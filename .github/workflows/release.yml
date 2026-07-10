@@ -1,0 +1,62 @@
+# Release ワークフロー
+#
+# バージョニング方針: SemVer (Semantic Versioning)。
+#   Git タグ = リリースバージョン。`vMAJOR.MINOR.PATCH` 形式のタグ (例: v0.1.0) を
+#   push することがリリースの起点になります。
+#
+# 動作: `v*` タグの push を契機に GitHub Release を自動作成します。
+#   - 外部シークレット不要 (組み込みの GITHUB_TOKEN のみを使用)。
+#   - CHANGELOG.md から該当バージョンの節を抽出できればリリース本文に利用し、
+#     抽出できない場合は自動生成ノートにフォールバックします。
+#
+# リリース手順の詳細は CHANGELOG.md の「リリース運用方針」を参照してください。
+
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+# GITHUB_TOKEN に必要最小限の権限のみを付与 (Release/タグ作成に contents: write が必要)。
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Create GitHub Release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Extract changelog section for this tag
+        id: changelog
+        shell: bash
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          notes_file="$(mktemp)"
+          # CHANGELOG.md から `## [<version>]` の節だけを抽出する。
+          if [ -f CHANGELOG.md ]; then
+            awk -v ver="$version" '
+              $0 ~ "^## \\[" ver "\\]" { capture = 1; next }
+              capture && /^## \[/ { exit }
+              capture { print }
+            ' CHANGELOG.md > "$notes_file"
+          fi
+          if [ -s "$notes_file" ]; then
+            echo "notes_path=$notes_file" >> "$GITHUB_OUTPUT"
+            echo "has_notes=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_notes=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: ${{ github.ref_name }}
+          # 抽出した CHANGELOG の節があればそれを本文に、なければ自動生成に任せる。
+          body_path: ${{ steps.changelog.outputs.has_notes == 'true' && steps.changelog.outputs.notes_path || '' }}
+          generate_release_notes: ${{ steps.changelog.outputs.has_notes != 'true' }}
+          # プレリリース識別子 (例: v1.0.0-rc.1) を含むタグは prerelease として扱う。
+          prerelease: ${{ contains(github.ref_name, '-') }}
