@@ -1,36 +1,71 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# 四兄弟麻雀 (Four Brothers Mahjong)
 
-## Requirements
+粗品 Official Channel「ギャンブル四兄弟」の麻雀企画をベースにした、関西式三人打ち(サンマ)麻雀のデジタル実装プロジェクトです。オールレッド5・北抜きドラ「ガリ」・サイコロ連動のドラ枚数・4人による着席ローテーション・「ソシー」精算など、番組独自のルールを再現します。
 
-- **Node.js**: version pinned in [`.nvmrc`](./.nvmrc) (run `nvm use` to switch automatically). Also enforced via `engines.node` in `package.json`.
-- **Package manager**: **pnpm only** — this is the project's standing decision (see `CLAUDE.md`). Do not use npm or yarn; there is no `package-lock.json`/`yarn.lock`, only `pnpm-lock.yaml`. The exact pnpm version is pinned via `packageManager` in `package.json` (use [Corepack](https://nodejs.org/api/corepack.html) to get it automatically: `corepack enable`).
+> **プロジェクトの現状**: `create-next-app` の足場のみが揃った段階で、ゲームロジックの実装はこれから着手します。`src/app/` は現時点でデフォルトテンプレートのままです。
 
-## Getting Started
+## 技術スタック
 
-Install dependencies and run the development server:
+- [Next.js 16](https://nextjs.org)(App Router)+ [React 19](https://react.dev) + TypeScript(`strict`)
+- [Tailwind CSS v4](https://tailwindcss.com) — `@import "tailwindcss"` と `src/app/globals.css` の `@theme` ブロックで設定(`tailwind.config.*` は無し)
+- ビルド/開発は [Turbopack](https://nextjs.org/docs/app/api-reference/turbopack)
+
+## セットアップ
+
+パッケージマネージャは **pnpm 固定**です。npm / yarn は使用しません(`package-lock.json` は存在せず、`pnpm-lock.yaml` のみをコミットします)。
 
 ```bash
+corepack enable    # package.json の packageManager からpnpmバージョンを自動取得(任意)
 pnpm install
-pnpm dev
+pnpm dev            # http://localhost:3000 で開発サーバ起動(Turbopack)
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Node.js のバージョンは [`.nvmrc`](./.nvmrc) に固定し、`package.json` の `engines` でも強制しています。
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## コマンド一覧
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+```bash
+pnpm dev            # 開発サーバ(Turbopack) — http://localhost:3000
+pnpm build          # 本番ビルド
+pnpm start          # 本番ビルドの起動
+pnpm lint           # ESLint(eslint.config.mjs, next/core-web-vitals + next/typescript)
+pnpm typecheck      # tsc --noEmit
 
-## Learn More
+pnpm test           # Vitest(ユニット) — src/**/*.{test,spec}.{ts,tsx}
+pnpm test:watch     # Vitest ウォッチモード
+pnpm test:coverage  # Vitest + v8 カバレッジ
+pnpm test:e2e       # Playwright E2E — ./e2e 配下(初回のみ `pnpm exec playwright install` が必要)
 
-To learn more about Next.js, take a look at the following resources:
+pnpm format         # Biome: フォーマット適用
+pnpm format:check   # Biome: フォーマットチェックのみ
+pnpm check          # Biome: check(format + assist)
+pnpm knip           # 未使用ファイル/エクスポート/依存の検出
+pnpm depcruise      # dependency-cruiser による依存関係ルールチェック(src配下)
+pnpm docs           # TypeDoc → docs/api(gitignore対象)
+```
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+単体の Vitest ファイルのみ実行する場合: `pnpm exec vitest run src/foo.test.ts`(`-t "name"` で特定テストのみ実行)。
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+## ディレクトリ構成
 
-## Deploy on Vercel
+```
+src/app/          Next.js App Router のルーティング(現状は create-next-app のデフォルトテンプレート)
+docs/             ゲームルール・ドキュメントの入口(人間向け)
+documents/spec/   実装スペック(SpecDD SSOT) — GoDD の docs_dir
+質問リスト.md      未確定の仕様に関する質問リスト(実装前にユーザー回答が必要な項目)
+e2e/              Playwright E2E スペック(playwright.config.ts が自動でdevサーバを起動)
+```
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+## ドキュメント
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+ゲームロジックやスコアリングの実装に着手する前に、必ず以下を確認してください(詳細は各ドキュメントを参照し、ここでは概要のみ記載します)。
+
+- [`docs/README.md`](./docs/README.md) — ドキュメントナビゲーションのハブ
+- [`docs/四兄弟麻雀ルール.md`](./docs/四兄弟麻雀ルール.md) — ゲームルールの単一情報源(SSOT)。ゲーム/スコアリング/牌ロジックに触れる前に必読
+- [`documents/spec/`](./documents/spec/README.md) — 確定した仕様を I/O・状態・境界値・完了条件に分解した実装スペック(卓構成・局進行・点数精算・ドメインモデル)。実装はこのスペックを基準に行う
+- [`質問リスト.md`](./質問リスト.md) — 未確定の仕様に関する質問リスト。**Q9〜Q13 が未回答**であり、該当領域(着席順・親決定・東南戦進行・ツモ配分・ウマ割当)は回答が出るまで実装しません
+
+## 開発時の注意
+
+- 詳細な開発ガイドライン(ツール構成・コーディング規約など)は [`CLAUDE.md`](./CLAUDE.md) を参照してください。
+- プレビュー/デプロイパイプラインは未整備です(関連: リポジトリの Issue 一覧を参照)。
