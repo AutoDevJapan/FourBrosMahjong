@@ -34,7 +34,8 @@ pnpm typecheck      # tsc --noEmit
 pnpm test           # Vitest(ユニット) — src/**/*.{test,spec}.{ts,tsx}
 pnpm test:watch     # Vitest ウォッチモード
 pnpm test:coverage  # Vitest + v8 カバレッジ
-pnpm test:e2e       # Playwright E2E — ./e2e 配下(初回のみ `pnpm exec playwright install` が必要)
+pnpm test:e2e       # Playwright E2E — ./e2e 配下(初回のみ `pnpm exec playwright install` が必要。詳細は後述の「E2E テスト」参照)
+pnpm test:e2e:ui    # Playwright UI モード(テストの選択実行・トレース確認向け)
 
 pnpm format         # Biome: フォーマット適用
 pnpm format:check   # Biome: フォーマットチェックのみ
@@ -55,7 +56,35 @@ documents/spec/   実装スペック(SpecDD SSOT) — GoDD の docs_dir
 質問リスト.md      未確定の仕様に関する質問リスト(実装前にユーザー回答が必要な項目)
 ```
 
-Playwright E2E スペックは `playwright.config.ts` で `./e2e` を参照する設定になっていますが、`e2e/` ディレクトリ自体はテストが未整備のため現時点ではまだ存在しません。
+## E2E テスト(Playwright)
+
+`playwright.config.ts` は `./e2e` 配下のスペックを対象に、`webServer` で `pnpm dev` を自動起動する設定になっています(既存のサーバがあればローカルでは再利用、CI では毎回新規起動)。
+
+### ブラウザバイナリのインストール(初回のみ)
+
+Playwright はブラウザ本体を別途ダウンロードする必要があります。`pnpm install` 後、初回のみ以下を実行してください。
+
+```bash
+pnpm exec playwright install          # ローカル開発環境(このリポジトリでは chromium のみ使用)
+pnpm exec playwright install --with-deps   # Linux CI ランナー等、OS 依存パッケージも同時に導入する場合
+```
+
+`--with-deps` は Linux 上で Playwright 実行に必要な OS パッケージ(apt 経由)も併せてインストールするオプションで、GitHub Actions の `ubuntu-latest` ランナーなど Linux 環境では基本的にこちらを使用してください。macOS/Windows のローカル環境では通常 `pnpm exec playwright install` のみで十分です。
+
+### 実行
+
+```bash
+pnpm test:e2e       # ヘッドレスで全 E2E スペックを実行
+pnpm test:e2e:ui    # Playwright UI モード(対話的にテストを選択・トレースを確認)
+```
+
+`test:e2e` はデフォルトでヘッドレス実行です(`playwright.config.ts` の `projects` は `chromium` のみを定義)。CI 上でもブラウザ UI は表示されず、ヘッドレスのまま実行されます。
+
+### CI での実行に関する注意
+
+- CI ランナー(GitHub Actions 等)では毎回ブラウザバイナリのキャッシュが存在しない前提のため、テスト実行前に `pnpm exec playwright install --with-deps` が必要です。
+- `playwright.config.ts` は `retries: process.env.CI ? 2 : 0` としており、CI 環境(`CI=true`)でのみ失敗テストを自動リトライします。
+- 本 README/このリポジトリの E2E 整備は「ローカルで実行できる初期シナリオと手順」までを対象としており、E2E を GitHub Actions の必須チェックとして組み込む作業(ワークフロー化)は別issueで扱います([#29](https://github.com/AutoDevJapan/FourBrosMahjong/issues/29))。
 
 ## ドキュメント
 
