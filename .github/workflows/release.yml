@@ -40,7 +40,7 @@ jobs:
           if [ -f CHANGELOG.md ]; then
             awk -v ver="$version" '
               $0 ~ "^## \\[" ver "\\]" { capture = 1; next }
-              capture && /^## \[/ { exit }
+              capture && (/^## \[/ || /^\[.+\]:/) { exit }
               capture { print }
             ' CHANGELOG.md > "$notes_file"
           fi

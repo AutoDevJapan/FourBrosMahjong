@@ -34,5 +34,5 @@
 
 - パッケージマネージャを pnpm に移行 (`packageManager` で固定、`pnpm-lock.yaml` を採用)。
 
-[Unreleased]: https://github.com/AutoDevJapan/soshina-majong/compare/v0.1.0...HEAD
-[0.1.0]: https://github.com/AutoDevJapan/soshina-majong/releases/tag/v0.1.0
+[Unreleased]: https://github.com/AutoDevJapan/FourBrosMahjong/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/AutoDevJapan/FourBrosMahjong/releases/tag/v0.1.0
