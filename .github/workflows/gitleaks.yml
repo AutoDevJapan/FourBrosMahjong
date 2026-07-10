@@ -1,0 +1,49 @@
+name: gitleaks
+
+# Secret scanning with gitleaks.
+# Runs on pull requests and pushes to main, plus manual dispatch.
+# Fails the check when secrets are detected.
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+# Minimize permissions so fork PRs work without extra grants.
+permissions:
+  contents: read
+
+jobs:
+  gitleaks:
+    name: gitleaks
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          # Full history so the entire commit log is scanned.
+          fetch-depth: 0
+
+      # gitleaks/gitleaks-action@v2 requires a paid GITLEAKS_LICENSE secret for
+      # GitHub organization repositories, so it fails with "missing gitleaks
+      # license" on this org-owned repo (see gitleaks/gitleaks-action#211).
+      # Install and run the open-source gitleaks CLI directly instead, pinned to
+      # the same version (8.30.1) already verified locally per the PR description.
+      - name: Install gitleaks
+        env:
+          GITLEAKS_VERSION: "8.30.1"
+        run: |
+          set -euo pipefail
+          archive="gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
+          base_url="https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}"
+          curl -sSLO "${base_url}/${archive}"
+          curl -sSLO "${base_url}/gitleaks_${GITLEAKS_VERSION}_checksums.txt"
+          sha256sum --ignore-missing -c "gitleaks_${GITLEAKS_VERSION}_checksums.txt"
+          tar -xzf "${archive}" gitleaks
+          sudo install -m 0755 gitleaks /usr/local/bin/gitleaks
+          gitleaks version
+
+      - name: Run gitleaks
+        run: gitleaks detect --source . --redact --verbose
