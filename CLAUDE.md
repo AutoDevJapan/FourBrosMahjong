@@ -49,14 +49,14 @@ Run a single Vitest file: `pnpm exec vitest run src/foo.test.ts` (or `-t "name"`
 
 - **Vitest** (`vitest.config.ts`): `node` environment (suits pure game/logic code); tests live next to source as `*.test.ts`/`*.spec.ts` under `src/`. For React component tests, switch the environment to `jsdom` and add `jsdom` + `@testing-library/react`.
 - **Playwright** (`playwright.config.ts`): specs in `./e2e`; the config auto-starts `pnpm dev`. First run needs browsers: `pnpm exec playwright install`.
-- **Biome** (`biome.json`): formatter + assist only — **linter is disabled** to avoid overlap with ESLint (`next lint`). CSS parser has `tailwindDirectives` enabled for the `@theme` block in `globals.css`.
+- **Biome** (`biome.json`): formatter + assist only — **linter is disabled** to avoid overlap with ESLint (`eslint .`, config in `eslint.config.mjs`). CSS parser has `tailwindDirectives` enabled for the `@theme` block in `globals.css`.
 - **Knip** (`knip.json`): no ignored dependencies — `eslint.config.mjs` imports `eslint-config-next/core-web-vitals` and `eslint-config-next/typescript` directly (flat config), which knip can trace natively.
 - **dependency-cruiser** (`.dependency-cruiser.cjs`): warns on circular deps and orphan modules.
 - **TypeDoc** (`typedoc.json`): expands over `src`, outputs to `docs/api` (gitignored).
 
 ## Stack & conventions
 
-- **Next.js 15** (App Router) with **React 19** and **TypeScript** (`strict` mode).
+- **Next.js 16** (App Router) with **React 19** and **TypeScript** (`strict` mode).
 - **Tailwind CSS v4** — configured via `@import "tailwindcss"` and the `@theme` block in `src/app/globals.css`; there is no `tailwind.config.*` file. PostCSS uses `@tailwindcss/postcss` (`postcss.config.mjs`).
 - Import alias: `@/*` → `./src/*` (see `tsconfig.json`).
 - Dev/build use Turbopack; `next.config.ts` is currently empty.

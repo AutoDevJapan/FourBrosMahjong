@@ -11,7 +11,7 @@
     "dev": "next dev --turbopack",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint",
+    "lint": "eslint .",
     "typecheck": "tsc --noEmit",
     "format": "biome format --write .",
     "format:check": "biome format .",
@@ -25,7 +25,7 @@
     "docs": "typedoc"
   },
   "dependencies": {
-    "next": "15.3.3",
+    "next": "16.2.10",
     "react": "^19.0.0",
     "react-dom": "^19.0.0"
   },
