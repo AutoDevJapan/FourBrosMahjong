@@ -28,7 +28,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Extract changelog section for this tag
         id: changelog
@@ -52,7 +52,7 @@ jobs:
           fi
 
       - name: Create Release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           name: ${{ github.ref_name }}
           # 抽出した CHANGELOG の節があればそれを本文に、なければ自動生成に任せる。
