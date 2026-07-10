@@ -1,0 +1,30 @@
+display_language: ja
+main_language: ja
+sub_languages: [en, ru]
+programming_languages: [typescript, go, gdscript, gdshader]
+frontend: [nextjs, vite, tauri, liftkit]
+backend: [gin]
+database: [postgresql, redis]
+orm: [gorm]
+infra: [docker, terraform, vercel, github-actions, railway]
+game: [godot]
+mobile: []
+other: [tauri-mobile]
+tools:
+  vcs: gh
+  browser_automation: browser-use
+  secret_scanning: gitleaks
+  e2e_testing: playwright
+  unit_testing: vitest
+  linting: biome
+  formatting: biome
+  type_checking: typescript
+  coverage: @vitest/coverage-v8
+  unused_code: knip
+  dependency_analysis: dependency-cruiser
+  documentation: typedoc
+  security_analysis: gosec
+godd_files:
+  docs_dir: documents
+  generate_gitattributes: true
+  generate_dependabot: true
