@@ -56,7 +56,7 @@ Run a single Vitest file: `pnpm exec vitest run src/foo.test.ts` (or `-t "name"`
 
 ## Stack & conventions
 
-- **Next.js 15** (App Router) with **React 19** and **TypeScript** (`strict` mode).
+- **Next.js 16** (App Router) with **React 19** and **TypeScript** (`strict` mode).
 - **Tailwind CSS v4** — configured via `@import "tailwindcss"` and the `@theme` block in `src/app/globals.css`; there is no `tailwind.config.*` file. PostCSS uses `@tailwindcss/postcss` (`postcss.config.mjs`).
 - Import alias: `@/*` → `./src/*` (see `tsconfig.json`).
 - Dev/build use Turbopack; `next.config.ts` is currently empty.
