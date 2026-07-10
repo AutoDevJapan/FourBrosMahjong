@@ -37,7 +37,7 @@
     "dependency-cruiser": "^18.0.0",
     "eslint": "^9",
     "eslint-config-next": "15.3.3",
-    "knip": "^6.25.0",
+    "knip": "^6.26.0",
     "tailwindcss": "^4",
     "typedoc": "^0.28.20",
     "typescript": "^5",
