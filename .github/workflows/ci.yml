@@ -25,7 +25,9 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          # dependency-cruiser@18 の engines.node が Node 22+ を要求し、
+          # .npmrc の engine-strict=true により Node 20 では install が失敗するため 22 LTS を使用
+          node-version: 22
           cache: pnpm
 
       - name: Install dependencies
