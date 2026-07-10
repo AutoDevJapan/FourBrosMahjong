@@ -11,6 +11,10 @@ concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+# 最小権限の原則: このワークフローはチェックアウトして読むだけなので read-only で十分
+permissions:
+  contents: read
+
 jobs:
   ci:
     name: lint / typecheck / format / test / build
@@ -37,10 +41,10 @@ jobs:
         run: pnpm lint
 
       - name: Typecheck (tsc --noEmit)
-        run: pnpm exec tsc --noEmit
+        run: pnpm typecheck
 
       - name: Format check (biome)
-        run: pnpm exec biome format .
+        run: pnpm format:check
 
       - name: Test (vitest)
         run: pnpm test

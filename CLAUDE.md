@@ -28,6 +28,7 @@ pnpm dev            # dev server with Turbopack at http://localhost:3000
 pnpm build          # production build
 pnpm start          # serve the production build
 pnpm lint           # ESLint (next/core-web-vitals + next/typescript)
+pnpm typecheck      # tsc --noEmit
 
 pnpm test           # Vitest (unit) — src/**/*.{test,spec}.{ts,tsx}
 pnpm test:watch     # Vitest watch mode
