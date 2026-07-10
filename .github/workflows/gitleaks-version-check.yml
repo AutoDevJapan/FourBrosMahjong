@@ -1,0 +1,172 @@
+name: gitleaks-version-check
+
+# gitleaks CLI バージョンの自動追従 (Dependabot 対象外の穴埋め)
+#
+# .github/workflows/gitleaks.yml は gitleaks CLI をシェルスクリプトで直接
+# ダウンロード・チェックサム検証している (gitleaks/gitleaks-action@v2 が組織
+# リポジトリに有料ライセンスを要求するようになったため)。この方式だと
+# バージョンは `run:` 内の環境変数にハードコードされた文字列になり、
+# Dependabot の github-actions エコシステムは `uses:` 参照しか追跡しないため
+# 自動更新の対象外になる (#24)。
+#
+# このワークフローは月次スケジュールで gitleaks の最新リリースをチェックし、
+# ピン留めバージョンが古ければ gitleaks.yml を更新する PR を自動作成する。
+#
+# 注意: GitHub は既定の GITHUB_TOKEN によって発生した push/PR 作成イベントでは
+# 他のワークフローの pull_request/push トリガーを自動発火しない(無限ループ防止の
+# 仕様)。そのため、gitleaks.yml は「PR を開いただけ」では自動実行されない。
+# これを補うため、ブランチを push した直後に `gh workflow run gitleaks.yml
+# --ref <branch>` で明示的に workflow_dispatch 起動する。この実行は同じコミット
+# SHA に紐づくため、作成された PR のチェック欄にも反映される。
+# マージするかどうかは引き続き人間のレビューに委ねる。
+
+on:
+  schedule:
+    # 毎月1日 03:00 UTC
+    - cron: "0 3 1 * *"
+  workflow_dispatch:
+
+# 手動再実行の多重起動を防ぐ (schedule は基本1本しか走らないが workflow_dispatch は多重起動しうる)。
+concurrency:
+  group: gitleaks-version-check
+
+permissions:
+  contents: read
+
+jobs:
+  check-version:
+    name: Check gitleaks latest release
+    runs-on: ubuntu-latest
+    # このジョブ自体は読み取りのみ。ブランチ作成・PR 作成が必要な場合だけ
+    # 昇格した権限で後続ジョブを呼び出す。
+    permissions:
+      contents: read
+    outputs:
+      current_version: ${{ steps.compare.outputs.current_version }}
+      latest_version: ${{ steps.compare.outputs.latest_version }}
+      needs_update: ${{ steps.compare.outputs.needs_update }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Compare pinned version with latest release
+        id: compare
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          current_version="$(grep -oP 'GITLEAKS_VERSION:\s*"\K[0-9.]+' .github/workflows/gitleaks.yml)"
+          if [ -z "$current_version" ]; then
+            echo "::error::gitleaks.yml から GITLEAKS_VERSION を抽出できませんでした" >&2
+            exit 1
+          fi
+
+          latest_tag="$(gh api repos/gitleaks/gitleaks/releases/latest --jq .tag_name)"
+          latest_version="${latest_tag#v}"
+          if [ -z "$latest_version" ]; then
+            echo "::error::gitleaks の最新リリースを取得できませんでした" >&2
+            exit 1
+          fi
+
+          echo "current_version=${current_version}" >> "$GITHUB_OUTPUT"
+          echo "latest_version=${latest_version}" >> "$GITHUB_OUTPUT"
+
+          if [ "$current_version" = "$latest_version" ]; then
+            echo "gitleaks は最新 (v${current_version}) です。更新不要。"
+            echo "needs_update=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "gitleaks の新しいバージョンがあります: v${current_version} -> v${latest_version}"
+            echo "needs_update=true" >> "$GITHUB_OUTPUT"
+          fi
+
+  open-bump-pr:
+    name: Open version bump PR
+    needs: check-version
+    if: needs.check-version.outputs.needs_update == 'true'
+    runs-on: ubuntu-latest
+    # ブランチの push・PR 作成・gitleaks.yml の手動起動のために書き込み権限が必要。
+    # このジョブ (バージョン差分が検出された場合のみ実行) に限定して付与する。
+    permissions:
+      contents: write
+      pull-requests: write
+      actions: write
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      CURRENT_VERSION: ${{ needs.check-version.outputs.current_version }}
+      LATEST_VERSION: ${{ needs.check-version.outputs.latest_version }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Skip if a bump PR is already open
+        id: existing
+        run: |
+          set -euo pipefail
+          branch="chore/gitleaks-version-bump-v${LATEST_VERSION}"
+          existing="$(gh pr list --state open --head "$branch" --json number --jq 'length')"
+          echo "branch=${branch}" >> "$GITHUB_OUTPUT"
+          if [ "$existing" -gt 0 ]; then
+            echo "既に v${LATEST_VERSION} への更新 PR が存在するためスキップします。"
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Bump GITLEAKS_VERSION
+        if: steps.existing.outputs.skip == 'false'
+        run: |
+          set -euo pipefail
+          sed -i "s/GITLEAKS_VERSION: \"${CURRENT_VERSION}\"/GITLEAKS_VERSION: \"${LATEST_VERSION}\"/" .github/workflows/gitleaks.yml
+          grep -q "GITLEAKS_VERSION: \"${LATEST_VERSION}\"" .github/workflows/gitleaks.yml
+
+      - name: Commit and push
+        if: steps.existing.outputs.skip == 'false'
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git checkout -b "${{ steps.existing.outputs.branch }}"
+          git add .github/workflows/gitleaks.yml
+          git commit -m "chore: bump gitleaks CLI to v${LATEST_VERSION}"
+          # force-with-lease: 前回の更新提案が未マージのままクローズされ、同名
+          # ブランチが remote に残っているケースでも安全に上書きできるようにする。
+          git push --force-with-lease origin "${{ steps.existing.outputs.branch }}"
+
+      - name: Trigger gitleaks check on the new branch
+        if: steps.existing.outputs.skip == 'false'
+        run: |
+          set -euo pipefail
+          # GITHUB_TOKEN による push は他ワークフローの pull_request/push トリガーを
+          # 自動発火しないため、gitleaks.yml をこのブランチに対して明示的に起動する。
+          # 実行結果は同じコミット SHA に紐づき、後続で作成する PR のチェック欄にも表示される。
+          gh workflow run gitleaks.yml --ref "${{ steps.existing.outputs.branch }}"
+
+      - name: Open PR
+        if: steps.existing.outputs.skip == 'false'
+        run: |
+          set -euo pipefail
+          cat > pr-body.md <<EOF
+          ## 概要
+
+          gitleaks CLI の新しいリリースを検出しました: v${CURRENT_VERSION} -> v${LATEST_VERSION}
+
+          このPRは \`.github/workflows/gitleaks-version-check.yml\` (#24) により自動生成されました。
+
+          ## 検証について
+
+          既定の GITHUB_TOKEN による push/PR 作成は他ワークフローの自動トリガーを発火しないため、
+          このワークフローが明示的に \`gitleaks.yml\` をこのブランチに対して workflow_dispatch
+          起動しています。新バージョンのダウンロード・チェックサム検証・\`gitleaks detect\` の
+          実行結果は、この PR のチェック欄に反映されます。gitleaks チェックが green になっている
+          ことを確認してからマージしてください。
+
+          リリースノート: https://github.com/gitleaks/gitleaks/releases/tag/v${LATEST_VERSION}
+          EOF
+
+          gh pr create \
+            --title "chore: bump gitleaks CLI to v${LATEST_VERSION}" \
+            --body-file pr-body.md \
+            --base main \
+            --head "${{ steps.existing.outputs.branch }}" \
+            --label ci
