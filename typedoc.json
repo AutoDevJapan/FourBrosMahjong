@@ -4,5 +4,8 @@
   "entryPointStrategy": "expand",
   "out": "docs/api",
   "exclude": ["**/*.test.ts", "**/*.test.tsx", "**/*.spec.ts", "**/*.spec.tsx"],
+  "excludePrivate": true,
+  "excludeInternal": true,
+  "excludeExternals": true,
   "skipErrorChecking": true
 }

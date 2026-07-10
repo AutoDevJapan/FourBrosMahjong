@@ -1,7 +1,18 @@
 {
   "$schema": "https://biomejs.dev/schemas/2.5.3/schema.json",
   "vcs": { "enabled": true, "clientKind": "git", "useIgnoreFile": true },
-  "files": { "ignoreUnknown": true },
+  "files": {
+    "ignoreUnknown": true,
+    "includes": [
+      "**",
+      "!.next/**",
+      "!out/**",
+      "!coverage/**",
+      "!playwright-report/**",
+      "!test-results/**",
+      "!docs/api/**"
+    ]
+  },
   "formatter": { "enabled": true, "indentStyle": "space", "indentWidth": 2 },
   "css": { "parser": { "tailwindDirectives": true } },
   "linter": { "enabled": false },
