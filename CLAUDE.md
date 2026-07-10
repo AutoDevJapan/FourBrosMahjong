@@ -13,6 +13,7 @@ Freshly bootstrapped `create-next-app` scaffold — the app itself has not been 
 - `docs/四兄弟麻雀ルール.md` — the single source of truth for game rules (real-world show summary). Read it before touching any game/scoring/tile logic.
 - `docs/README.md` — documentation navigation hub.
 - `documents/spec/` — **implementation spec (SpecDD SSOT)**: confirmed rules decomposed into I/O, states, boundary values, and completion criteria (setup/tiles, game-flow with a Mermaid state diagram, scoring/settlement, domain-model with a class diagram). Implement against this. `documents/` is the GoDD `docs_dir`.
+- `documents/spec/ui-accessibility-responsive-darkmode.md` — cross-cutting UI policy for accessibility, responsive breakpoints, and dark mode (color-independent info, keyboard/focus, breakpoints, dark mode toggle decision, color tokens, a11y verification tooling). Any future UI implementation (issues #8, #9, etc.) must follow this policy.
 - `質問リスト.md` (repo root) — open spec questions. Q1–Q8 resolved (see 解決済み). **Q9–Q13 remain open** (bench rotation order, seat/dealer assignment, 東南戦 progression, tsumo payment split, uma allocation) — do **not** implement the affected areas (seating, dealer, tsumo scoring, uma) until answered; never guess.
 
 Config note: `config.godd` sets `display_language: ja` (respond in Japanese) and `docs_dir: documents` (GoDD spec SSOT goes under `documents/` once such content exists — kept separate from the human-facing `docs/`).
