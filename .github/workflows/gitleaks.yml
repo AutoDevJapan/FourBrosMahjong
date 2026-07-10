@@ -1,0 +1,32 @@
+name: gitleaks
+
+# Secret scanning with gitleaks.
+# Runs on pull requests and pushes to main, plus manual dispatch.
+# Fails the check when secrets are detected.
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+# Minimize permissions so fork PRs work without extra grants.
+permissions:
+  contents: read
+
+jobs:
+  gitleaks:
+    name: gitleaks
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          # Full history so the entire commit log is scanned.
+          fetch-depth: 0
+
+      - name: Run gitleaks
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
