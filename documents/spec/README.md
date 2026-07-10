@@ -11,6 +11,7 @@
 | 2 | [game-flow.md](./game-flow.md) | 局の進行・北抜き(ガリ)・ドラめくり・連荘・終了条件(状態遷移図つき) |
 | 3 | [scoring-and-settlement.md](./scoring-and-settlement.md) | 点数計算・ドラ・ソシー精算・祝儀・供託 |
 | 4 | [domain-model.md](./domain-model.md) | ドメインモデル(エンティティ/値オブジェクト、クラス図) |
+| 5 | [ui-accessibility-responsive-darkmode.md](./ui-accessibility-responsive-darkmode.md) | アクセシビリティ・レスポンシブ・ダークモードの横断方針(UI実装issueの前提) |
 
 ## 用語(基本)
 
