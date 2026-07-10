@@ -11,9 +11,13 @@ name: gitleaks-version-check
 #
 # このワークフローは月次スケジュールで gitleaks の最新リリースをチェックし、
 # ピン留めバージョンが古ければ gitleaks.yml を更新する PR を自動作成する。
-# 作成された PR は gitleaks.yml 自身が pull_request トリガーで実行される
-# ため、新バージョンのダウンロード・チェックサム検証・実行が PR 上で
-# 自動的に end-to-end 検証される (セルフバリデーション)。
+#
+# 注意: GitHub は既定の GITHUB_TOKEN によって発生した push/PR 作成イベントでは
+# 他のワークフローの pull_request/push トリガーを自動発火しない(無限ループ防止の
+# 仕様)。そのため、gitleaks.yml は「PR を開いただけ」では自動実行されない。
+# これを補うため、ブランチを push した直後に `gh workflow run gitleaks.yml
+# --ref <branch>` で明示的に workflow_dispatch 起動する。この実行は同じコミット
+# SHA に紐づくため、作成された PR のチェック欄にも反映される。
 # マージするかどうかは引き続き人間のレビューに委ねる。
 
 on:
@@ -21,6 +25,10 @@ on:
     # 毎月1日 03:00 UTC
     - cron: "0 3 1 * *"
   workflow_dispatch:
+
+# 手動再実行の多重起動を防ぐ (schedule は基本1本しか走らないが workflow_dispatch は多重起動しうる)。
+concurrency:
+  group: gitleaks-version-check
 
 permissions:
   contents: read
@@ -77,11 +85,12 @@ jobs:
     needs: check-version
     if: needs.check-version.outputs.needs_update == 'true'
     runs-on: ubuntu-latest
-    # ブランチの push と PR 作成のために書き込み権限が必要。
+    # ブランチの push・PR 作成・gitleaks.yml の手動起動のために書き込み権限が必要。
     # このジョブ (バージョン差分が検出された場合のみ実行) に限定して付与する。
     permissions:
       contents: write
       pull-requests: write
+      actions: write
     env:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       CURRENT_VERSION: ${{ needs.check-version.outputs.current_version }}
@@ -120,7 +129,18 @@ jobs:
           git checkout -b "${{ steps.existing.outputs.branch }}"
           git add .github/workflows/gitleaks.yml
           git commit -m "chore: bump gitleaks CLI to v${LATEST_VERSION}"
-          git push origin "${{ steps.existing.outputs.branch }}"
+          # force-with-lease: 前回の更新提案が未マージのままクローズされ、同名
+          # ブランチが remote に残っているケースでも安全に上書きできるようにする。
+          git push --force-with-lease origin "${{ steps.existing.outputs.branch }}"
+
+      - name: Trigger gitleaks check on the new branch
+        if: steps.existing.outputs.skip == 'false'
+        run: |
+          set -euo pipefail
+          # GITHUB_TOKEN による push は他ワークフローの pull_request/push トリガーを
+          # 自動発火しないため、gitleaks.yml をこのブランチに対して明示的に起動する。
+          # 実行結果は同じコミット SHA に紐づき、後続で作成する PR のチェック欄にも表示される。
+          gh workflow run gitleaks.yml --ref "${{ steps.existing.outputs.branch }}"
 
       - name: Open PR
         if: steps.existing.outputs.skip == 'false'
@@ -135,10 +155,11 @@ jobs:
 
           ## 検証について
 
-          \`.github/workflows/gitleaks.yml\` はこの PR 上でもそのまま実行されるため、
-          新バージョンのダウンロード・チェックサム検証・\`gitleaks detect\` の実行が
-          このPRのCIチェックとして end-to-end で検証されます。gitleaks チェックが
-          green になっていることを確認してからマージしてください。
+          既定の GITHUB_TOKEN による push/PR 作成は他ワークフローの自動トリガーを発火しないため、
+          このワークフローが明示的に \`gitleaks.yml\` をこのブランチに対して workflow_dispatch
+          起動しています。新バージョンのダウンロード・チェックサム検証・\`gitleaks detect\` の
+          実行結果は、この PR のチェック欄に反映されます。gitleaks チェックが green になっている
+          ことを確認してからマージしてください。
 
           リリースノート: https://github.com/gitleaks/gitleaks/releases/tag/v${LATEST_VERSION}
           EOF
