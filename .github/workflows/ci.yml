@@ -1,0 +1,59 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+# 同一ブランチで新しい push があれば古い実行をキャンセルして無駄を省く
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+# 最小権限の原則: このワークフローはチェックアウトして読むだけなので read-only で十分
+permissions:
+  contents: read
+
+jobs:
+  ci:
+    name: lint / typecheck / format / test / build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          # dependency-cruiser@18 の engines.node が Node 22+ を要求し、
+          # .npmrc の engine-strict=true により Node 20 では install が失敗するため 22 LTS を使用
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Lint (next lint)
+        run: pnpm lint
+
+      - name: Typecheck (tsc --noEmit)
+        run: pnpm typecheck
+
+      - name: Format check (biome)
+        run: pnpm format:check
+
+      - name: Test (vitest)
+        run: pnpm test
+
+      - name: Knip
+        run: pnpm knip
+
+      - name: Dependency Cruiser
+        run: pnpm depcruise
+
+      - name: Build (next build)
+        run: pnpm build
