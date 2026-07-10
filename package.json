@@ -20,6 +20,7 @@
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage --passWithNoTests",
     "test:e2e": "playwright test",
+    "test:e2e:ui": "playwright test --ui",
     "knip": "knip",
     "depcruise": "depcruise src",
     "docs": "typedoc"
