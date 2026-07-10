@@ -95,6 +95,17 @@ pnpm test:e2e:ui    # Playwright UI モード(対話的にテストを選択・�
 - [`documents/spec/`](./documents/spec/README.md) — 確定した仕様を I/O・状態・境界値・完了条件に分解した実装スペック(卓構成・局進行・点数精算・ドメインモデル)。実装はこのスペックを基準に行う
 - [`質問リスト.md`](./質問リスト.md) — 未確定の仕様に関する質問リスト。**Q9〜Q13 が未回答**であり、該当領域(着席順・親決定・東南戦進行・ツモ配分・ウマ割当)は回答が出るまで実装しません
 
+## ブランチ保護(main)
+
+`main` は Branch protection rule で保護されており、直 push は禁止です(すべての変更は PR 経由)。設定内容:
+
+- **PR 必須**: `main` への変更は PR のマージ経由のみ可能(直 push は拒否されます)。
+- **必須ステータスチェック**(最新コミットに対して必須、strict): `gitleaks`、`lint / typecheck / format / test / build`
+- **管理者にも適用**(`enforce_admins: true`): admin 権限でも上記チェックをバイパスできません。
+- **レビュー承認は必須にしていません**(`required_approving_review_count: 0`): 本リポジトリは自律エージェントパイプラインが自己マージする運用のため、人間レビュー必須化はパイプラインを恒久的にブロックしてしまいます。「PR 必須 + CI 必須」で品質と履歴の健全性は担保しつつ、レビュー要件のみ意図的に外しています。
+
+詳細・経緯は [#4](https://github.com/AutoDevJapan/FourBrosMahjong/issues/4) を参照してください。
+
 ## 開発時の注意
 
 - 詳細な開発ガイドライン(ツール構成・コーディング規約など)は [`CLAUDE.md`](./CLAUDE.md) を参照してください。
