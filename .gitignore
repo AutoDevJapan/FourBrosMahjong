@@ -12,6 +12,12 @@
 
 # testing
 /coverage
+/test-results
+/playwright-report
+/playwright/.cache
+
+# generated docs
+/docs/api
 
 # next.js
 /.next/
@@ -23,6 +29,9 @@
 # misc
 .DS_Store
 *.pem
+
+# claude code local worktrees / agent scratch
+.claude/worktrees/
 
 # debug
 npm-debug.log*
