@@ -53,8 +53,9 @@ src/app/          Next.js App Router のルーティング(現状は create-next
 docs/             ゲームルール・ドキュメントの入口(人間向け)
 documents/spec/   実装スペック(SpecDD SSOT) — GoDD の docs_dir
 質問リスト.md      未確定の仕様に関する質問リスト(実装前にユーザー回答が必要な項目)
-e2e/              Playwright E2E スペック(playwright.config.ts が自動でdevサーバを起動)
 ```
+
+Playwright E2E スペックは `playwright.config.ts` で `./e2e` を参照する設定になっていますが、`e2e/` ディレクトリ自体はテストが未整備のため現時点ではまだ存在しません。
 
 ## ドキュメント
 
@@ -68,4 +69,4 @@ e2e/              Playwright E2E スペック(playwright.config.ts が自動でd
 ## 開発時の注意
 
 - 詳細な開発ガイドライン(ツール構成・コーディング規約など)は [`CLAUDE.md`](./CLAUDE.md) を参照してください。
-- プレビュー/デプロイパイプラインは未整備です(関連: リポジトリの Issue 一覧を参照)。
+- プレビュー/デプロイパイプラインは未整備です(関連: [#3 Vercel 連携・Preview環境・dev/stg/prd 昇格フロー](https://github.com/AutoDevJapan/FourBrosMahjong/issues/3))。
