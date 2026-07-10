@@ -21,6 +21,10 @@
 - [品質ツール運用方針](./品質ツール運用方針.md) — Biome / Knip / dependency-cruiser / TypeDoc の目的・
   役割分担・除外設定の妥当性・実行タイミング(ローカル/pre-commit/CI)。
 
+## デプロイ・環境運用
+
+- [デプロイ環境運用](./デプロイ環境運用.md) — Vercel 連携・PR ごとの Preview 環境・dev/stg/prd の昇格フロー・環境変数管理方針。
+
 ## ディレクトリの役割
 
 | 場所 | 用途 |
