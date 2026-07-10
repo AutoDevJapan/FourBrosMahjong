@@ -50,10 +50,12 @@ Run a single Vitest file: `pnpm exec vitest run src/foo.test.ts` (or `-t "name"`
 
 - **Vitest** (`vitest.config.ts`): `node` environment (suits pure game/logic code); tests live next to source as `*.test.ts`/`*.spec.ts` under `src/`. For React component tests, switch the environment to `jsdom` and add `jsdom` + `@testing-library/react`.
 - **Playwright** (`playwright.config.ts`): specs in `./e2e`; the config auto-starts `pnpm dev`. First run needs browsers: `pnpm exec playwright install`.
-- **Biome** (`biome.json`): formatter + assist only — **linter is disabled** to avoid overlap with ESLint (`eslint .`, config in `eslint.config.mjs`). CSS parser has `tailwindDirectives` enabled for the `@theme` block in `globals.css`.
-- **Knip** (`knip.json`): no ignored dependencies — `eslint.config.mjs` imports `eslint-config-next/core-web-vitals` and `eslint-config-next/typescript` directly (flat config), which knip can trace natively.
-- **dependency-cruiser** (`.dependency-cruiser.cjs`): warns on circular deps and orphan modules.
-- **TypeDoc** (`typedoc.json`): expands over `src`, outputs to `docs/api` (gitignored).
+- **Biome** (`biome.json`): formatter + assist only — **linter is disabled** to avoid overlap with ESLint (`eslint .`, config in `eslint.config.mjs`). CSS parser has `tailwindDirectives` enabled for the `@theme` block in `globals.css`. `files.includes` explicitly excludes build/test/doc-generation output (`.next/`, `out/`, `coverage/`, `playwright-report/`, `test-results/`, `docs/api/`), mirroring `eslint.config.mjs`'s `ignores`.
+- **Knip** (`knip.json`): deliberately minimal (`$schema` only) — Next.js's App Router entry files (`page.tsx`/`layout.tsx`/`route.ts`/etc.) are auto-detected by knip's built-in Next.js plugin, and knip already respects `.gitignore` for generated output, so explicit `entry`/`ignore` config would be redundant (knip's own config-hint diagnostics flag exactly that if added).
+- **dependency-cruiser** (`.dependency-cruiser.cjs`): `no-circular` is `severity: "error"` (enforced — dependency-cruiser's CLI exit code only reflects `error`-severity violations, so `warn` would never fail CI); `no-orphans` stays `severity: "warn"` (advisory dead-code hint, not an architectural boundary).
+- **TypeDoc** (`typedoc.json`): expands over `src`, outputs to `docs/api` (gitignored, not a CI gate); `excludePrivate`/`excludeInternal`/`excludeExternals` keep the generated docs scoped to the public API surface.
+
+Full rationale, exclusion justifications, and the local/pre-commit/CI execution-timing matrix for all four tools: [`docs/品質ツール運用方針.md`](docs/品質ツール運用方針.md).
 
 ## Stack & conventions
 
