@@ -1,17 +1,17 @@
 This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
 
+## Requirements
+
+- **Node.js**: version pinned in [`.nvmrc`](./.nvmrc) (run `nvm use` to switch automatically). Also enforced via `engines.node` in `package.json`.
+- **Package manager**: **pnpm only** — this is the project's standing decision (see `CLAUDE.md`). Do not use npm or yarn; there is no `package-lock.json`/`yarn.lock`, only `pnpm-lock.yaml`. The exact pnpm version is pinned via `packageManager` in `package.json` (use [Corepack](https://nodejs.org/api/corepack.html) to get it automatically: `corepack enable`).
+
 ## Getting Started
 
-First, run the development server:
+Install dependencies and run the development server:
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
+pnpm install
 pnpm dev
-# or
-bun dev
 ```
 
 Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
