@@ -1,16 +1,18 @@
-import { dirname } from "path";
-import { fileURLToPath } from "url";
-import { FlatCompat } from "@eslint/eslintrc";
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = dirname(__filename);
-
-const compat = new FlatCompat({
-  baseDirectory: __dirname,
-});
+import nextCoreWebVitals from "eslint-config-next/core-web-vitals";
+import nextTypescript from "eslint-config-next/typescript";
 
 const eslintConfig = [
-  ...compat.extends("next/core-web-vitals", "next/typescript"),
+  // eslint-config-next 16 ships real ESLint 9 flat-config arrays (with
+  // live plugin objects, e.g. `plugins: { react: reactPluginInstance }`)
+  // instead of the legacy eslintrc-shareable-config format. Feeding that
+  // through `FlatCompat.extends()` (the `@eslint/eslintrc` shim for
+  // pre-flat-config plugins) makes eslint try to schema-validate it as a
+  // legacy config, which fails, and formatting that failure then crashes
+  // with "Converting circular structure to JSON" because the plugin
+  // objects self-reference their own flat configs. Import the flat
+  // configs directly instead.
+  ...nextCoreWebVitals,
+  ...nextTypescript,
   {
     // Flat config does not auto-ignore Next's build output the way the
     // legacy .eslintignore-based setup did. Without this, `pnpm lint` run
