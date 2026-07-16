@@ -155,7 +155,7 @@ export default function RulesPage() {
   return (
     <div className="flex min-h-screen flex-col items-center p-6 sm:p-12">
       <main className="flex w-full max-w-2xl flex-col gap-8">
-        <nav aria-label="パンくず">
+        <nav aria-label="ページナビゲーション">
           <Link
             href="/"
             className="inline-flex items-center gap-1 text-sm text-foreground/70 underline underline-offset-4 hover:text-foreground focus-visible:rounded-sm focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-foreground"
