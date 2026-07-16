@@ -1,11 +1,9 @@
-import Link from "next/link";
-
 /**
  * ロビー(トップページ)。
  *
  * スペック6(`documents/spec/screen-design-and-routing.md` 6.2節)で定義された
  * エントリーポイント。対局開始・ルール説明・設定への導線を提供する。
- * 実装済みのルートは実リンク(`/rules`)、未実装のルート(`/game`・`/settings`)は
+ * 実装済みのルートは実リンク(`/game`・`/rules`)、未実装のルート(`/settings`)は
  * 「準備中」表示のプレースホルダとし、ルート実装後にリンクへ差し替える。
  *
  * アクセシビリティ・レスポンシブ・ダークモードは
@@ -13,6 +11,7 @@ import Link from "next/link";
  * 状態は色のみに依存せずテキストラベルで伝達し、配色は `globals.css` の
  * トークン(`--background` / `--foreground`)経由で参照する。
  */
+import Link from "next/link";
 
 /** ロビーからの導線1件。 */
 type MenuItem = {
@@ -29,6 +28,7 @@ const menuItems: MenuItem[] = [
     title: "対局を開始",
     description: "四人回しサンマで半荘戦を打つ",
     href: "/game",
+    ready: true,
   },
   {
     title: "ルールを見る",
@@ -40,6 +40,7 @@ const menuItems: MenuItem[] = [
     title: "設定",
     description: "ダークモード切替などの表示設定",
     href: "/settings",
+    ready: false,
   },
 ];
 
