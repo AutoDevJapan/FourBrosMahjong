@@ -31,7 +31,9 @@ pnpm start          # 本番ビルドの起動
 pnpm lint           # ESLint(eslint.config.mjs, next/core-web-vitals + next/typescript)
 pnpm typecheck      # tsc --noEmit
 
-pnpm test           # Vitest(ユニット) — src/**/*.{test,spec}.{ts,tsx}
+pnpm test           # Vitest — node/jsdom 両プロジェクトを実行(src/**/*.{test,spec}.{ts,tsx})
+pnpm test:unit      # Vitest — node プロジェクトのみ(*.{test,spec}.ts)
+pnpm test:component # Vitest — jsdom プロジェクトのみ(*.{test,spec}.tsx / コンポーネントテスト)
 pnpm test:watch     # Vitest ウォッチモード
 pnpm test:coverage  # Vitest + v8 カバレッジ
 pnpm test:e2e       # Playwright E2E — ./e2e 配下(初回のみ `pnpm exec playwright install` が必要。詳細は後述の「E2E テスト」参照)
@@ -55,6 +57,38 @@ docs/             ゲームルール・ドキュメントの入口(人間向け)
 documents/spec/   実装スペック(SpecDD SSOT) — GoDD の docs_dir
 質問リスト.md      未確定の仕様に関する質問リスト(実装前にユーザー回答が必要な項目)
 ```
+
+## コンポーネントテスト(Vitest + Testing Library)
+
+Vitest は**ファイル拡張子でテスト環境を分割**する 2 プロジェクト構成です(`vitest.config.ts`)。
+
+| 拡張子 | 環境 | 用途 | プロジェクト名 |
+| --- | --- | --- | --- |
+| `*.{test,spec}.ts` | `node` | 純粋なゲーム/ルール/ロジック(DOM 不要) | `unit` |
+| `*.{test,spec}.tsx` | `jsdom` | React コンポーネント(DOM が必要) | `component` |
+
+`pnpm test` で両プロジェクトを一括実行し、`pnpm test:unit` / `pnpm test:component` で片方だけを実行できます。個別ファイルで方針を上書きしたい場合は先頭に `// @vitest-environment jsdom`(または `node`)のドックブロックを付けます。
+
+### 構成要素
+
+- 依存: `@testing-library/react` / `@testing-library/user-event` / `@testing-library/jest-dom` / `jsdom`(JSX 変換用に `@vitejs/plugin-react` を component プロジェクトへ適用)。
+- セットアップ: `vitest.setup.ts`(component プロジェクトの `setupFiles`)が `@testing-library/jest-dom` のマッチャ(`toBeInTheDocument` 等)を登録し、各テスト後に `cleanup()` を実行します。
+- スモークテスト: `src/test/component-smoke.test.tsx`(jsdom レンダリング + Tailwind クラス + `user-event` 操作)と `src/test/environment-split.test.ts`(node 環境の確認)が基盤の疎通を担保します。
+
+### コンポーネントテストの書き方(例)
+
+```tsx
+// src/components/foo.test.tsx — .tsx なので自動的に jsdom で実行される
+import { render, screen } from "@testing-library/react";
+import { Foo } from "./foo";
+
+it("renders", () => {
+  render(<Foo />);
+  expect(screen.getByRole("button")).toBeInTheDocument(); // jest-dom マッチャ
+});
+```
+
+個別コンポーネントのテストケース拡充は各コンポーネント実装時に行います(本節は基盤の説明)。
 
 ## E2E テスト(Playwright)
 
