@@ -22,7 +22,7 @@
  * 標準機能で満たす。実効テーマは `aria-live` で色に依存しないテキストとして通知する。
  */
 
-import { useCallback, useId, useSyncExternalStore } from "react";
+import { useCallback, useSyncExternalStore } from "react";
 
 /** テーマの選択状態。"system" は OS 設定に追従(=`data-theme` 未設定)。 */
 type ThemePreference = "system" | "light" | "dark";
@@ -89,45 +89,55 @@ function getServerSnapshot(): ThemeSnapshot {
   return SERVER_SNAPSHOT;
 }
 
-/** OS 設定変更・別タブでの保存変更・自タブでの選択変更を購読者へ通知する。 */
+/** 選択に応じて `<html data-theme>` を設定/除去する(DOM 反映のみ)。 */
+function writeThemeToDom(preference: ThemePreference): void {
+  const root = document.documentElement;
+  if (preference === "system") {
+    root.removeAttribute("data-theme");
+  } else {
+    root.setAttribute("data-theme", preference);
+  }
+}
+
+/**
+ * OS 設定変更(`matchMedia`)と別タブでの保存変更(`storage`)を購読する。
+ * 別タブでの変更はこのタブの DOM にも反映し、制御表示と実効テーマを一致させる。
+ */
 function subscribe(callback: () => void): () => void {
   subscribers.add(callback);
   const media = window.matchMedia(MEDIA_QUERY);
-  const onExternalChange = () => {
+  const onMediaChange = () => {
     cachedSnapshot = null;
     callback();
   };
   const onStorage = (event: StorageEvent) => {
     if (event.key === STORAGE_KEY || event.key === null) {
-      onExternalChange();
+      // 別タブでの選択をこのタブの DOM へ同期(localStorage は書き換えない)。
+      writeThemeToDom(readStoredPreference());
+      cachedSnapshot = null;
+      callback();
     }
   };
-  media.addEventListener("change", onExternalChange);
+  media.addEventListener("change", onMediaChange);
   window.addEventListener("storage", onStorage);
   return () => {
     subscribers.delete(callback);
-    media.removeEventListener("change", onExternalChange);
+    media.removeEventListener("change", onMediaChange);
     window.removeEventListener("storage", onStorage);
   };
 }
 
 /** 選択を `<html data-theme>` と `localStorage` に反映し、購読者へ通知する。 */
 function applyPreference(preference: ThemePreference): void {
-  const root = document.documentElement;
-  if (preference === "system") {
-    root.removeAttribute("data-theme");
-    try {
+  writeThemeToDom(preference);
+  try {
+    if (preference === "system") {
       localStorage.removeItem(STORAGE_KEY);
-    } catch {
-      // 保存不可でも属性反映は済んでいるので握りつぶす。
-    }
-  } else {
-    root.setAttribute("data-theme", preference);
-    try {
+    } else {
       localStorage.setItem(STORAGE_KEY, preference);
-    } catch {
-      // 同上。
     }
+  } catch {
+    // localStorage 保存不可(プライベートモード等)でも DOM 反映は済んでいる。
   }
   cachedSnapshot = null;
   for (const callback of subscribers) {
@@ -141,7 +151,6 @@ export function ThemeToggle() {
     getClientSnapshot,
     getServerSnapshot,
   );
-  const groupId = useId();
 
   const handleSelect = useCallback((next: ThemePreference) => {
     applyPreference(next);
@@ -158,14 +167,7 @@ export function ThemeToggle() {
     <fieldset className="flex flex-col gap-3">
       <legend className="text-sm font-medium">テーマ(表示モード)</legend>
 
-      <div
-        className="flex flex-col gap-2"
-        role="radiogroup"
-        aria-labelledby={groupId}
-      >
-        <span id={groupId} className="sr-only">
-          テーマの選択
-        </span>
+      <div className="flex flex-col gap-2">
         {OPTIONS.map((option) => {
           const checked = preference === option.value;
           return (

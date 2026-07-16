@@ -40,9 +40,10 @@ test.describe("トップページ(ロビー)", () => {
     await expect(page.getByText("ルールを見る")).toBeVisible();
     await expect(page.getByText("設定", { exact: true })).toBeVisible();
     // 実装済みの設定は /settings への実リンク、未実装の 2 ルートは「準備中」。
-    await expect(
-      page.getByRole("link", { name: /設定/ }),
-    ).toHaveAttribute("href", "/settings");
+    await expect(page.getByRole("link", { name: /設定/ })).toHaveAttribute(
+      "href",
+      "/settings",
+    );
     await expect(page.getByText("準備中")).toHaveCount(2);
   });
 
