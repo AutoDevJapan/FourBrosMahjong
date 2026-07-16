@@ -113,6 +113,38 @@ export interface DoraData {
 }
 
 /**
+ * 結果画面(`/game/result`)の1プレイヤー分の表示データ(スペック6 6.2 / 6.8, スペック3 3.3)。
+ *
+ * ソシー精算 = ①素点 + ②順位ウマ + ③役満祝儀(スペック3 3.3)。ここに並ぶのは**表示専用の値**であり、
+ * 順位の決定・素点(オカ配分)・ウマ割当(`質問リスト.md` Q13)・祝儀判定などの**計算ロジックは一切含めない**。
+ * これらの値は将来ドメイン層(スペック3/4)が算出し、確定済みの結果として流し込む(スペック6 6.8)。
+ */
+export interface ResultPlayerView {
+  readonly name: string;
+  /** 最終順位(1〜)。順位決定ロジックは含めず、与えられた値を表示するのみ。 */
+  readonly rank: number;
+  /** ① 素点(1点=1ソシー、スペック3 3.3①)。 */
+  readonly rawScore: number;
+  /** ② 順位ウマ(スペック3 3.3②)。数値の割当ロジック(Q13)は含めない。 */
+  readonly uma: number;
+  /** ③ 役満祝儀(スペック3 3.3③)。 */
+  readonly bonus: number;
+  /**
+   * ソシー合計(= rawScore + uma + bonus、スペック3 3.3)。
+   * UI では計算せず、確定済みの合計値を受け取って表示する(スペック6 6.8)。
+   */
+  readonly soshiiTotal: number;
+}
+
+/**
+ * 半荘終了時の結果ビュー(スペック6 6.2)。`GameProvider` が保持し `/game/result` が読む。
+ * `players` は最終順位(`rank` 昇順)で並んだ確定済みの内訳。
+ */
+export interface GameResultView {
+  readonly players: readonly ResultPlayerView[];
+}
+
+/**
  * 対局画面全体のビューモデル。`GameProvider` がブラウザメモリ内に保持し、
  * `/game` ⇄ `/game/result` で共有する(スペック6 6.5 / 6.9)。
  */
@@ -120,4 +152,9 @@ export interface GameViewState {
   readonly slots: SlotMap;
   readonly tableInfo: TableInfoData;
   readonly dora: DoraData;
+  /**
+   * 半荘終了時の結果ビュー(スペック6 6.2 / 6.8)。半荘終了まで結果は未確定のため `null`。
+   * `/game/result` はこの値を `useContext` 経由で読み取り、`null` の場合は未確定として扱う。
+   */
+  readonly result: GameResultView | null;
 }

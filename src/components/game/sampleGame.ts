@@ -5,7 +5,7 @@
  * 静的なサンプルに過ぎない。席割り当て・抜け番・親・点差などは実ロジック(Q9〜Q13)ではなく
  * 手で置いた固定値であり、ゲーム進行の意味を持たない。ドメイン層が実装されたら差し替える。
  */
-import type { GameViewState, TileData } from "./types";
+import type { GameResultView, GameViewState, TileData } from "./types";
 
 /** 短縮ヘルパ。数牌。 */
 const t = (suit: TileData["suit"], rank: number, isRed = false): TileData => ({
@@ -60,9 +60,55 @@ const rightDiscards: readonly TileData[] = [
 ];
 
 /**
+ * 結果画面(`/game/result`)の描画確認用**固定ダミー結果**(スペック6 6.8, スペック3 3.3)。
+ *
+ * 順位・素点・ウマ・祝儀・合計はいずれもドメイン計算の結果ではなく手で置いた固定値であり、
+ * 順位決定やウマ割当(Q13)の意味を持たない。UI が「確定済みの内訳を受け取って表示する」構造を
+ * 確認するためのサンプルに過ぎず、ドメイン層(スペック3)実装後に差し替える。
+ * `soshiiTotal` は rawScore + uma + bonus の確定値として明示的に与えている(UI では計算しない)。
+ */
+const sampleResultView: GameResultView = {
+  players: [
+    {
+      name: "あなた",
+      rank: 1,
+      rawScore: 45000,
+      uma: 10000,
+      bonus: 1000,
+      soshiiTotal: 56000,
+    },
+    {
+      name: "対面",
+      rank: 2,
+      rawScore: 32000,
+      uma: 5000,
+      bonus: 0,
+      soshiiTotal: 37000,
+    },
+    {
+      name: "上家",
+      rank: 3,
+      rawScore: 28000,
+      uma: -5000,
+      bonus: 0,
+      soshiiTotal: 23000,
+    },
+    {
+      name: "下家",
+      rank: 4,
+      rawScore: 15000,
+      uma: -10000,
+      bonus: 0,
+      soshiiTotal: 5000,
+    },
+  ],
+};
+
+/**
  * 固定サンプルの対局ビュー状態。
  * 4スロット中「対面(across)」を抜け番として配置してあるが、これは描画確認用の任意配置であり、
  * 抜け番の交代順序(Q9)や席割り(Q10)を表すものではない。
+ * `result` には結果画面の描画確認用に固定ダミー結果を同梱している(通常は半荘終了まで `null`)。
  */
 export const sampleGameState: GameViewState = {
   slots: {
@@ -117,4 +163,5 @@ export const sampleGameState: GameViewState = {
     indicators: [t("pin", 4), t("sou", 6)],
     uraIndicatorCount: 2,
   },
+  result: sampleResultView,
 };
