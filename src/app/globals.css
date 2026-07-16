@@ -1,5 +1,18 @@
 @import "tailwindcss";
 
+/*
+ * ダークモード: OS 追従を既定にしつつ手動トグルを併用する(スペック5 5.4.1)。
+ *  - data-theme 未設定       → prefers-color-scheme に委譲(下の @media)
+ *  - data-theme="light|dark" → 手動選択が OS 設定より優先される
+ * `dark:` ユーティリティは data-theme="dark" に連動させる(スペック5 5.4.1 の決定)。
+ * 色値は必ず --background / --foreground 等のトークン経由で参照する(スペック5 5.4.2)。
+ *
+ * ダーク値は「手動ダーク(:root[data-theme="dark"])」と「未選択かつ OS ダーク
+ * (:root:not([data-theme]) 内 @media)」の2箇所で定義する。全トークンを両方に
+ * 適用させるための意図的な二重定義であり、変更時は両ブロックを同期させること。
+ */
+@custom-variant dark (&:where([data-theme="dark"], [data-theme="dark"] *));
+
 :root {
   --background: #ffffff;
   --foreground: #171717;
@@ -24,6 +37,44 @@
   --focus-ring: #1d4ed8;
 }
 
+/* 手動でダークを選択した場合は OS 設定より優先し、全トークンをダーク値にする。 */
+:root[data-theme="dark"] {
+  --background: #0a0a0a;
+  --foreground: #ededed;
+
+  --table-felt: #0a3d22;
+  --tile-face: #ece9e0;
+  --tile-ink: #1a1a1a;
+  --tile-border: #6b7280;
+  --tile-back: #24486f;
+  --tile-back-mark: #cdd9ea;
+  --tile-accent-red: #e0384a;
+  --turn-highlight: #f59e0b;
+  --danger: #f87171;
+  --positive: #4ade80;
+  --focus-ring: #60a5fa;
+}
+
+/* ユーザーが明示選択していない場合のみ OS のダーク設定に追従する。 */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme]) {
+    --background: #0a0a0a;
+    --foreground: #ededed;
+
+    --table-felt: #0a3d22;
+    --tile-face: #ece9e0;
+    --tile-ink: #1a1a1a;
+    --tile-border: #6b7280;
+    --tile-back: #24486f;
+    --tile-back-mark: #cdd9ea;
+    --tile-accent-red: #e0384a;
+    --turn-highlight: #f59e0b;
+    --danger: #f87171;
+    --positive: #4ade80;
+    --focus-ring: #60a5fa;
+  }
+}
+
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
@@ -41,25 +92,6 @@
   --color-danger: var(--danger);
   --color-positive: var(--positive);
   --color-focus-ring: var(--focus-ring);
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-
-    --table-felt: #0a3d22;
-    --tile-face: #ece9e0;
-    --tile-ink: #1a1a1a;
-    --tile-border: #6b7280;
-    --tile-back: #24486f;
-    --tile-back-mark: #cdd9ea;
-    --tile-accent-red: #e0384a;
-    --turn-highlight: #f59e0b;
-    --danger: #f87171;
-    --positive: #4ade80;
-    --focus-ring: #60a5fa;
-  }
 }
 
 body {
