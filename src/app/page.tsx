@@ -1,10 +1,12 @@
+import Link from "next/link";
+
 /**
  * ロビー(トップページ)。
  *
  * スペック6(`documents/spec/screen-design-and-routing.md` 6.2節)で定義された
  * エントリーポイント。対局開始・ルール説明・設定への導線を提供する。
- * 遷移先の各ルート(`/game`・`/rules`・`/settings`)は未実装のため、
- * 導線は「準備中」表示のプレースホルダとし、ルート実装後にリンクへ差し替える。
+ * 実装済みのルートは実リンク(`/rules`)、未実装のルート(`/game`・`/settings`)は
+ * 「準備中」表示のプレースホルダとし、ルート実装後にリンクへ差し替える。
  *
  * アクセシビリティ・レスポンシブ・ダークモードは
  * `documents/spec/ui-accessibility-responsive-darkmode.md`(スペック5)に従う:
@@ -12,8 +14,17 @@
  * トークン(`--background` / `--foreground`)経由で参照する。
  */
 
+/** ロビーからの導線1件。 */
+type MenuItem = {
+  title: string;
+  description: string;
+  href: string;
+  /** 遷移先ルートが実装済みか。false/未指定なら「準備中」プレースホルダ表示。 */
+  ready?: boolean;
+};
+
 /** ロビーからの導線一覧(スペック6 6.3節の画面遷移に対応)。 */
-const menuItems = [
+const menuItems: MenuItem[] = [
   {
     title: "対局を開始",
     description: "四人回しサンマで半荘戦を打つ",
@@ -23,13 +34,14 @@ const menuItems = [
     title: "ルールを見る",
     description: "オール赤5・ガリ・サイコロ連動ドラなど独自ルールの説明",
     href: "/rules",
+    ready: true,
   },
   {
     title: "設定",
     description: "ダークモード切替などの表示設定",
     href: "/settings",
   },
-] as const;
+];
 
 export default function Home() {
   return (
@@ -48,22 +60,50 @@ export default function Home() {
 
         <nav aria-label="メインメニュー" className="w-full">
           <ul className="flex flex-col gap-3">
-            {menuItems.map((item) => (
-              <li
-                key={item.href}
-                className="flex items-center justify-between gap-4 rounded-lg border border-foreground/15 p-4"
-              >
-                <div>
-                  <p className="font-medium">{item.title}</p>
-                  <p className="mt-1 text-sm/5 text-foreground/70">
-                    {item.description}
-                  </p>
-                </div>
-                <span className="shrink-0 rounded-full border border-foreground/25 px-3 py-1 text-xs text-foreground/70">
-                  準備中
-                </span>
-              </li>
-            ))}
+            {menuItems.map((item) => {
+              const content = (
+                <>
+                  <div>
+                    <p className="font-medium">{item.title}</p>
+                    <p className="mt-1 text-sm/5 text-foreground/70">
+                      {item.description}
+                    </p>
+                  </div>
+                  {item.ready ? (
+                    <span
+                      aria-hidden
+                      className="shrink-0 text-lg text-foreground/70"
+                    >
+                      →
+                    </span>
+                  ) : (
+                    <span className="shrink-0 rounded-full border border-foreground/25 px-3 py-1 text-xs text-foreground/70">
+                      準備中
+                    </span>
+                  )}
+                </>
+              );
+
+              return (
+                <li
+                  key={item.href}
+                  className="rounded-lg border border-foreground/15"
+                >
+                  {item.ready ? (
+                    <Link
+                      href={item.href}
+                      className="flex items-center justify-between gap-4 rounded-lg p-4 transition-colors hover:bg-foreground/5 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-foreground"
+                    >
+                      {content}
+                    </Link>
+                  ) : (
+                    <div className="flex items-center justify-between gap-4 p-4">
+                      {content}
+                    </div>
+                  )}
+                </li>
+              );
+            })}
           </ul>
         </nav>
       </main>
