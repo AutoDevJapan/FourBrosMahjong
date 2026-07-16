@@ -15,9 +15,10 @@ import { expect, type Locator, type Page, test } from "@playwright/test";
  * ライト/ダーク双方が axe の `color-contrast`(WCAG 2.1 AA / 5.2.4)を満たすことを確認する。
  *
  * axe のルールセットは WCAG 2.0/2.1 の A・AA タグに限定する(spec 5.2.4 の最低ライン)。
- * `disableRules` による全体無効化は行わない。既知の src 側バグでスコープ外のものだけ、理由と
- * 追跡 issue を明記して該当ノードを個別に `.exclude()` する(現状は `/game` の OpponentHand /
- * issue #73 の1件のみ)。
+ * `disableRules` による全体無効化は行わない。現状は全画面・全ノードを無除外で監査している
+ * (`/game` の OpponentHand / issue #73 は src 側で修正済みのため除外を撤去した)。既知の src 側
+ * バグでスコープ外のものが再び出た場合のみ、理由と追跡 issue を明記して該当ノードを個別に
+ * `.exclude()` する(`Screen.axeExclude`)。
  */
 
 /** 監査対象の WCAG タグ(A・AA / 2.0・2.1)。spec 5.2.4 の最低ライン AA を含む。 */
@@ -41,16 +42,7 @@ const SCREENS: readonly Screen[] = [
   { path: "/", name: "ロビー", heading: "四兄弟麻雀" },
   { path: "/rules", name: "ルール説明", heading: "ルール説明" },
   { path: "/settings", name: "設定", heading: "設定" },
-  {
-    path: "/game",
-    name: "対局画面",
-    heading: "対局画面",
-    // 他家の伏せ手牌 `OpponentHand` が role を持たない <div> に aria-label を付与しており
-    // axe の aria-prohibited-attr(WCAG 4.1.2)に触れる。src 側の既知バグで本 PR のスコープ外
-    // (e2e / 依存追加のみ)のため issue #73 で追跡し、当該ノードのみ監査から除外する。
-    // #73 で src を修正したらこの除外を削除すること。
-    axeExclude: ['[aria-label*="伏せ"]'],
-  },
+  { path: "/game", name: "対局画面", heading: "対局画面" },
   { path: "/game/result", name: "対局結果", heading: "対局結果" },
 ];
 
