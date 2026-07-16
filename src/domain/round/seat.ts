@@ -67,7 +67,7 @@ export function deriveSeating<TPlayer>(
 ): Seating<TPlayer> {
   const base = ((dealerIndex % RING_SIZE) + RING_SIZE) % RING_SIZE;
   return {
-    east: order[base % RING_SIZE],
+    east: order[base],
     south: order[(base + 1) % RING_SIZE],
     west: order[(base + 2) % RING_SIZE],
     benchWarmer: order[(base + 3) % RING_SIZE],
