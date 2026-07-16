@@ -78,8 +78,19 @@
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  /*
+   * フォントスタック(Issue #72): 欧文は Geist、和文は Noto Sans JP。
+   * Geist は latin サブセットのみで和文グリフを持たないため、日本語文字は
+   * ブラウザが次点の Noto Sans JP へ自動フォールバックして描画する。
+   * いずれも `next/font` がビルド時にセルフホストするため CDN 依存はない。
+   * 末尾はフォント未取得時の同期フォールバック(暗黙のシステム依存に頼らず明示)。
+   */
+  --font-sans:
+    var(--font-geist-sans), var(--font-noto-sans-jp), ui-sans-serif, system-ui,
+    sans-serif;
+  --font-mono:
+    var(--font-geist-mono), var(--font-noto-sans-jp), ui-monospace,
+    "SFMono-Regular", monospace;
 
   --color-table-felt: var(--table-felt);
   --color-tile-face: var(--tile-face);
@@ -97,7 +108,8 @@
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  /* Issue #72: Arial ハードコードを廃し、@theme の --font-sans(Geist + Noto Sans JP)を参照する。 */
+  font-family: var(--font-sans);
 }
 
 /*
