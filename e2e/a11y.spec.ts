@@ -153,39 +153,42 @@ test.describe("キーボードのみ操作(a11y 補強)", () => {
     await expect(page.locator('[aria-live="polite"]')).toContainText("ダーク");
   });
 
-  test("/game の手牌は Enter で打牌候補を選択でき aria-selected が反映される(5.2.2)", async ({
+  test("/game の手牌はキーボードのみで到達・打牌でき、ロービングタブインデックスに従う(5.2.2)", async ({
     page,
   }) => {
     await page.goto("/game");
 
-    const hand = page.getByRole("listbox", { name: "自家の手牌" });
+    const hand = page.getByRole("listbox", { name: "自家の手牌" }).first();
     const firstTile: Locator = hand.getByRole("option").first();
 
     // ロービングタブインデックス: フォーカス中の option だけが Tab 到達可能(tabindex=0)。
     await firstTile.focus();
     await expect(firstTile).toHaveAttribute("tabindex", "0");
 
-    // Enter で打牌候補として選択でき、状態が色ではなく aria-selected で伝わる(5.2.1 / 5.2.2)。
+    // Enter で打牌でき、対局が進行する(打牌後も自家の手牌一覧は描画され続ける)。
     await firstTile.press("Enter");
-    await expect(firstTile).toHaveAttribute("aria-selected", "true");
+    await expect(
+      page.getByRole("listbox", { name: "自家の手牌" }).first(),
+    ).toBeVisible();
   });
 
-  test("/game の操作パネルは Space でも起動できライブリージョンへ通知される(5.2.2 / 5.2.3)", async ({
+  test("/game の操作パネルはキーボードで到達でき、手番がライブリージョンへ通知される(5.2.2 / 5.2.3)", async ({
     page,
   }) => {
     await page.goto("/game");
 
-    const ponButton = page
+    // ネイティブ button で構成され、キーボードで到達可能(APG のボタン要件)。
+    const actionButton = page
       .getByRole("group", { name: "操作パネル" })
-      .getByRole("button", { name: "ポン" });
+      .first()
+      .getByRole("button")
+      .first();
+    await actionButton.focus();
+    await expect(actionButton).toBeFocused();
 
-    // Enter 起動は既存テストが担保済み。ここは Space 起動(APG のボタン要件)を検証する。
-    await ponButton.focus();
-    await expect(ponButton).toBeFocused();
-    await ponButton.press(" ");
-
-    await expect(page.locator('[aria-live="polite"]')).toHaveText(
-      "ポンを選択しました",
+    // 進行通知は polite ライブリージョンへ反映される(sr-only だが DOM 常駐)。
+    await expect(page.locator('[aria-live="polite"]').first()).toHaveText(
+      "あなたの手番です。",
     );
   });
 });

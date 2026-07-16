@@ -69,7 +69,13 @@ export default function GameBoard() {
     }
     if (pending?.kind === "humanRon") {
       return [
-        { key: "ron", label: "ロン", icon: "栄", onClick: controls.ron, primary: true },
+        {
+          key: "ron",
+          label: "ロン",
+          icon: "栄",
+          onClick: controls.ron,
+          primary: true,
+        },
         { key: "pass", label: "スルー", icon: "○", onClick: controls.passRon },
       ];
     }

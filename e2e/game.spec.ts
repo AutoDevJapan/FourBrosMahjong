@@ -1,17 +1,13 @@
 import { expect, test } from "@playwright/test";
 
 /**
- * 対局画面(`/game`)への遷移と主要表示要素の E2E 検証(#30)。
+ * 対局画面(`/game`)の E2E 検証(#30 / #67)。
  *
- * #53(PR #58)で `/game` ルート・コンポーネントツリーが骨組み実装され、ロビーの
- * 「対局を開始」が実リンク化したため、スペック6 6.3(画面遷移)の
- * ロビー → 対局画面 導線と、6.4.2(表示要素の割り当て)の主要要素の存在を検証する。
+ * #67 で `/game` は固定サンプルから**実対局エンジン**駆動へ統合された。ロビー導線・主要表示要素に加え、
+ * 「1半荘を実プレイして `/game/result` に到達する」ループ(スペック2 2.1・2.6・2.8 / スペック6 6.3)を検証する。
  *
- * セレクタは実装文言に脆く依存しないよう role / aria-label ベースを優先する。
- * `/game` は骨組み段階で固定サンプル(`sampleGame.ts`)を描画するため、値そのものではなく
- * 「要素が存在し、遷移が成立すること」を安定検証の対象とする(スペック6 6.8)。
- *
- * `/game/result`(#54)など未実装ルートに依存するシナリオはここには書かない。
+ * 盤面の牌はクライアントで乱数生成されるため、値そのものではなく role/aria-label ベースで安定検証する。
+ * 席割りは起家=自家 p0 固定(engine)のため、東1 の席(あなた=東家 / 抜け番=三郎)は決定的。
  */
 test.describe("対局画面(/game)", () => {
   test("ロビーの「対局を開始」導線から /game へ遷移できる(スペック6 6.3)", async ({
@@ -34,14 +30,11 @@ test.describe("対局画面(/game)", () => {
     const response = await page.goto("/game");
     expect(response?.status()).toBe(200);
 
-    // 見出し
     await expect(
       page.getByRole("heading", { level: 1, name: "対局画面" }),
     ).toBeVisible();
 
-    // 卓中央: 場風/局/本場/供託(TableInfo)。
-    // GameBoard は md 用と狭幅用の 2 レイアウトを描画し片方を display:none にするため、
-    // テキストは DOM 上に 2 つ存在する。可視側(現ビューポート)に限定して検証する。
+    // 卓中央: 場風/局/本場/供託(TableInfo)。2レイアウト分 DOM にあるため可視側に限定。
     await expect(
       page.getByText("東1局").filter({ visible: true }),
     ).toBeVisible();
@@ -52,43 +45,42 @@ test.describe("対局画面(/game)", () => {
       page.getByText("供託").filter({ visible: true }),
     ).toBeVisible();
 
-    // ドラ表示(DoraIndicator: section aria-label="ドラ表示")
+    // ドラ表示。
     await expect(page.getByRole("region", { name: "ドラ表示" })).toBeVisible();
 
-    // 4スロット: 着席3人 + 抜け番1人(PlayerArea / BenchArea の aria-label)
+    // 4スロット: 着席3人(あなた=東家 / 一郎=南家 / 二郎=西家)+ 抜け番(三郎)。
     await expect(
       page.getByRole("region", { name: "あなた(東家)" }),
     ).toBeVisible();
     await expect(
-      page.getByRole("region", { name: "上家(南家)" }),
+      page.getByRole("region", { name: "一郎(南家)" }),
     ).toBeVisible();
     await expect(
-      page.getByRole("region", { name: "下家(西家)" }),
+      page.getByRole("region", { name: "二郎(西家)" }),
     ).toBeVisible();
     await expect(
-      page.getByRole("region", { name: "対面(抜け番)" }),
+      page.getByRole("region", { name: "三郎(抜け番)" }),
     ).toBeVisible();
 
-    // 抜け番の状態はテキストでも伝わる(色のみ依存禁止 / スペック5 5.2.1)
+    // 抜け番の状態はテキストでも伝わる(色のみ依存禁止 / スペック5 5.2.1)。
     await expect(
-      page.getByRole("region", { name: "対面(抜け番)" }).getByText("抜け番"),
+      page.getByRole("region", { name: "三郎(抜け番)" }).getByText("抜け番"),
     ).toBeVisible();
 
-    // 自家の手牌(Hand: role=listbox)と点数表示(ScoreDisplay)
+    // 自家の手牌(role=listbox)と持ち点(35,000 スタート)。
     await expect(
-      page.getByRole("listbox", { name: "自家の手牌" }),
+      page.getByRole("listbox", { name: "自家の手牌" }).first(),
     ).toBeVisible();
-    // 点数は自家スロット内にサンプルの持ち点が表示される(ja-JP 桁区切り)。
     await expect(
       page.getByRole("region", { name: "あなた(東家)" }),
     ).toContainText("35,000");
 
-    // 操作パネル(ActionPanel: role=group)と各操作ボタン
-    const actionPanel = page.getByRole("group", { name: "操作パネル" });
+    // 操作パネル(role=group)。開始直後は自家の打牌待ちで「ツモ」ボタンが現れる。
+    const actionPanel = page.getByRole("group", { name: "操作パネル" }).first();
     await expect(actionPanel).toBeVisible();
-    for (const name of ["リーチ", "ポン", "カン", "北抜き(ガリ)", "スキップ"]) {
-      await expect(actionPanel.getByRole("button", { name })).toBeVisible();
-    }
+    await expect(
+      actionPanel.getByRole("button", { name: "ツモ" }),
+    ).toBeVisible();
   });
 
   test("/game から「ロビーへ戻る」導線でロビーに戻れる(スペック6 6.3)", async ({
@@ -104,40 +96,67 @@ test.describe("対局画面(/game)", () => {
     ).toBeVisible();
   });
 
-  test("結果画面の「もう一半荘」導線で /game(対局画面)へ戻れる(スペック6 6.3)", async ({
+  test("1半荘を実プレイして結果画面へ到達し、「もう一半荘」で対局へ戻れる(スペック2 2.8 / 6.3)", async ({
     page,
   }) => {
-    // /game → /game/result は半荘終了(ドメイン判定 Q13)起点のため導線が無く未検証。
-    // 逆向きの Result → Game(「もう一半荘」)は導線が実在するため、対局画面への着地を検証する。
-    // 結果画面内部の表示検証は #54 の責務とし、ここでは対局画面への遷移のみを対象とする。
-    await page.goto("/game/result");
+    test.setTimeout(120_000);
+    await page.goto("/game");
 
-    await page.getByRole("link", { name: "もう一半荘" }).click();
+    // 局面に応じて操作を選び、半荘終了(→ /game/result 自動遷移)まで進める。
+    // 自家は打牌(ツモ切り相当)・ロンは見送り、局終了ごとに次局へ。
+    for (let step = 0; step < 800; step++) {
+      if (/\/game\/result$/.test(page.url())) break;
 
+      const next = page.getByRole("button", { name: "次の局へ" });
+      if ((await next.count()) > 0 && (await next.first().isVisible())) {
+        await next.first().click();
+        continue;
+      }
+      const through = page.getByRole("button", { name: "スルー" });
+      if ((await through.count()) > 0 && (await through.first().isVisible())) {
+        await through.first().click();
+        continue;
+      }
+      const option = page
+        .getByRole("listbox", { name: "自家の手牌" })
+        .first()
+        .getByRole("option")
+        .first();
+      if ((await option.count()) > 0 && (await option.isVisible())) {
+        await option.click();
+        continue;
+      }
+      await page.waitForTimeout(50);
+    }
+
+    await expect(page).toHaveURL(/\/game\/result$/);
+    await expect(
+      page.getByRole("heading", { level: 1, name: "対局結果" }),
+    ).toBeVisible();
+    await expect(page.getByRole("heading", { name: "最終順位" })).toBeVisible();
+
+    // 「もう一半荘」で新規半荘を生成し対局画面へ戻る。
+    await page.getByRole("button", { name: "もう一半荘" }).click();
     await expect(page).toHaveURL(/\/game$/);
     await expect(
       page.getByRole("heading", { level: 1, name: "対局画面" }),
     ).toBeVisible();
   });
 
-  test("操作パネルのボタンをキーボードで活性化でき、進行がライブリージョンに通知される(スペック5 5.2.2 / 5.2.3)", async ({
+  test("開始時、自家の手番がライブリージョンへ通知され操作パネルが操作可能(スペック5 5.2.2 / 5.2.3)", async ({
     page,
   }) => {
     await page.goto("/game");
 
-    const riichiButton = page
-      .getByRole("group", { name: "操作パネル" })
-      .getByRole("button", { name: "リーチ" });
-
-    // キーボードのみで到達・決定できる(ネイティブ button)。
-    await riichiButton.focus();
-    await expect(riichiButton).toBeFocused();
-    await riichiButton.press("Enter");
-
-    // 進行通知は polite ライブリージョンへ反映される(sr-only だが DOM 常駐)。
-    await expect(page.locator('[aria-live="polite"]')).toHaveText(
-      "リーチを選択しました",
+    // 自家の手番(打牌待ち)は polite ライブリージョンへ通知される(sr-only だが DOM 常駐)。
+    await expect(page.locator('[aria-live="polite"]').first()).toHaveText(
+      "あなたの手番です。",
     );
+
+    // 操作パネルはキーボードで到達可能(ネイティブ button)。
+    const actionPanel = page.getByRole("group", { name: "操作パネル" }).first();
+    await expect(actionPanel).toBeVisible();
+    await expect(actionPanel.getByRole("button").first()).toBeVisible();
   });
 
   test("自家の手牌は矢印キーでフォーカス移動できる(ロービングタブインデックス / スペック5 5.2.2)", async ({
@@ -145,11 +164,13 @@ test.describe("対局画面(/game)", () => {
   }) => {
     await page.goto("/game");
 
-    const hand = page.getByRole("listbox", { name: "自家の手牌" });
-    // 先頭牌(一萬)を起点に、右矢印で次牌(九萬)へフォーカスが移る。
-    await hand.getByRole("option", { name: "一萬" }).focus();
+    const hand = page.getByRole("listbox", { name: "自家の手牌" }).first();
+    const options = hand.getByRole("option");
+    // 先頭牌を起点に、右矢印で次の牌へフォーカスが移る(牌の種類に依らず位置で検証)。
+    await options.nth(0).focus();
+    await expect(options.nth(0)).toHaveAttribute("tabindex", "0");
     await page.keyboard.press("ArrowRight");
-    await expect(hand.getByRole("option", { name: "九萬" })).toBeFocused();
+    await expect(options.nth(1)).toBeFocused();
   });
 
   test("ダークモード設定でも主要要素が見える(スペック5 5.4)", async ({
@@ -162,6 +183,8 @@ test.describe("対局画面(/game)", () => {
     await expect(
       page.getByRole("heading", { level: 1, name: "対局画面" }),
     ).toBeVisible();
-    await expect(page.getByRole("group", { name: "操作パネル" })).toBeVisible();
+    await expect(
+      page.getByRole("group", { name: "操作パネル" }).first(),
+    ).toBeVisible();
   });
 });

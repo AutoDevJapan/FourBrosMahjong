@@ -34,7 +34,6 @@ import {
   isOorasu,
   type RoundOutcome,
   type RoundState,
-  roundLabel,
   seatingOf,
 } from "@/domain/round/round";
 import type { PlayerRing, Seating } from "@/domain/round/seat";
@@ -75,19 +74,19 @@ const SEAT_WIND_NUMBER: Record<SeatKey, number> = {
 };
 
 /** 局数の安全上限(南4連荘での理論的無限ループ防止)。通常は発火しない。 */
-export const SAFETY_ROUND_CAP = 32;
+const SAFETY_ROUND_CAP = 32;
 
 /** 流局時テンパイ料の総額(標準の3,000点プールをサンマ3人へ配分)。 */
 const NOTEN_POOL = 3000;
 
 /** プレイヤー情報(不変)。 */
-export interface EnginePlayer {
+interface EnginePlayer {
   readonly id: PlayerId;
   readonly name: string;
 }
 
 /** 1局(進行中)の状態。`Wall` を含むため内部は可変に扱う。 */
-export interface HandState {
+interface HandState {
   readonly wall: Wall;
   readonly dice: DiceRoll;
   readonly doraSet: DoraSet;
@@ -109,7 +108,7 @@ export interface HandState {
 }
 
 /** 半荘終了時の1プレイヤー分の確定精算(ソシー内訳)。 */
-export interface SettlementResult {
+interface SettlementResult {
   readonly playerId: PlayerId;
   readonly name: string;
   /** 最終順位(1〜)。 */
@@ -377,7 +376,11 @@ function pump(state: EngineState): EngineState {
  * 打牌を反映し、ロン判定 → 手番送りまでを解決する。
  * ロン(自家)が発生する場合は `pending` を立てて停止する。
  */
-function applyDiscard(state: EngineState, seat: SeatKey, tile: Tile): EngineState {
+function applyDiscard(
+  state: EngineState,
+  seat: SeatKey,
+  tile: Tile,
+): EngineState {
   const hand = state.hand;
   if (hand === null) return state;
   // 14枚(手牌13 + ツモ)から捨て牌1枚を取り除く。
@@ -385,7 +388,8 @@ function applyDiscard(state: EngineState, seat: SeatKey, tile: Tile): EngineStat
     (t): t is Tile => t !== null,
   );
   const removeAt = pool.findIndex(
-    (t) => t.suit === tile.suit && t.rank === tile.rank && t.isRed === tile.isRed,
+    (t) =>
+      t.suit === tile.suit && t.rank === tile.rank && t.isRed === tile.isRed,
   );
   const idx = removeAt >= 0 ? removeAt : pool.length - 1;
   const discarded = pool[idx];
@@ -813,9 +817,4 @@ export function proceedToNextRound(state: EngineState): EngineState {
     pending: null,
   };
   return beginRound(next);
-}
-
-/** 現局の表示ラベル(例: `"東1"` / `"南4 2本場"`)。 */
-export function currentRoundLabel(state: EngineState): string {
-  return roundLabel(state.round);
 }

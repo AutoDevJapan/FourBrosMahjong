@@ -15,7 +15,14 @@
  * バックエンド/永続化・複数デバイス同期は未設計のため、単一デバイス上のクライアント状態を前提とする
  * (スペック6 6.9)。
  */
-import { createContext, useContext, useMemo, useState } from "react";
+import {
+  createContext,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import {
   createGame,
   declareRon,
@@ -69,9 +76,18 @@ export interface GameProviderProps {
 }
 
 export function GameProvider({ children, initialGame }: GameProviderProps) {
+  // 初期描画は**固定 seed**で決定的にし、SSR プリレンダーとクライアントの初回描画を一致させる
+  // (ハイドレーション不一致の回避)。その後クライアントでのみ乱数対局へ差し替える。
   const [engine, setEngine] = useState<EngineState>(
-    () => initialGame ?? createGame(),
+    () => initialGame ?? createGame({ seed: 1 }),
   );
+  const randomized = useRef(false);
+  useEffect(() => {
+    if (initialGame === undefined && !randomized.current) {
+      randomized.current = true;
+      setEngine(createGame());
+    }
+  }, [initialGame]);
 
   const controls = useMemo<GameControls>(
     () => ({

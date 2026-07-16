@@ -37,9 +37,7 @@ export default function ActionPanel({ actions, hint }: ActionPanelProps) {
       aria-label="操作パネル"
       className="flex flex-col items-center gap-2"
     >
-      {hint ? (
-        <p className="text-xs text-foreground/70">{hint}</p>
-      ) : null}
+      {hint ? <p className="text-xs text-foreground/70">{hint}</p> : null}
       {actions.length > 0 ? (
         <div className="flex flex-wrap items-center justify-center gap-2">
           {actions.map(({ key, label, icon, onClick, disabled, primary }) => (
