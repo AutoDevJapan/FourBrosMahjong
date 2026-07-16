@@ -82,9 +82,10 @@ pnpm test:e2e:ui    # Playwright UI モード(対話的にテストを選択・�
 
 ### CI での実行に関する注意
 
-- CI ランナー(GitHub Actions 等)では毎回ブラウザバイナリのキャッシュが存在しない前提のため、テスト実行前に `pnpm exec playwright install --with-deps` が必要です。
+- `.github/workflows/ci.yml` の `E2E (Playwright)` ジョブが、PR および main への push 時にヘッドレスで `pnpm test:e2e` を実行します([#29](https://github.com/AutoDevJapan/FourBrosMahjong/issues/29) で組み込み済み)。
+- CI ではブラウザバイナリ(`~/.cache/ms-playwright`)を `pnpm-lock.yaml` のハッシュをキーにキャッシュし、テスト実行前の `pnpm exec playwright install --with-deps chromium` はキャッシュの有無に関わらず毎回実行します(キャッシュヒット時はブラウザ本体の再ダウンロードのみスキップされ、OS 依存パッケージは毎回導入されます)。
 - `playwright.config.ts` は `retries: process.env.CI ? 2 : 0` としており、CI 環境(`CI=true`)でのみ失敗テストを自動リトライします。
-- 本 README/このリポジトリの E2E 整備は「ローカルで実行できる初期シナリオと手順」までを対象としており、E2E を GitHub Actions の必須チェックとして組み込む作業(ワークフロー化)は別issueで扱います([#29](https://github.com/AutoDevJapan/FourBrosMahjong/issues/29))。
+- E2E テストは lint/typecheck 等と比べて不安定化(flaky)しやすいため、現時点ではブランチ保護の必須ステータスチェックには含めていません(結果は PR 上で可視化されます。必要になれば別途判断して追加します)。
 
 ## ドキュメント
 

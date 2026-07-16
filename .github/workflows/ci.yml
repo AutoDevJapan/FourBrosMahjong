@@ -58,3 +58,58 @@ jobs:
 
       - name: Build (next build)
         run: pnpm build
+
+  e2e:
+    name: E2E (Playwright)
+    runs-on: ubuntu-latest
+    # 既存の ci ジョブ (lint/typecheck/format/test/build) とは独立に並列実行する。
+    # playwright.config.ts の webServer は `pnpm dev` を自前で起動するためビルド成果物に依存せず、
+    # ci ジョブの完了を待つ必要がない。
+    # ハングした場合にジョブを長時間占有し続けないようタイムアウトを明示する。
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          # .nvmrc がリポジトリの Node バージョンの単一の情報源。
+          node-version-file: ".nvmrc"
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # ブラウザバイナリ (~/.cache/ms-playwright) を pnpm-lock.yaml のハッシュ (= @playwright/test の
+      # バージョン変化を含む) をキーにキャッシュし、CI 実行時間を短縮する。OS 依存パッケージの apt install
+      # はキャッシュの有無に関わらず --with-deps で毎回実行するため、キャッシュヒット時もブラウザ本体の
+      # 再ダウンロードのみがスキップされる。
+      - name: Cache Playwright browsers
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-browsers-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
+
+      # Ubuntu ランナーで --with-deps が apt-get 経由で依存パッケージを更新する際、needrestart が
+      # 対話的な再起動確認プロンプトを出して非対話環境でハングすることがあるため、
+      # 環境変数で明示的に自動応答させる。
+      - name: Install Playwright browsers (chromium + OS deps)
+        env:
+          DEBIAN_FRONTEND: noninteractive
+          NEEDRESTART_MODE: a
+        run: pnpm exec playwright install --with-deps chromium
+
+      - name: Test (playwright e2e)
+        run: pnpm test:e2e
+
+      - name: Upload Playwright report
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: playwright-report/
+          retention-days: 7
