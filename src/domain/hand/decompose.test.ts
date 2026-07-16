@@ -1,0 +1,97 @@
+import { describe, expect, it } from "vitest";
+import {
+  type MeldInput,
+  decomposeSevenPairs,
+  decomposeStandard,
+  decomposeThirteenOrphans,
+  isCompleteHand,
+} from "./decompose";
+import { parseTiles } from "./notation";
+
+describe("decomposeStandard", () => {
+  it("4面子1雀頭を1通りに分解する", () => {
+    const forms = decomposeStandard(parseTiles("123p 456p 789p 111s 99s"), []);
+    expect(forms).toHaveLength(1);
+    expect(forms[0].melds).toHaveLength(4);
+    expect(forms[0].pair.startRank).toBe(9);
+  });
+
+  it("多面(刻子/順子の二義性)を全通り列挙する", () => {
+    // 222333444p は [222][333][444] / [234][234][234] / (22雀頭+234+345+345) と読める。
+    const forms = decomposeStandard(parseTiles("222333444p 55p 678s"), []);
+    expect(forms.length).toBe(3);
+    const kinds = forms.map((f) =>
+      f.melds
+        .filter((m) => m.suit === "pin")
+        .map((m) => m.kind)
+        .sort()
+        .join(","),
+    );
+    expect(kinds).toContain("sequence,sequence,sequence");
+    expect(kinds).toContain("triplet,triplet,triplet");
+  });
+
+  it("副露を面子として合成する", () => {
+    const melds: MeldInput[] = [
+      { tiles: parseTiles("111s"), isKan: false, concealed: false },
+    ];
+    // 副露1 → 門前は 3面子+雀頭(11枚)。
+    const forms = decomposeStandard(parseTiles("123p 456p 789p 99s"), melds);
+    expect(forms).toHaveLength(1);
+    expect(forms[0].melds).toHaveLength(4);
+  });
+
+  it("萬子は順子を作れない(サンマ牌構成)", () => {
+    // 1m9m は順子にならないため、この形は和了形にならない。
+    expect(isCompleteHand(parseTiles("19m 123p 456p 789p 99s"), [])).toBe(
+      false,
+    );
+  });
+
+  it("和了形でない手は空配列", () => {
+    expect(
+      decomposeStandard(parseTiles("123p 456p 789p 135s 99s"), []),
+    ).toHaveLength(0);
+  });
+});
+
+describe("decomposeSevenPairs", () => {
+  it("相異なる7対子を七対子と判定する", () => {
+    const form = decomposeSevenPairs(
+      parseTiles("11p 33p 22s 44s 66s 88s 77z"),
+      [],
+    );
+    expect(form?.pairs).toHaveLength(7);
+  });
+
+  it("4枚使い(2対子扱い)は七対子にならない", () => {
+    expect(
+      decomposeSevenPairs(parseTiles("1111p 33p 55p 77p 22s 44s"), []),
+    ).toBeNull();
+  });
+
+  it("副露があると成立しない", () => {
+    const melds: MeldInput[] = [
+      { tiles: parseTiles("111s"), isKan: false, concealed: false },
+    ];
+    expect(
+      decomposeSevenPairs(parseTiles("11p 33p 55p 77p"), melds),
+    ).toBeNull();
+  });
+});
+
+describe("decomposeThirteenOrphans", () => {
+  it("13種の么九+1雀頭を国士無双と判定する", () => {
+    const form = decomposeThirteenOrphans(
+      parseTiles("19m 19p 19s 11234567z"),
+      [],
+    );
+    expect(form?.kind).toBe("thirteenOrphans");
+  });
+
+  it("么九以外を含むと成立しない", () => {
+    expect(
+      decomposeThirteenOrphans(parseTiles("19m 19p 12s 11234567z"), []),
+    ).toBeNull();
+  });
+});
