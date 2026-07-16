@@ -1,3 +1,4 @@
+import { fileURLToPath } from "node:url";
 import react from "@vitejs/plugin-react";
 import { defineConfig } from "vitest/config";
 
@@ -16,7 +17,14 @@ import { defineConfig } from "vitest/config";
  * Run everything with `pnpm test`, or a single environment with
  * `pnpm test:unit` (node) / `pnpm test:component` (jsdom).
  */
+/**
+ * `@/*` → `src/*`(`tsconfig.json` の paths と対応)。ソースが `@/` エイリアスで参照する
+ * ランタイム値を、ページ/コンポーネントを直接読み込むテストでも解決できるようにする。
+ */
+const srcAlias = { "@": fileURLToPath(new URL("./src", import.meta.url)) };
+
 export default defineConfig({
+  resolve: { alias: srcAlias },
   test: {
     // Coverage is a run-wide concern, so it stays at the root config and
     // aggregates across both projects below.
@@ -27,6 +35,9 @@ export default defineConfig({
     },
     projects: [
       {
+        // `resolve.alias` must be declared per project — a root-level alias does
+        // not propagate into `projects` entries.
+        resolve: { alias: srcAlias },
         test: {
           name: "unit",
           environment: "node",
@@ -37,6 +48,7 @@ export default defineConfig({
       {
         // The React plugin only applies to the component project so node tests
         // are not needlessly run through the JSX/Babel transform.
+        resolve: { alias: srcAlias },
         plugins: [react()],
         test: {
           name: "component",

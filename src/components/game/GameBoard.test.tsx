@@ -49,6 +49,8 @@ const fixture: GameViewState = {
   },
   tableInfo: { roundWind: "east", handNumber: 1, honba: 0, riichiSticks: 1 },
   dora: { indicators: [{ suit: "pin", rank: 4 }], uraIndicatorCount: 1 },
+  // 対局中は結果未確定(spec 6.8): 結果画面のビューは null。
+  result: null,
 };
 
 function renderBoard() {
