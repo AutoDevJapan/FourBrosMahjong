@@ -4,20 +4,27 @@
  * 結果画面(`/game/result`)。スペック6 6.2 / 6.5 / 6.6。
  *
  * 半荘終了時の最終順位とソシー内訳(素点+ウマ+祝儀)を表示する。親レイアウト(`app/game/layout.tsx`)の
- * `GameProvider` が保持する確定済み結果を `useContext`(`useGame`)経由で読み取るため Client Component
- * とする(スペック6 6.6)。表示している値は骨組み確認用の固定サンプルであり、順位決定・ソシー計算
- * (ウマ割当 Q13 を含む)などのドメインロジックは一切持たない(スペック6 6.8)。
+ * `GameProvider` が保持する**実対局の確定結果**(engine 精算)を `useContext`(`useGame`)経由で読み取るため
+ * Client Component とする(スペック6 6.6)。順位決定・ソシー計算(ウマ割当 Q13 を含む)などのドメイン
+ * ロジックは engine が担い、本画面は確定済みの内訳を表示するだけ(スペック6 6.8)。
  *
- * 導線(スペック6 6.3): 「ロビーへ戻る」(→ `/`)・「もう一半荘」(→ `/game`)。
+ * 導線(スペック6 6.3): 「ロビーへ戻る」(→ `/`)・「もう一半荘」(→ 新規半荘を生成して `/game`)。
  */
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useGame } from "@/components/game/GameProvider";
 import RankingTable from "@/components/result/RankingTable";
 import SoshiiBreakdown from "@/components/result/SoshiiBreakdown";
 
 export default function ResultPage() {
-  const { state } = useGame();
-  const result = state.result;
+  const { view, controls } = useGame();
+  const router = useRouter();
+  const result = view.result;
+
+  const startNewGame = () => {
+    controls.newGame();
+    router.push("/game");
+  };
 
   return (
     <div className="mx-auto flex min-h-screen w-full max-w-3xl flex-col gap-6 p-4 sm:p-6">
@@ -46,11 +53,6 @@ export default function ResultPage() {
         </div>
       ) : (
         <>
-          <p className="text-xs text-foreground/60">
-            ※
-            現在表示中の結果は骨組み確認用のサンプルです(順位・素点・ウマ・祝儀は固定値)。
-          </p>
-
           <section
             aria-labelledby="ranking-heading"
             className="flex flex-col gap-3"
@@ -79,12 +81,13 @@ export default function ResultPage() {
             aria-label="対局後の導線"
             className="mt-2 flex flex-wrap gap-3 border-t border-foreground/15 pt-6"
           >
-            <Link
-              href="/game"
+            <button
+              type="button"
+              onClick={startNewGame}
               className="rounded-full bg-foreground px-5 py-2 text-sm font-medium text-background hover:opacity-90"
             >
               もう一半荘
-            </Link>
+            </button>
             <Link
               href="/"
               className="rounded-full border border-foreground/25 px-5 py-2 text-sm hover:bg-foreground/5"

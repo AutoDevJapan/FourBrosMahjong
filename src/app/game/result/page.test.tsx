@@ -1,13 +1,42 @@
 import { render, screen } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { GameProvider } from "@/components/game/GameProvider";
-import { sampleGameState } from "@/components/game/sampleGame";
+import {
+  createGame,
+  discard,
+  type EngineState,
+  passRon,
+  proceedToNextRound,
+} from "@/domain/game/engine";
 import ResultPage from "./page";
 
+// App Router の useRouter を jsdom 用にスタブ。
+vi.mock("next/navigation", () => ({
+  useRouter: () => ({ push: vi.fn() }),
+}));
+
+/** 実エンジンで1半荘を完走させ、確定結果を持つ状態を返す(決定的)。 */
+function finishedGame(seed = 2024): EngineState {
+  let s = createGame({ seed });
+  for (let guard = 0; guard < 5000 && s.phase !== "gameEnd"; guard++) {
+    if (s.phase === "roundEnd") {
+      s = proceedToNextRound(s);
+      continue;
+    }
+    if (s.pending?.kind === "humanDiscard") {
+      const drawn = s.hand?.drawn;
+      s = drawn ? discard(s, drawn) : s;
+    } else if (s.pending?.kind === "humanRon") {
+      s = passRon(s);
+    }
+  }
+  return s;
+}
+
 describe("/game/result page (spec 6.2 / 6.6)", () => {
-  it("reads the confirmed result from GameProvider and renders ranking + soshii breakdown", () => {
+  it("GameProvider の確定結果(実精算)から順位表とソシー内訳を描画する", () => {
     render(
-      <GameProvider initialState={sampleGameState}>
+      <GameProvider initialGame={finishedGame()}>
         <ResultPage />
       </GameProvider>,
     );
@@ -18,26 +47,25 @@ describe("/game/result page (spec 6.2 / 6.6)", () => {
     expect(
       screen.getByRole("heading", { name: "最終順位" }),
     ).toBeInTheDocument();
-    // 順位表とソシー内訳の双方に順位が現れる(最終順位が表示されている)。
+    // 順位表とソシー内訳の双方に順位が現れる。
     expect(screen.getAllByText("1位").length).toBeGreaterThan(0);
-    // ソシー内訳セクションは各プレイヤー分のリージョンを持つ。
+    // ソシー内訳セクションは自家(あなた)のリージョンを持つ。
     expect(
       screen.getByRole("region", { name: "あなたのソシー内訳" }),
     ).toBeInTheDocument();
   });
 
-  it("provides both post-game navigation links (spec 6.3)", () => {
+  it("対局後の導線を提供する(spec 6.3): もう一半荘 / ロビーへ戻る", () => {
     render(
-      <GameProvider initialState={sampleGameState}>
+      <GameProvider initialGame={finishedGame()}>
         <ResultPage />
       </GameProvider>,
     );
 
-    // 「もう一半荘」は /game、「ロビーへ戻る」は /(複数箇所にあり得るため getAll)。
-    expect(screen.getByRole("link", { name: "もう一半荘" })).toHaveAttribute(
-      "href",
-      "/game",
-    );
+    // 「もう一半荘」は新規半荘を生成するボタン。
+    expect(
+      screen.getByRole("button", { name: "もう一半荘" }),
+    ).toBeInTheDocument();
     const lobbyLinks = screen.getAllByRole("link", { name: "ロビーへ戻る" });
     expect(lobbyLinks.length).toBeGreaterThan(0);
     for (const link of lobbyLinks) {
@@ -45,9 +73,9 @@ describe("/game/result page (spec 6.2 / 6.6)", () => {
     }
   });
 
-  it("falls back gracefully when the result is not yet confirmed (null)", () => {
+  it("結果未確定(対局中に直接アクセス)ではフォールバックを表示する", () => {
     render(
-      <GameProvider initialState={{ ...sampleGameState, result: null }}>
+      <GameProvider initialGame={createGame({ seed: 1 })}>
         <ResultPage />
       </GameProvider>,
     );

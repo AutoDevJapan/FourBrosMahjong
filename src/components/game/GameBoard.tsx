@@ -4,47 +4,112 @@
  * 対局本体を統括するクライアント境界(スペック6 6.6 `<GameBoard>`)。
  *
  * `/game/page.tsx`(Server shell)から呼ばれる唯一のクライアントアイランド。`GameProvider` が
- * 保持するビュー状態を読み取り、卓・4スロット・操作パネル・ライブリージョンを描画する。
- * 表示に必要な値はすべて props/コンテキスト経由で受け取り、席割り・親・ツモ配分・ウマ等の
- * 決定ロジック(Q9〜Q13)は含めない(スペック6 6.8)。
+ * 保持する**実対局エンジン**の表示ビュー(`view`)と操作(`controls`)を読み取り、卓・4スロット・
+ * 局面に応じた操作パネル・ライブリージョンを描画して1半荘を進行させる。席割り・親・ツモ配分・ウマ等の
+ * 決定ロジック(Q9〜Q13)は engine が持ち、本コンポーネントは値の表示と操作の橋渡しに徹する(スペック6 6.8)。
  *
  * レスポンシブ(スペック6 6.4.3 / スペック5 5.3.2):
  * - `md` 以上: 4スロットのクロス配置(自家=下 / 上家=左 / 対面=上 / 下家=右)。
  * - 狭幅(既定 < `md`): 自家フォーカス表示。他スロットは直近の河+得点+状態のコンパクト帯に縮小。
  * いずれも横スクロールで成立させない。
  */
-import { useCallback, useState } from "react";
+import { useRouter } from "next/navigation";
+import { useCallback, useEffect, useMemo } from "react";
+import ActionPanel, { type ActionItem } from "./ActionPanel";
 import { useGame } from "./GameProvider";
-import ActionPanel, { type GameAction } from "./ActionPanel";
 import LiveRegion from "./LiveRegion";
 import PlayerSlot from "./PlayerSlot";
 import Table from "./Table";
-import { tileLabel } from "../common/tileLabel";
 import type { SeatPosition, TileData } from "./types";
 
-const ACTION_LABEL: Record<GameAction, string> = {
-  riichi: "リーチ",
-  pon: "ポン",
-  kan: "カン",
-  pullNorth: "北抜き",
-  skip: "スキップ",
-};
-
 export default function GameBoard() {
-  const { state } = useGame();
-  const { slots, tableInfo, dora } = state;
+  const { view, phase, pending, roundSummary, controls } = useGame();
+  const { slots, tableInfo, dora } = view;
+  const router = useRouter();
 
-  // ライブリージョン用の進行メッセージ(スペック5 5.2.3)。骨組みでは操作の入口を
-  // 押した旨を通知するだけで、ドメイン判定の結果ではない。
-  const [announcement, setAnnouncement] = useState("");
+  // 半荘終了 → 結果画面へ(スペック6 6.3)。engine の確定結果は GameProvider が保持し、
+  // 遷移先の /game/result が読み取る(スペック6 6.5 / 6.9)。
+  useEffect(() => {
+    if (phase === "gameEnd") {
+      router.push("/game/result");
+    }
+  }, [phase, router]);
 
-  const handleSelectTile = useCallback((_index: number, tile: TileData) => {
-    setAnnouncement(`${tileLabel(tile)}を選択しました`);
-  }, []);
+  const handleSelectTile = useCallback(
+    (_index: number, tile: TileData) => {
+      if (pending?.kind === "humanDiscard") {
+        controls.discard(tile);
+      }
+    },
+    [pending, controls],
+  );
 
-  const handleAction = useCallback((action: GameAction) => {
-    setAnnouncement(`${ACTION_LABEL[action]}を選択しました`);
-  }, []);
+  const actions = useMemo<ActionItem[]>(() => {
+    if (phase === "roundEnd") {
+      return [
+        {
+          key: "next",
+          label: "次の局へ",
+          icon: "▶",
+          onClick: controls.nextRound,
+          primary: true,
+        },
+      ];
+    }
+    if (phase === "gameEnd") {
+      return [
+        {
+          key: "result",
+          label: "結果を見る",
+          icon: "▶",
+          onClick: () => router.push("/game/result"),
+          primary: true,
+        },
+      ];
+    }
+    if (pending?.kind === "humanRon") {
+      return [
+        { key: "ron", label: "ロン", icon: "栄", onClick: controls.ron, primary: true },
+        { key: "pass", label: "スルー", icon: "○", onClick: controls.passRon },
+      ];
+    }
+    if (pending?.kind === "humanDiscard") {
+      return [
+        {
+          key: "tsumo",
+          label: "ツモ",
+          icon: "自",
+          onClick: controls.tsumo,
+          disabled: !pending.canTsumo,
+          primary: pending.canTsumo,
+        },
+      ];
+    }
+    return [];
+  }, [phase, pending, controls, router]);
+
+  const hint = useMemo(() => {
+    if (phase === "roundEnd") return roundSummary?.label ?? "";
+    if (phase === "gameEnd") return "半荘終了。結果を確認できます。";
+    if (pending?.kind === "humanDiscard") {
+      return "牌を選んで打牌してください(北抜きは自動・鳴き/リーチは未対応)。";
+    }
+    if (pending?.kind === "humanRon") return "ロンできます。";
+    return "";
+  }, [phase, pending, roundSummary]);
+
+  const announcement = useMemo(() => {
+    if (pending?.kind === "humanDiscard") return "あなたの手番です。";
+    if (pending?.kind === "humanRon") return "ロンできます。";
+    return "";
+  }, [pending]);
+
+  const assertive = useMemo(() => {
+    if (phase === "roundEnd" || phase === "gameEnd") {
+      return roundSummary?.label ?? "";
+    }
+    return "";
+  }, [phase, roundSummary]);
 
   const renderSlot = useCallback(
     (position: SeatPosition, compact: boolean) => (
@@ -78,7 +143,7 @@ export default function GameBoard() {
           {renderSlot("self", false)}
         </div>
         <div className="col-span-3 col-start-1 row-start-4">
-          <ActionPanel onAction={handleAction} />
+          <ActionPanel actions={actions} hint={hint} />
         </div>
       </div>
 
@@ -91,10 +156,10 @@ export default function GameBoard() {
           {renderSlot("right", true)}
         </div>
         {renderSlot("self", false)}
-        <ActionPanel onAction={handleAction} />
+        <ActionPanel actions={actions} hint={hint} />
       </div>
 
-      <LiveRegion politeMessage={announcement} />
+      <LiveRegion politeMessage={announcement} assertiveMessage={assertive} />
     </div>
   );
 }
