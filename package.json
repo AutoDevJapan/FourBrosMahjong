@@ -46,5 +46,10 @@
     "typedoc": "^0.28.20",
     "typescript": "^6",
     "vitest": "^4.1.10"
+  },
+  "pnpm": {
+    "overrides": {
+      "postcss": ">=8.5.10"
+    }
   }
 }

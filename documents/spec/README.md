@@ -12,6 +12,7 @@
 | 3 | [scoring-and-settlement.md](./scoring-and-settlement.md) | 点数計算・ドラ・ソシー精算・祝儀・供託 |
 | 4 | [domain-model.md](./domain-model.md) | ドメインモデル(エンティティ/値オブジェクト、クラス図) |
 | 5 | [ui-accessibility-responsive-darkmode.md](./ui-accessibility-responsive-darkmode.md) | アクセシビリティ・レスポンシブ・ダークモードの横断方針(UI実装issueの前提) |
+| 6 | [screen-design-and-routing.md](./screen-design-and-routing.md) | ゲーム画面のUI設計・App Routerルーティング設計・コンポーネント分割方針(実装は別issue) |
 
 ## 用語(基本)
 
