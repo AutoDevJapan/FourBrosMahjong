@@ -3,8 +3,8 @@
  *
  * スペック6(`documents/spec/screen-design-and-routing.md` 6.2節)で定義された
  * エントリーポイント。対局開始・ルール説明・設定への導線を提供する。
- * 実装済みのルートは実リンク(`/game`・`/rules`)、未実装のルート(`/settings`)は
- * 「準備中」表示のプレースホルダとし、ルート実装後にリンクへ差し替える。
+ * 3導線(`/game`・`/rules`・`/settings`)はいずれも実装済みのため実リンクとして遷移でき、
+ * 今後未実装ルートを追加する場合は `ready: false` で「準備中」プレースホルダ表示に切り替える。
  *
  * アクセシビリティ・レスポンシブ・ダークモードは
  * `documents/spec/ui-accessibility-responsive-darkmode.md`(スペック5)に従う:
@@ -40,7 +40,7 @@ const menuItems: MenuItem[] = [
     title: "設定",
     description: "ダークモード切替などの表示設定",
     href: "/settings",
-    ready: false,
+    ready: true,
   },
 ];
 

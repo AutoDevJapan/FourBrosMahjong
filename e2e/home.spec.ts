@@ -7,9 +7,9 @@ import { expect, test } from "@playwright/test";
  * 本テストは実際のタイトル・見出し・プレースホルダを検証する
  * (create-next-app デフォルト時代のスモークテストから更新 / #45)。
  *
- * `/rules`(ルール説明)は #51、`/game`(対局画面)は #53 で実装済みのため
- * それぞれ実リンクとして検証する。残る `/settings` は未実装で導線は「準備中」
- * プレースホルダのまま。対局画面ルートへの遷移 E2E はルート実装後に #30 で追加する。
+ * `/rules`(#51)・`/game`(#53)・`/settings`(#52)はいずれも実装済みのため、
+ * 3導線とも実リンクとして検証する(現時点で「準備中」プレースホルダは無し)。
+ * 対局画面ルートへの遷移 E2E はルート実装後に #30 で追加する。
  */
 test.describe("トップページ(ロビー)", () => {
   test("200 で表示され、lang とタイトルが実態と一致する", async ({ page }) => {
@@ -39,15 +39,19 @@ test.describe("トップページ(ロビー)", () => {
     await expect(page.getByText("対局を開始")).toBeVisible();
     await expect(page.getByText("ルールを見る")).toBeVisible();
     await expect(page.getByText("設定", { exact: true })).toBeVisible();
-    // ルール説明(#51)・対局開始(#53)は実装済みのため実リンク
-    await expect(
-      page.getByRole("link", { name: /ルールを見る/ }),
-    ).toHaveAttribute("href", "/rules");
+    // 3導線(#53 /game・#51 /rules・#52 /settings)はすべて実装済みで実リンク。
     await expect(
       page.getByRole("link", { name: /対局を開始/ }),
     ).toHaveAttribute("href", "/game");
-    // 未実装ルート(/settings)の導線のみ「準備中」プレースホルダ(1 件)
-    await expect(page.getByText("準備中")).toHaveCount(1);
+    await expect(
+      page.getByRole("link", { name: /ルールを見る/ }),
+    ).toHaveAttribute("href", "/rules");
+    await expect(page.getByRole("link", { name: /設定/ })).toHaveAttribute(
+      "href",
+      "/settings",
+    );
+    // 現時点で「準備中」プレースホルダは存在しない。
+    await expect(page.getByText("準備中")).toHaveCount(0);
   });
 
   test("ロビーから /rules へ遷移し、戻れる", async ({ page }) => {
@@ -96,5 +100,61 @@ test.describe("トップページ(ロビー)", () => {
     await expect(
       page.getByRole("heading", { level: 1, name: "四兄弟麻雀" }),
     ).toBeVisible();
+  });
+});
+
+/**
+ * 設定ページ(`/settings`)の E2E 検証(#52)。ロビー ⇄ 設定の遷移、
+ * ダークモード手動切替の DOM 反映(`<html data-theme>`)とリロード後の保持、
+ * OS 設定尊重(未選択時は data-theme を付与しない)を確認する。
+ */
+test.describe("設定ページ(ダークモード手動切替)", () => {
+  test("ロビーから遷移し、テーマ切替がリロード後も保持され、戻れる", async ({
+    page,
+  }) => {
+    await page.goto("/");
+
+    // ロビー → 設定
+    await page.getByRole("link", { name: /設定/ }).click();
+    await expect(page).toHaveURL(/\/settings$/);
+    await expect(
+      page.getByRole("heading", { level: 1, name: "設定" }),
+    ).toBeVisible();
+
+    // 初期(未選択)は data-theme を付与せず OS 設定へ委譲する。
+    expect(await page.locator("html").getAttribute("data-theme")).toBeNull();
+    await expect(
+      page.getByRole("radio", { name: "システム設定に従う" }),
+    ).toBeChecked();
+
+    // ダークを手動選択 → <html data-theme="dark">
+    await page.getByRole("radio", { name: "ダーク" }).check();
+    await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
+
+    // リロードしても保持される(localStorage + layout の初期化スクリプト)。
+    await page.reload();
+    await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
+    await expect(page.getByRole("radio", { name: "ダーク" })).toBeChecked();
+
+    // 設定 → ロビーへ戻る
+    await page.getByRole("link", { name: "ロビーへ戻る" }).click();
+    await expect(page).toHaveURL(/\/$/);
+    await expect(
+      page.getByRole("heading", { level: 1, name: "四兄弟麻雀" }),
+    ).toBeVisible();
+  });
+
+  test("OS がダークでも手動でライト固定でき、その選択が優先される", async ({
+    page,
+  }) => {
+    await page.emulateMedia({ colorScheme: "dark" });
+    await page.goto("/settings");
+
+    await page.getByRole("radio", { name: "ライト" }).check();
+    await expect(page.locator("html")).toHaveAttribute("data-theme", "light");
+
+    await page.reload();
+    await expect(page.locator("html")).toHaveAttribute("data-theme", "light");
+    await expect(page.getByRole("radio", { name: "ライト" })).toBeChecked();
   });
 });
