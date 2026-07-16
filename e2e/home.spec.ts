@@ -7,9 +7,9 @@ import { expect, test } from "@playwright/test";
  * 本テストは実際のタイトル・見出し・プレースホルダを検証する
  * (create-next-app デフォルト時代のスモークテストから更新 / #45)。
  *
- * `/rules`(ルール説明)は #51 で実装済みのため実リンクとして遷移を検証する。
- * 残る `/game`・`/settings` は未実装で導線は「準備中」プレースホルダのまま。
- * 対局画面ルートへの遷移 E2E はルート実装後に #30 で追加する。
+ * `/rules`(ルール説明)は #51、`/game`(対局画面)は #53 で実装済みのため
+ * それぞれ実リンクとして検証する。残る `/settings` は未実装で導線は「準備中」
+ * プレースホルダのまま。対局画面ルートへの遷移 E2E はルート実装後に #30 で追加する。
  */
 test.describe("トップページ(ロビー)", () => {
   test("200 で表示され、lang とタイトルが実態と一致する", async ({ page }) => {
@@ -39,12 +39,15 @@ test.describe("トップページ(ロビー)", () => {
     await expect(page.getByText("対局を開始")).toBeVisible();
     await expect(page.getByText("ルールを見る")).toBeVisible();
     await expect(page.getByText("設定", { exact: true })).toBeVisible();
-    // ルール説明(#51)は実装済みのため実リンク
+    // ルール説明(#51)・対局開始(#53)は実装済みのため実リンク
     await expect(
       page.getByRole("link", { name: /ルールを見る/ }),
     ).toHaveAttribute("href", "/rules");
-    // 未実装ルート(/game・/settings)の導線は「準備中」プレースホルダ(2 件)
-    await expect(page.getByText("準備中")).toHaveCount(2);
+    await expect(
+      page.getByRole("link", { name: /対局を開始/ }),
+    ).toHaveAttribute("href", "/game");
+    // 未実装ルート(/settings)の導線のみ「準備中」プレースホルダ(1 件)
+    await expect(page.getByText("準備中")).toHaveCount(1);
   });
 
   test("ロビーから /rules へ遷移し、戻れる", async ({ page }) => {
