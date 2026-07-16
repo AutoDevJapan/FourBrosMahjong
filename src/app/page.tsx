@@ -3,9 +3,8 @@
  *
  * スペック6(`documents/spec/screen-design-and-routing.md` 6.2節)で定義された
  * エントリーポイント。対局開始・ルール説明・設定への導線を提供する。
- * 対局(`/game`)は実装済みのため実リンクとして描画し、未実装のルート
- * (`/rules`・`/settings`)は「準備中」表示のプレースホルダのまま残す
- * (各ルート実装後にリンクへ差し替える)。
+ * 実装済みのルートは実リンク(`/game`・`/rules`)、未実装のルート(`/settings`)は
+ * 「準備中」表示のプレースホルダとし、ルート実装後にリンクへ差し替える。
  *
  * アクセシビリティ・レスポンシブ・ダークモードは
  * `documents/spec/ui-accessibility-responsive-darkmode.md`(スペック5)に従う:
@@ -14,13 +13,17 @@
  */
 import Link from "next/link";
 
-/**
- * ロビーからの導線一覧(スペック6 6.3節の画面遷移に対応)。
- *
- * `ready: true` の導線は実装済みルートへのリンクとして描画し、未実装(`ready: false`)の導線は
- * 「準備中」表示のプレースホルダのまま残す。`/game`(対局画面)は #53 で実装済みのためリンク化する。
- */
-const menuItems = [
+/** ロビーからの導線1件。 */
+type MenuItem = {
+  title: string;
+  description: string;
+  href: string;
+  /** 遷移先ルートが実装済みか。false/未指定なら「準備中」プレースホルダ表示。 */
+  ready?: boolean;
+};
+
+/** ロビーからの導線一覧(スペック6 6.3節の画面遷移に対応)。 */
+const menuItems: MenuItem[] = [
   {
     title: "対局を開始",
     description: "四人回しサンマで半荘戦を打つ",
@@ -31,7 +34,7 @@ const menuItems = [
     title: "ルールを見る",
     description: "オール赤5・ガリ・サイコロ連動ドラなど独自ルールの説明",
     href: "/rules",
-    ready: false,
+    ready: true,
   },
   {
     title: "設定",
@@ -39,7 +42,7 @@ const menuItems = [
     href: "/settings",
     ready: false,
   },
-] as const;
+];
 
 export default function Home() {
   return (
@@ -58,41 +61,50 @@ export default function Home() {
 
         <nav aria-label="メインメニュー" className="w-full">
           <ul className="flex flex-col gap-3">
-            {menuItems.map((item) => (
-              <li key={item.href}>
-                {item.ready ? (
-                  <Link
-                    href={item.href}
-                    className="flex items-center justify-between gap-4 rounded-lg border border-foreground/15 p-4 transition-colors hover:border-foreground/40 hover:bg-foreground/[.03]"
-                  >
-                    <span className="block">
-                      <span className="block font-medium">{item.title}</span>
-                      <span className="mt-1 block text-sm/5 text-foreground/70">
-                        {item.description}
-                      </span>
-                    </span>
+            {menuItems.map((item) => {
+              const content = (
+                <>
+                  <div>
+                    <p className="font-medium">{item.title}</p>
+                    <p className="mt-1 text-sm/5 text-foreground/70">
+                      {item.description}
+                    </p>
+                  </div>
+                  {item.ready ? (
                     <span
-                      aria-hidden="true"
-                      className="shrink-0 text-lg text-foreground/60"
+                      aria-hidden
+                      className="shrink-0 text-lg text-foreground/70"
                     >
                       →
                     </span>
-                  </Link>
-                ) : (
-                  <div className="flex items-center justify-between gap-4 rounded-lg border border-foreground/15 p-4">
-                    <div>
-                      <p className="font-medium">{item.title}</p>
-                      <p className="mt-1 text-sm/5 text-foreground/70">
-                        {item.description}
-                      </p>
-                    </div>
+                  ) : (
                     <span className="shrink-0 rounded-full border border-foreground/25 px-3 py-1 text-xs text-foreground/70">
                       準備中
                     </span>
-                  </div>
-                )}
-              </li>
-            ))}
+                  )}
+                </>
+              );
+
+              return (
+                <li
+                  key={item.href}
+                  className="rounded-lg border border-foreground/15"
+                >
+                  {item.ready ? (
+                    <Link
+                      href={item.href}
+                      className="flex items-center justify-between gap-4 rounded-lg p-4 transition-colors hover:bg-foreground/5 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-foreground"
+                    >
+                      {content}
+                    </Link>
+                  ) : (
+                    <div className="flex items-center justify-between gap-4 p-4">
+                      {content}
+                    </div>
+                  )}
+                </li>
+              );
+            })}
           </ul>
         </nav>
       </main>
