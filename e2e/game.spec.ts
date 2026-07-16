@@ -104,6 +104,22 @@ test.describe("対局画面(/game)", () => {
     ).toBeVisible();
   });
 
+  test("結果画面の「もう一半荘」導線で /game(対局画面)へ戻れる(スペック6 6.3)", async ({
+    page,
+  }) => {
+    // /game → /game/result は半荘終了(ドメイン判定 Q13)起点のため導線が無く未検証。
+    // 逆向きの Result → Game(「もう一半荘」)は導線が実在するため、対局画面への着地を検証する。
+    // 結果画面内部の表示検証は #54 の責務とし、ここでは対局画面への遷移のみを対象とする。
+    await page.goto("/game/result");
+
+    await page.getByRole("link", { name: "もう一半荘" }).click();
+
+    await expect(page).toHaveURL(/\/game$/);
+    await expect(
+      page.getByRole("heading", { level: 1, name: "対局画面" }),
+    ).toBeVisible();
+  });
+
   test("操作パネルのボタンをキーボードで活性化でき、進行がライブリージョンに通知される(スペック5 5.2.2 / 5.2.3)", async ({
     page,
   }) => {
