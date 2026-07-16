@@ -1,8 +1,36 @@
 @import "tailwindcss";
 
+/*
+ * ダークモード: OS 追従を既定にしつつ手動トグルを併用する(スペック5 5.4.1)。
+ *  - data-theme 未設定       → prefers-color-scheme に委譲(下の @media)
+ *  - data-theme="light|dark" → 手動選択が OS 設定より優先される
+ * `dark:` ユーティリティは data-theme="dark" に連動させる(スペック5 5.4.1 の決定)。
+ * 色値は必ず --background / --foreground 等のトークン経由で参照する(スペック5 5.4.2)。
+ */
+@custom-variant dark (&:where([data-theme="dark"], [data-theme="dark"] *));
+
 :root {
   --background: #ffffff;
   --foreground: #171717;
+}
+
+/* ユーザーが明示選択していない場合のみ OS のダーク設定に追従する。 */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme]) {
+    --background: #0a0a0a;
+    --foreground: #ededed;
+  }
+}
+
+/* 手動選択は OS 設定より優先する(明示 light は OS がダークでもライトを維持)。 */
+:root[data-theme="light"] {
+  --background: #ffffff;
+  --foreground: #171717;
+}
+
+:root[data-theme="dark"] {
+  --background: #0a0a0a;
+  --foreground: #ededed;
 }
 
 @theme inline {
@@ -10,13 +38,6 @@
   --color-foreground: var(--foreground);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
 }
 
 body {
