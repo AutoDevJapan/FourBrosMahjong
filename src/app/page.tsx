@@ -3,31 +3,41 @@
  *
  * スペック6(`documents/spec/screen-design-and-routing.md` 6.2節)で定義された
  * エントリーポイント。対局開始・ルール説明・設定への導線を提供する。
- * 遷移先の各ルート(`/game`・`/rules`・`/settings`)は未実装のため、
- * 導線は「準備中」表示のプレースホルダとし、ルート実装後にリンクへ差し替える。
+ * 対局(`/game`)は実装済みのため実リンクとして描画し、未実装のルート
+ * (`/rules`・`/settings`)は「準備中」表示のプレースホルダのまま残す
+ * (各ルート実装後にリンクへ差し替える)。
  *
  * アクセシビリティ・レスポンシブ・ダークモードは
  * `documents/spec/ui-accessibility-responsive-darkmode.md`(スペック5)に従う:
  * 状態は色のみに依存せずテキストラベルで伝達し、配色は `globals.css` の
  * トークン(`--background` / `--foreground`)経由で参照する。
  */
+import Link from "next/link";
 
-/** ロビーからの導線一覧(スペック6 6.3節の画面遷移に対応)。 */
+/**
+ * ロビーからの導線一覧(スペック6 6.3節の画面遷移に対応)。
+ *
+ * `ready: true` の導線は実装済みルートへのリンクとして描画し、未実装(`ready: false`)の導線は
+ * 「準備中」表示のプレースホルダのまま残す。`/game`(対局画面)は #53 で実装済みのためリンク化する。
+ */
 const menuItems = [
   {
     title: "対局を開始",
     description: "四人回しサンマで半荘戦を打つ",
     href: "/game",
+    ready: true,
   },
   {
     title: "ルールを見る",
     description: "オール赤5・ガリ・サイコロ連動ドラなど独自ルールの説明",
     href: "/rules",
+    ready: false,
   },
   {
     title: "設定",
     description: "ダークモード切替などの表示設定",
     href: "/settings",
+    ready: false,
   },
 ] as const;
 
@@ -49,19 +59,38 @@ export default function Home() {
         <nav aria-label="メインメニュー" className="w-full">
           <ul className="flex flex-col gap-3">
             {menuItems.map((item) => (
-              <li
-                key={item.href}
-                className="flex items-center justify-between gap-4 rounded-lg border border-foreground/15 p-4"
-              >
-                <div>
-                  <p className="font-medium">{item.title}</p>
-                  <p className="mt-1 text-sm/5 text-foreground/70">
-                    {item.description}
-                  </p>
-                </div>
-                <span className="shrink-0 rounded-full border border-foreground/25 px-3 py-1 text-xs text-foreground/70">
-                  準備中
-                </span>
+              <li key={item.href}>
+                {item.ready ? (
+                  <Link
+                    href={item.href}
+                    className="flex items-center justify-between gap-4 rounded-lg border border-foreground/15 p-4 transition-colors hover:border-foreground/40 hover:bg-foreground/[.03]"
+                  >
+                    <span className="block">
+                      <span className="block font-medium">{item.title}</span>
+                      <span className="mt-1 block text-sm/5 text-foreground/70">
+                        {item.description}
+                      </span>
+                    </span>
+                    <span
+                      aria-hidden="true"
+                      className="shrink-0 text-lg text-foreground/60"
+                    >
+                      →
+                    </span>
+                  </Link>
+                ) : (
+                  <div className="flex items-center justify-between gap-4 rounded-lg border border-foreground/15 p-4">
+                    <div>
+                      <p className="font-medium">{item.title}</p>
+                      <p className="mt-1 text-sm/5 text-foreground/70">
+                        {item.description}
+                      </p>
+                    </div>
+                    <span className="shrink-0 rounded-full border border-foreground/25 px-3 py-1 text-xs text-foreground/70">
+                      準備中
+                    </span>
+                  </div>
+                )}
               </li>
             ))}
           </ul>

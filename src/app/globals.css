@@ -3,6 +3,25 @@
 :root {
   --background: #ffffff;
   --foreground: #171717;
+
+  /*
+   * 対局UIのセマンティックカラートークン(スペック5 5.4.2)。
+   * コンポーネントは生の色値を直接使わず、これらのトークン経由で参照する。
+   * ライト/ダーク双方で WCAG 2.1 AA のコントラスト目標(5.2.4)を満たすよう選定。
+   * 牌面(tile-face/tile-ink)は物理的な牌に合わせ、テーマに関わらず明色地×濃色印字で固定し
+   * 牌の判読性を保証する。
+   */
+  --table-felt: #0b6b3a;
+  --tile-face: #faf9f4;
+  --tile-ink: #1a1a1a;
+  --tile-border: #b8b2a1;
+  --tile-back: #2b5c9b;
+  --tile-back-mark: #dbe7f5;
+  --tile-accent-red: #c81e2b;
+  --turn-highlight: #b45309;
+  --danger: #b91c1c;
+  --positive: #15803d;
+  --focus-ring: #1d4ed8;
 }
 
 @theme inline {
@@ -10,12 +29,36 @@
   --color-foreground: var(--foreground);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
+
+  --color-table-felt: var(--table-felt);
+  --color-tile-face: var(--tile-face);
+  --color-tile-ink: var(--tile-ink);
+  --color-tile-border: var(--tile-border);
+  --color-tile-back: var(--tile-back);
+  --color-tile-back-mark: var(--tile-back-mark);
+  --color-tile-accent-red: var(--tile-accent-red);
+  --color-turn-highlight: var(--turn-highlight);
+  --color-danger: var(--danger);
+  --color-positive: var(--positive);
+  --color-focus-ring: var(--focus-ring);
 }
 
 @media (prefers-color-scheme: dark) {
   :root {
     --background: #0a0a0a;
     --foreground: #ededed;
+
+    --table-felt: #0a3d22;
+    --tile-face: #ece9e0;
+    --tile-ink: #1a1a1a;
+    --tile-border: #6b7280;
+    --tile-back: #24486f;
+    --tile-back-mark: #cdd9ea;
+    --tile-accent-red: #e0384a;
+    --turn-highlight: #f59e0b;
+    --danger: #f87171;
+    --positive: #4ade80;
+    --focus-ring: #60a5fa;
   }
 }
 
@@ -23,4 +66,13 @@ body {
   background: var(--background);
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
+}
+
+/*
+ * フォーカスリング(スペック5 5.2.2): フォーカスは除去せず、隣接背景に対し
+ * コントラスト比 3:1 以上を確保する専用リングを付与する。
+ */
+:focus-visible {
+  outline: 2px solid var(--color-focus-ring);
+  outline-offset: 2px;
 }
