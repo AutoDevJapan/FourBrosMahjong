@@ -242,11 +242,13 @@ test.describe("状態駆動 a11y 監査(リーチ/鳴き/和了アラート/ト�
       const board = page.locator("[data-phase]").first();
       const handOptions = () =>
         page.getByRole("listbox", { name: "自家の手牌" }).getByRole("option");
-      // リーチ宣言バッジ(variant="riichi")は自家スロット(section)内の "リーチ" テキスト。
-      // 操作パネルの「リーチ」ボタンは section 外なので、自家 region 内へ限定して誤検知を防ぐ。
+      // リーチ宣言バッジ(variant="riichi")は安定したテスト用アンカー(#162)で特定する。
+      // 操作パネルの「リーチ」ボタンは testid を持たないため、表示テキスト部分一致に依存せず
+      // バッジのみを一意に掴める(レイアウト変更に対して堅牢)。自家スロット(section)へ
+      // 限定し、監査対象が自家バッジであることを明示する。
       const riichiBadge = page
         .getByRole("region", { name: /^あなた/ })
-        .getByText("リーチ");
+        .getByTestId("status-badge-riichi");
 
       // 自家は先頭牌から打牌して進める。engine が「リーチ」ボタンを出した手番(門前テンパイ)で
       // リーチ宣言する。seed 固定によりこの半荘は数手でリーチ可能局面へ決定的に到達する。

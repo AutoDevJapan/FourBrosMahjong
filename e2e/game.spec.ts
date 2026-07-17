@@ -63,9 +63,13 @@ test.describe("対局画面(/game)", () => {
     ).toBeVisible();
 
     // 抜け番の状態はテキストでも伝わる(色のみ依存禁止 / スペック5 5.2.1)。
+    // バッジの特定は安定したテスト用アンカー(#162)で行い、その上でテキスト併記を検証する
+    // (テキスト部分一致でのバッジ特定に依存せず、色非依存の可視ラベルは引き続き担保)。
     await expect(
-      page.getByRole("region", { name: "三郎(抜け番)" }).getByText("抜け番"),
-    ).toBeVisible();
+      page
+        .getByRole("region", { name: "三郎(抜け番)" })
+        .getByTestId("status-badge-bench"),
+    ).toContainText("抜け番");
 
     // 自家の手牌(role=listbox)と持ち点(35,000 スタート)。
     await expect(
