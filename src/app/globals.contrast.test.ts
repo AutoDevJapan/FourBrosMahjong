@@ -69,3 +69,37 @@ describe("赤ドラ「赤」バッジのコントラスト(#147 / WCAG 1.4.3)", 
     expect(contrast(darkFace, darkBorder)).toBeGreaterThanOrEqual(3);
   });
 });
+
+describe("StatusBadge の felt 上コントラスト(#154 / WCAG 1.4.3)", () => {
+  // riichi/highlight バッジは明色地 --tile-face を敷き、その上に濃色トークンで文字を描く。
+  // 文字×バッジ地(--tile-face)がライト/ダーク双方で通常テキスト 4.5:1 を満たすことを固定する。
+  const lightFace = token(":root", "--tile-face");
+  const darkFace = token(':root[data-theme="dark"]', "--tile-face");
+  const lightFelt = token(":root", "--table-felt");
+  const darkFelt = token(':root[data-theme="dark"]', "--table-felt");
+  // 文字トークンはテーマ非依存(:root のみで定義、ダーク側で上書きしない)。
+  const riichiInk = token(":root", "--tile-badge-red");
+  const highlightInk = token(":root", "--turn-highlight-ink");
+
+  it("riichi: 文字×バッジ地がライトで 4.5:1 以上", () => {
+    expect(contrast(riichiInk, lightFace)).toBeGreaterThanOrEqual(4.5);
+  });
+
+  it("riichi: 文字×バッジ地がダークで 4.5:1 以上", () => {
+    expect(contrast(riichiInk, darkFace)).toBeGreaterThanOrEqual(4.5);
+  });
+
+  it("highlight: 文字×バッジ地がライトで 4.5:1 以上", () => {
+    expect(contrast(highlightInk, lightFace)).toBeGreaterThanOrEqual(4.5);
+  });
+
+  it("highlight: 文字×バッジ地がダークで 4.5:1 以上", () => {
+    expect(contrast(highlightInk, darkFace)).toBeGreaterThanOrEqual(4.5);
+  });
+
+  it("バッジ地 --tile-face が felt に対し非テキスト 3:1 以上(地と識別可能)", () => {
+    // バッジ自体が卓 felt 上で図地分離できることを保証する(非テキスト UI 境界=3:1)。
+    expect(contrast(lightFace, lightFelt)).toBeGreaterThanOrEqual(3);
+    expect(contrast(darkFace, darkFelt)).toBeGreaterThanOrEqual(3);
+  });
+});

@@ -40,6 +40,14 @@
    */
   --tile-badge-red: #c81e2b;
   --turn-highlight: #b45309;
+  /*
+   * 状態バッジ(StatusBadge)の「手番」ハイライト文字色(#154)。バッジは明色地 --tile-face の
+   * 上に描画するため、地に対し WCAG 1.4.3 の 4.5:1(通常テキスト)を満たす濃い琥珀を用いる。
+   * --turn-highlight は felt 枠/セクション強調(非テキスト 3:1)用でダークに明色 #f59e0b へ振れ、
+   * 明色地の上では文字コントラストが割れる。バッジ文字は用途が異なる(明色地上のテキスト=4.5:1
+   * 必須)ため専用トークンへ分離し、テーマ非依存の濃い琥珀で固定する(ダーク側で上書きしない)。
+   */
+  --turn-highlight-ink: #92400e;
   --danger: #b91c1c;
   --positive: #15803d;
   --focus-ring: #1d4ed8;
@@ -116,6 +124,7 @@
   --color-tile-accent-red: var(--tile-accent-red);
   --color-tile-badge-red: var(--tile-badge-red);
   --color-turn-highlight: var(--turn-highlight);
+  --color-turn-highlight-ink: var(--turn-highlight-ink);
   --color-danger: var(--danger);
   --color-positive: var(--positive);
   --color-focus-ring: var(--focus-ring);

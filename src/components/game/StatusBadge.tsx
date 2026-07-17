@@ -13,13 +13,22 @@ export interface StatusBadgeProps {
   variant?: "default" | "highlight" | "riichi" | "bench";
 }
 
+/*
+ * `highlight` / `riichi` は卓 felt(緑地)上に描画されるため、felt を直接地色にすると
+ * 文字コントラストが WCAG 1.4.3 の 4.5:1 を満たせない(#154)。バッジに明色地 `bg-tile-face`
+ * を敷き、その上で 4.5:1 以上を満たす濃色トークン(`turn-highlight-ink` / `tile-badge-red`)を
+ * 文字・枠に用いる。明色地はライト/ダーク双方で felt に対し非テキスト 3:1 以上を満たし、
+ * バッジが地(felt)と識別できる。色はアイコン+ラベルの冗長表現の補助であり単独では意味を担わない。
+ */
 const VARIANT_CLASS: Record<
   NonNullable<StatusBadgeProps["variant"]>,
   string
 > = {
   default: "border-foreground/25 text-foreground/80",
-  highlight: "border-turn-highlight text-turn-highlight font-semibold",
-  riichi: "border-tile-accent-red text-tile-accent-red font-semibold",
+  highlight:
+    "bg-tile-face border-turn-highlight-ink text-turn-highlight-ink font-semibold",
+  riichi:
+    "bg-tile-face border-tile-badge-red text-tile-badge-red font-semibold",
   bench: "border-foreground/30 text-foreground/70",
 };
 
