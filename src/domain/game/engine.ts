@@ -1022,7 +1022,7 @@ function diffPoints(
   return out;
 }
 
-interface RoundConclusion {
+export interface RoundConclusion {
   readonly outcome: RoundOutcome;
   readonly isDraw: boolean;
   readonly summary: RoundSummary;
@@ -1031,8 +1031,12 @@ interface RoundConclusion {
 /**
  * 局を締め、終了条件を評価する。半荘継続なら次局遷移を保持し `roundEnd` に、
  * 終了なら `gameEnd`(結果確定)へ。
+ *
+ * spec 2.8 の終了3経路(トビ / 南4完了 / 南4親3万超トップやめ)を判定する中核。
+ * `settleWin`/`settleDraw` からのみ呼ばれる内部遷移だが、各終了分岐を決定的に
+ * 直接検証できるよう **テスト用に公開**している(issue #114 / spec 2.8)。
  */
-function finishRound(
+export function finishRound(
   state: EngineState,
   conclusion: RoundConclusion,
 ): EngineState {
