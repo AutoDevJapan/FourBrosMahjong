@@ -35,6 +35,13 @@
   --danger: #b91c1c;
   --positive: #15803d;
   --focus-ring: #1d4ed8;
+
+  /*
+   * 牌サイズの基準ユニット(スペック5 5.3.2 段階①)。すべての牌サイズはこの --u の倍数で
+   * 表現し、卓(.board-cross)内では --u をコンテナ幅(cqi)連動の clamp() に差し替えることで
+   * 卓全体を横スクロールなしに流体縮小する。既定値は従来の固定サイズ相当(テーマ非依存)。
+   */
+  --u: 0.9rem;
 }
 
 /* 手動でダークを選択した場合は OS 設定より優先し、全トークンをダーク値にする。 */
@@ -119,4 +126,41 @@ body {
 :focus-visible {
   outline: 2px solid var(--color-focus-ring);
   outline-offset: 2px;
+}
+
+/*
+ * 牌サイズ(スペック5 5.3.2 段階①: clamp() + @container スケーリング)。
+ * すべての牌は --u(基準ユニット)の倍数で寸法を定義する。--u を1か所差し替えるだけで
+ * 手牌・河・ドラ表示が同一比率でスケールするため、卓全体を破綻なく縮小できる。
+ * 用途別の倍率は従来の固定 Tailwind サイズ(手牌 h-11/w-8、河 h-8/w-6、ドラ h-9/w-7)に相当。
+ */
+.game-tile {
+  height: calc(var(--u) * 3.05);
+  width: calc(var(--u) * 2.2);
+  font-size: calc(var(--u) * 0.95);
+}
+
+.game-tile--river {
+  height: calc(var(--u) * 2.2);
+  width: calc(var(--u) * 1.65);
+  /* 牌面テキストは色非依存の識別情報(§5.2.1)。狭幅でも判読性を保つよう字面を確保しつつ幅内に収める。 */
+  font-size: calc(var(--u) * 0.7);
+}
+
+.game-tile--dora {
+  height: calc(var(--u) * 2.5);
+  width: calc(var(--u) * 1.95);
+  font-size: calc(var(--u) * 0.78);
+}
+
+/*
+ * クロス卓(スペック5 5.3.2 段階①)。祖先の @container(inline-size)幅に連動して
+ * --u と卓内の隙間を clamp() で流体縮小する。cqi = コンテナ幅の 1%。
+ * 卓の描画幅が広いほど --u は上限(0.9rem ≒ 従来サイズ)に張り付き、狭まるほど縮小する。
+ * これにより 640〜767px 帯でもクロス配置を横スクロールなしで維持する。段階②(卓幅 < 360px)
+ * のフォーカス表示切替は GameBoard 側の @container クエリ(@min-[360px])が担う。
+ */
+.board-cross {
+  --u: clamp(0.6rem, 0.45rem + 0.85cqi, 0.9rem);
+  --board-gap: clamp(0.4rem, 0.2rem + 0.7cqi, 0.75rem);
 }
