@@ -2,15 +2,23 @@
  * 牌1枚の表示コンポーネント(スペック6 6.7: 全牌表示の唯一の再利用元)。
  *
  * `Hand` / `OpponentHand` / `Discards` / `DoraIndicator` はすべてこの `Tile` を再利用する。
- * スペック5 5.2.1 準拠:
- * - 牌の種類は色ではなく**牌面の印字**(漢数字+スート漢字/字牌名)で識別できる。
- * - 赤ドラは色だけでなく**赤枠+「赤」バッジという形状差**を付与し、`aria-label` に `(赤ドラ)` を付記する。
- * - 配色は `globals.css` のセマンティックトークン経由で参照し、生の色値を直接使わない(スペック5 5.4.2)。
+ * 牌面は FluffyStuff/riichi-mahjong-tiles(CC0 パブリックドメイン)の SVG を `public/tiles/` に
+ * 同梱して用いる(出典 → `public/tiles/CREDITS.md`)。牌の枠(角丸+縁+地色)は従来どおり
+ * `globals.css` のセマンティックトークンで描き、その上に牌面 SVG を重ねる。これにより
+ * ダークモード連動(スペック5 5.4.2)・`--u` 連動のレスポンシブ寸法(#111)を保ったまま、
+ * 牌面のみを高品位な SVG へ差し替える。
+ *
+ * スペック5 5.2.1 準拠(色のみに依存しない情報伝達):
+ * - 牌の種類は色ではなく**牌面 SVG の形状**(漢数字・筒/索の図案・字牌)で識別できる。
+ * - 赤ドラは色の付いた `*-Dora` 素材に加え、色に依存しない**赤枠+「赤」バッジという形状差**を
+ *   付与し、`aria-label` に `(赤ドラ)` を付記する。
+ * - 枠の配色は `globals.css` のセマンティックトークン経由で参照し、生の色値を直接使わない。
  *
  * 値渡しのみの純表示コンポーネントのため Server Component として実装できる(スペック6 6.6)。
  */
 import type { TileData } from "../game/types";
-import { FACE_DOWN_LABEL, tileFace, tileLabel } from "./tileLabel";
+import { TILE_BACK_SRC, tileImageName, tileImageSrc } from "./tileImage";
+import { FACE_DOWN_LABEL, tileLabel } from "./tileLabel";
 
 export interface TileProps {
   /** 表向きに描く牌。`null` の場合は伏せ牌(内容非開示)として描く。 */
@@ -37,7 +45,21 @@ const SIZE_CLASS: Record<NonNullable<TileProps["size"]>, string> = {
 };
 
 const BASE_CLASS =
-  "inline-flex select-none items-center justify-center rounded-md border font-semibold leading-none";
+  "relative inline-flex select-none items-center justify-center rounded-md border";
+
+/**
+ * 牌面(おもて)SVG を枠内に配置する背景指定。牌面素材は白地に印字のみを持ち、素材自体が
+ * 内側に十分な余白を含むため、`contain`(アスペクト比維持)で中央に置き `bg-tile-face` の
+ * 地色を残す。`padding`/`bg-origin-content` は使わない — 河・副露の `flex-wrap` で牌が
+ * 伸長(正方形化)しても背景画像が確実に描画されるようにするため。
+ */
+const FACE_IMAGE_CLASS = "bg-contain bg-center bg-no-repeat";
+
+/**
+ * 裏面(伏せ牌)SVG を配置する背景指定。`Back.svg` は縁まで塗られた1枚絵のため `cover` で
+ * 牌全体を埋め、牌の縦横比が河/ドラ/伸長レイアウトで変わっても隙間なく安定して描く。
+ */
+const BACK_IMAGE_CLASS = "bg-cover bg-center bg-no-repeat";
 
 export default function Tile({
   tile,
@@ -46,17 +68,18 @@ export default function Tile({
   className = "",
 }: TileProps) {
   const sizeClass = SIZE_CLASS[size];
-  // 伏せ牌: 内容を見せない裏面。色に依存しないよう格子模様+ラベルで伝える。
+
+  // 伏せ牌: 内容を見せない裏面 SVG。地色(bg-tile-back)を裏に敷き、素材未読込でも牌と分かる。
   if (tile === null) {
     return (
       <span
-        className={`${BASE_CLASS} ${sizeClass} border-tile-border bg-tile-back text-tile-back-mark ${className}`}
+        className={`${BASE_CLASS} ${BACK_IMAGE_CLASS} ${sizeClass} overflow-hidden border-tile-border bg-tile-back ${className}`}
+        style={{ backgroundImage: `url(${TILE_BACK_SRC})` }}
         role={decorative ? undefined : "img"}
         aria-label={decorative ? undefined : FACE_DOWN_LABEL}
         aria-hidden={decorative || undefined}
-      >
-        <span aria-hidden="true">▚</span>
-      </span>
+        data-face="Back"
+      />
     );
   }
 
@@ -67,12 +90,13 @@ export default function Tile({
 
   return (
     <span
-      className={`${BASE_CLASS} ${sizeClass} relative bg-tile-face text-tile-ink ${borderClass} ${className}`}
+      className={`${BASE_CLASS} ${FACE_IMAGE_CLASS} ${sizeClass} bg-tile-face ${borderClass} ${className}`}
+      style={{ backgroundImage: `url(${tileImageSrc(tile)})` }}
       role={decorative ? undefined : "img"}
       aria-label={decorative ? undefined : tileLabel(tile)}
       aria-hidden={decorative || undefined}
+      data-face={tileImageName(tile)}
     >
-      <span aria-hidden="true">{tileFace(tile)}</span>
       {isRed ? (
         // 赤ドラの形状差: 色だけに頼らず「赤」バッジを付す(スペック5 5.2.1)。
         <span
