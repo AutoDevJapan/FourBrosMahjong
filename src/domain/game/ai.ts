@@ -173,10 +173,20 @@ function suitFrontier(arr: readonly number[], isNumber: boolean): SuitDecomp[] {
 
   rec(0, 0, 0, 0);
 
-  // パレート枝刈り: 面子・塔子・対子いずれも多いほど良いので、全項目で劣る分解は捨てる。
-  const pruned = raw.filter(
+  const pruned = paretoPrune(raw);
+  suitMemo.set(key, pruned);
+  return pruned;
+}
+
+/**
+ * パレート枝刈り: 面子・塔子・対子いずれも多いほど {@link leafShanten} は小さく(良く)なるため、
+ * 全項目で他に劣る分解は捨てる。スートごとにフロンティアを小さく保つことで、
+ * 標準形の合成(スート積)を軽くする。
+ */
+function paretoPrune(list: readonly SuitDecomp[]): SuitDecomp[] {
+  return list.filter(
     (x) =>
-      !raw.some(
+      !list.some(
         (y) =>
           y !== x &&
           y[0] >= x[0] &&
@@ -185,28 +195,24 @@ function suitFrontier(arr: readonly number[], isNumber: boolean): SuitDecomp[] {
           (y[0] > x[0] || y[1] > x[1] || y[2] > x[2]),
       ),
   );
-
-  suitMemo.set(key, pruned);
-  return pruned;
 }
 
 /**
- * 標準形(4面子1雀頭)の向聴数。スート独立に分解(メモ済み)して合成し、
- * 面子/塔子/対子の合計に対し {@link leafShanten} を最小化する。
+ * 標準形(4面子1雀頭)の向聴数。スートは面子を跨がないためスート独立に分解でき
+ * (それぞれメモ済み・パレート枝刈り済みで小さい)、その積を合成して面子/塔子/対子の
+ * 合計に対し {@link leafShanten} を最小化する。
  */
 function standardShanten(counts: Counts): number {
-  const frontiers = [
-    suitFrontier(counts.man, true),
-    suitFrontier(counts.pin, true),
-    suitFrontier(counts.sou, true),
-    suitFrontier(counts.honor, false),
-  ];
+  const man = suitFrontier(counts.man, true);
+  const pin = suitFrontier(counts.pin, true);
+  const sou = suitFrontier(counts.sou, true);
+  const honor = suitFrontier(counts.honor, false);
 
   let best = 8;
-  for (const dm of frontiers[0]) {
-    for (const dp of frontiers[1]) {
-      for (const ds of frontiers[2]) {
-        for (const dh of frontiers[3]) {
+  for (const dm of man) {
+    for (const dp of pin) {
+      for (const ds of sou) {
+        for (const dh of honor) {
           const m = dm[0] + dp[0] + ds[0] + dh[0];
           const t = dm[1] + dp[1] + ds[1] + dh[1];
           const p = dm[2] + dp[2] + ds[2] + dh[2];
@@ -335,6 +341,14 @@ export function ukeire(tiles13: readonly Tile[]): Ukeire {
 // 打牌選択
 // ---------------------------------------------------------------------------
 
+/**
+ * 受け入れ比較を行う向聴数の上限(これ以下=テンパイ近傍でのみ受け入れを評価)。
+ * 1 = テンパイ/1向聴。待ちの広い聴牌へ向かう選択が最も効くのはこの近傍で、
+ * ここでは候補も少ない。深い向聴では浮き牌同士の比較になり打牌にほぼ影響しない一方、
+ * 計算コストだけ跳ね上がるため評価しない(打点温存・安全度・外側度で決定)。
+ */
+const UKEIRE_SHANTEN_GATE = 1;
+
 /** 打牌選択に渡す状況(自家=AI 手番の視点)。 */
 export interface DiscardContext {
   /** 手番の全牌(門前手牌13枚 + ツモ牌1枚 = 14枚)。 */
@@ -438,8 +452,11 @@ export function chooseDiscard(ctx: DiscardContext): Tile {
   const minShanten = Math.min(...candidates.map((c) => c.shantenAfter));
   const best = candidates.filter((c) => c.shantenAfter === minShanten);
 
-  // 2. 受け入れは絞り込んだ候補にだけ算出(複数残るときのみ意味がある)。
-  if (best.length > 1) {
+  // 2. 受け入れは「向聴が浅く(テンパイ近傍)、かつ候補が複数」のときだけ算出する。
+  //    受け入れ差は待ちの広い聴牌へ向かう選択に効くが、向聴の深い序盤では浮き牌同士の
+  //    比較になり打牌選択にほぼ影響しない一方で計算量が跳ね上がるため、そこでは省く
+  //    (省略時は打点温存・危険牌回避・外側度で決める)。
+  if (best.length > 1 && minShanten <= UKEIRE_SHANTEN_GATE) {
     for (const c of best) c.ukeireCopies = ukeire(c.remaining13).copies;
   }
 
