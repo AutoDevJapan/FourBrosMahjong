@@ -16,7 +16,7 @@
  * 純関数・決定的・React/DOM 非依存。
  */
 
-import type { Tile } from "../tiles/tile";
+import { HONOR, type Tile } from "../tiles/tile";
 import {
   type Mentsu,
   type StandardForm,
@@ -209,6 +209,12 @@ function standardFormYaku(form: StandardForm, input: YakuInput): RawYaku[] {
   // --- 役牌(三元牌・場風・自風) ---
   for (const m of triplets) {
     if (m.suit !== "honor") continue;
+    // 北(ガリ)は抜きドラ専用の字牌であり、手牌に残した刻子でも役牌1翻としない
+    // (spec 3.0 #83-3「手牌に残した北刻子で役牌翻が発生しない」)。北は三元牌でない
+    // ため現行の風割り当てでは元々役牌翻は付かないが、四人回し(北家=抜け番)で風の
+    // 割り当てを誤って `roundWind`/`seatWind` に北(HONOR.NORTH)を渡した場合でも
+    // 北刻子に役牌翻が付かないよう、ここで明示的に除外する(挙動非破壊のガード)。
+    if (m.startRank === HONOR.NORTH) continue;
     const completedByAgari =
       m.concealed && w.suit === "honor" && w.rank === m.startRank;
     if (isDragon({ suit: "honor", rank: m.startRank })) {
