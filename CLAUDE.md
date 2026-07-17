@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project state
 
-Freshly bootstrapped `create-next-app` scaffold — the app itself has not been built yet. `src/app/` still holds the default template (`page.tsx`, `layout.tsx`); no game logic exists yet.
+Under active development. The **domain layer** (`src/domain/`) implements the game logic — tiles, wall/dead-wall, deal, dora (dice-driven count + indicators + han), hand-win detection, seat/round progression, and scoring/settlement — each with co-located Vitest tests plus cross-module integration tests (`src/domain/integration/`). The **App Router UI** (`src/app/`) ships the top page (`/`), rules (`/rules`), settings (`/settings`, with a dark-mode `ThemeToggle`), the game screen (`/game`), and the result screen (`/game/result`), with game/UI components under `src/components/`. Wiring the real game loop into `/game` (issue #67) is in progress; until it lands, the game screen renders scaffold/sample data.
 
 **What this project is:** a digital version of **四兄弟麻雀 (Four Brothers Mahjong)** — the mahjong segment from 粗品 Official Channel's「ギャンブル四兄弟」. It is a Kansai-style three-player (サンマ) variant with distinctive rules (all-red 5s, 北 pull-dora "ガリ", dice-driven dora count, four-player rotation, "ソシー" scoring). See the rule SSOT below before implementing any game logic.
 
@@ -13,8 +13,8 @@ Freshly bootstrapped `create-next-app` scaffold — the app itself has not been 
 - `docs/四兄弟麻雀ルール.md` — the single source of truth for game rules (real-world show summary). Read it before touching any game/scoring/tile logic.
 - `docs/README.md` — documentation navigation hub.
 - `documents/spec/` — **implementation spec (SpecDD SSOT)**: confirmed rules decomposed into I/O, states, boundary values, and completion criteria (setup/tiles, game-flow with a Mermaid state diagram, scoring/settlement, domain-model with a class diagram). Implement against this. `documents/` is the GoDD `docs_dir`.
-- `documents/spec/ui-accessibility-responsive-darkmode.md` — cross-cutting UI policy for accessibility, responsive breakpoints, and dark mode (color-independent info, keyboard/focus, breakpoints, dark mode toggle decision, color tokens, a11y verification tooling). Any future UI implementation (issues #8, #9, etc.) must follow this policy.
-- `質問リスト.md` (repo root) — open spec questions. Q1–Q8 resolved (see 解決済み). **Q9–Q13 remain open** (bench rotation order, seat/dealer assignment, 東南戦 progression, tsumo payment split, uma allocation) — do **not** implement the affected areas (seating, dealer, tsumo scoring, uma) until answered; never guess.
+- `documents/spec/ui-accessibility-responsive-darkmode.md` — cross-cutting UI policy for accessibility, responsive breakpoints, and dark mode (color-independent info, keyboard/focus, breakpoints, dark mode toggle decision, color tokens, a11y verification tooling). All UI implementation must follow this policy.
+- `質問リスト.md` (repo root) — spec questions log. **Q1–Q13 are all resolved** (user-approved; see 解決済み) — including the once-open bench-rotation order, seat/dealer assignment, 東南戦 progression, tsumo payment split, and uma allocation. Confirmed rules are reflected in `documents/spec/`. Any new design ambiguity is logged there as Q14+ before implementation — never guess.
 
 Config note: `config.godd` sets `display_language: ja` (respond in Japanese) and `docs_dir: documents` (GoDD spec SSOT goes under `documents/` once such content exists — kept separate from the human-facing `docs/`).
 
