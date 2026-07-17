@@ -83,11 +83,17 @@ function playAggressive(seed: number, tally: ActionTally): EngineState {
         s = declareRiichi(s, pending.riichiTiles[0]);
         continue;
       }
-      // ツモ牌があればツモ切り。無い(ポン直後など)なら門前手牌の先頭を切る。
+      // ツモ牌があればツモ切り。無い(ポン直後など)なら門前手牌から切る。
+      // 喰い替え禁止(#105)でポンした牌種は切れないため、それを避けて選ぶ。
       const hand = s.hand;
       const seat = hand ? seatOfPlayer(hand.seating, "p0") : null;
-      const tile =
-        hand?.drawn ?? (hand && seat ? hand.hands[seat][0] : undefined);
+      const forbidden = pending.forbiddenDiscards;
+      const isForbidden = (t: { suit: string; rank: number }): boolean =>
+        forbidden.some((f) => f.suit === t.suit && f.rank === t.rank);
+      let tile = hand?.drawn ?? undefined;
+      if ((tile == null || isForbidden(tile)) && hand && seat) {
+        tile = hand.hands[seat].find((t) => !isForbidden(t));
+      }
       if (tile == null)
         throw new Error("humanDiscard without a discardable tile");
       s = discard(s, tile);
@@ -219,5 +225,88 @@ describe("engine: 鳴き・リーチ・裏ドラ・一発(#97)", () => {
     // ポン後は自家の打牌待ち(ツモなし)になる。
     expect(after.pending?.kind).toBe("humanDiscard");
     expect(after.hand.turn).toBe(seat);
+  });
+});
+
+/**
+ * 喰い替え(現物)禁止の結線検証(#105 / スペック1 1.4「喰い替えなし」)。
+ *
+ * サンマはチーが無くポンのみのため喰い替えは「現物喰い替え」(ポンした牌と同種を直後に
+ * 切る)に限られる。ポン直後の `humanDiscard` で:
+ * - `forbiddenDiscards` にポンした牌種がちょうど1種入る。
+ * - その牌種を切る `discard` は非合法手として no-op(状態不変=同一参照を返す)。
+ * - 同種以外の合法牌を切る `discard` は進行する(状態が変わる)。
+ */
+describe("engine: 喰い替え(現物)禁止(#105)", () => {
+  /** 自家が他家打牌にポンできる humanReact を探索し、ポン実行後の状態を返す。 */
+  function findPonnedState(): EngineState | null {
+    outer: for (let seed = 1; seed <= 600; seed++) {
+      let s = createGame({ seed });
+      for (let guard = 0; guard < 400 && s.phase === "playing"; guard++) {
+        const pending = s.pending;
+        if (pending?.kind === "humanReact" && pending.canPon) {
+          return declarePon(s);
+        }
+        if (pending?.kind === "humanReact") {
+          s = passRon(s);
+        } else if (pending?.kind === "humanDiscard") {
+          const drawn = s.hand?.drawn;
+          if (drawn == null) break;
+          s = discard(s, drawn);
+        } else {
+          break outer;
+        }
+      }
+    }
+    return null;
+  }
+
+  it("ポン直後は forbiddenDiscards にポンした牌種がちょうど1種入る", () => {
+    const after = findPonnedState();
+    expect(after).not.toBeNull();
+    if (after === null || after.hand === null) return;
+    expect(after.pending?.kind).toBe("humanDiscard");
+    if (after.pending?.kind !== "humanDiscard") return;
+
+    const seat = seatOfPlayer(after.hand.seating, "p0");
+    expect(seat).not.toBeNull();
+    if (seat === null) return;
+    const meldsLen = after.hand.melds[seat].length;
+    const ponned = after.hand.melds[seat][meldsLen - 1].tiles[0];
+
+    expect(after.pending.forbiddenDiscards).toHaveLength(1);
+    const forbidden = after.pending.forbiddenDiscards[0];
+    // 現物喰い替えの対象はポンした牌と同種(赤フラグは無視・種別一致)。
+    expect(forbidden.suit).toBe(ponned.suit);
+    expect(forbidden.rank).toBe(ponned.rank);
+  });
+
+  it("ポンした牌種の打牌は no-op(拒否)、同種以外の打牌は進行する", () => {
+    const after = findPonnedState();
+    expect(after).not.toBeNull();
+    if (after === null || after.hand === null) return;
+    if (after.pending?.kind !== "humanDiscard") return;
+
+    const seat = seatOfPlayer(after.hand.seating, "p0");
+    if (seat === null) return;
+    const meldsLen = after.hand.melds[seat].length;
+    const ponned = after.hand.melds[seat][meldsLen - 1].tiles[0];
+
+    // 現物喰い替え(ポンした牌種を切る)は非合法手 → no-op(同一参照を返す)。
+    const rejected = discard(after, ponned);
+    expect(rejected).toBe(after);
+    expect(rejected.pending?.kind).toBe("humanDiscard");
+    expect(rejected.hand?.turn).toBe(seat);
+
+    // 同種以外の合法牌を1枚選ぶ(必ず存在する)。
+    const legal = after.hand.hands[seat].find(
+      (t) => t.suit !== ponned.suit || t.rank !== ponned.rank,
+    );
+    expect(legal).toBeDefined();
+    if (legal === undefined) return;
+
+    // 合法牌の打牌は進行する(no-op ではない=別状態を返す)。
+    const progressed = discard(after, legal);
+    expect(progressed).not.toBe(after);
   });
 });
