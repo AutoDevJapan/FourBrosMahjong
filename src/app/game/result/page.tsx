@@ -21,6 +21,12 @@ export default function ResultPage() {
   const router = useRouter();
   const result = view.result;
 
+  // ソシー内訳カードは最終順位テーブル(`RankingTable`)と同じく順位(rank)昇順で並べ、
+  // 上部テーブル(1位→最下位)と視線移動を一致させる(issue #150 要検討点1)。
+  // 表示順の整列のみで、順位やソシーの計算は engine の責務(スペック6 6.8)。
+  const orderedPlayers =
+    result === null ? [] : [...result.players].sort((a, b) => a.rank - b.rank);
+
   const startNewGame = () => {
     controls.newGame();
     router.push("/game");
@@ -71,7 +77,7 @@ export default function ResultPage() {
               ソシー内訳(素点+ウマ+祝儀)
             </h2>
             <div className="grid gap-3 sm:grid-cols-2">
-              {result.players.map((player) => (
+              {orderedPlayers.map((player) => (
                 <SoshiiBreakdown key={player.name} player={player} />
               ))}
             </div>

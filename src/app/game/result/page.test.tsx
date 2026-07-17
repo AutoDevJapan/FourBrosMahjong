@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { GameProvider } from "@/components/game/GameProvider";
 import {
@@ -53,6 +53,25 @@ describe("/game/result page (spec 6.2 / 6.6)", () => {
     expect(
       screen.getByRole("region", { name: "あなたのソシー内訳" }),
     ).toBeInTheDocument();
+  });
+
+  it("ソシー内訳カードを順位(rank)昇順で並べ、最終順位テーブルと視線移動を一致させる(issue #150)", () => {
+    render(
+      <GameProvider initialGame={finishedGame()}>
+        <ResultPage />
+      </GameProvider>,
+    );
+
+    // ソシー内訳カード(各プレイヤーのリージョン)を DOM 順で取得し、見出しの「N位」を読む。
+    const cards = screen.getAllByRole("region", { name: /のソシー内訳$/ });
+    expect(cards.length).toBe(4);
+    const ranks = cards.map((card) => {
+      const rankText = within(card).getByText(/^\d+位$/).textContent ?? "";
+      return Number.parseInt(rankText, 10);
+    });
+    // 昇順(1位→最下位)で並ぶこと。
+    expect(ranks).toEqual([...ranks].sort((a, b) => a - b));
+    expect(ranks[0]).toBe(1);
   });
 
   it("対局後の導線を提供する(spec 6.3): もう一半荘 / ロビーへ戻る", () => {
