@@ -801,7 +801,8 @@ function buildHumanPending(state: EngineState, seat: SeatKey): Pending {
   const pool = [...hand.hands[seat], ...(drawn ? [drawn] : [])];
   const menzen = isConcealedHand(hand.melds[seat]);
   const occupant = seatOccupant(hand.seating, seat);
-  // リーチ候補牌は門前・自ツモ番・1,000点以上のときのみ算出する(可否は canDeclareRiichi)。
+  // リーチ候補牌の算出ガード。可否の最終判定は canDeclareRiichi が担うが、点棒不足時は
+  // 公開状態 `pending.riichiTiles` を空に保つ(挙動不変)ため、ここでも 1,000 点で足切りする。
   const riichiEligible =
     drawn !== null && menzen && state.points[occupant] >= RIICHI_STICK_POINTS;
   const riichiTiles = riichiEligible ? riichiDiscardTiles(hand, seat) : [];
