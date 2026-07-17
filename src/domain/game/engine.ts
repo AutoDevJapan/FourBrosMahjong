@@ -1033,6 +1033,10 @@ function finishRound(
 
 /** 半荘を締め、ソシー精算(素点+ウマ+オカ+祝儀)を確定する。 */
 function endGame(state: EngineState): EngineState {
+  // 半荘終了時に場へ残った供託リーチ棒(`state.riichiSticks` > 0。最終局が流局/トビで
+  // 終わると残存し得る)の帰属は spec 未確定(Q15 / issue #106・要ユーザー承認)。
+  // 現状は再配分せず `state.points` をそのまま素点として精算する = 消失(暫定採用)。
+  // 確定回答後、精算前にここで供託帰属処理を差し込む。挙動は変えないこと。
   const finalPoints = ALL_IDS.map((id) => ({
     playerId: id,
     points: state.points[id],

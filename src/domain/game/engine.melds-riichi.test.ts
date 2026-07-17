@@ -117,6 +117,8 @@ describe("engine: 鳴き・リーチ・裏ドラ・一発(#97)", () => {
       expect(s.result).toHaveLength(4);
 
       // 持ち点は「140,000 − 場に残る供託(未回収リーチ棒 × 1,000)」。
+      // 半荘終了時の残存供託の帰属は spec 未確定(Q15 / issue #106・要ユーザー承認)で、
+      // 現状は再配分せず消失を暫定採用。この式はその暫定挙動を固定する(確定後に見直し)。
       const total = Object.values(s.points).reduce((a, b) => a + b, 0);
       expect(total).toBe(140000 - 1000 * s.riichiSticks);
       // 持ち点はすべて整数(端数処理の破綻がない)。
