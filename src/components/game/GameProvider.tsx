@@ -18,6 +18,11 @@
 import { createContext, useContext, useMemo, useState } from "react";
 import {
   createGame,
+  declareAnkan,
+  declareKakan,
+  declareKan,
+  declarePon,
+  declareRiichi,
   declareRon,
   declareTsumo,
   discard,
@@ -27,6 +32,7 @@ import {
   type Pending,
   proceedToNextRound,
   type RoundSummary,
+  tsumogiri,
 } from "@/domain/game/engine";
 import { selectView, toTile } from "./gameView";
 import type { GameViewState, TileData } from "./types";
@@ -35,11 +41,23 @@ import type { GameViewState, TileData } from "./types";
 export interface GameControls {
   /** 自家の打牌(表示手牌から選んだ牌)。 */
   readonly discard: (tile: TileData) => void;
+  /** 自家のツモ切り(リーチ後にツモ和了しないとき)。 */
+  readonly tsumogiri: () => void;
+  /** 自家のリーチ宣言(宣言牌を切る)。 */
+  readonly riichi: (tile: TileData) => void;
   /** 自家のツモ和了宣言。 */
   readonly tsumo: () => void;
   /** 自家のロン和了宣言。 */
   readonly ron: () => void;
-  /** 自家のロン見送り(スルー)。 */
+  /** 自家のポン(直前の他家打牌に対して)。 */
+  readonly pon: () => void;
+  /** 自家の明槓(大明槓・直前の他家打牌に対して)。 */
+  readonly kan: () => void;
+  /** 自家の暗槓(自ツモ番・指定牌種)。 */
+  readonly ankan: (tile: TileData) => void;
+  /** 自家の加槓(自ツモ番・既存ポンに4枚目)。 */
+  readonly kakan: (tile: TileData) => void;
+  /** 自家のロン/鳴き見送り(スルー)。 */
   readonly passRon: () => void;
   /** 局終了後、次局を開始する。 */
   readonly nextRound: () => void;
@@ -83,8 +101,14 @@ export function GameProvider({ children, initialGame }: GameProviderProps) {
   const controls = useMemo<GameControls>(
     () => ({
       discard: (tile) => setEngine(discard(engine, toTile(tile))),
+      tsumogiri: () => setEngine(tsumogiri(engine)),
+      riichi: (tile) => setEngine(declareRiichi(engine, toTile(tile))),
       tsumo: () => setEngine(declareTsumo(engine)),
       ron: () => setEngine(declareRon(engine)),
+      pon: () => setEngine(declarePon(engine)),
+      kan: () => setEngine(declareKan(engine)),
+      ankan: (tile) => setEngine(declareAnkan(engine, toTile(tile))),
+      kakan: (tile) => setEngine(declareKakan(engine, toTile(tile))),
       passRon: () => setEngine(passRon(engine)),
       nextRound: () => setEngine(proceedToNextRound(engine)),
       newGame: () => setEngine(createGame()),

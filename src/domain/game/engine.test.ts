@@ -30,7 +30,7 @@ function playOut(seed: number, opts: { tsumo?: boolean } = {}): EngineState {
         }
         s = discard(s, drawn);
       }
-    } else if (s.pending?.kind === "humanRon") {
+    } else if (s.pending?.kind === "humanReact") {
       s = passRon(s);
     } else {
       throw new Error(`stuck in phase=${s.phase}`);

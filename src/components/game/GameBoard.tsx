@@ -14,7 +14,14 @@
  * いずれも横スクロールで成立させない。
  */
 import { useRouter } from "next/navigation";
-import { useCallback, useEffect, useMemo, useSyncExternalStore } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+  useSyncExternalStore,
+} from "react";
+import { tileLabel } from "../common/tileLabel";
 import ActionPanel, { type ActionItem } from "./ActionPanel";
 import { useGame } from "./GameProvider";
 import LiveRegion from "./LiveRegion";
@@ -40,6 +47,17 @@ export default function GameBoard() {
     () => false,
   );
 
+  // リーチ宣言モード: オンのとき、次に選んだ手牌が「リーチ宣言牌」として切られる。
+  const [riichiArmed, setRiichiArmed] = useState(false);
+  const canRiichi = pending?.kind === "humanDiscard" && pending.canRiichi;
+  // リーチ可能な打牌待ちでなくなったら arming を解除する(レンダー中の前回値比較 =
+  // set-state-in-effect を避ける React 公認の「前回レンダー情報の保持」パターン)。
+  const [prevCanRiichi, setPrevCanRiichi] = useState(canRiichi);
+  if (prevCanRiichi !== canRiichi) {
+    setPrevCanRiichi(canRiichi);
+    if (!canRiichi && riichiArmed) setRiichiArmed(false);
+  }
+
   // 半荘終了 → 結果画面へ(スペック6 6.3)。engine の確定結果は GameProvider が保持し、
   // 遷移先の /game/result が読み取る(スペック6 6.5 / 6.9)。
   useEffect(() => {
@@ -50,11 +68,17 @@ export default function GameBoard() {
 
   const handleSelectTile = useCallback(
     (_index: number, tile: TileData) => {
-      if (pending?.kind === "humanDiscard") {
-        controls.discard(tile);
+      if (pending?.kind !== "humanDiscard") return;
+      // リーチ後は打牌が自動ツモ切りに固定されるため、手牌選択は無効(ツモ/ツモ切りボタンで操作)。
+      if (pending.locked) return;
+      if (riichiArmed && pending.canRiichi) {
+        controls.riichi(tile);
+        setRiichiArmed(false);
+        return;
       }
+      controls.discard(tile);
     },
-    [pending, controls],
+    [pending, controls, riichiArmed],
   );
 
   const actions = useMemo<ActionItem[]>(() => {
@@ -80,20 +104,45 @@ export default function GameBoard() {
         },
       ];
     }
-    if (pending?.kind === "humanRon") {
-      return [
-        {
+    // 他家打牌への反応(ロン / ポン / 明槓 / スルー)。
+    if (pending?.kind === "humanReact") {
+      const items: ActionItem[] = [];
+      if (pending.canRon) {
+        items.push({
           key: "ron",
           label: "ロン",
           icon: "栄",
           onClick: controls.ron,
           primary: true,
-        },
-        { key: "pass", label: "スルー", icon: "○", onClick: controls.passRon },
-      ];
+        });
+      }
+      if (pending.canPon) {
+        items.push({
+          key: "pon",
+          label: "ポン",
+          icon: "碰",
+          onClick: controls.pon,
+        });
+      }
+      if (pending.canKan) {
+        items.push({
+          key: "kan",
+          label: "カン",
+          icon: "槓",
+          onClick: controls.kan,
+        });
+      }
+      items.push({
+        key: "pass",
+        label: "スルー",
+        icon: "○",
+        onClick: controls.passRon,
+      });
+      return items;
     }
+    // 自家の打牌待ち(ツモ / リーチ / 暗槓 / 加槓 / ツモ切り)。
     if (pending?.kind === "humanDiscard") {
-      return [
+      const items: ActionItem[] = [
         {
           key: "tsumo",
           label: "ツモ",
@@ -103,23 +152,75 @@ export default function GameBoard() {
           primary: pending.canTsumo,
         },
       ];
+      // リーチ後は手牌選択が固定されるため、ツモ切りボタンを提供する。
+      if (pending.locked) {
+        items.push({
+          key: "tsumogiri",
+          label: "ツモ切り",
+          icon: "切",
+          onClick: controls.tsumogiri,
+        });
+      }
+      if (pending.canRiichi) {
+        items.push({
+          key: "riichi",
+          label: riichiArmed ? "リーチ解除" : "リーチ",
+          icon: "宣",
+          onClick: () => setRiichiArmed((armed) => !armed),
+          primary: riichiArmed,
+        });
+      }
+      for (const tile of pending.ankanTiles) {
+        items.push({
+          key: `ankan-${tile.suit}-${tile.rank}`,
+          label: `暗槓 ${tileLabel(tile)}`,
+          icon: "槓",
+          onClick: () => controls.ankan(tile),
+        });
+      }
+      for (const tile of pending.kakanTiles) {
+        items.push({
+          key: `kakan-${tile.suit}-${tile.rank}`,
+          label: `加槓 ${tileLabel(tile)}`,
+          icon: "槓",
+          onClick: () => controls.kakan(tile),
+        });
+      }
+      return items;
     }
     return [];
-  }, [phase, pending, controls, router]);
+  }, [phase, pending, controls, router, riichiArmed]);
 
   const hint = useMemo(() => {
     if (phase === "roundEnd") return roundSummary?.label ?? "";
     if (phase === "gameEnd") return "半荘終了。結果を確認できます。";
-    if (pending?.kind === "humanDiscard") {
-      return "牌を選んで打牌してください(北抜きは自動・鳴き/リーチは未対応)。";
+    if (pending?.kind === "humanReact") {
+      // 実際に選べる操作だけを案内する(存在しない選択肢を誤って提示しない)。
+      const choices = [
+        pending.canRon ? "ロン" : null,
+        pending.canPon ? "ポン" : null,
+        pending.canKan ? "カン" : null,
+        "スルー",
+      ].filter((c): c is string => c !== null);
+      return `${choices.join(" / ")}を選べます。`;
     }
-    if (pending?.kind === "humanRon") return "ロンできます。";
+    if (pending?.kind === "humanDiscard") {
+      if (pending.locked) {
+        return "リーチ中です。ツモ和了かツモ切りを選んでください(北抜きは自動)。";
+      }
+      if (riichiArmed) {
+        return "リーチ宣言牌を選んでください(テンパイを保つ牌のみ有効)。";
+      }
+      return "牌を選んで打牌してください(北抜きは自動)。";
+    }
     return "";
-  }, [phase, pending, roundSummary]);
+  }, [phase, pending, roundSummary, riichiArmed]);
 
   const announcement = useMemo(() => {
     if (pending?.kind === "humanDiscard") return "あなたの手番です。";
-    if (pending?.kind === "humanRon") return "ロンできます。";
+    if (pending?.kind === "humanReact") {
+      return pending.canRon ? "ロンできます。" : "鳴きできます。";
+    }
     return "";
   }, [pending]);
 

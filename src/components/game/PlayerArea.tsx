@@ -8,6 +8,7 @@
 import type { SeatWind, SeatedPlayerView, TileData } from "./types";
 import Discards from "./Discards";
 import Hand from "./Hand";
+import Melds from "./Melds";
 import OpponentHand from "./OpponentHand";
 import ScoreDisplay from "./ScoreDisplay";
 import StatusBadge from "./StatusBadge";
@@ -34,7 +35,7 @@ export default function PlayerArea({
   compact = false,
   onSelectTile,
 }: PlayerAreaProps) {
-  const { name, points, pointsDelta, seatWind, status, hand, discards } =
+  const { name, points, pointsDelta, seatWind, status, hand, melds, discards } =
     player;
 
   return (
@@ -71,6 +72,8 @@ export default function PlayerArea({
           )}
         </div>
       ) : null}
+
+      {melds && melds.length > 0 ? <Melds melds={melds} /> : null}
 
       <Discards tiles={discards} limit={compact ? 6 : undefined} />
     </section>

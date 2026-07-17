@@ -95,6 +95,13 @@ function buildSlotContent(engine: EngineState, id: PlayerId): SlotContent {
     engine.phase === "roundEnd" && engine.lastRound
       ? engine.lastRound.deltas[id]
       : 0;
+  const melds = hand
+    ? hand.melds[seat].map((m) => ({
+        type: m.type,
+        tiles: m.tiles.map(toTileData),
+        concealed: m.concealed,
+      }))
+    : [];
 
   const seated: SeatedPlayerView = {
     name: nameOf(engine, id),
@@ -104,8 +111,9 @@ function buildSlotContent(engine: EngineState, id: PlayerId): SlotContent {
     status: {
       isDealer: seat === "east",
       isCurrentTurn: isTurn,
-      hasDeclaredRiichi: false,
+      hasDeclaredRiichi: hand ? hand.riichi[seat] : false,
     },
+    ...(melds.length > 0 ? { melds } : {}),
     discards: hand ? hand.discards[seat].map(toTileData) : [],
     ...(isSelf && hand
       ? {
@@ -153,10 +161,18 @@ export function selectView(engine: EngineState): GameViewState {
     riichiSticks: engine.riichiSticks,
   };
 
+  // 裏ドラはリーチ和了の局終了時のみ開示する(スペック2 2.2)。
+  const revealUra =
+    engine.phase === "roundEnd" &&
+    engine.lastRound?.riichiWin === true &&
+    engine.hand !== null;
   const dora: DoraData = engine.hand
     ? {
         indicators: engine.hand.doraSet.indicators.map(toTileData),
         uraIndicatorCount: engine.hand.doraSet.count,
+        ...(revealUra
+          ? { uraIndicators: engine.hand.doraSet.uraIndicators.map(toTileData) }
+          : {}),
       }
     : { indicators: [], uraIndicatorCount: 0 };
 
