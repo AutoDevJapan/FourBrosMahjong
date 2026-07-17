@@ -44,6 +44,10 @@ export default function StatusBadge({
 }: StatusBadgeProps) {
   return (
     <span
+      // variant 別の安定したテスト用アンカー(#162)。表示テキスト部分一致に依存せず
+      // E2E/コンポーネントテストが状態バッジを一意に特定できるようにする。`data-testid` は
+      // アクセシビリティツリー・可視ラベル・見た目のいずれにも影響しない属性。
+      data-testid={`status-badge-${variant}`}
       className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs ${VARIANT_CLASS[variant]}`}
     >
       <span aria-hidden="true">{icon}</span>
