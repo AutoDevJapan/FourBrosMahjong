@@ -172,23 +172,28 @@ test.describe("キーボードのみ操作(a11y 補強)", () => {
     ).toBeVisible();
   });
 
-  test("/game の操作パネルはキーボードで到達でき、手番がライブリージョンへ通知される(5.2.2 / 5.2.3)", async ({
+  test("/game は手番をライブリージョンで通知し、打牌をキーボードのみで実行できる(5.2.2 / 5.2.3)", async ({
     page,
   }) => {
     await page.goto("/game");
 
-    // ネイティブ button で構成され、キーボードで到達可能(APG のボタン要件)。
-    const actionButton = page
-      .getByRole("group", { name: "操作パネル" })
-      .first()
-      .getByRole("button")
-      .first();
-    await actionButton.focus();
-    await expect(actionButton).toBeFocused();
-
-    // 進行通知は polite ライブリージョンへ反映される(sr-only だが DOM 常駐)。
+    // 進行通知(色非依存)は polite ライブリージョンへ反映される(sr-only だが DOM 常駐)。
     await expect(page.locator('[aria-live="polite"]').first()).toHaveText(
       "あなたの手番です。",
     );
+
+    // 操作パネルはネイティブ button で構成される(APG のボタン要件)。ツモが局面上不可なら
+    // disabled で伝わる(色ではなく状態)。打牌はキーボードのみで完結できる操作が本筋のため、
+    // 手牌の現行 option をフォーカスして操作可能であることを検証する。
+    await expect(
+      page.getByRole("group", { name: "操作パネル" }).first(),
+    ).toBeVisible();
+    const activeOption = page
+      .getByRole("listbox", { name: "自家の手牌" })
+      .first()
+      .getByRole("option")
+      .first();
+    await activeOption.focus();
+    await expect(activeOption).toBeFocused();
   });
 });

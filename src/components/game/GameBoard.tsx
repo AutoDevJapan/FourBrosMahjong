@@ -14,7 +14,7 @@
  * いずれも横スクロールで成立させない。
  */
 import { useRouter } from "next/navigation";
-import { useCallback, useEffect, useMemo } from "react";
+import { useCallback, useEffect, useMemo, useSyncExternalStore } from "react";
 import ActionPanel, { type ActionItem } from "./ActionPanel";
 import { useGame } from "./GameProvider";
 import LiveRegion from "./LiveRegion";
@@ -22,18 +22,31 @@ import PlayerSlot from "./PlayerSlot";
 import Table from "./Table";
 import type { SeatPosition, TileData } from "./types";
 
+/** 外部ストア購読なしのダミー(クライアント判定にのみ使う)。 */
+const noopSubscribe = () => () => {};
+
 export default function GameBoard() {
   const { view, phase, pending, roundSummary, controls } = useGame();
   const { slots, tableInfo, dora } = view;
   const router = useRouter();
 
+  // 実対局は乱数(クライアント固有)で生成されるため、盤面はマウント後のクライアントでのみ描画する。
+  // これにより SSR プリレンダーとの牌のハイドレーション不一致を避け、初回描画後の盤面も安定させる。
+  // `useSyncExternalStore` は SSR とハイドレーション初回描画で false、以後クライアントで true を返す
+  // (set-state-in-effect を使わないハイドレーション安全なクライアント判定)。
+  const mounted = useSyncExternalStore(
+    noopSubscribe,
+    () => true,
+    () => false,
+  );
+
   // 半荘終了 → 結果画面へ(スペック6 6.3)。engine の確定結果は GameProvider が保持し、
   // 遷移先の /game/result が読み取る(スペック6 6.5 / 6.9)。
   useEffect(() => {
-    if (phase === "gameEnd") {
+    if (mounted && phase === "gameEnd") {
       router.push("/game/result");
     }
-  }, [phase, router]);
+  }, [mounted, phase, router]);
 
   const handleSelectTile = useCallback(
     (_index: number, tile: TileData) => {
@@ -129,8 +142,23 @@ export default function GameBoard() {
     [slots, handleSelectTile],
   );
 
+  if (!mounted) {
+    return (
+      <div
+        className="flex min-h-[12rem] w-full items-center justify-center rounded-xl border border-foreground/10 text-sm text-foreground/60"
+        aria-live="polite"
+      >
+        対局を準備しています…
+      </div>
+    );
+  }
+
   return (
-    <div className="w-full">
+    <div
+      className="w-full"
+      data-phase={phase}
+      data-pending={pending?.kind ?? "none"}
+    >
       {/* md 以上: クロス配置。基底では非表示(a11yツリーからも除外)。 */}
       <div className="mx-auto hidden w-full max-w-4xl grid-cols-[minmax(0,1fr)_minmax(0,1.5fr)_minmax(0,1fr)] gap-3 md:grid">
         <div className="col-start-2 row-start-1">

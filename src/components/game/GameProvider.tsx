@@ -15,14 +15,7 @@
  * バックエンド/永続化・複数デバイス同期は未設計のため、単一デバイス上のクライアント状態を前提とする
  * (スペック6 6.9)。
  */
-import {
-  createContext,
-  useContext,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-} from "react";
+import { createContext, useContext, useMemo, useState } from "react";
 import {
   createGame,
   declareRon,
@@ -76,29 +69,27 @@ export interface GameProviderProps {
 }
 
 export function GameProvider({ children, initialGame }: GameProviderProps) {
-  // 初期描画は**固定 seed**で決定的にし、SSR プリレンダーとクライアントの初回描画を一致させる
-  // (ハイドレーション不一致の回避)。その後クライアントでのみ乱数対局へ差し替える。
+  // 実対局の乱数状態は初期化子で1度だけ生成する。SSR とクライアント初回描画の不一致は、
+  // 盤面を描く `GameBoard` 側のマウントゲート(クライアントでのみ盤面を描画)で回避する。
   const [engine, setEngine] = useState<EngineState>(
-    () => initialGame ?? createGame({ seed: 1 }),
+    () => initialGame ?? createGame(),
   );
-  const randomized = useRef(false);
-  useEffect(() => {
-    if (initialGame === undefined && !randomized.current) {
-      randomized.current = true;
-      setEngine(createGame());
-    }
-  }, [initialGame]);
 
+  // 遷移は「イベントハンドラ内で現在の engine から1度だけ」算出し、その**値**を `setEngine` へ渡す。
+  // engine の遷移は内部で `Wall` 等を可変更新するため、`setEngine((s) => transition(s))` の
+  // 関数型更新にすると React Strict Mode(開発時)の updater 二重呼び出しで**同じ状態を2回
+  // 破壊的に進めて**局が壊れる。controls は現在の engine を閉じ込めて毎レンダー再生成する
+  // (イベントハンドラは二重呼び出しされないため、遷移は必ず1回だけ適用される)。
   const controls = useMemo<GameControls>(
     () => ({
-      discard: (tile) => setEngine((s) => discard(s, toTile(tile))),
-      tsumo: () => setEngine(declareTsumo),
-      ron: () => setEngine(declareRon),
-      passRon: () => setEngine(passRon),
-      nextRound: () => setEngine(proceedToNextRound),
-      newGame: () => setEngine(() => createGame()),
+      discard: (tile) => setEngine(discard(engine, toTile(tile))),
+      tsumo: () => setEngine(declareTsumo(engine)),
+      ron: () => setEngine(declareRon(engine)),
+      passRon: () => setEngine(passRon(engine)),
+      nextRound: () => setEngine(proceedToNextRound(engine)),
+      newGame: () => setEngine(createGame()),
     }),
-    [],
+    [engine],
   );
 
   const value = useMemo<GameContextValue>(

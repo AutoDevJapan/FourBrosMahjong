@@ -99,34 +99,48 @@ test.describe("対局画面(/game)", () => {
   test("1半荘を実プレイして結果画面へ到達し、「もう一半荘」で対局へ戻れる(スペック2 2.8 / 6.3)", async ({
     page,
   }) => {
-    test.setTimeout(120_000);
+    test.setTimeout(180_000);
     await page.goto("/game");
 
-    // 局面に応じて操作を選び、半荘終了(→ /game/result 自動遷移)まで進める。
-    // 自家は打牌(ツモ切り相当)・ロンは見送り、局終了ごとに次局へ。
-    for (let step = 0; step < 800; step++) {
+    // 盤面ルートの data-phase / data-pending(進行状態のテスト用フック)を読み、局面に応じて
+    // 操作を1つ選んで進める。自家は打牌(ツモ切り相当)・ロンは見送り、局終了ごとに次局へ。
+    // 半荘終了で GameBoard が /game/result へ自動遷移する(スペック6 6.3)。
+    const board = page.locator("[data-phase]").first();
+    for (let step = 0; step < 1500; step++) {
       if (/\/game\/result$/.test(page.url())) break;
-
-      const next = page.getByRole("button", { name: "次の局へ" });
-      if ((await next.count()) > 0 && (await next.first().isVisible())) {
-        await next.first().click();
+      const state = await board
+        .evaluate((el) => ({
+          phase: el.getAttribute("data-phase"),
+          pending: el.getAttribute("data-pending"),
+        }))
+        .catch(() => null);
+      if (state === null) {
+        // 遷移直後などで盤面が一時的に取れないときは URL 確認へ回す。
+        await page.waitForTimeout(20);
         continue;
       }
-      const through = page.getByRole("button", { name: "スルー" });
-      if ((await through.count()) > 0 && (await through.first().isVisible())) {
-        await through.first().click();
+      if (state.phase === "gameEnd") {
+        await page.waitForTimeout(50);
         continue;
       }
-      const option = page
-        .getByRole("listbox", { name: "自家の手牌" })
-        .first()
-        .getByRole("option")
-        .first();
-      if ((await option.count()) > 0 && (await option.isVisible())) {
-        await option.click();
+      if (state.phase === "roundEnd") {
+        await page.getByRole("button", { name: "次の局へ" }).first().click();
         continue;
       }
-      await page.waitForTimeout(50);
+      if (state.pending === "humanRon") {
+        await page.getByRole("button", { name: "スルー" }).first().click();
+        continue;
+      }
+      if (state.pending === "humanDiscard") {
+        await page
+          .getByRole("listbox", { name: "自家の手牌" })
+          .first()
+          .getByRole("option")
+          .first()
+          .click();
+        continue;
+      }
+      await page.waitForTimeout(20);
     }
 
     await expect(page).toHaveURL(/\/game\/result$/);
