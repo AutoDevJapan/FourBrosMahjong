@@ -18,7 +18,10 @@
  * - 他家(AI)は**ツモ切り**。ツモ/ロンは和了形が成立すれば自動宣言するが、**リーチ・鳴きはしない**(→ #98)。
  * - 加槓に対する槍槓(チャンカン)は未対応(AI は槍槓しない)。リーチ後の暗槓も不可(→ issue)。
  * - 北抜き(ガリ)は**自動**で処理する(手動選択は未対応)。
- * - パオ(責任払い)は未割当。役満祝儀の支払者は「同卓の敗者2人」を既定とする(issue #89 の #67 確定)。
+ * - パオ(責任払い)は**自家の鳴きで確定した大三元/大四喜/四槓子**に対応(#99)。ポン/大明槓で
+ *   パオ役満が確定した瞬間に責任者(打牌者)を記録し、和了時 `resolveWinPayment` で責任払い
+ *   (ロン折半・ツモ全額・本場)を行う(判定は `scoring/pao.ts`)。役満祝儀は別枠で、支払者は
+ *   「同卓の敗者2人」を既定とする(issue #89 の #67 確定)。
  * - `SAFETY_ROUND_CAP` で局数に上限を設け、南4連荘の理論的無限ループを防ぐ(通常は発火しない)。
  *
  * 決定性: `createGame({ seed })` で `createSeededRng` を用いるため、同じ seed + 同じ操作列から
@@ -46,6 +49,7 @@ import {
   seatingOf,
 } from "@/domain/round/round";
 import type { PlayerRing, Seating } from "@/domain/round/seat";
+import { isPaoTriggeringCall } from "@/domain/scoring/pao";
 import { computeScore, handValueFromHan } from "@/domain/scoring/points";
 import {
   RETURN_POINTS,
@@ -138,6 +142,12 @@ interface HandState {
   tempMiss: SeatFlags;
   /** この局で鳴き(ポン/カン)が発生したか(ダブルリーチ判定用)。 */
   callsMade: boolean;
+  /**
+   * パオ責任者(スペック3 3.3 / #99)。パオ役満(大三元/大四喜/四槓子)を
+   * **鳴き(ポン/大明槓)で確定させた席 → その確定牌を打った責任者ID**。
+   * その席が和了したとき `settleWin` が責任払いへ渡す。
+   */
+  paoResponsible: Partial<Record<SeatKey, PlayerId>>;
   /** 直前の打牌(ロン/鳴き判定の対象)。解決後に null。 */
   pendingDiscard: { seat: SeatKey; tile: Tile } | null;
   /** 直前の打牌に対しロン/鳴きを見送った席(頭ハネ解決の再入で参照)。 */
@@ -416,6 +426,7 @@ function beginRound(state: EngineState): EngineState {
     riichiMiss: seatFlags(),
     tempMiss: seatFlags(),
     callsMade: false,
+    paoResponsible: {},
     pendingDiscard: null,
     passedRonSeats: [],
   };
@@ -828,12 +839,18 @@ function settleWin(state: EngineState, win: WinInput): EngineState {
       ? seatOccupant(hand.seating, win.discarderSeat)
       : undefined;
 
+  // パオ(責任払い): 和了手にパオ役満が含まれ、その席がパオ確定牌を鳴いていれば
+  // 記録済みの責任者へ寄せる(スペック3 3.3 / #99)。門前完成はパオなし。
+  const paoResponsibleId =
+    analysis.pao.length > 0 ? hand.paoResponsible[winnerSeat] : undefined;
+
   const payment = resolveWinPayment({
     winner: { id: winnerId, isDealer: isDealerWin },
     winType,
     score,
     discarderId,
     others,
+    paoResponsibleId,
     honba: state.round.honba,
     riichiSticks: state.riichiSticks,
   });
@@ -883,6 +900,36 @@ function settleWin(state: EngineState, win: WinInput): EngineState {
   );
 }
 
+/**
+ * 流局テンパイ料(荒牌平局)の1人あたり授受額(スペック3 3.4 / issue #99)。
+ *
+ * 着席3人(東・南・西)で **3,000点プール**を配分する(抜け番=北家は対局外のため
+ * 授受に含めない)。テンパイ者が均等に受け取り、ノーテン者が均等に支払う。
+ * **全員テンパイ(k=3)/全員ノーテン(k=0)は授受なし**(点棒移動ゼロ)。
+ *
+ * | k | 各テンパイ受取 | 各ノーテン支払 |
+ * |---|---|---|
+ * | 0 | — | 0 |
+ * | 1 | +3,000 | −1,500 |
+ * | 2 | +1,500 | −3,000 |
+ * | 3 | 0 | — |
+ *
+ * @param tenpaiCount 着席3人中のテンパイ人数 k(0〜3)。
+ */
+export function notenPaymentPool(tenpaiCount: number): {
+  readonly receivePerTenpai: number;
+  readonly payPerNoten: number;
+} {
+  const notenCount = 3 - tenpaiCount;
+  if (tenpaiCount <= 0 || notenCount <= 0) {
+    return { receivePerTenpai: 0, payPerNoten: 0 };
+  }
+  return {
+    receivePerTenpai: NOTEN_POOL / tenpaiCount,
+    payPerNoten: NOTEN_POOL / notenCount,
+  };
+}
+
 /** 流局(海底)を精算し局を終える。テンパイ料を配分する。 */
 function settleDraw(state: EngineState): EngineState {
   const hand = state.hand;
@@ -892,16 +939,14 @@ function settleDraw(state: EngineState): EngineState {
   );
   const notenSeats = SEATS.filter((seat) => !tenpaiSeats.includes(seat));
 
+  // テンパイ料の授受(着席3人・3,000点プール。抜け番は不参加)。
   const points: Record<PlayerId, number> = { ...state.points };
-  if (tenpaiSeats.length > 0 && notenSeats.length > 0) {
-    const receivePer = NOTEN_POOL / tenpaiSeats.length;
-    const payPer = NOTEN_POOL / notenSeats.length;
-    for (const seat of tenpaiSeats) {
-      points[seatOccupant(hand.seating, seat)] += receivePer;
-    }
-    for (const seat of notenSeats) {
-      points[seatOccupant(hand.seating, seat)] -= payPer;
-    }
+  const pool = notenPaymentPool(tenpaiSeats.length);
+  for (const seat of tenpaiSeats) {
+    points[seatOccupant(hand.seating, seat)] += pool.receivePerTenpai;
+  }
+  for (const seat of notenSeats) {
+    points[seatOccupant(hand.seating, seat)] -= pool.payPerNoten;
   }
 
   // 親テンパイなら連荘、さもなくば親流れ。流局は本場+1(finishRound で処理)。
@@ -1093,6 +1138,25 @@ export function declareRiichi(state: EngineState, tile: Tile): EngineState {
   return pump(s2);
 }
 
+/**
+ * 相手の打牌を鳴いた副露(ポン/大明槓)がパオ役満(大三元/大四喜/四槓子)を
+ * 確定させたら、責任者(= その確定牌を打った者)を記録する(スペック3 3.3 / #99)。
+ * `existingMelds` は **この鳴きを加える前**の副露列。
+ */
+function recordPaoResponsible(
+  hand: HandState,
+  seat: SeatKey,
+  discarder: SeatKey,
+  existingMelds: readonly Meld[],
+  newMeld: Meld,
+): void {
+  if (
+    isPaoTriggeringCall({ existingMelds, newMeld, fromOpponentDiscard: true })
+  ) {
+    hand.paoResponsible[seat] = seatOccupant(hand.seating, discarder);
+  }
+}
+
 /** 自家のポン(直前の他家打牌に対して)。 */
 export function declarePon(state: EngineState): EngineState {
   if (
@@ -1112,10 +1176,13 @@ export function declarePon(state: EngineState): EngineState {
   if (taken.length < 2) return state;
 
   hand.hands[seat] = rest;
-  hand.melds[seat] = [
-    ...hand.melds[seat],
-    { type: "pon", tiles: [tile, ...taken], concealed: false },
-  ];
+  const ponMeld: Meld = {
+    type: "pon",
+    tiles: [tile, ...taken],
+    concealed: false,
+  };
+  recordPaoResponsible(hand, seat, discarder, hand.melds[seat], ponMeld);
+  hand.melds[seat] = [...hand.melds[seat], ponMeld];
   removeCalledTileFromRiver(hand, discarder, tile);
   clearAllIppatsu(hand);
   hand.callsMade = true;
@@ -1147,10 +1214,13 @@ export function declareKan(state: EngineState): EngineState {
   if (taken.length < 3) return state;
 
   hand.hands[seat] = rest;
-  hand.melds[seat] = [
-    ...hand.melds[seat],
-    { type: "kan", tiles: [tile, ...taken], concealed: false },
-  ];
+  const kanMeld: Meld = {
+    type: "kan",
+    tiles: [tile, ...taken],
+    concealed: false,
+  };
+  recordPaoResponsible(hand, seat, discarder, hand.melds[seat], kanMeld);
+  hand.melds[seat] = [...hand.melds[seat], kanMeld];
   removeCalledTileFromRiver(hand, discarder, tile);
   clearAllIppatsu(hand);
   hand.callsMade = true;

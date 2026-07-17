@@ -4,6 +4,7 @@ import {
   declareTsumo,
   discard,
   type EngineState,
+  notenPaymentPool,
   passRon,
   proceedToNextRound,
 } from "./engine";
@@ -110,5 +111,46 @@ describe("engine: 半荘の状態機械(#67)", () => {
     const s = playOut(2024, { tsumo: true });
     expect(s.phase).toBe("gameEnd");
     expect(s.result).toHaveLength(4);
+  });
+});
+
+describe("notenPaymentPool: 流局テンパイ料のサンマ配分(スペック3 3.4 / #99)", () => {
+  it("k=0(全員ノーテン): 授受なし", () => {
+    expect(notenPaymentPool(0)).toEqual({
+      receivePerTenpai: 0,
+      payPerNoten: 0,
+    });
+  });
+
+  it("k=1: 受取 +3,000 / 支払 −1,500(ノーテン2人で3,000を折半)", () => {
+    expect(notenPaymentPool(1)).toEqual({
+      receivePerTenpai: 3000,
+      payPerNoten: 1500,
+    });
+  });
+
+  it("k=2: 受取 +1,500 / 支払 −3,000(テンパイ2人で3,000を折半)", () => {
+    expect(notenPaymentPool(2)).toEqual({
+      receivePerTenpai: 1500,
+      payPerNoten: 3000,
+    });
+  });
+
+  it("k=3(全員テンパイ): 授受なし", () => {
+    expect(notenPaymentPool(3)).toEqual({
+      receivePerTenpai: 0,
+      payPerNoten: 0,
+    });
+  });
+
+  it("授受は総和ゼロ(テンパイ受取総額 = ノーテン支払総額 = 3,000)", () => {
+    for (let k = 1; k <= 2; k++) {
+      const { receivePerTenpai, payPerNoten } = notenPaymentPool(k);
+      const received = receivePerTenpai * k;
+      const paid = payPerNoten * (3 - k);
+      expect(received).toBe(3000);
+      expect(paid).toBe(3000);
+      expect(received - paid).toBe(0);
+    }
   });
 });
