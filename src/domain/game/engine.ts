@@ -1174,16 +1174,44 @@ export function finishRound(
   return gameEnds ? endGame(base) : base;
 }
 
+/**
+ * 抜け番を含む4兄弟全員の最終持ち点で**単独最高**(厳密最高)のプレイヤーID。
+ * 同点最高で単独1位が存在しなければ null(Q19 の `dealerIsTop` と同じ厳密比較)。
+ */
+function soleTopPlayer(points: Record<PlayerId, number>): PlayerId | null {
+  let topId: PlayerId = ALL_IDS[0];
+  for (const id of ALL_IDS) {
+    if (points[id] > points[topId]) topId = id;
+  }
+  const isSole = ALL_IDS.every(
+    (id) => id === topId || points[id] < points[topId],
+  );
+  return isSole ? topId : null;
+}
+
 /** 半荘を締め、ソシー精算(素点+ウマ+オカ+祝儀)を確定する。 */
 function endGame(state: EngineState): EngineState {
-  // 半荘終了時に場へ残った供託リーチ棒(`state.riichiSticks` > 0)の帰属は spec 未確定
-  // (Q15 / issue #106・要ユーザー承認)。`settleWin` は和了者が回収して 0 にするため、
-  // 残存するのは最終局が `settleDraw`(流局)で終わったとき(その流局がトビを伴う場合も含む)。
-  // 現状は再配分せず `state.points` をそのまま素点として精算する = 消失(暫定採用)。
-  // 確定回答後、精算前にここで供託帰属処理を差し込む。挙動は変えないこと。
+  // 半荘終了時に場へ残った供託リーチ棒(`state.riichiSticks` > 0)は、**最終持ち点が
+  // 単独最高**(抜け番含む全員に対し厳密最高 = Q19 整合)のプレイヤーの素点へ加算する
+  // (Q15 確定・ユーザー承認 2026-07-17 = 1位取得 / issue #130)。`settleWin` は和了者が
+  // 供託を回収して 0 にするため、残存するのは最終局が `settleDraw`(流局・トビ流局含む)で
+  // 終わったとき。1位が取得することでソシー合計は zero-sum を保つ(消失で総和が目減りしない)。
+  const residual = state.riichiSticks * RIICHI_STICK_POINTS;
+  const points: Record<PlayerId, number> = { ...state.points };
+  let riichiSticks = state.riichiSticks;
+  if (residual > 0) {
+    const topId = soleTopPlayer(points);
+    if (topId !== null) {
+      points[topId] += residual;
+      riichiSticks = 0; // 供託を素点へ移し、場から下ろす。
+    }
+    // TODO(Q20 / issue #131): 同点最高で単独1位が存在しない場合の残存供託帰属は SSOT 未定義。
+    // ユーザー確定まで再配分せず据え置く(= 消失・従来挙動)。この分岐のみ zero-sum を満たさない。
+  }
+
   const finalPoints = ALL_IDS.map((id) => ({
     playerId: id,
-    points: state.points[id],
+    points: points[id],
   }));
   const umaBreak = state.ledger.applyUma(finalPoints);
   state.ledger.applyRawScore(finalPoints);
@@ -1196,14 +1224,21 @@ function endGame(state: EngineState): EngineState {
       playerId: id,
       name: nameOf(state, id),
       rank: ranking.indexOf(id) + 1,
-      rawScore: state.points[id] - RETURN_POINTS,
+      rawScore: points[id] - RETURN_POINTS,
       uma: umaTotal,
       bonus: state.bonus[id],
       soshiiTotal: state.ledger.balanceOf(id),
     };
   });
 
-  return { ...state, phase: "gameEnd", pending: null, result };
+  return {
+    ...state,
+    points,
+    riichiSticks,
+    phase: "gameEnd",
+    pending: null,
+    result,
+  };
 }
 
 // ---------------------------------------------------------------------------
