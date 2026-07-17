@@ -17,7 +17,7 @@
  * 値渡しのみの純表示コンポーネントのため Server Component として実装できる(スペック6 6.6)。
  */
 import type { TileData } from "../game/types";
-import { isRedDora, resolveTileFace, TILE_BACK_SRC } from "./tileImage";
+import { isRedDora, resolveTileFace } from "./tileImage";
 import { FACE_DOWN_LABEL, tileLabel } from "./tileLabel";
 
 export interface TileProps {
@@ -56,12 +56,6 @@ const BASE_CLASS =
 const FACE_IMAGE_CLASS = "bg-contain bg-center bg-no-repeat";
 
 /**
- * 裏面(伏せ牌)SVG を配置する背景指定。`Back.svg` は縁まで塗られた1枚絵のため `cover` で
- * 牌全体を埋め、牌の縦横比が河/ドラ/伸長レイアウトで変わっても隙間なく安定して描く。
- */
-const BACK_IMAGE_CLASS = "bg-cover bg-center bg-no-repeat";
-
-/**
  * カタログ外牌の可視プレースホルダの体裁。地色(`bg-tile-face`)に濃色印字(`text-tile-ink`)で
  * 牌名テキストを描く。`background-image` を発行しないため 404 が起きず、裏面(`Back`)も出さない。
  * これにより視覚(牌名)と `aria-label`(同名)が一致する検出可能なフォールバックになる(issue #146)。
@@ -77,12 +71,12 @@ export default function Tile({
 }: TileProps) {
   const sizeClass = SIZE_CLASS[size];
 
-  // 伏せ牌: 内容を見せない裏面 SVG。地色(bg-tile-back)を裏に敷き、素材未読込でも牌と分かる。
+  // 伏せ牌: 内容を見せない裏面。設計トークン由来の `.game-tile--back`(青系・全テーマ連動)で
+  // 描き、外部 SVG 素材に依存せず全テーマ/全ビューポートで安定して裏面と分かる(Issue #149)。
   if (tile === null) {
     return (
       <span
-        className={`${BASE_CLASS} ${BACK_IMAGE_CLASS} ${sizeClass} overflow-hidden border-tile-border bg-tile-back ${className}`}
-        style={{ backgroundImage: `url(${TILE_BACK_SRC})` }}
+        className={`${BASE_CLASS} game-tile--back ${sizeClass} overflow-hidden border-tile-border ${className}`}
         role={decorative ? undefined : "img"}
         aria-label={decorative ? undefined : FACE_DOWN_LABEL}
         aria-hidden={decorative || undefined}

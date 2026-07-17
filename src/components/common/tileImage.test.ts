@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { TileData } from "../game/types";
-import { isRedDora, resolveTileFace, TILE_BACK_SRC } from "./tileImage";
+import { isRedDora, resolveTileFace } from "./tileImage";
 
 describe("resolveTileFace(カタログ内)", () => {
   it.each<[TileData, string]>([
@@ -76,11 +76,5 @@ describe("isRedDora(赤扱いは 5筒・5索のみ)", () => {
     ["赤フラグ付き字牌", { suit: "honor", rank: 1, isRed: true }],
   ])("%s は false", (_label, tile) => {
     expect(isRedDora(tile)).toBe(false);
-  });
-});
-
-describe("TILE_BACK_SRC", () => {
-  it("伏せ牌の裏面素材への公開パス", () => {
-    expect(TILE_BACK_SRC).toBe("/tiles/Back.svg");
   });
 });

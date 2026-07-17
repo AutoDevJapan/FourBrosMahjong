@@ -59,10 +59,13 @@ describe("Tile", () => {
     expect(el).not.toHaveTextContent("赤");
   });
 
-  it("伏せ牌は裏面 SVG(Back)で描き 伏せ牌 とラベルする", () => {
+  it("伏せ牌は設計トークン由来の裏面(game-tile--back)で描き 伏せ牌 とラベルする(Issue #149)", () => {
     render(<Tile tile={null} />);
     const el = screen.getByRole("img", { name: "伏せ牌" });
-    expectFace(el, "Back");
+    expect(el).toHaveAttribute("data-face", "Back");
+    // 裏面はトークン由来 CSS で描くため、赤ベタの外部 SVG 背景画像は持たない。
+    expect(el).toHaveClass("game-tile--back");
+    expect(el).not.toHaveStyle({ backgroundImage: "url(/tiles/Back.svg)" });
   });
 
   it("ラベル付き操作要素の内側では装飾扱い(aria-hidden・role なし)になる", () => {
