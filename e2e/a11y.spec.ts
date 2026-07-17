@@ -174,9 +174,15 @@ test.describe("状態駆動 a11y 監査(狭幅・モーダル / #148)", () => {
  *
  * 既定の自動監査(初期局面)と #148 の狭幅/モーダル監査は、対局を**進めて**初めて DOM に
  * 現れる局面依存の描画 — リーチ宣言バッジ(`StatusBadge variant="riichi"`)・鳴き副露
- * (`Melds` の `aria-label="副露"`)・和了/流局の `role="alert"` 通知と点差の `--danger` /
- * `--positive` 表示(`ScoreDisplay`)— を走査できていなかった。ここでは実対局エンジンを
+ * (`Melds` の `aria-label="副露"`)・和了/流局の `role="alert"` 通知と点差表示(`ScoreDisplay`
+ * の `--danger` / `--positive` デルタ)— を走査できていなかった。ここでは実対局エンジンを
  * **決定的 seed**(`/game?seed=…`)で固定し、各動的状態を実際に描画させた状態で axe を回す。
+ *
+ * 補足(点差表示の監査範囲): `ScoreDisplay` の色付き数値(`--danger`/`--positive`)は装飾扱いで
+ * `aria-hidden` のため axe の `color-contrast` 対象外であり、意味は色非依存の `sr-only` テキスト
+ * (「マイナス〇点」等)が担う(スペック5 5.2.1)。本シナリオは点差を伴う roundEnd 状態を実描画して
+ * `role="alert"` 通知・強調ボタン・周辺 DOM を axe で監査し、点差表示が色非依存で描かれることを
+ * `sr-only` テキストの存在で確認する(色そのもののコントラスト検証は axe の走査範囲に依存する)。
  *
  * 到達手段(設計判断): これらの状態は乱数依存で、通常の `createGame()` では現れる局面・タイミングが
  * 非決定的なため、E2E から安定して踏めない。そこで `GameProvider` が既に持つ決定的再現フック
@@ -195,7 +201,12 @@ test.describe("状態駆動 a11y 監査(リーチ/鳴き/和了アラート/ト�
   // 同一戦略で走査して選定。同じ seed + 同じ操作列は完全再現するため局面到達は決定的):
   // - RIICHI: 自家(起家=東家)が序盤の自手番で門前テンパイし、数手でリーチ宣言できる半荘。
   // - MELD  : 自家が序盤の他家打牌をポンして副露が卓に出る半荘。
-  // - RESULT: 素点移動のある和了で1局目が終わり、`role="alert"` と `--danger` 点差が出る半荘。
+  // - RESULT: 素点移動のある和了で1局目が終わり、`role="alert"` と点差表示が出る半荘。
+  //
+  // 保守メモ: これらの seed と各ドライバの探索上限(60/400/800)は engine/AI の打牌ロジックに依存する。
+  // engine を変更して目的局面へ到達しなくなった場合は、同一 DOM 戦略のオフライン走査で seed を
+  // 再選定すること(到達失敗は末尾の toBeVisible/属性アサーションで顕在化し、誤 pass にはならない)。
+  // SEED_MELD と SEED_RESULT が同一(1)なのは、ドライバ戦略が異なり別局面に至るため意図的。
   const SEED_RIICHI = 381;
   const SEED_MELD = 1;
   const SEED_RESULT = 1;
@@ -267,9 +278,13 @@ test.describe("状態駆動 a11y 監査(リーチ/鳴き/和了アラート/ト�
         if (await armButton.count()) {
           // リーチ宣言 = 「リーチ」で武装 → テンパイを保つ宣言牌を選ぶ。どの牌が有効かは engine が
           // 決めるため、武装し直しながら手牌を順に試す(無効牌は no-op で武装解除されるだけ)。
-          const optionCount = await handOptions().count();
-          for (let k = 0; k < optionCount; k++) {
-            if (await riichiBadge.count()) break;
+          // 成功打で手牌枚数が変わる(index がずれる)ため、option 数は毎回読み直して古い index の
+          // 空振り(flake)を避ける。バッジ出現(=宣言成立)で即座に打ち切る。
+          for (
+            let k = 0;
+            !(await riichiBadge.count()) && k < (await handOptions().count());
+            k++
+          ) {
             const arm = page.getByRole("button", {
               name: "リーチ",
               exact: true,
@@ -342,7 +357,7 @@ test.describe("状態駆動 a11y 監査(リーチ/鳴き/和了アラート/ト�
       await openScreen(page, gameScreen, theme, `?seed=${SEED_RESULT}`);
 
       const board = page.locator("[data-phase]").first();
-      // 自家は打牌(先頭牌)・ロン/鳴きは見送り(スルー)で進め、素点移動のある決着(--danger 点差)
+      // 自家は打牌(先頭牌)・ロン/鳴きは見送り(スルー)で進め、素点移動のある決着(マイナス点差)
       // を伴う局終了(roundEnd)まで到達させる。点差ゼロの流局が来たら次局へ進めて続行する。
       for (let step = 0; step < 800; step++) {
         const state = await boardState(board);
@@ -376,7 +391,8 @@ test.describe("状態駆動 a11y 監査(リーチ/鳴き/和了アラート/ト�
       // 局終了の決着通知が `role="alert"`(assertive ライブリージョン)へ入る。
       await expect(board).toHaveAttribute("data-phase", "roundEnd");
       await expect(page.getByRole("alert").first()).not.toHaveText("");
-      // 点差の `--danger`(マイナス点差)表示が色非依存のテキスト併記で描画されている。
+      // 点差の減少(`--danger`)が色のみに依存せず `sr-only` テキストで併記されている
+      // (スペック5 5.2.1)。色付き数値自体は `aria-hidden` の装飾のため、意味はこのテキストが担う。
       await expect(page.getByText(/マイナス/).first()).toBeAttached();
       await auditPage(page);
     });

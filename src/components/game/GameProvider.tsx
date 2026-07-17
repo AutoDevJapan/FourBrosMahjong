@@ -81,20 +81,26 @@ export interface GameContextValue {
 const GameContext = createContext<GameContextValue | null>(null);
 
 /**
- * 決定的再現用の乱数 seed を URL クエリ `?seed=<整数>` から読む(テスト専用フック)。
+ * 決定的再現用の乱数 seed を URL クエリ `?seed=<非負整数>` から読む(テスト専用フック)。
  *
  * E2E(状態駆動 a11y 監査など)が特定局面へ**決定的に**到達するための最小の状態注入口。
  * seed 付与時のみ `createGame({ seed })` で半荘を固定再現する。**本番挙動は変えない**:
+ * - **本番ビルドでは丸ごと無効**(`NODE_ENV === "production"` で早期 return)。エンドユーザーが
+ *   `?seed` で壁・配牌を決定的再現し「良い配牌を引くまで seed を探す」等の完全性侵害をできないよう、
+ *   本フックは本番バンドルから実質デッドコード化する(サンマ賭博テーマの完全性 / #159 レビュー指摘)。
+ *   E2E は dev サーバ(`pnpm dev` = development)で走るため引き続き機能する。
  * - クエリ無し(通常導線の `/game`)は `null` を返し、既定の乱数半荘(`createGame()`)のまま。
- * - サーバ(`window` 不在)・不正値・非有限値は `null`(既定へフォールバック)。
+ * - サーバ(`window` 不在)・非整数・負値は `null`(既定へフォールバック)。`?seed=1.5` の様な
+ *   誤読(`>>>0` による 1 への丸め)を避けるため「非負整数」に厳格化する。
  * seed は盤面の牌列(乱数)を固定するだけで、席割り・進行規則・UI の分岐は一切変えない。
  */
 function seedFromLocation(): number | null {
+  if (process.env.NODE_ENV === "production") return null;
   if (typeof window === "undefined") return null;
   const raw = new URLSearchParams(window.location.search).get("seed");
   if (raw === null || raw.trim() === "") return null;
   const seed = Number(raw);
-  return Number.isFinite(seed) ? seed : null;
+  return Number.isInteger(seed) && seed >= 0 ? seed : null;
 }
 
 export interface GameProviderProps {
