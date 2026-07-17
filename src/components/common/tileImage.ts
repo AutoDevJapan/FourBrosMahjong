@@ -83,9 +83,6 @@ const TILE_CATALOG: ReadonlySet<string> = new Set([
   "Chun",
 ]);
 
-/** 伏せ牌(内容非開示)の裏面素材。 */
-export const TILE_BACK_SRC = `${TILE_DIR}/Back.svg`;
-
 /**
  * 赤ドラ素材(色付き `*-Dora`)が実在する牌か = **5筒・5索のみ**。
  *
