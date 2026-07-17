@@ -127,7 +127,8 @@ test.describe("対局画面(/game)", () => {
         await page.getByRole("button", { name: "次の局へ" }).first().click();
         continue;
       }
-      if (state.pending === "humanRon") {
+      if (state.pending === "humanReact") {
+        // 鳴き/ロンは見送り(スルー)して進める。
         await page.getByRole("button", { name: "スルー" }).first().click();
         continue;
       }

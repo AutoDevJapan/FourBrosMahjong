@@ -66,8 +66,20 @@ export interface SeatedPlayerView {
   readonly hand?: readonly TileData[];
   /** 他家の伏せ手牌の枚数。自家では未使用。 */
   readonly handCount?: number;
+  /** 副露(ポン・カン)。晒した面子を全員分表示する。 */
+  readonly melds?: readonly MeldView[];
   /** 河(捨て牌)。着席3人分表示する。 */
   readonly discards: readonly TileData[];
+}
+
+/** 副露1組の表示データ(スペック4 `Meld`)。 */
+export interface MeldView {
+  /** 副露種別(ポン/カン)。 */
+  readonly type: "pon" | "kan";
+  /** 構成牌。暗槓は伏せ表示にするため `concealed` を併せて参照する。 */
+  readonly tiles: readonly TileData[];
+  /** 暗槓か(伏せ表示)。ポン・明槓は false。 */
+  readonly concealed: boolean;
 }
 
 /** 抜け番(休み)プレイヤーの表示データ(スペック4 `Round.benchWarmer`)。 */
@@ -110,6 +122,8 @@ export interface DoraData {
   readonly indicators: readonly TileData[];
   /** 裏ドラ表示牌。リーチ和了時のみ開示するため、対局中は枚数ぶん伏せて表示する。 */
   readonly uraIndicatorCount?: number;
+  /** 開示済みの裏ドラ表示牌(リーチ和了の局終了時のみ非空)。 */
+  readonly uraIndicators?: readonly TileData[];
 }
 
 /**

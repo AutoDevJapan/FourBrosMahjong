@@ -13,6 +13,7 @@ export interface DoraIndicatorProps {
 }
 
 export default function DoraIndicator({ dora }: DoraIndicatorProps) {
+  const ura = dora.uraIndicators ?? [];
   const uraCount = Math.max(0, Math.floor(dora.uraIndicatorCount ?? 0));
 
   return (
@@ -26,13 +27,23 @@ export default function DoraIndicator({ dora }: DoraIndicatorProps) {
             <Tile tile={tile} className="h-9 w-7 sm:h-10 sm:w-8" />
           </li>
         ))}
-        {Array.from({ length: uraCount }, (_, i) => (
-          // 裏ドラは対局中は伏せる(結果確定時に開示)。
-          <li key={`ura-${i}`}>
-            <Tile tile={null} className="h-9 w-7 sm:h-10 sm:w-8" />
-          </li>
-        ))}
+        {ura.length > 0
+          ? // リーチ和了時のみ裏ドラを開示する。
+            ura.map((tile, i) => (
+              <li key={`ura-open-${tile.suit}-${tile.rank}-${i}`}>
+                <Tile tile={tile} className="h-9 w-7 sm:h-10 sm:w-8" />
+              </li>
+            ))
+          : Array.from({ length: uraCount }, (_, i) => (
+              // 裏ドラは対局中は伏せる(リーチ和了時に開示)。
+              <li key={`ura-${i}`}>
+                <Tile tile={null} className="h-9 w-7 sm:h-10 sm:w-8" />
+              </li>
+            ))}
       </ul>
+      {ura.length > 0 ? (
+        <p className="text-[0.65rem] text-tile-face opacity-80">裏ドラ開示</p>
+      ) : null}
     </section>
   );
 }

@@ -26,7 +26,7 @@ function finishedGame(seed = 2024): EngineState {
     if (s.pending?.kind === "humanDiscard") {
       const drawn = s.hand?.drawn;
       s = drawn ? discard(s, drawn) : s;
-    } else if (s.pending?.kind === "humanRon") {
+    } else if (s.pending?.kind === "humanReact") {
       s = passRon(s);
     }
   }
