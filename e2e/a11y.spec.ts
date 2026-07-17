@@ -48,6 +48,21 @@ const SCREENS: readonly Screen[] = [
 
 const THEMES: readonly Theme[] = ["ライト", "OSダーク", "手動ダーク"];
 
+/** `AxeBuilder.analyze()` が返す違反配列の型(失敗メッセージ整形の引数用)。 */
+type AxeViolations = Awaited<ReturnType<AxeBuilder["analyze"]>>["violations"];
+
+/** axe 違反を rule id・impact・該当要素付きの読みやすい文字列へ整形する(失敗時の原因追跡用)。 */
+function formatViolations(violations: AxeViolations): string {
+  return violations
+    .map(
+      (v) =>
+        `${v.id}(${v.impact}): ${v.help} [${v.nodes
+          .map((n) => n.target.join(" "))
+          .join(", ")}]`,
+    )
+    .join("\n");
+}
+
 /**
  * 指定テーマで画面を開く。
  * - OSダーク: `prefers-color-scheme: dark` をエミュレート(未選択=OS 追従の経路)。
@@ -99,17 +114,57 @@ test.describe("自動 a11y 監査(axe-core)", () => {
         // 違反があれば rule id と該当要素をメッセージに載せ、原因追跡を容易にする。
         expect(
           results.violations,
-          results.violations
-            .map(
-              (v) =>
-                `${v.id}(${v.impact}): ${v.help} [${v.nodes
-                  .map((n) => n.target.join(" "))
-                  .join(", ")}]`,
-            )
-            .join("\n"),
+          formatViolations(results.violations),
         ).toEqual([]);
       });
     }
+  }
+});
+
+/**
+ * 状態駆動 a11y 監査(#148 項目3: カバレッジギャップの補完)。
+ *
+ * 既定の自動監査は初期局面・幅 1280px のみを走査するため、狭幅(卓の描画幅 < 360px)で現れる
+ * 「自分手番フォーカス表示」のコンパクト帯レイアウトと、そこから開く全体盤面モーダル
+ * (`role="dialog"`)の展開状態が未走査だった。ここでは狭幅ビューポートで /game を開き、
+ * コンパクト帯そのものとモーダル展開状態を axe で監査する。配色トークンのライト/ダーク双方を
+ * 突くため、ライト・手動ダークの 2 テーマで実行する。
+ */
+test.describe("状態駆動 a11y 監査(狭幅・モーダル / #148)", () => {
+  // 卓の描画幅 < 360px(段階②)を確実に踏むための狭幅ビューポート。
+  const NARROW = { width: 320, height: 800 } as const;
+  const gameScreen = SCREENS.find((s) => s.path === "/game");
+  if (gameScreen === undefined) throw new Error("SCREENS に /game がない");
+
+  for (const theme of ["ライト", "手動ダーク"] as const) {
+    test(`/game 狭幅のコンパクト帯と全体盤面モーダルは WCAG 2.1 A/AA 違反ゼロ [${theme}]`, async ({
+      page,
+    }) => {
+      await page.setViewportSize(NARROW);
+      await openScreen(page, gameScreen, theme);
+
+      // 段階②に入ると「自分手番フォーカス表示」帯と「全体盤面」ボタンが現れる。
+      const openButton = page.getByRole("button", { name: "全体盤面" });
+      await expect(openButton).toBeVisible();
+
+      // (1) コンパクト帯レイアウト(モーダル閉)を監査する。
+      const compact = await new AxeBuilder({ page })
+        .withTags([...WCAG_TAGS])
+        .analyze();
+      expect(compact.violations, formatViolations(compact.violations)).toEqual(
+        [],
+      );
+
+      // (2) 全体盤面モーダル(role="dialog")の展開状態を監査する。
+      await openButton.click();
+      await expect(
+        page.getByRole("dialog", { name: "全体盤面" }),
+      ).toBeVisible();
+      const modal = await new AxeBuilder({ page })
+        .withTags([...WCAG_TAGS])
+        .analyze();
+      expect(modal.violations, formatViolations(modal.violations)).toEqual([]);
+    });
   }
 });
 

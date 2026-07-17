@@ -103,3 +103,20 @@ describe("StatusBadge の felt 上コントラスト(#154 / WCAG 1.4.3)", () => 
     expect(contrast(darkFace, darkFelt)).toBeGreaterThanOrEqual(3);
   });
 });
+
+describe("牌枠 --tile-border の非テキストコントラスト(#148 項目2 / WCAG 1.4.11)", () => {
+  // 白地に直接載る手牌の枠は、ページ背景に対し非テキスト境界 3:1(スペック5 5.2.4)が必要。
+  // フラット 1 色では白地(暗い枠が有利)と緑フェルト(明るい枠が有利)を同時に満たせないため、
+  // 白地側を基準に固定する。フェルト上の輪郭は牌面 --tile-face/伏せ牌の内側環が担う(globals.css 参照)。
+  it("ライトテーマで白系ページ背景に対し 3:1 以上", () => {
+    const lightBorder = token(":root", "--tile-border");
+    const lightBg = token(":root", "--background");
+    expect(contrast(lightBorder, lightBg)).toBeGreaterThanOrEqual(3);
+  });
+
+  it("ダークテーマで暗いページ背景に対し 3:1 以上(退行防止)", () => {
+    const darkBorder = token(':root[data-theme="dark"]', "--tile-border");
+    const darkBg = token(':root[data-theme="dark"]', "--background");
+    expect(contrast(darkBorder, darkBg)).toBeGreaterThanOrEqual(3);
+  });
+});
