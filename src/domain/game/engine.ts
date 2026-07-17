@@ -9,7 +9,7 @@
  * UI 層(`src/components/game/gameView.ts`)が本モジュールの公開状態を読んで行う(責務分離)。
  *
  * ## 対応済み(#97)
- * - **リーチ**: 門前テンパイで宣言(1,000点供託)、リーチ後は自動ツモ切り、フリテンリーチはツモのみ、
+ * - **リーチ**: 門前テンパイで宣言(1,000点供託)、リーチ後は原則自動ツモ切り、フリテンリーチはツモのみ、
  *   **裏ドラ**開示(リーチ和了時)、**一発**(リーチ後1巡以内・鳴きを挟むと消滅)、ダブルリーチ。
  * - **鳴き(自家のみ)**: ポン・明槓(他家打牌)・暗槓・加槓(自家ツモ番)。嶺上ツモ・鳴き喰い下がりは
  *   既存 hand が対応。鳴きは一発を消滅させる。
@@ -25,8 +25,9 @@
  *   その加槓牌でロンできる他家がいれば加槓は不成立(横取り)= 槍槓ロン(`chankan` 1翻)として精算する。
  *   `declareKakan` は自家(p0)専用のため応答者は他家(AI)。国士無双の暗槓槍槓など派生規則は SSOT に
  *   明記がなく未対応(Q17 の派生・要ユーザー承認)。
- * - リーチ後の暗槓も不可。SSOT に可否・条件の明記がなく一意に定まらないため未確定化
- *   (Q18 / #105 フォローアップ・要ユーザー承認)。
+ * - リーチ後の暗槓は**条件付きで許可**(Q18 / #116・ユーザー承認済み・標準慣行)。ツモ牌での暗槓に限り、
+ *   待ち・面子構成が変わらない(送り槓でない)場合のみ許可する。七対子テンパイでの暗槓は不可
+ *   (`canAnkanAfterRiichi` が判定)。加槓に対する槍槓横取りは Q17 / #115 の範囲。
  * - 北抜き(ガリ)は**自動**で処理する(手動選択は未対応)。
  * - パオ(責任払い)は**自家の鳴きで確定した大三元/大四喜/四槓子**に対応(#99)。ポン/大明槓で
  *   パオ役満が確定した瞬間に責任者(打牌者)を記録し、和了時 `resolveWinPayment` で責任払い
@@ -47,11 +48,11 @@ import {
 } from "@/domain/dora/doraSet";
 import { countDoraHan } from "@/domain/dora/han";
 import { chooseDiscard } from "@/domain/game/ai";
-import type { MeldInput } from "@/domain/hand/decompose";
+import { type MeldInput, decomposeAll } from "@/domain/hand/decompose";
 import { canRon } from "@/domain/hand/furiten";
 import { isKuikaeForbidden } from "@/domain/hand/kuikae";
 import { type Meld, isConcealedHand } from "@/domain/hand/meld";
-import { isTenpai } from "@/domain/hand/tenpai";
+import { isTenpai, waitingTiles } from "@/domain/hand/tenpai";
 import { sameKind, tileKey } from "@/domain/hand/tile-identity";
 import { type WinAnalysis, analyzeWin } from "@/domain/hand/win";
 import { type Rng, createSeededRng } from "@/domain/random/rng";
@@ -547,17 +548,19 @@ function pump(state: EngineState): EngineState {
 
     if (isHuman) {
       if (hand.riichi[seat]) {
-        // リーチ後は自動ツモ切り(ツモ和了のみ選択の余地)。
+        // リーチ後は自動ツモ切りが基本(ツモ和了のみ選択の余地)。ただし送り槓に
+        // ならない暗槓は許可する(標準慣行 / Q18・#116)。
         const tsumo = analyzeTsumo(s, seat, hand.drawn, haitei);
-        if (tsumo !== null) {
+        const ankanTiles = riichiAnkanTiles(hand, seat);
+        if (tsumo !== null || ankanTiles.length > 0) {
           return {
             ...s,
             pending: {
               kind: "humanDiscard",
-              canTsumo: true,
+              canTsumo: tsumo !== null,
               canRiichi: false,
               riichiTiles: [],
-              ankanTiles: [],
+              ankanTiles,
               kakanTiles: [],
               forbiddenDiscards: [],
               locked: true,
@@ -619,6 +622,80 @@ function ankanCandidates(pool: readonly Tile[]): Tile[] {
     else counts.set(k, { tile: t, n: 1 });
   }
   return [...counts.values()].filter((e) => e.n >= 4).map((e) => e.tile);
+}
+
+/** 2つの牌集合が「種別(赤フラグ無視)」として同一かを判定する。 */
+function sameKindSet(a: readonly Tile[], b: readonly Tile[]): boolean {
+  const ka = new Set(a.map((t) => tileKey(t)));
+  const kb = new Set(b.map((t) => tileKey(t)));
+  if (ka.size !== kb.size) return false;
+  for (const k of ka) if (!kb.has(k)) return false;
+  return true;
+}
+
+/**
+ * リーチ後にツモ牌 `drawn` で暗槓できるか(標準慣行 / Q18・#116)。純関数・決定的。
+ *
+ * リーチは門前が前提のため、暗槓できるのは「手牌に暗刻(同種3枚)があり、その4枚目を
+ * **ツモした**」場合に限られる。加えて送り槓(待ち・受け・面子構成が変わる槓)を禁じるため、
+ * 次の2条件を**すべて**満たすときのみ許可する:
+ *  ① 待ち不変: 暗槓の前後で和了牌(種別)の集合が変わらない。
+ *  ② 面子構成の固定: 全ての待ちの全和了形で、その3枚が門前の**暗刻として確定**している
+ *     (順子/雀頭に使い得ない・七対子/国士でしか和了れない待ちが混じらない)。
+ *
+ * これにより「七対子テンパイでの暗槓」「送り槓」はいずれも不可となる。
+ *
+ * @param concealed13 リーチ確定形の門前手牌13枚(ツモ牌を含まない)。
+ * @param drawn       今ツモった牌(暗槓に使う4枚目)。
+ */
+export function canAnkanAfterRiichi(
+  concealed13: readonly Tile[],
+  drawn: Tile,
+): boolean {
+  // ツモ牌と同種が手牌にちょうど3枚 → ツモで4枚目(暗刻+ツモ)。手牌内に既に4枚ある
+  // 状態や、ツモ牌以外での槓は標準慣行として不可(ツモ牌での暗槓に限る)。
+  const xTiles = concealed13.filter((t) => sameKind(t, drawn));
+  if (xTiles.length !== 3) return false;
+
+  const before = waitingTiles(concealed13, []);
+  if (before.length === 0) return false; // 非テンパイ(リーチ中は通常起きない)。
+  // ツモ牌自身が待ち = 暗刻が確定していない(和了牌を槓に回す)→ 送り槓として不可。
+  if (before.some((w) => sameKind(w, drawn))) return false;
+
+  // ① 待ち不変チェック: 3枚を暗槓子へ移した「10枚+槓」の待ちと比較する。
+  const withoutX = concealed13.filter((t) => !sameKind(t, drawn));
+  const kanMeld: MeldInput = {
+    tiles: [...xTiles, drawn],
+    isKan: true,
+    concealed: true,
+  };
+  if (!sameKindSet(before, waitingTiles(withoutX, [kanMeld]))) return false;
+
+  // ② 面子構成の固定チェック: 全ての待ちの全和了形で drawn が門前暗刻であること。
+  for (const win of before) {
+    for (const form of decomposeAll([...concealed13, win], [])) {
+      if (form.kind !== "standard") return false; // 七対子/国士では暗刻でない。
+      const isAnkou = form.melds.some(
+        (m) =>
+          m.kind === "triplet" &&
+          m.concealed &&
+          m.suit === drawn.suit &&
+          m.startRank === drawn.rank,
+      );
+      if (!isAnkou) return false;
+    }
+  }
+  return true;
+}
+
+/**
+ * リーチ後にツモ牌で暗槓できる牌を列挙する(0 or 1 枚)。
+ * 判定は {@link canAnkanAfterRiichi}(標準慣行 / Q18)。
+ */
+function riichiAnkanTiles(hand: HandState, seat: SeatKey): Tile[] {
+  const drawn = hand.drawn;
+  if (drawn === null) return [];
+  return canAnkanAfterRiichi(hand.hands[seat], drawn) ? [drawn] : [];
 }
 
 /** 既存ポンに4枚目が手にある牌(加槓候補)を列挙する。 */
@@ -1335,6 +1412,9 @@ export function declareAnkan(state: EngineState, tile: Tile): EngineState {
   clearAllIppatsu(hand);
   hand.callsMade = true;
   drawKanReplacement(hand, seat); // 嶺上ツモ
+  // リーチ中の暗槓(Q18・#116)は打牌の自由が無いため、pump に委ねて嶺上ツモ和了 /
+  // 連続暗槓 / 自動ツモ切りを解決する(通常の打牌待ちに戻さない)。
+  if (hand.riichi[seat]) return pump({ ...state, pending: null });
   return { ...state, pending: buildHumanPending(state, seat) };
 }
 
