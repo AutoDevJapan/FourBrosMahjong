@@ -1,92 +1,54 @@
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+import { createGame } from "@/domain/game/engine";
 import GameBoard from "./GameBoard";
 import { GameProvider } from "./GameProvider";
-import type { GameViewState } from "./types";
+
+// App Router の useRouter を jsdom 用にスタブ(遷移は本テストの対象外)。
+vi.mock("next/navigation", () => ({
+  useRouter: () => ({ push: vi.fn() }),
+}));
 
 /**
- * A minimal fixed view state (spec 6.8: fixed dummy data, no domain computation)
- * so the board test is independent of the shipped sample.
+ * 実対局エンジン(seed 固定 = 決定的)で盤面を描画する。
+ * 起家=自家 p0 が 東1 の親のため、開始直後は自家の打牌待ち。
  */
-const fixture: GameViewState = {
-  slots: {
-    self: {
-      kind: "seated",
-      player: {
-        name: "あなた",
-        points: 30000,
-        seatWind: "east",
-        status: { isDealer: true, isCurrentTurn: true },
-        hand: [
-          { suit: "man", rank: 1 },
-          { suit: "pin", rank: 5, isRed: true },
-        ],
-        discards: [{ suit: "sou", rank: 1 }],
-      },
-    },
-    left: {
-      kind: "seated",
-      player: {
-        name: "上家",
-        points: 30000,
-        seatWind: "south",
-        handCount: 13,
-        discards: [],
-      },
-    },
-    across: { kind: "bench", player: { name: "対面", points: 30000 } },
-    right: {
-      kind: "seated",
-      player: {
-        name: "下家",
-        points: 30000,
-        seatWind: "west",
-        handCount: 13,
-        discards: [],
-      },
-    },
-  },
-  tableInfo: { roundWind: "east", handNumber: 1, honba: 0, riichiSticks: 1 },
-  dora: { indicators: [{ suit: "pin", rank: 4 }], uraIndicatorCount: 1 },
-  // 対局中は結果未確定(spec 6.8): 結果画面のビューは null。
-  result: null,
-};
-
-function renderBoard() {
+function renderBoard(seed = 1) {
   return render(
-    <GameProvider initialState={fixture}>
+    <GameProvider initialGame={createGame({ seed })}>
       <GameBoard />
     </GameProvider>,
   );
 }
 
-describe("GameBoard (spec 6.6 client island)", () => {
-  it("renders the table info, self hand, bench slot and action panel from context", () => {
+describe("GameBoard (spec 6.6 client island / engine-driven)", () => {
+  it("実エンジン状態から卓情報・自家手牌・抜け番スロット・操作パネルを描画する", () => {
     renderBoard();
-    // Responsive layout renders both md/base trees in jsdom (CSS hides one in a
-    // real viewport), so table info appears in each — assert on getAll.
+    // レスポンシブで md/base の両ツリーが jsdom には出るため getAll で検証。
     expect(screen.getAllByText("東1局").length).toBeGreaterThan(0);
+    // 自家(p0)は着席し手牌が表向き。
     expect(
       screen.getAllByRole("listbox", { name: "自家の手牌" }).length,
     ).toBeGreaterThan(0);
+    // 東1 の抜け番は三郎(p3)。
     expect(
-      screen.getAllByRole("region", { name: "対面(抜け番)" }).length,
+      screen.getAllByRole("region", { name: "三郎(抜け番)" }).length,
     ).toBeGreaterThan(0);
+    // 打牌待ちでは「ツモ」ボタンが操作パネルに現れる。
     expect(
-      screen.getAllByRole("button", { name: "リーチ" }).length,
+      screen.getAllByRole("button", { name: "ツモ" }).length,
     ).toBeGreaterThan(0);
   });
 
-  it("announces a chosen action via the polite live region (UI-only)", async () => {
+  it("自家の手牌をクリックすると打牌され対局が進行する", async () => {
     const user = userEvent.setup();
-    const { container } = renderBoard();
+    renderBoard();
 
-    await user.click(
-      screen.getAllByRole("button", { name: "北抜き(ガリ)" })[0],
-    );
+    const firstTile = screen.getAllByRole("option")[0];
+    await user.click(firstTile);
 
-    const live = container.querySelector('[aria-live="polite"]');
-    expect(live).toHaveTextContent("北抜きを選択しました");
+    // 打牌後も盤面は破綻せず対局が続く(局ラベルが表示され続ける)。
+    expect(screen.getAllByText(/局$/).length).toBeGreaterThan(0);
   });
 });

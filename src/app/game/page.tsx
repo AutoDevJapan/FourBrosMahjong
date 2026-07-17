@@ -9,7 +9,7 @@ import GameBoard from "@/components/game/GameBoard";
  * クライアントアイランド `<GameBoard>` に切り出す。対局のビュー状態は親レイアウトの
  * `GameProvider` が保持し、`<GameBoard>` がコンテキストから読み取る(スペック6 6.5)。
  *
- * 表示している内容は骨組み確認用の固定サンプルであり、ドメイン計算の結果ではない(スペック6 6.8)。
+ * 卓の表示内容は `GameProvider` が保持する実対局エンジンの状態から写像される(スペック6 6.8)。
  */
 export const metadata: Metadata = {
   title: "対局",
@@ -27,10 +27,6 @@ export default function GamePage() {
           ロビーへ戻る
         </Link>
       </header>
-
-      <p className="text-xs text-foreground/60">
-        ※ 現在表示中の卓は骨組み確認用のサンプルです(得点・席・ドラ等は固定値)。
-      </p>
 
       <GameBoard />
     </div>
