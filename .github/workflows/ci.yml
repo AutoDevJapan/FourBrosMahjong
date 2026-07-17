@@ -1,10 +1,13 @@
 name: CI
 
+# docs/デプロイ環境運用.md の昇格フロー (feature → dev → stg → main) の全段をガードするため、
+# 3 つの永続ブランチ (main / dev / stg) を宛先とする PR とそれらへの push で CI を実行する。
+# dev / stg に活動がない間はトリガが発火しないため、Actions 実行時間 (課金) は増えない。
 on:
   pull_request:
-    branches: [main]
+    branches: [main, dev, stg]
   push:
-    branches: [main]
+    branches: [main, dev, stg]
 
 # 同一ブランチで新しい push があれば古い実行をキャンセルして無駄を省く
 concurrency:
