@@ -348,10 +348,12 @@ export interface DiscardContext {
 /** 打牌1候補の評価。優先度順に比較する。 */
 interface Candidate {
   readonly tile: Tile;
+  /** この牌を切った後の残り13枚(受け入れ算出に再利用)。 */
+  readonly remaining13: readonly Tile[];
   /** 打牌後の向聴数(小さいほど良い)。 */
   readonly shantenAfter: number;
-  /** 打牌後の受け入れ延べ枚数(大きいほど良い)。 */
-  readonly ukeireCopies: number;
+  /** 打牌後の受け入れ延べ枚数(大きいほど良い)。未算出は -1。 */
+  ukeireCopies: number;
   /** 温存価値(赤5=2・ドラ=1・素牌=0)。小さいほど切ってよい。 */
   readonly value: number;
   /** 安全度(現物にしている他家の数。大きいほど放銃しにくい)。 */
@@ -420,10 +422,10 @@ export function chooseDiscard(ctx: DiscardContext): Tile {
     seen.add(idKey);
 
     const remaining13 = [...tiles.slice(0, i), ...tiles.slice(i + 1)];
-    const shantenAfter = shanten(remaining13);
     candidates.push({
       tile,
-      shantenAfter,
+      remaining13,
+      shantenAfter: shanten(remaining13),
       // 受け入れは後段(向聴最小の候補)でのみ算出する(計算量削減)。
       ukeireCopies: -1,
       value: valueOf(tile, doraKinds),
@@ -437,16 +439,11 @@ export function chooseDiscard(ctx: DiscardContext): Tile {
   const best = candidates.filter((c) => c.shantenAfter === minShanten);
 
   // 2. 受け入れは絞り込んだ候補にだけ算出(複数残るときのみ意味がある)。
-  const scored: Candidate[] =
-    best.length === 1
-      ? best
-      : best.map((c) => {
-          const i = tiles.indexOf(c.tile);
-          const remaining13 = [...tiles.slice(0, i), ...tiles.slice(i + 1)];
-          return { ...c, ukeireCopies: ukeire(remaining13).copies };
-        });
+  if (best.length > 1) {
+    for (const c of best) c.ukeireCopies = ukeire(c.remaining13).copies;
+  }
 
-  scored.sort((a, b) => {
+  best.sort((a, b) => {
     // 受け入れ最大(切って残る受けが広い方)。
     if (a.ukeireCopies !== b.ukeireCopies)
       return b.ukeireCopies - a.ukeireCopies;
@@ -460,5 +457,5 @@ export function chooseDiscard(ctx: DiscardContext): Tile {
     return tileKey(a.tile).localeCompare(tileKey(b.tile));
   });
 
-  return scored[0].tile;
+  return best[0].tile;
 }
