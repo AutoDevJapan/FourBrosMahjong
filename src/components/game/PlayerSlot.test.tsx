@@ -51,5 +51,24 @@ describe("PlayerSlot (seated / bench switch, spec 6.4.1)", () => {
       screen.getByRole("region", { name: "対面(抜け番)" }),
     ).toBeInTheDocument();
     expect(screen.getByText("抜け番")).toBeInTheDocument();
+    // フルサイズ(非 compact)では「この局は休み」の補足文を出す。
+    expect(screen.getByText("この局は休み")).toBeInTheDocument();
+  });
+
+  it("collapses the bench slot to a compact band matching seated opponents (issue #150)", () => {
+    const content: SlotContent = {
+      kind: "bench",
+      player: { name: "対面", points: 32000 },
+    };
+    render(<PlayerSlot position="across" content={content} compact />);
+    // 名前・持ち点・抜け番バッジは残す。
+    expect(
+      screen.getByRole("region", { name: "対面(抜け番)" }),
+    ).toBeInTheDocument();
+    expect(screen.getByText("抜け番")).toBeInTheDocument();
+    expect(screen.getByText("対面")).toBeInTheDocument();
+    expect(screen.getByText("32,000")).toBeInTheDocument();
+    // コンパクト帯では「この局は休み」の補足文を省き、着席他家と密度を揃える。
+    expect(screen.queryByText("この局は休み")).not.toBeInTheDocument();
   });
 });
