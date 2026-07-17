@@ -23,8 +23,11 @@
  *   **リーチ・鳴きはしない**。
  * - 加槓に対する槍槓(チャンカン)は**対応済み**(Q17 = 槍槓あり・ユーザー承認 / #115)。加槓宣言時、
  *   その加槓牌でロンできる他家がいれば加槓は不成立(横取り)= 槍槓ロン(`chankan` 1翻)として精算する。
- *   `declareKakan` は自家(p0)専用のため応答者は他家(AI)。国士無双の暗槓槍槓など派生規則は SSOT に
- *   明記がなく未対応(Q17 の派生・要ユーザー承認)。
+ *   `declareKakan` は自家(p0)専用のため応答者は他家(AI)。
+ * - 国士無双の暗槓槍槓は**対応済み**(Q17 フォローアップ・#126・ユーザー承認・国士のみ暗槓槍槓可)。
+ *   国士無双テンパイの他家に限り、暗槓(4枚目を暗槓した瞬間)に対しても槍槓ロンを認める。
+ *   応答者の和了形が国士無双(`thirteenOrphans`)の場合のみ横取り成立とし、それ以外の役では
+ *   暗槓に対する槍槓は不可(暗槓成立)。`declareAnkan` の槍槓分岐で判定する。
  * - リーチ後の暗槓は**条件付きで許可**(Q18 / #116・ユーザー承認済み・標準慣行)。ツモ牌での暗槓に限り、
  *   待ち・面子構成が変わらない(送り槓でない)場合のみ許可する。七対子テンパイでの暗槓は不可
  *   (`canAnkanAfterRiichi` が判定)。加槓に対する槍槓横取りは Q17 / #115 の範囲。
@@ -1439,6 +1442,30 @@ export function declareAnkan(state: EngineState, tile: Tile): EngineState {
   const pool = [...hand.hands[seat], hand.drawn];
   const { taken, rest } = takeKind(pool, tile, 4);
   if (taken.length < 4) return state;
+
+  // 国士無双の暗槓槍槓(Q17 フォローアップ・#126・ユーザー承認・国士のみ暗槓槍槓可)。
+  // 通常の槍槓は加槓のみ対象だが(`declareKakan`)、国士無双テンパイの他家に限り、
+  // 暗槓の4枚目に対しても槍槓ロンを認める。応答者の和了形が国士無双(`thirteenOrphans`)で
+  // ある場合のみ横取り成立とし、それ以外の役(標準/七対子)では暗槓に対する槍槓は不可
+  // (= 暗槓成立・従来どおり)。頭ハネ・フリテンは通常ロンと同じく `ronOrder` / `analyzeRon`
+  // を再利用する。`declareAnkan` は自家(p0)専用のため応答者は必ず他家(AI)。
+  const ankanTile = taken[0];
+  for (const candidate of ronOrder(seat)) {
+    const chankanWin = analyzeRon(state, candidate, ankanTile, false, true);
+    if (chankanWin === null) continue;
+    if (chankanWin.form.kind !== "thirteenOrphans") continue; // 国士以外は暗槓槍槓不可
+    return settleWin(
+      { ...state, pending: null },
+      {
+        winnerSeat: candidate,
+        winType: "ron",
+        winningTile: ankanTile,
+        analysis: chankanWin,
+        discarderSeat: seat,
+        haitei: false,
+      },
+    );
+  }
 
   hand.hands[seat] = rest;
   hand.drawn = null;
