@@ -1046,8 +1046,12 @@ export function finishRound(
   const tobi = ALL_IDS.some((id) => state.points[id] < 0);
   const dealerId = dealerOf(round);
   const dealerPoints = state.points[dealerId];
-  const maxPoints = Math.max(...ALL_IDS.map((id) => state.points[id]));
-  const dealerIsTop = dealerPoints === maxPoints;
+  // 親トップやめの「トップ」= 抜け番を含む4兄弟全員に対する**単独最高**(Q19 確定・ユーザー承認)。
+  // 抜け番(その局は対局外の第4者)の持ち点も比較対象に含め、同点最高は「単独トップ」でないため
+  // 不成立(継続)とする。厳密比較: 親が自分以外の全員より**真に**高いときのみ true。
+  const dealerIsTop = ALL_IDS.every(
+    (id) => id === dealerId || state.points[id] < dealerPoints,
+  );
 
   let gameEnds = false;
   if (tobi) {

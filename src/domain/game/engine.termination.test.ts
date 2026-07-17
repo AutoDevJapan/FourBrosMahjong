@@ -14,10 +14,10 @@
  * `finishRound` は本来 `settleWin`/`settleDraw` からのみ呼ばれる内部遷移だが、各分岐を
  * 直接構成できるよう engine.ts で `export` 済み(テスト容易性のための最小公開)。
  *
- * `dealerIsTop = dealerPoints === maxPoints`(4人=抜け番含む最大点との同点で親をトップ扱い)の
- * 同点裁定は SSOT(`docs/四兄弟麻雀ルール.md` §5「オーラスで親が3万点を超えてトップ」)からは
- * 一意に定まらない(Q19 / 質問リスト.md)。ここでは**現状実装の挙動を特性化(characterization)**し、
- * 確定回答が出たら本ファイルの期待値を更新する(TODO 参照)。
+ * 親トップやめの「トップ」= **抜け番を含む4兄弟全員に対する単独最高**(かつ >30,000)で判定する
+ * (Q19 確定・ユーザー承認 2026-07-17 / issue #122)。SSOT(`docs/四兄弟麻雀ルール.md` §5
+ * 「オーラスで親が3万点を超えてトップ」)の「トップ」を、抜け番の持ち点も含めた4人全体での
+ * **単独最高**と確定した(同点最高は「単独トップ」でないため終了せず継続)。
  */
 
 import { describe, expect, it } from "vitest";
@@ -300,36 +300,53 @@ describe("engine 終了条件(spec 2.8 / #114)", () => {
     });
   });
 
-  describe("dealerIsTop の同点裁定(characterization / Q19)", () => {
-    // TODO(Q19): 「トップ」の同点裁定は SSOT 未確定。現状 `dealerPoints === maxPoints` で
-    // 親を「トップ」とみなす(タイ=トップ扱い)。抜け番(対局外の第4者)も最大点判定に含む。
-    // 確定回答が出たら以下の期待値を見直す。
+  describe("dealerIsTop の同点/抜け番裁定(Q19 確定・抜け番含む全員で厳密比較)", () => {
+    // Q19 確定(ユーザー承認 2026-07-17 / #122): 「トップ」= 抜け番を含む4兄弟全員に対する
+    // **単独最高**(かつ >30,000)。同点最高は「単独トップ」でないため終了せず継続する。
+    // 抜け番(対局外の第4者)の持ち点も比較対象に含める。
 
-    it("南4・親と抜け番が同点最高(親>30000) → 現状は親トップやめで gameEnd", () => {
+    it("南4・親が抜け番含む全員に対し単独最高(親>30000) → 親トップやめで gameEnd", () => {
+      const round = roundAt("south", 4);
+      const dealer = dealerOf(round); // p3
+      const bench = benchWarmerOf(round); // p2(この局は対局外)
+      const points = even(10000);
+      points[dealer] = 40000; // 親が単独最高(抜け番含む全員より真に高い)
+      points[bench] = 39000; // 抜け番は親より低い
+      const s = finishRound(
+        stateFor(round, points),
+        conclusion("dealerContinues", false),
+      );
+      expect(s.phase).toBe("gameEnd");
+      expect(s.nextRoundState).toBeNull();
+    });
+
+    it("南4・親と抜け番が同点最高(親>30000・単独トップでない) → 継続", () => {
       const round = roundAt("south", 4);
       const dealer = dealerOf(round); // p3
       const bench = benchWarmerOf(round); // p2(この局は対局外)
       const points = even(10000);
       points[dealer] = 40000;
-      points[bench] = 40000; // 抜け番が親と同点最高
+      points[bench] = 40000; // 抜け番が親と同点最高 → 単独トップでない → 継続
       const s = finishRound(
         stateFor(round, points),
         conclusion("dealerContinues", false),
       );
-      expect(s.phase).toBe("gameEnd");
+      expect(s.phase).toBe("roundEnd");
+      expect(s.nextRoundState).not.toBeNull();
     });
 
-    it("南4・親と着席他家が同点最高(親>30000) → 現状は親トップやめで gameEnd", () => {
+    it("南4・親と着席他家が同点最高(親>30000・単独トップでない) → 継続", () => {
       const round = roundAt("south", 4);
       const dealer = dealerOf(round); // p3
       const points = even(10000);
       points[dealer] = 40000;
-      points.p0 = 40000; // 着席他家(south)が親と同点最高
+      points.p0 = 40000; // 着席他家(south)が親と同点最高 → 単独トップでない → 継続
       const s = finishRound(
         stateFor(round, points),
         conclusion("dealerContinues", false),
       );
-      expect(s.phase).toBe("gameEnd");
+      expect(s.phase).toBe("roundEnd");
+      expect(s.nextRoundState).not.toBeNull();
     });
 
     it("南4・抜け番が親より真に高い(親はトップでない) → 継続", () => {
