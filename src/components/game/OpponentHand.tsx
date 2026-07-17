@@ -21,12 +21,7 @@ export default function OpponentHand({ count }: OpponentHandProps) {
       aria-label={`手牌 ${safeCount}枚(伏せ)`}
     >
       {Array.from({ length: safeCount }, (_, i) => (
-        <Tile
-          key={i}
-          tile={null}
-          decorative
-          className="h-8 w-6 sm:h-9 sm:w-7"
-        />
+        <Tile key={i} tile={null} decorative size="river" />
       ))}
     </div>
   );

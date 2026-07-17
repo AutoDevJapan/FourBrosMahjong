@@ -20,24 +20,37 @@ export interface TileProps {
    * `Hand` のように外側の対話要素(`role="option"` 等)が `aria-label` を担うケースで使う。
    */
   decorative?: boolean;
+  /**
+   * 表示サイズ(スペック5 5.3.2)。牌寸法は `globals.css` の基準ユニット `--u` の倍数で定義され、
+   * クロス卓(`.board-cross`)内では `--u` がコンテナ幅連動の `clamp()` に差し替わって流体縮小する。
+   * - `hand`: 自家手牌(既定) / `river`: 河・伏せ牌・副露 / `dora`: ドラ表示。
+   */
+  size?: "hand" | "river" | "dora";
   /** 追加クラス(レイアウト調整用)。 */
   className?: string;
 }
 
+const SIZE_CLASS: Record<NonNullable<TileProps["size"]>, string> = {
+  hand: "game-tile",
+  river: "game-tile--river",
+  dora: "game-tile--dora",
+};
+
 const BASE_CLASS =
-  "inline-flex select-none items-center justify-center rounded-md border font-semibold leading-none " +
-  "h-11 w-8 text-sm sm:h-12 sm:w-9";
+  "inline-flex select-none items-center justify-center rounded-md border font-semibold leading-none";
 
 export default function Tile({
   tile,
   decorative = false,
+  size = "hand",
   className = "",
 }: TileProps) {
+  const sizeClass = SIZE_CLASS[size];
   // 伏せ牌: 内容を見せない裏面。色に依存しないよう格子模様+ラベルで伝える。
   if (tile === null) {
     return (
       <span
-        className={`${BASE_CLASS} border-tile-border bg-tile-back text-tile-back-mark ${className}`}
+        className={`${BASE_CLASS} ${sizeClass} border-tile-border bg-tile-back text-tile-back-mark ${className}`}
         role={decorative ? undefined : "img"}
         aria-label={decorative ? undefined : FACE_DOWN_LABEL}
         aria-hidden={decorative || undefined}
@@ -54,7 +67,7 @@ export default function Tile({
 
   return (
     <span
-      className={`${BASE_CLASS} relative bg-tile-face text-tile-ink ${borderClass} ${className}`}
+      className={`${BASE_CLASS} ${sizeClass} relative bg-tile-face text-tile-ink ${borderClass} ${className}`}
       role={decorative ? undefined : "img"}
       aria-label={decorative ? undefined : tileLabel(tile)}
       aria-hidden={decorative || undefined}

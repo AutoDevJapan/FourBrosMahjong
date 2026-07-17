@@ -22,7 +22,7 @@ export default function Discards({ tiles, limit }: DiscardsProps) {
       {shown.map((tile, i) => (
         // 河は同一牌が複数並ぶため index を key に含める(捨て順の同一性は保持不要)。
         <li key={`${tile.suit}-${tile.rank}-${i}`}>
-          <Tile tile={tile} className="h-8 w-6 sm:h-9 sm:w-7" />
+          <Tile tile={tile} size="river" />
         </li>
       ))}
     </ul>

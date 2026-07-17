@@ -51,4 +51,21 @@ describe("GameBoard (spec 6.6 client island / engine-driven)", () => {
     // 打牌後も盤面は破綻せず対局が続く(局ラベルが表示され続ける)。
     expect(screen.getAllByText(/局$/).length).toBeGreaterThan(0);
   });
+
+  it("フォーカス表示の「全体盤面」で盤面モーダルを開閉できる(スペック5 5.3.2 段階② / 5.2.2)", async () => {
+    const user = userEvent.setup();
+    renderBoard();
+
+    // 初期状態ではモーダルは開いていない。
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+
+    // フォーカス表示帯の「全体盤面」でクロス配置のモーダルを開く。
+    await user.click(screen.getByRole("button", { name: "全体盤面" }));
+    const dialog = screen.getByRole("dialog", { name: "全体盤面" });
+    expect(dialog).toHaveAttribute("aria-modal", "true");
+
+    // Escape でフォーカストラップ付きモーダルを閉じられる(5.2.2)。
+    await user.keyboard("{Escape}");
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  });
 });

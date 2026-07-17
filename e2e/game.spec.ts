@@ -188,6 +188,61 @@ test.describe("対局画面(/game)", () => {
     await expect(options.nth(1)).toBeFocused();
   });
 
+  test("狭幅帯(700px)でもクロス卓が @container/clamp で成立し横スクロールしない(スペック5 5.3.2 段階①)", async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 700, height: 900 });
+    await page.goto("/game");
+    await expect(
+      page.getByRole("heading", { level: 1, name: "対局画面" }),
+    ).toBeVisible();
+
+    // 卓の描画幅 >= 360px のためクロス配置が有効。フォーカス表示専用の「全体盤面」ボタンは出ない。
+    await expect(page.getByRole("button", { name: "全体盤面" })).toBeHidden();
+
+    // 横スクロール(はみ出しの横スクロール解決)を発生させない(スペック5 5.3.2)。
+    const overflow = await page.evaluate(
+      () =>
+        document.documentElement.scrollWidth -
+        document.documentElement.clientWidth,
+    );
+    expect(overflow).toBeLessThanOrEqual(1);
+  });
+
+  test("極狭幅(320px)でフォーカス表示へ切替わり、全体盤面モーダルで盤面を確認できる(スペック5 5.3.2 段階② / 5.2.2)", async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 320, height: 800 });
+    await page.goto("/game");
+    await expect(
+      page.getByRole("heading", { level: 1, name: "対局画面" }),
+    ).toBeVisible();
+
+    // 卓の描画幅 < 360px のためフォーカス表示。全体盤面への導線が現れる。
+    const openButton = page.getByRole("button", { name: "全体盤面" });
+    await expect(openButton).toBeVisible();
+
+    // 横スクロールなしで成立している(スペック5 5.3.2)。
+    const overflow = await page.evaluate(
+      () =>
+        document.documentElement.scrollWidth -
+        document.documentElement.clientWidth,
+    );
+    expect(overflow).toBeLessThanOrEqual(1);
+
+    // モーダルでクロス配置の全体盤面を確認できる(role=dialog / aria-modal)。
+    await openButton.click();
+    const dialog = page.getByRole("dialog", { name: "全体盤面" });
+    await expect(dialog).toBeVisible();
+    await expect(dialog).toHaveAttribute("aria-modal", "true");
+
+    // Escape でフォーカストラップ付きモーダルを閉じられる(スペック5 5.2.2)。
+    await page.keyboard.press("Escape");
+    await expect(dialog).toBeHidden();
+    // 閉じた後はトリガー(全体盤面ボタン)へフォーカスが戻る。
+    await expect(openButton).toBeFocused();
+  });
+
   test("ダークモード設定でも主要要素が見える(スペック5 5.4)", async ({
     page,
   }) => {

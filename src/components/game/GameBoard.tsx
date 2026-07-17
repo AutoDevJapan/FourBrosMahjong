@@ -8,10 +8,15 @@
  * 局面に応じた操作パネル・ライブリージョンを描画して1半荘を進行させる。席割り・親・ツモ配分・ウマ等の
  * 決定ロジック(Q9〜Q13)は engine が持ち、本コンポーネントは値の表示と操作の橋渡しに徹する(スペック6 6.8)。
  *
- * レスポンシブ(スペック6 6.4.3 / スペック5 5.3.2):
- * - `md` 以上: 4スロットのクロス配置(自家=下 / 上家=左 / 対面=上 / 下家=右)。
- * - 狭幅(既定 < `md`): 自家フォーカス表示。他スロットは直近の河+得点+状態のコンパクト帯に縮小。
- * いずれも横スクロールで成立させない。
+ * レスポンシブ(スペック6 6.4.3 / スペック5 5.3.2 の狭幅2段階方式):
+ * - **段階①(スケーリング優先)**: 盤面を `@container`(inline-size)でくるみ、クロス配置は
+ *   `.board-cross` の `clamp()`+`cqi` で牌・隙間を卓幅連動に流体縮小する。ビューポート固定の
+ *   `md` ブレークポイントではなく**卓の描画幅**で成立させ、640〜767px 帯でも横スクロールなしに
+ *   クロス配置(自家=下 / 上家=左 / 対面=上 / 下家=右)を維持する。
+ * - **段階②(フォーカス表示切替)**: 卓の描画幅が 360px を下回ったら(`@min-[360px]` 未満)、
+ *   自家の手牌・操作パネルをフルサイズ表示し、他家3人は河直近+得点+状態のコンパクト帯に縮小する。
+ *   コンパクト化で隠れた全体盤面は「全体盤面」ボタンのモーダル(`Modal`)でいつでも確認できる。
+ * いずれの段階も横スクロールで成立させない。
  */
 import { useRouter } from "next/navigation";
 import {
@@ -21,6 +26,7 @@ import {
   useState,
   useSyncExternalStore,
 } from "react";
+import Modal from "../common/Modal";
 import { tileLabel } from "../common/tileLabel";
 import ActionPanel, { type ActionItem } from "./ActionPanel";
 import { useGame } from "./GameProvider";
@@ -46,6 +52,10 @@ export default function GameBoard() {
     () => true,
     () => false,
   );
+
+  // 全体盤面モーダル(スペック5 5.3.2 段階②): フォーカス表示でコンパクト化された他家情報を
+  // クロス配置のまま再確認するための開閉状態。モーダルの表示自体は `< 360px` でのみ意味を持つ。
+  const [boardOpen, setBoardOpen] = useState(false);
 
   // リーチ宣言モード: オンのとき、次に選んだ手牌が「リーチ宣言牌」として切られる。
   const [riichiArmed, setRiichiArmed] = useState(false);
@@ -239,16 +249,58 @@ export default function GameBoard() {
     return "";
   }, [phase, roundSummary]);
 
+  // `onSelect` を明示的に受け取り、全体盤面モーダル(閲覧専用)では自家手牌の打牌を無効化できる。
+  // `PlayerSlot` は position==="self" のときだけ `onSelectTile` を配線するため、他家スロットでは無害。
   const renderSlot = useCallback(
-    (position: SeatPosition, compact: boolean) => (
+    (
+      position: SeatPosition,
+      compact: boolean,
+      onSelect?: (index: number, tile: TileData) => void,
+    ) => (
       <PlayerSlot
         position={position}
         content={slots[position]}
         compact={compact}
-        onSelectTile={handleSelectTile}
+        onSelectTile={onSelect}
       />
     ),
-    [slots, handleSelectTile],
+    [slots],
+  );
+
+  // クロス配置のグリッド(段階①)。可視制御クラスと自家手牌の打牌ハンドラを差し替えて、
+  // 実盤面(卓幅 >= 360px)と全体盤面モーダル(閲覧専用)の双方で再利用する。
+  const crossBoard = useCallback(
+    (
+      visibilityClass: string,
+      onSelfSelect?: (index: number, tile: TileData) => void,
+      withActions = true,
+    ) => (
+      <div
+        className={`board-cross mx-auto w-full max-w-4xl grid-cols-[minmax(0,1fr)_minmax(0,1.5fr)_minmax(0,1fr)] gap-[var(--board-gap)] ${visibilityClass}`}
+      >
+        <div className="col-start-2 row-start-1">
+          {renderSlot("across", false)}
+        </div>
+        <div className="col-start-1 row-start-2">
+          {renderSlot("left", false)}
+        </div>
+        <div className="col-start-2 row-start-2">
+          <Table info={tableInfo} dora={dora} />
+        </div>
+        <div className="col-start-3 row-start-2">
+          {renderSlot("right", false)}
+        </div>
+        <div className="col-span-3 col-start-1 row-start-3">
+          {renderSlot("self", false, onSelfSelect)}
+        </div>
+        {withActions ? (
+          <div className="col-span-3 col-start-1 row-start-4">
+            <ActionPanel actions={actions} hint={hint} />
+          </div>
+        ) : null}
+      </div>
+    ),
+    [renderSlot, tableInfo, dora, actions, hint],
   );
 
   if (!mounted) {
@@ -264,43 +316,46 @@ export default function GameBoard() {
 
   return (
     <div
-      className="w-full"
+      className="@container w-full"
       data-phase={phase}
       data-pending={pending?.kind ?? "none"}
     >
-      {/* md 以上: クロス配置。基底では非表示(a11yツリーからも除外)。 */}
-      <div className="mx-auto hidden w-full max-w-4xl grid-cols-[minmax(0,1fr)_minmax(0,1.5fr)_minmax(0,1fr)] gap-3 md:grid">
-        <div className="col-start-2 row-start-1">
-          {renderSlot("across", false)}
-        </div>
-        <div className="col-start-1 row-start-2">
-          {renderSlot("left", false)}
-        </div>
-        <div className="col-start-2 row-start-2">
-          <Table info={tableInfo} dora={dora} />
-        </div>
-        <div className="col-start-3 row-start-2">
-          {renderSlot("right", false)}
-        </div>
-        <div className="col-span-3 col-start-1 row-start-3">
-          {renderSlot("self", false)}
-        </div>
-        <div className="col-span-3 col-start-1 row-start-4">
-          <ActionPanel actions={actions} hint={hint} />
-        </div>
-      </div>
+      {/* 段階①: 卓幅 >= 360px はクロス配置。牌・隙間は .board-cross の clamp()/cqi で流体縮小。 */}
+      {crossBoard("hidden @min-[360px]:grid", handleSelectTile)}
 
-      {/* 狭幅: 自家フォーカス表示。md 以上では非表示。 */}
-      <div className="flex flex-col gap-3 md:hidden">
+      {/* 段階②: 卓幅 < 360px は自家フォーカス表示。他家はコンパクト帯へ縮小。 */}
+      <div className="flex flex-col gap-3 @min-[360px]:hidden">
+        <div className="flex items-center justify-between gap-2">
+          <p className="text-xs font-medium text-foreground/70">
+            自分手番フォーカス表示
+          </p>
+          <button
+            type="button"
+            onClick={() => setBoardOpen(true)}
+            className="inline-flex items-center gap-1.5 rounded-lg border border-foreground/25 px-3 py-1.5 text-xs font-medium hover:bg-foreground/5"
+          >
+            <span aria-hidden="true">▦</span>
+            全体盤面
+          </button>
+        </div>
         <Table info={tableInfo} dora={dora} />
-        <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+        <div className="grid grid-cols-1 gap-2">
           {renderSlot("left", true)}
           {renderSlot("across", true)}
           {renderSlot("right", true)}
         </div>
-        {renderSlot("self", false)}
+        {renderSlot("self", false, handleSelectTile)}
         <ActionPanel actions={actions} hint={hint} />
       </div>
+
+      {/* 全体盤面モーダル(段階②の補完): クロス配置を閲覧専用で再表示。フォーカストラップ/Escape は Modal が担保。 */}
+      {boardOpen ? (
+        <Modal title="全体盤面" onClose={() => setBoardOpen(false)}>
+          <div className="@container">
+            {crossBoard("grid", undefined, false)}
+          </div>
+        </Modal>
+      ) : null}
 
       <LiveRegion politeMessage={announcement} assertiveMessage={assertive} />
     </div>

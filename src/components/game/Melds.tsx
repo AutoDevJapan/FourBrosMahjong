@@ -37,7 +37,7 @@ export default function Melds({ melds }: MeldsProps) {
                 <Tile
                   key={`${tile.suit}-${tile.rank}-${ti}`}
                   tile={faceDown ? null : tile}
-                  className="h-8 w-6 sm:h-9 sm:w-7"
+                  size="river"
                 />
               );
             })}
