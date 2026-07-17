@@ -96,7 +96,8 @@ Tailwind v4 のデフォルトブレークポイントをそのまま採用し�
 | `--background` / `--foreground` | 既存踏襲。ページ全体の基調色 |
 | `--color-table-felt` | 卓の背景(緑系felt色) |
 | `--color-tile-face` / `--color-tile-border` | 牌面・牌の縁取り |
-| `--color-tile-accent-red` | 赤ドラの強調色(形状差と併用) |
+| `--color-tile-accent-red` | 赤ドラの強調色=牌枠(非テキスト)。隣接色に対し 3:1 以上(5.2.4) |
+| `--color-tile-badge-red` | 赤ドラ「赤」バッジの地色(テキスト背景)。文字 `--color-tile-face` に対しライト/ダーク双方で 4.5:1 以上(1.4.3)。ダークで枠を鮮やかな赤へ上げると文字比が割れるため枠とは別トークンに分離し、テーマ非依存の深い赤で固定する(#147) |
 | `--color-turn-highlight` | 現在手番のハイライト |
 | `--color-danger` / `--color-positive` | 点数減少/増加、トビ警告等 |
 | `--color-focus-ring` | フォーカスリング(隣接背景に対し3:1以上) |
