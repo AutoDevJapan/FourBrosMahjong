@@ -37,8 +37,13 @@ function digit(rank: number): string {
   return KANJI_DIGITS[rank] ?? String(rank);
 }
 
-/** 牌面に印字する短いテキスト(例: `五筒`・`東`)。 */
-export function tileFace(tile: TileData): string {
+/**
+ * 牌名の短いテキスト(例: `五筒`・`東`)。`aria-label` 生成の内部ヘルパ。
+ *
+ * 牌面の視覚表示は `Tile.tsx` が SVG 素材(`tileImage.ts`)で描くため、この文字列は
+ * 画面には出さず、スクリーンリーダ向けの名称(`tileLabel`)を組み立てるためだけに使う。
+ */
+function tileFace(tile: TileData): string {
   if (tile.suit === "honor") {
     return HONOR_NAME[tile.rank] ?? "字";
   }
