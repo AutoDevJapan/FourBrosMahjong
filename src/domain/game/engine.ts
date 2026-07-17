@@ -15,7 +15,9 @@
  *   既存 hand が対応。鳴きは一発を消滅させる。
  *
  * ## 割り切り(MVP / フォローアップ issue 化)
- * - 他家(AI)は**ツモ切り**。ツモ/ロンは和了形が成立すれば自動宣言するが、**リーチ・鳴きはしない**(→ #98)。
+ * - 他家(AI)は**手牌効率(向聴・受け入れ)ベースの打牌**(#98)。有効牌を残し、赤5/ドラを温存し、
+ *   他家の現物を優先して切る(→ `src/domain/game/ai.ts`)。ツモ/ロンは和了形が成立すれば自動宣言するが、
+ *   **リーチ・鳴きはしない**。
  * - 加槓に対する槍槓(チャンカン)は未対応(AI は槍槓しない)。リーチ後の暗槓も不可(→ issue)。
  * - 北抜き(ガリ)は**自動**で処理する(手動選択は未対応)。
  * - パオ(責任払い)は**自家の鳴きで確定した大三元/大四喜/四槓子**に対応(#99)。ポン/大明槓で
@@ -30,13 +32,18 @@
 
 import { dealStartingHands } from "@/domain/deal/deal";
 import type { DiceRoll } from "@/domain/dora/dice";
-import { type DoraSet, createDoraSet } from "@/domain/dora/doraSet";
+import {
+  type DoraSet,
+  createDoraSet,
+  resolveDora,
+} from "@/domain/dora/doraSet";
 import { countDoraHan } from "@/domain/dora/han";
+import { chooseDiscard } from "@/domain/game/ai";
 import type { MeldInput } from "@/domain/hand/decompose";
 import { canRon } from "@/domain/hand/furiten";
 import { type Meld, isConcealedHand } from "@/domain/hand/meld";
 import { isTenpai } from "@/domain/hand/tenpai";
-import { sameKind } from "@/domain/hand/tile-identity";
+import { sameKind, tileKey } from "@/domain/hand/tile-identity";
 import { type WinAnalysis, analyzeWin } from "@/domain/hand/win";
 import { type Rng, createSeededRng } from "@/domain/random/rng";
 import {
@@ -477,8 +484,25 @@ function drawKanReplacement(hand: HandState, seat: SeatKey): void {
 }
 
 /**
+ * AI 手番の打牌を手牌効率(向聴・受け入れ)ベースで選ぶ(#98)。
+ * 他家の河から現物(危険牌回避)、表ドラ+赤5から打点温存を加味する。
+ * 和了牌の温存は考えない(和了は本関数の前段でツモ宣言済み)。
+ * 他家(AI)は #97 でも鳴き・リーチをしないため常に門前13枚 → `hand.hands[seat]` を直接使える。
+ */
+function chooseAiDiscard(hand: HandState, seat: SeatKey, drawn: Tile): Tile {
+  const tiles = [...hand.hands[seat], drawn];
+  const opponentDiscards = (["east", "south", "west"] as SeatKey[])
+    .filter((s) => s !== seat)
+    .map((s) => hand.discards[s]);
+  const doraKinds = new Set(
+    resolveDora(hand.doraSet).omote.map((t) => tileKey(t)),
+  );
+  return chooseDiscard({ tiles, opponentDiscards, doraKinds });
+}
+
+/**
  * 進行を人間の意思決定点(自家の打牌 / 鳴き / ロン)まで、または局・半荘の終了まで進める。
- * AI 手番は自動で処理する(リーチ・鳴きはしない)。
+ * AI 手番は自動で処理する(リーチ・鳴きはせず、手牌効率で打牌する #98)。
  */
 function pump(state: EngineState): EngineState {
   let s = state;
@@ -538,8 +562,9 @@ function pump(state: EngineState): EngineState {
       });
     }
 
-    // AI: ツモ切り(リーチ・鳴きはしない)。
-    s = applyDiscard(s, seat, hand.drawn);
+    // AI: 手牌効率(向聴・受け入れ)ベースで打牌を選ぶ(#98)。リーチ・鳴きはしない。
+    const chosen = chooseAiDiscard(hand, seat, hand.drawn);
+    s = applyDiscard(s, seat, chosen);
     if (s.phase !== "playing" || s.pending !== null) return s;
   }
   return s;

@@ -154,3 +154,49 @@ describe("notenPaymentPool: 流局テンパイ料のサンマ配分(スペック
     }
   });
 });
+
+/** 半荘を1局ずつ進め、和了局・流局の数を数える(自家はツモ切りドライバ)。 */
+function tallyRounds(seed: number): { wins: number; draws: number } {
+  let s = createGame({ seed });
+  let wins = 0;
+  let draws = 0;
+  for (let guard = 0; guard < 5000 && s.phase !== "gameEnd"; guard++) {
+    if (s.phase === "roundEnd") {
+      if (s.lastRound?.kind === "win") wins += 1;
+      else if (s.lastRound?.kind === "draw") draws += 1;
+      s = proceedToNextRound(s);
+      continue;
+    }
+    if (s.pending?.kind === "humanDiscard") {
+      const drawn = s.hand?.drawn;
+      if (drawn === null || drawn === undefined) {
+        throw new Error("humanDiscard without a drawn tile");
+      }
+      s = discard(s, drawn);
+    } else if (s.pending?.kind === "humanReact") {
+      s = passRon(s);
+    } else {
+      throw new Error(`stuck in phase=${s.phase}`);
+    }
+  }
+  if (s.lastRound?.kind === "win") wins += 1;
+  else if (s.lastRound?.kind === "draw") draws += 1;
+  return { wins, draws };
+}
+
+describe("engine: AI 高度化で和了が成立する(#98)", () => {
+  // 旧「ツモ切り簡易 AI」はほぼ毎局が流局していた。手牌効率ベースの打牌へ高度化した結果、
+  // 他家がテンパイ・和了に到達し、和了局が生まれることを回帰的に担保する。
+  it("複数 seed で和了局が流局局を上回る(ツモ切り時代の全局流局からの改善)", () => {
+    let wins = 0;
+    let draws = 0;
+    for (const seed of [1, 42, 2024]) {
+      const r = tallyRounds(seed);
+      wins += r.wins;
+      draws += r.draws;
+    }
+    // 和了が確実に発生し(全局流局ではない)、かつ流局を上回る。
+    expect(wins).toBeGreaterThan(0);
+    expect(wins).toBeGreaterThan(draws);
+  }, 20000);
+});
