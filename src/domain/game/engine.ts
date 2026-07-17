@@ -32,7 +32,7 @@
  * - パオ(責任払い)は**自家の鳴きで確定した大三元/大四喜/四槓子**に対応(#99)。ポン/大明槓で
  *   パオ役満が確定した瞬間に責任者(打牌者)を記録し、和了時 `resolveWinPayment` で責任払い
  *   (ロン折半・ツモ全額・本場)を行う(判定は `scoring/pao.ts`)。役満祝儀は別枠で、支払者は
- *   「同卓の敗者2人」を既定とする(issue #89 の #67 確定)。
+ *   **抜け番を含む和了者以外の3兄弟**とする(Q14 確定・ユーザー承認 2026-07-17 / #129)。
  * - `SAFETY_ROUND_CAP` で局数に上限を設け、南4連荘の理論的無限ループを防ぐ(通常は発火しない)。
  *
  * 決定性: `createGame({ seed })` で `createSeededRng` を用いるため、同じ seed + 同じ操作列から
@@ -72,6 +72,7 @@ import {
   RETURN_POINTS,
   SoshiiLedger,
   STARTING_POINTS,
+  YAKUMAN_BONUS,
 } from "@/domain/scoring/settlement";
 import {
   type SeatedPlayerRef,
@@ -994,20 +995,21 @@ function settleWin(state: EngineState, win: WinInput): EngineState {
   }
   points[winnerId] += payment.stickPayout;
 
-  // 役満祝儀(同卓の敗者2人から各1,000ソシー・先着1名・数え役満対象外)。
-  // 支払者の範囲(同卓2人 or 抜け番含む3人)は #89 論点② / Q14 で未確定。
-  // ここでは暫定で同卓の敗者2人(others)を採用する(spec 3.3③ 参照・確定後に差し替え)。
+  // 役満祝儀(抜け番を含む和了者以外の3兄弟から各1,000ソシー・先着1名・数え役満対象外)。
+  // 支払者 = 4兄弟のうち和了者を除く3人(その局の抜け番=北家も支払う)に確定
+  // (Q14 確定・ユーザー承認 2026-07-17 / #129・spec 3.3③)。パオ(点数の責任払い)は
+  // win-payment 側の別枠で、祝儀の支払者は責任者へ寄せない。
   const bonus: Record<PlayerId, number> = { ...state.bonus };
   if (score.isTrueYakuman && !score.isCountedYakuman) {
-    const loserIds = others.map((o) => o.id as PlayerId);
+    const loserIds = state.order.filter((id) => id !== winnerId);
     const awarded = state.ledger.applyBonus({
       winnerId,
       loserIds,
       score,
     });
     if (awarded) {
-      for (const id of loserIds) bonus[id] -= 1000;
-      bonus[winnerId] += 1000 * loserIds.length;
+      for (const id of loserIds) bonus[id] -= YAKUMAN_BONUS;
+      bonus[winnerId] += YAKUMAN_BONUS * loserIds.length;
     }
   }
 
