@@ -23,14 +23,16 @@
 
 ## デプロイ・環境運用
 
-- [デプロイ環境運用](./デプロイ環境運用.md) — Vercel 連携・PR ごとの Preview 環境・dev/stg/prd の昇格フロー・環境変数管理方針。
+- [デプロイ環境運用](./デプロイ環境運用.md) — Vercel 連携・PR ごとの Preview 環境・dev/stg/prd の昇格フロー・環境変数管理方針・バックエンド(Railway)とカスタムドメインの位置づけ。
+- [ADR(アーキテクチャ決定記録)](../documents/adr/README.md) — [ADR-0001](../documents/adr/0001-deploy-architecture-and-preview-policy.md): prd 構成(Vercel フロント + Railway バックエンド)と Vercel Preview 方針。
+- [運用ガイド](../documents/guides/README.md) — [カスタムドメイン公開手順](../documents/guides/custom-domain-setup.md) ほか。
 
 ## ディレクトリの役割
 
 | 場所 | 用途 |
 |---|---|
 | `docs/` | 人間向けのゲームルール・企画ドキュメント(この README が入口) |
-| `documents/` | GoDD の仕様SSOT置き場(`documents/spec/`・`documents/adr/` など。`config.godd` の `docs_dir`)。**内容が発生した時点で作成** |
+| `documents/` | GoDD の仕様SSOT置き場(`documents/spec/`・`documents/adr/`・`documents/guides/`。`config.godd` の `docs_dir`) |
 | `docs/api/` | TypeDoc 生成の API リファレンス(`pnpm docs`、gitignore 済み) |
 
-> 注: `documents/spec/` はスペック文書を整備済みです。`documents/adr/` 等は内容が生じた時点で追加します(空ディレクトリは作りません)。
+> 注: `documents/spec/`(スペック)・`documents/adr/`(アーキテクチャ決定)・`documents/guides/`(運用手順)を整備済みです。

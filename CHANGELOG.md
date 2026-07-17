@@ -19,6 +19,15 @@
 
 ## [Unreleased]
 
+### Added
+
+- デプロイ構成の ADR(`documents/adr/0001-deploy-architecture-and-preview-policy.md`)を追加。prd 構成(Vercel フロント + Railway バックエンドは将来配置先)と Vercel Preview 方針を明文化 (#69)。
+- カスタムドメイン公開手順(`documents/guides/custom-domain-setup.md`)と `documents/adr/` `documents/guides/` の索引 README を追加 (#69)。
+
+### Changed
+
+- `docs/デプロイ環境運用.md` をインフラ実態に合わせて更新。バックエンド(Railway)の位置づけとカスタムドメイン公開の節を追加し、`config.godd` / `AGENTS.md` のスタック定義と整合 (#69)。
+
 ## [0.1.0] - 2026-07-10
 
 初期整備。アプリ本体 (ゲームロジック) は未実装で、開発基盤とドキュメント SSOT を整備した段階です。
