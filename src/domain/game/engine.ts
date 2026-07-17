@@ -548,7 +548,9 @@ function settleWin(state: EngineState, win: WinInput): EngineState {
   }
   points[winnerId] += payment.stickPayout;
 
-  // 役満祝儀(同卓の敗者2人から各1,000ソシー・先着1名・数え役満対象外 / #89 の #67 確定)。
+  // 役満祝儀(同卓の敗者2人から各1,000ソシー・先着1名・数え役満対象外)。
+  // 支払者の範囲(同卓2人 or 抜け番含む3人)は #89 論点② / Q14 で未確定。
+  // ここでは暫定で同卓の敗者2人(others)を採用する(spec 3.3③ 参照・確定後に差し替え)。
   const bonus: Record<PlayerId, number> = { ...state.bonus };
   if (score.isTrueYakuman && !score.isCountedYakuman) {
     const loserIds = others.map((o) => o.id as PlayerId);
