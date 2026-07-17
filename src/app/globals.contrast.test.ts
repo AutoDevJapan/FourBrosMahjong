@@ -70,16 +70,27 @@ describe("赤ドラ「赤」バッジのコントラスト(#147 / WCAG 1.4.3)", 
   });
 });
 
-describe("StatusBadge の felt 上コントラスト(#154 / WCAG 1.4.3)", () => {
-  // riichi/highlight バッジは明色地 --tile-face を敷き、その上に濃色トークンで文字を描く。
+describe("StatusBadge の felt 上コントラスト(#154 / #157 / WCAG 1.4.3)", () => {
+  // default/riichi/highlight バッジは明色地 --tile-face を敷き、その上に濃色トークンで文字を描く。
   // 文字×バッジ地(--tile-face)がライト/ダーク双方で通常テキスト 4.5:1 を満たすことを固定する。
   const lightFace = token(":root", "--tile-face");
   const darkFace = token(':root[data-theme="dark"]', "--tile-face");
   const lightFelt = token(":root", "--table-felt");
   const darkFelt = token(':root[data-theme="dark"]', "--table-felt");
   // 文字トークンはテーマ非依存(:root のみで定義、ダーク側で上書きしない)。
+  // default(◆親)は牌面印字色 --tile-ink をバッジ文字に再利用する(#157)。--tile-ink は
+  // ダーク側でも同値(明色地に濃色印字)のため、ライト/ダークとも同一値で評価する。
+  const defaultInk = token(":root", "--tile-ink");
   const riichiInk = token(":root", "--tile-badge-red");
   const highlightInk = token(":root", "--turn-highlight-ink");
+
+  it("default(親): 文字×バッジ地がライトで 4.5:1 以上", () => {
+    expect(contrast(defaultInk, lightFace)).toBeGreaterThanOrEqual(4.5);
+  });
+
+  it("default(親): 文字×バッジ地がダークで 4.5:1 以上", () => {
+    expect(contrast(defaultInk, darkFace)).toBeGreaterThanOrEqual(4.5);
+  });
 
   it("riichi: 文字×バッジ地がライトで 4.5:1 以上", () => {
     expect(contrast(riichiInk, lightFace)).toBeGreaterThanOrEqual(4.5);
