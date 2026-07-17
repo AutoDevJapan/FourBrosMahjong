@@ -241,15 +241,11 @@ test.describe("状態駆動 a11y 監査(リーチ/鳴き/和了アラート/ト�
 
       const board = page.locator("[data-phase]").first();
       const handOptions = () =>
-        page
-          .getByRole("listbox", { name: "自家の手牌" })
-          .first()
-          .getByRole("option");
+        page.getByRole("listbox", { name: "自家の手牌" }).getByRole("option");
       // リーチ宣言バッジ(variant="riichi")は自家スロット(section)内の "リーチ" テキスト。
       // 操作パネルの「リーチ」ボタンは section 外なので、自家 region 内へ限定して誤検知を防ぐ。
       const riichiBadge = page
         .getByRole("region", { name: /^あなた/ })
-        .first()
         .getByText("リーチ");
 
       // 自家は先頭牌から打牌して進める。engine が「リーチ」ボタンを出した手番(門前テンパイ)で
@@ -337,7 +333,6 @@ test.describe("状態駆動 a11y 監査(リーチ/鳴き/和了アラート/ト�
         if (state.pending === "humanDiscard") {
           await page
             .getByRole("listbox", { name: "自家の手牌" })
-            .first()
             .getByRole("option")
             .first()
             .click();
@@ -379,7 +374,6 @@ test.describe("状態駆動 a11y 監査(リーチ/鳴き/和了アラート/ト�
         if (state.pending === "humanDiscard") {
           await page
             .getByRole("listbox", { name: "自家の手牌" })
-            .first()
             .getByRole("option")
             .first()
             .click();
@@ -444,7 +438,7 @@ test.describe("キーボードのみ操作(a11y 補強)", () => {
   }) => {
     await page.goto("/game");
 
-    const hand = page.getByRole("listbox", { name: "自家の手牌" }).first();
+    const hand = page.getByRole("listbox", { name: "自家の手牌" });
     const firstTile: Locator = hand.getByRole("option").first();
 
     // ロービングタブインデックス: フォーカス中の option だけが Tab 到達可能(tabindex=0)。
@@ -454,7 +448,7 @@ test.describe("キーボードのみ操作(a11y 補強)", () => {
     // Enter で打牌でき、対局が進行する(打牌後も自家の手牌一覧は描画され続ける)。
     await firstTile.press("Enter");
     await expect(
-      page.getByRole("listbox", { name: "自家の手牌" }).first(),
+      page.getByRole("listbox", { name: "自家の手牌" }),
     ).toBeVisible();
   });
 
@@ -471,12 +465,9 @@ test.describe("キーボードのみ操作(a11y 補強)", () => {
     // 操作パネルはネイティブ button で構成される(APG のボタン要件)。ツモが局面上不可なら
     // disabled で伝わる(色ではなく状態)。打牌はキーボードのみで完結できる操作が本筋のため、
     // 手牌の現行 option をフォーカスして操作可能であることを検証する。
-    await expect(
-      page.getByRole("group", { name: "操作パネル" }).first(),
-    ).toBeVisible();
+    await expect(page.getByRole("group", { name: "操作パネル" })).toBeVisible();
     const activeOption = page
       .getByRole("listbox", { name: "自家の手牌" })
-      .first()
       .getByRole("option")
       .first();
     await activeOption.focus();
