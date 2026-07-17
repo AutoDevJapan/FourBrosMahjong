@@ -101,7 +101,7 @@ export default function Tile({
         // 赤ドラの形状差: 色だけに頼らず「赤」バッジを付す(スペック5 5.2.1)。
         <span
           aria-hidden="true"
-          className="absolute -top-1 -right-1 rounded-sm bg-tile-accent-red px-0.5 text-[0.5rem] font-bold text-tile-face leading-tight"
+          className="absolute -top-1 -right-1 rounded-sm bg-tile-badge-red px-0.5 text-[0.5rem] font-bold text-tile-face leading-tight"
         >
           赤
         </span>
