@@ -5,6 +5,11 @@
  * アイコン+テキストラベルで伝える(スペック5 5.2.1)。持ち点は抜け番中に変化しない
  * (スペック4 不変条件)。誰が抜け番になるかの決定(Q9)には関与しない。
  * 値渡しのみの純表示コンポーネント(スペック6 6.6)。
+ *
+ * `compact`(スペック6 6.4.3 / スペック5 5.3.2 段階②フォーカス表示): 卓幅 < 360px の
+ * 自分手番フォーカス時、着席他家(`PlayerArea` compact)と同じ「名前+点数」の薄い帯に縮小し、
+ * 抜け番だけがフルサイズ大カードで突出しないよう密度を揃える(issue #150 要検討点2)。
+ * 「この局は休み」の補足文はコンパクト帯では省き、抜け番バッジで休みを伝える。
  */
 import type { BenchPlayerView } from "./types";
 import ScoreDisplay from "./ScoreDisplay";
@@ -12,9 +17,27 @@ import StatusBadge from "./StatusBadge";
 
 export interface BenchAreaProps {
   player: BenchPlayerView;
+  /** 狭幅の帯表示(自分手番フォーカス時、着席他家と密度を揃える)(スペック6 6.4.3)。 */
+  compact?: boolean;
 }
 
-export default function BenchArea({ player }: BenchAreaProps) {
+export default function BenchArea({ player, compact = false }: BenchAreaProps) {
+  if (compact) {
+    // 着席他家(`PlayerArea` compact)と同じ体裁の薄い帯: 抜け番バッジ+名前+持ち点のみ。
+    return (
+      <section
+        aria-label={`${player.name}(抜け番)`}
+        className="flex flex-col gap-2 rounded-lg border border-dashed border-foreground/25 bg-foreground/[.03] p-2"
+      >
+        <header className="flex flex-wrap items-center gap-x-2 gap-y-1">
+          <StatusBadge icon="⏸" label="抜け番" variant="bench" />
+          <span className="font-medium">{player.name}</span>
+        </header>
+        <ScoreDisplay points={player.points} />
+      </section>
+    );
+  }
+
   return (
     <section
       aria-label={`${player.name}(抜け番)`}

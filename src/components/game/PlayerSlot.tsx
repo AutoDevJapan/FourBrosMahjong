@@ -26,7 +26,7 @@ export default function PlayerSlot({
   onSelectTile,
 }: PlayerSlotProps) {
   if (content.kind === "bench") {
-    return <BenchArea player={content.player} />;
+    return <BenchArea player={content.player} compact={compact} />;
   }
   return (
     <PlayerArea
