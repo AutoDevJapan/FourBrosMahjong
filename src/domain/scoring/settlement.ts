@@ -4,12 +4,12 @@
  * 半荘を通じてプレイヤーごとのソシー累計を保持する。精算は3要素の合算:
  * - **① 素点**(1点=1ソシー、返し 40,000 基準) … {@link SoshiiLedger.applyRawScore}
  * - **② 順位ウマ + オカ**(4人の最終順位、Q13) … {@link SoshiiLedger.applyUma}
- * - **③ 役満祝儀**(全員から1,000・先着1名・数え役満対象外) … {@link SoshiiLedger.applyBonus}
+ * - **③ 役満祝儀**(抜け番含む他3兄弟から各1,000・先着1名・数え役満対象外) … {@link SoshiiLedger.applyBonus}
  *
  * **ゼロサム不変条件**: 素点(返し)は総和 −(オカ) になり、ウマ+オカで総和 0 に戻る。
  * すなわち `applyRawScore` と `applyUma` を各半荘で1回ずつ適用した合計は総和ゼロ
  * (35,000持ち×4 − 返し40,000×4 = −20,000 を、オカ +20,000 が1位で相殺)。
- * 祝儀は同卓内の授受でこれも総和ゼロ。
+ * 祝儀は和了者以外の3兄弟(抜け番含む)からの授受でこれも総和ゼロ。
  *
  * 席・親(#81 round)には依存せず、プレイヤーIDのみで動作する。
  * 純ロジック・決定的・React/DOM 非依存。
@@ -32,7 +32,7 @@ export const OKA = (RETURN_POINTS - STARTING_POINTS) * 4;
 export const UMA: readonly [number, number, number, number] = [
   10000, 5000, -5000, -10000,
 ];
-/** 役満祝儀1件あたりの額(全員が各々1,000ソシーを支払う)。 */
+/** 役満祝儀1件あたりの額(和了者以外の3兄弟が各々1,000ソシーを支払う)。 */
 export const YAKUMAN_BONUS = 1000;
 
 /** 順位付け対象の1プレイヤーの最終持ち点。 */
@@ -45,7 +45,11 @@ export interface PlayerPoints {
 /** 役満祝儀の適用入力。 */
 export interface BonusInput {
   readonly winnerId: PlayerId;
-  /** 祝儀を支払う者(通常は同卓の他家)。各々 {@link YAKUMAN_BONUS} を支払う。 */
+  /**
+   * 祝儀を支払う者。四兄弟麻雀では**抜け番を含む和了者以外の3兄弟**
+   * (Q14 確定・ユーザー承認 2026-07-17 / #129)。各々 {@link YAKUMAN_BONUS} を支払う。
+   * 支払者の選定は呼び出し側(engine `settleWin`)が行い、本メソッドは中立に授受する。
+   */
   readonly loserIds: readonly PlayerId[];
   /** 点数区分の判定結果({@link "./points".computeScore})。 */
   readonly score: Pick<ScoreResult, "isTrueYakuman" | "isCountedYakuman">;
@@ -134,7 +138,8 @@ export class SoshiiLedger {
   /**
    * ③ 役満祝儀を反映(スペック3 3.3③)。
    * **構成役満**(大三元等)かつ**数え役満でない**かつ**その半荘で先着1名**の
-   * ときのみ、各 loser が {@link YAKUMAN_BONUS} を和了者へ支払う。
+   * ときのみ、各 loser が {@link YAKUMAN_BONUS} を和了者へ支払う。支払者は
+   * **抜け番を含む和了者以外の3兄弟**(Q14 確定 / #129)を呼び出し側が渡す。
    *
    * パオ(責任払い)は点数側({@link "./win-payment"})の話で、祝儀は
    * spec 通り「全員から1,000」を維持する(パオでも祝儀の支払者は変わらない)。
