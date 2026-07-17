@@ -117,6 +117,8 @@ test.describe("設定ページ(ダークモード手動切替)", () => {
     // ロビー → 設定
     await page.getByRole("link", { name: /設定/ }).click();
     await expect(page).toHaveURL(/\/settings$/);
+    // layout.tsx の title テンプレートが適用されたページ固有タイトル(#94)。
+    await expect(page).toHaveTitle("設定 | 四兄弟麻雀");
     await expect(
       page.getByRole("heading", { level: 1, name: "設定" }),
     ).toBeVisible();
