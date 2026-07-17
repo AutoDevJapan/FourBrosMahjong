@@ -33,4 +33,4 @@
 | `documents/` | GoDD の仕様SSOT置き場(`documents/spec/`・`documents/adr/` など。`config.godd` の `docs_dir`)。**内容が発生した時点で作成** |
 | `docs/api/` | TypeDoc 生成の API リファレンス(`pnpm docs`、gitignore 済み) |
 
-> 注: 現状はまだアプリ実装が無い足場段階のため、`documents/spec/` 等は内容が生じた時点で追加します(空ディレクトリは作りません)。
+> 注: `documents/spec/` はスペック文書を整備済みです。`documents/adr/` 等は内容が生じた時点で追加します(空ディレクトリは作りません)。
