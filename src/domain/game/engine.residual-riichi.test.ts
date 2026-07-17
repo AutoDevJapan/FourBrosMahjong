@@ -1,18 +1,18 @@
 /**
- * 半荘終了時に場へ残った供託リーチ棒の帰属(Q15 確定・1位取得 / issue #130)の直接テスト。
+ * 半荘終了時に場へ残った供託リーチ棒の帰属(Q15 確定・1位取得 / #130、Q20 確定・同点最高の
+ * うち席順上位が総取り / issue #131)の直接テスト。
  *
  * `settleWin` は和了者が供託を回収して 0 にするため、供託が場に残ったまま半荘が終わるのは
  * 最終局が **流局**(`settleDraw`、トビ流局を含む)で決着したとき。この残存供託(残存本数
- * × 1,000)は **最終持ち点が単独最高**(抜け番含む全員で厳密比較 = Q19 整合)のプレイヤーの
- * 素点へ加算してから順位・精算を確定する。加算により持ち点総和は 140,000 に復し、ソシー精算
- * (素点+ウマ+オカ)は **zero-sum** を保つ。
+ * × 1,000)は **最終持ち点が最高**(抜け番含む全員で厳密比較 = Q19 整合)のプレイヤーの
+ * 素点へ加算してから順位・精算を確定する。**同点最高で単独1位が存在しない場合は席順
+ * (固定円環 `order` の先頭 = 起家に近い順)で最上位の1人が総取り**する(Q20)。いずれの場合も
+ * 帰属先が一意に定まり、加算により持ち点総和は 140,000 に復してソシー精算(素点+ウマ+オカ)は
+ * **zero-sum** を保つ。
  *
  * `endGame` は内部関数だが、`finishRound`(公開)がオーラス親流れ流局で `endGame` を呼ぶため、
  * `finishRound` を土台に決定的な局状態を組んで各分岐を 1:1 で検証する
  * (`engine.termination.test.ts` と同じ手法)。
- *
- * 同点最高で単独1位が存在しない場合の帰属は SSOT 未定義(Q20 / issue #131)のため、暫定で
- * 据え置き(消失)= この分岐でのみ zero-sum を満たさないことを固定する。
  */
 
 import { describe, expect, it } from "vitest";
@@ -74,7 +74,7 @@ function rowOf(state: EngineState, id: PlayerId) {
   return row;
 }
 
-describe("engine 残存供託リーチ棒の帰属(Q15 確定・1位取得 / #130)", () => {
+describe("engine 残存供託リーチ棒の帰属(Q15 = 1位取得 / #130・Q20 = 同点最高のうち席順上位が総取り / #131)", () => {
   it("単独1位が残存供託を素点へ取得し、ソシー精算が zero-sum を保つ", () => {
     // sum(points) = 138,000 = 140,000 − 1,000 × 2(供託2本ぶんが場に残っている)。
     const points: Record<PlayerId, number> = {
@@ -131,23 +131,79 @@ describe("engine 残存供託リーチ棒の帰属(Q15 確定・1位取得 / #13
     expect(soshiiSum(end)).toBe(0);
   });
 
-  it("同点最高で単独1位が無ければ暫定で据え置く(Q20/#131・zero-sum は満たさない)", () => {
-    // p0 と p1 が最高点タイ → 単独1位なし。SSOT 未定義のため再配分せず据え置き。
+  it("同点最高2人(p0/p1)なら席順上位=起家 p0 が総取りし zero-sum を保つ(Q20/#131)", () => {
+    // p0 と p1 が最高点タイ → 単独1位なし。席順(order 先頭 = 起家 p0)で最上位の p0 が総取り。
+    // sum(points) = 138,000 = 140,000 − 1,000 × 2。
     const points: Record<PlayerId, number> = {
-      p0: 50000,
-      p1: 50000, // 最高点タイ
+      p0: 50000, // 最高点タイ・席順上位(起家)→ 残存供託 2,000 を総取り
+      p1: 50000, // 最高点タイだが席順下位
       p2: 20000,
       p3: 18000,
     };
     const end = finishRound(endGameStateWith(points, 2), OORASU_DRAW);
 
     expect(end.phase).toBe("gameEnd");
-    // 供託は誰にも渡らず場に残る(従来挙動)。
-    expect(end.riichiSticks).toBe(2);
-    expect(end.points.p0).toBe(50000);
-    expect(end.points.p1).toBe(50000);
-    expect(rowOf(end, "p0").rawScore).toBe(50000 - 40000);
-    // 据え置き分だけ zero-sum を満たさない(残存供託 × 1,000 の目減り)。
-    expect(soshiiSum(end)).toBe(-1000 * 2);
+    // 供託は席順上位の p0 の素点へ移り、場から下りる。
+    expect(end.riichiSticks).toBe(0);
+    expect(end.points.p0).toBe(52000);
+    expect(end.points.p1).toBe(50000); // 席順下位は据え置き。
+    expect(rowOf(end, "p0").rawScore).toBe(52000 - 40000);
+    // 帰属先が一意に定まるため持ち点総和は 140,000 に復し zero-sum。
+    expect(Object.values(end.points).reduce((a, b) => a + b, 0)).toBe(140000);
+    expect(soshiiSum(end)).toBe(0);
+  });
+
+  it("同点最高2人が起家以外(p1/p2)でも席順上位 p1 が総取りする(Q20/#131)", () => {
+    // 起家 p0 は最高点でない。最高点タイの p1・p2 のうち席順(order 上)で上位の p1 が総取り。
+    const points: Record<PlayerId, number> = {
+      p0: 40000,
+      p1: 45000, // 最高点タイ・p2 より席順上位 → 総取り
+      p2: 45000, // 最高点タイだが席順下位
+      p3: 8000,
+    };
+    const end = finishRound(endGameStateWith(points, 2), OORASU_DRAW);
+
+    expect(end.riichiSticks).toBe(0);
+    expect(end.points.p1).toBe(47000);
+    expect(end.points.p2).toBe(45000);
+    expect(rowOf(end, "p1").rank).toBe(1);
+    expect(soshiiSum(end)).toBe(0);
+  });
+
+  it("同点最高3人(p1/p2/p3)なら席順最上位 p1 が総取りする(Q20/#131)", () => {
+    // 3人が最高点タイ。席順(order = [p0,p1,p2,p3])で最上位の p1 が総取り。
+    // sum(points) = 137,000 = 140,000 − 1,000 × 3。
+    const points: Record<PlayerId, number> = {
+      p0: 14000,
+      p1: 41000, // 最高点タイ・3人中で席順最上位 → 総取り
+      p2: 41000,
+      p3: 41000,
+    };
+    const end = finishRound(endGameStateWith(points, 3), OORASU_DRAW);
+
+    expect(end.riichiSticks).toBe(0);
+    expect(end.points.p1).toBe(44000);
+    expect(end.points.p2).toBe(41000);
+    expect(end.points.p3).toBe(41000);
+    expect(rowOf(end, "p1").rank).toBe(1);
+    expect(soshiiSum(end)).toBe(0);
+  });
+
+  it("抜け番(南4=p2)を含む同点最高でも席順で裁定する(Q19 比較 × Q20 帰属)", () => {
+    // 南4 の抜け番 = p2。着席 p1 と抜け番 p2 が最高点タイ → 抜け番も比較対象(Q19)だが、
+    // 席順(order 上で p1 が p2 より上位)で最上位の p1 が総取りする。
+    const points: Record<PlayerId, number> = {
+      p0: 20000,
+      p1: 49000, // 最高点タイ(着席)・席順上位 → 総取り
+      p2: 49000, // 最高点タイ(抜け番)だが席順下位
+      p3: 20000,
+    };
+    const end = finishRound(endGameStateWith(points, 2), OORASU_DRAW);
+
+    expect(end.riichiSticks).toBe(0);
+    expect(end.points.p1).toBe(51000);
+    expect(end.points.p2).toBe(49000);
+    expect(rowOf(end, "p1").rank).toBe(1);
+    expect(soshiiSum(end)).toBe(0);
   });
 });
