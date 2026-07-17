@@ -699,6 +699,8 @@ export function canAnkanAfterRiichi(
 function riichiAnkanTiles(hand: HandState, seat: SeatKey): Tile[] {
   const drawn = hand.drawn;
   if (drawn === null) return [];
+  // 海底(ライブ牌 0 = 嶺上を引けない)ではカン不可(標準慣行・#128)。
+  if (hand.wall.remainingLiveTiles === 0) return [];
   return canAnkanAfterRiichi(hand.hands[seat], drawn) ? [drawn] : [];
 }
 
@@ -729,8 +731,10 @@ function buildHumanPending(state: EngineState, seat: SeatKey): Pending {
     drawn !== null && menzen && state.points[occupant] >= RIICHI_STICK_POINTS
       ? riichiDiscardTiles(hand, seat)
       : [];
-  const ankanTiles = drawn !== null ? ankanCandidates(pool) : [];
-  const kakanTiles = drawn !== null ? kakanCandidates(hand, seat, pool) : [];
+  // 海底(ライブ牌 0 = 嶺上を引けない)ではカン(暗槓・加槓)不可(標準慣行・#128)。
+  const ankanTiles = drawn !== null && !haitei ? ankanCandidates(pool) : [];
+  const kakanTiles =
+    drawn !== null && !haitei ? kakanCandidates(hand, seat, pool) : [];
   // 喰い替え禁止: ポン直後のみ、ポンした牌と同種の打牌を禁止(現物喰い替え / スペック1 1.4)。
   const forbiddenDiscards = hand.ponnedKind !== null ? [hand.ponnedKind] : [];
 
@@ -1436,6 +1440,9 @@ export function declareAnkan(state: EngineState, tile: Tile): EngineState {
   }
   if (!state.pending.ankanTiles.some((t) => sameKind(t, tile))) return state;
   const hand = state.hand;
+  // 海底(ライブ牌 0 = 嶺上を引けない)ではカン不可(#128)。pending でも空にしているが
+  // 直接呼び出しに対する防御として no-op で拒否する。
+  if (hand.wall.remainingLiveTiles === 0) return state;
   const seat = humanSeatOf(hand);
   if (seat === null || hand.turn !== seat || hand.drawn === null) return state;
 
@@ -1494,6 +1501,9 @@ export function declareKakan(state: EngineState, tile: Tile): EngineState {
   }
   if (!state.pending.kakanTiles.some((t) => sameKind(t, tile))) return state;
   const hand = state.hand;
+  // 海底(ライブ牌 0 = 嶺上を引けない)ではカン不可(#128)。pending でも空にしているが
+  // 直接呼び出しに対する防御として no-op で拒否する。
+  if (hand.wall.remainingLiveTiles === 0) return state;
   const seat = humanSeatOf(hand);
   if (seat === null || hand.turn !== seat || hand.drawn === null) return state;
 
