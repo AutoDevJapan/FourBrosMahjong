@@ -71,4 +71,45 @@ describe("Tile", () => {
     expect(screen.queryByRole("img")).not.toBeInTheDocument();
     expect(container.firstChild).toHaveAttribute("aria-hidden", "true");
   });
+
+  describe("カタログ外牌のフォールバック(issue #146)", () => {
+    it.each<[string, TileData]>([
+      ["五萬", { suit: "man", rank: 5 }], // サンマ非同梱の中張萬子
+      ["二萬", { suit: "man", rank: 2 }],
+      ["八萬", { suit: "man", rank: 8 }],
+      ["字", { suit: "honor", rank: 8 }], // 旧実装は Back(裏面)誤描画
+      ["字", { suit: "honor", rank: 0 }], // 旧実装は "" → /tiles/.svg で 404
+    ])(
+      "%s(%o)は牌名テキストの可視プレースホルダで描き、404・裏面・空白牌を出さない",
+      (label, tile) => {
+        render(<Tile tile={tile} />);
+        const el = screen.getByRole("img", { name: label });
+        // background-image を発行しない(404 リスク回避・onError 不能問題の回避)。
+        expect(el.style.backgroundImage).toBe("");
+        // 表向き牌に裏面(Back)を描かず、fallback と識別できる。
+        expect(el).toHaveAttribute("data-face", "fallback");
+        // 視覚(牌名テキスト)と aria-label が一致する(空白牌にならない)。
+        expect(el).toHaveTextContent(label);
+      },
+    );
+
+    it("赤5萬(素材なし)は fallback で描き、赤バッジも (赤ドラ) ラベルも付さない", () => {
+      render(<Tile tile={{ suit: "man", rank: 5, isRed: true }} />);
+      // 赤扱いは発火しないため aria-label は「五萬」(赤ドラ無し)。
+      const el = screen.getByRole("img", { name: "五萬" });
+      expect(el).toHaveAttribute("data-face", "fallback");
+      expect(el).not.toHaveTextContent("赤");
+      expect(el).not.toHaveTextContent("ドラ");
+    });
+  });
+
+  describe("isRed 非整合の整合方針(issue #146)", () => {
+    it("赤フラグ付き3筒(非5)は通常牌として描く: 牌面・バッジ・ラベルが整合", () => {
+      render(<Tile tile={{ suit: "pin", rank: 3, isRed: true }} />);
+      // 赤扱いを発火させない → ラベルは「三筒」(赤ドラ無し)、赤バッジ無し、通常素材。
+      const el = screen.getByRole("img", { name: "三筒" });
+      expectFace(el, "Pin3");
+      expect(el).not.toHaveTextContent("赤");
+    });
+  });
 });

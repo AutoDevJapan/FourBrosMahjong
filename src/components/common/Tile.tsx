@@ -17,7 +17,7 @@
  * 値渡しのみの純表示コンポーネントのため Server Component として実装できる(スペック6 6.6)。
  */
 import type { TileData } from "../game/types";
-import { TILE_BACK_SRC, tileImageName, tileImageSrc } from "./tileImage";
+import { isRedDora, resolveTileFace, TILE_BACK_SRC } from "./tileImage";
 import { FACE_DOWN_LABEL, tileLabel } from "./tileLabel";
 
 export interface TileProps {
@@ -61,6 +61,14 @@ const FACE_IMAGE_CLASS = "bg-contain bg-center bg-no-repeat";
  */
 const BACK_IMAGE_CLASS = "bg-cover bg-center bg-no-repeat";
 
+/**
+ * カタログ外牌の可視プレースホルダの体裁。地色(`bg-tile-face`)に濃色印字(`text-tile-ink`)で
+ * 牌名テキストを描く。`background-image` を発行しないため 404 が起きず、裏面(`Back`)も出さない。
+ * これにより視覚(牌名)と `aria-label`(同名)が一致する検出可能なフォールバックになる(issue #146)。
+ */
+const FALLBACK_TEXT_CLASS =
+  "px-0.5 text-center font-bold leading-none text-tile-ink text-[0.6rem] break-all";
+
 export default function Tile({
   tile,
   decorative = false,
@@ -83,19 +91,41 @@ export default function Tile({
     );
   }
 
-  const isRed = tile.isRed === true;
+  // 赤扱い(色付き素材・赤枠・「赤」バッジ・(赤ドラ)ラベル)は赤素材が実在する 5筒・5索のみ。
+  // `isRed` がそれ以外に付いても発火させず、牌面・バッジ・ラベルの整合を保つ(issue #146)。
+  const isRed = isRedDora(tile);
   const borderClass = isRed
     ? "border-2 border-tile-accent-red"
     : "border border-tile-border";
+  const label = tileLabel(tile);
+  const face = resolveTileFace(tile);
+
+  // カタログ外牌: 素材参照(404 リスク)を発行せず、牌名テキストの可視プレースホルダを描く。
+  // background-image は onError 不能のため、フォールバックは背景ではなく前景テキストで確定的に描く。
+  if (face.kind === "fallback") {
+    return (
+      <span
+        className={`${BASE_CLASS} ${sizeClass} overflow-hidden bg-tile-face ${borderClass} ${className}`}
+        role={decorative ? undefined : "img"}
+        aria-label={decorative ? undefined : label}
+        aria-hidden={decorative || undefined}
+        data-face="fallback"
+      >
+        <span aria-hidden="true" className={FALLBACK_TEXT_CLASS}>
+          {label}
+        </span>
+      </span>
+    );
+  }
 
   return (
     <span
       className={`${BASE_CLASS} ${FACE_IMAGE_CLASS} ${sizeClass} bg-tile-face ${borderClass} ${className}`}
-      style={{ backgroundImage: `url(${tileImageSrc(tile)})` }}
+      style={{ backgroundImage: `url(${face.src})` }}
       role={decorative ? undefined : "img"}
-      aria-label={decorative ? undefined : tileLabel(tile)}
+      aria-label={decorative ? undefined : label}
       aria-hidden={decorative || undefined}
-      data-face={tileImageName(tile)}
+      data-face={face.name}
     >
       {isRed ? (
         // 赤ドラの形状差: 色だけに頼らず「赤」バッジを付す(スペック5 5.2.1)。
