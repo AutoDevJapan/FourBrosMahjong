@@ -21,8 +21,10 @@
  * - 他家(AI)は**手牌効率(向聴・受け入れ)ベースの打牌**(#98)。有効牌を残し、赤5/ドラを温存し、
  *   他家の現物を優先して切る(→ `src/domain/game/ai.ts`)。ツモ/ロンは和了形が成立すれば自動宣言するが、
  *   **リーチ・鳴きはしない**。
- * - 加槓に対する槍槓(チャンカン)は未対応(AI は槍槓しない)。この四兄弟麻雀 SSOT は槍槓の可否を
- *   明記せず一意に定まらないため未確定化(Q17 / #105 フォローアップ・要ユーザー承認)。
+ * - 加槓に対する槍槓(チャンカン)は**対応済み**(Q17 = 槍槓あり・ユーザー承認 / #115)。加槓宣言時、
+ *   その加槓牌でロンできる他家がいれば加槓は不成立(横取り)= 槍槓ロン(`chankan` 1翻)として精算する。
+ *   `declareKakan` は自家(p0)専用のため応答者は他家(AI)。国士無双の暗槓槍槓など派生規則は SSOT に
+ *   明記がなく未対応(Q17 の派生・要ユーザー承認)。
  * - リーチ後の暗槓も不可。SSOT に可否・条件の明記がなく一意に定まらないため未確定化
  *   (Q18 / #105 フォローアップ・要ユーザー承認)。
  * - 北抜き(ガリ)は**自動**で処理する(手動選択は未対応)。
@@ -801,12 +803,17 @@ function analyzeTsumo(
   });
 }
 
-/** ロン和了の役判定(フリテン不可・役なしは null)。 */
+/**
+ * ロン和了の役判定(フリテン不可・役なしは null)。
+ * `chankan=true` は槍槓(加槓牌の横取り)の判定で、`chankan` 役(1翻)を付与する
+ * (Q17 = 槍槓あり / #115)。槍槓は嶺上ツモ前の割り込みのため海底(`houtei`)とは併存しない。
+ */
 function analyzeRon(
   state: EngineState,
   seat: SeatKey,
   winningTile: Tile,
   houtei: boolean,
+  chankan = false,
 ): WinAnalysis | null {
   const hand = state.hand;
   if (hand === null) return null;
@@ -833,6 +840,7 @@ function analyzeRon(
     doubleRiichi: hand.doubleRiichi[seat],
     ippatsu: hand.ippatsu[seat],
     haitei: houtei,
+    chankan,
   });
 }
 
@@ -1352,17 +1360,40 @@ export function declareKakan(state: EngineState, tile: Tile): EngineState {
   if (!target) return state;
   const { taken, rest } = takeKind(pool, tile, 1);
   if (taken.length < 1) return state;
+  const kakanTile = taken[0];
 
+  // 槍槓(チャンカン / Q17 = 槍槓あり・#115): 加槓宣言牌でロンできる他家がいれば、
+  // 加槓は不成立(牌は手に戻らず横取り)= 槍槓ロンを成立させる。頭ハネ(上家取り)は
+  // 通常ロンと同じ `ronOrder` に従い、最先の1人のみが和了する。加槓者は放銃者(discarder)
+  // として支払う。応答者は既存のフリテン・役判定(`analyzeRon` + `chankan` 役)を再利用する。
+  // 現状 `declareKakan` は自家(p0)専用のため応答者は必ず他家(AI)= 入力待ちは発生しない。
+  for (const candidate of ronOrder(seat)) {
+    const chankanWin = analyzeRon(state, candidate, kakanTile, false, true);
+    if (chankanWin === null) continue;
+    return settleWin(
+      { ...state, pending: null },
+      {
+        winnerSeat: candidate,
+        winType: "ron",
+        winningTile: kakanTile,
+        analysis: chankanWin,
+        discarderSeat: seat,
+        haitei: false,
+      },
+    );
+  }
+
+  // 槍槓なし → 加槓成立。嶺上ツモへ進む。
   hand.hands[seat] = rest;
   hand.drawn = null;
   hand.melds[seat] = hand.melds[seat].map((m) =>
     m === target
-      ? { type: "kan", tiles: [...m.tiles, taken[0]], concealed: false }
+      ? { type: "kan", tiles: [...m.tiles, kakanTile], concealed: false }
       : m,
   );
   clearAllIppatsu(hand);
   hand.callsMade = true;
-  drawKanReplacement(hand, seat); // 嶺上ツモ(槍槓は未対応)
+  drawKanReplacement(hand, seat); // 嶺上ツモ
   return { ...state, pending: buildHumanPending(state, seat) };
 }
 
