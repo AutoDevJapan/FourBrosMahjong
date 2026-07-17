@@ -73,6 +73,7 @@ async function openScreen(
   page: Page,
   screen: Screen,
   theme: Theme,
+  query = "",
 ): Promise<void> {
   if (theme === "OSダーク") {
     await page.emulateMedia({ colorScheme: "dark" });
@@ -86,7 +87,7 @@ async function openScreen(
     });
   }
 
-  await page.goto(screen.path);
+  await page.goto(screen.path + query);
   await expect(
     page.getByRole("heading", { level: 1, name: screen.heading }),
   ).toBeVisible();
@@ -164,6 +165,236 @@ test.describe("状態駆動 a11y 監査(狭幅・モーダル / #148)", () => {
         .withTags([...WCAG_TAGS])
         .analyze();
       expect(modal.violations, formatViolations(modal.violations)).toEqual([]);
+    });
+  }
+});
+
+/**
+ * 状態駆動 a11y 監査(局面依存の動的描画 / #159)。
+ *
+ * 既定の自動監査(初期局面)と #148 の狭幅/モーダル監査は、対局を**進めて**初めて DOM に
+ * 現れる局面依存の描画 — リーチ宣言バッジ(`StatusBadge variant="riichi"`)・鳴き副露
+ * (`Melds` の `aria-label="副露"`)・和了/流局の `role="alert"` 通知と点差表示(`ScoreDisplay`
+ * の `--danger` / `--positive` デルタ)— を走査できていなかった。ここでは実対局エンジンを
+ * **決定的 seed**(`/game?seed=…`)で固定し、各動的状態を実際に描画させた状態で axe を回す。
+ *
+ * 補足(点差表示の監査範囲): `ScoreDisplay` の色付き数値(`--danger`/`--positive`)は装飾扱いで
+ * `aria-hidden` のため axe の `color-contrast` 対象外であり、意味は色非依存の `sr-only` テキスト
+ * (「マイナス〇点」等)が担う(スペック5 5.2.1)。本シナリオは点差を伴う roundEnd 状態を実描画して
+ * `role="alert"` 通知・強調ボタン・周辺 DOM を axe で監査し、点差表示が色非依存で描かれることを
+ * `sr-only` テキストの存在で確認する(色そのもののコントラスト検証は axe の走査範囲に依存する)。
+ *
+ * 到達手段(設計判断): これらの状態は乱数依存で、通常の `createGame()` では現れる局面・タイミングが
+ * 非決定的なため、E2E から安定して踏めない。そこで `GameProvider` が既に持つ決定的再現フック
+ * (`?seed`)を使い、AI・壁が固定された半荘を実際に**プレイして**目的の DOM を出現させる
+ * (状態を捏造せず本番の描画経路を通す)。seed は本番導線(クエリ無しの `/game`)では発火せず、
+ * 盤面の牌列を固定するだけで席割り・進行規則・UI 分岐は一切変えない(本番挙動不変)。
+ *
+ * 配色トークンのライト/ダーク双方を突くため、各シナリオをライト・OSダーク・手動ダークの
+ * 3 テーマで実行する(spec 5.4 / 5.5)。
+ */
+test.describe("状態駆動 a11y 監査(リーチ/鳴き/和了アラート/トビ / #159)", () => {
+  const gameScreen = SCREENS.find((s) => s.path === "/game");
+  if (gameScreen === undefined) throw new Error("SCREENS に /game がない");
+
+  // 決定的再現 seed(オフラインで engine を「先頭牌打牌+可能ならリーチ/ポン」の DOM ドライバと
+  // 同一戦略で走査して選定。同じ seed + 同じ操作列は完全再現するため局面到達は決定的):
+  // - RIICHI: 自家(起家=東家)が序盤の自手番で門前テンパイし、数手でリーチ宣言できる半荘。
+  // - MELD  : 自家が序盤の他家打牌をポンして副露が卓に出る半荘。
+  // - RESULT: 素点移動のある和了で1局目が終わり、`role="alert"` と点差表示が出る半荘。
+  //
+  // 保守メモ: これらの seed と各ドライバの探索上限(60/400/800)は engine/AI の打牌ロジックに依存する。
+  // engine を変更して目的局面へ到達しなくなった場合は、同一 DOM 戦略のオフライン走査で seed を
+  // 再選定すること(到達失敗は末尾の toBeVisible/属性アサーションで顕在化し、誤 pass にはならない)。
+  // SEED_MELD と SEED_RESULT が同一(1)なのは、ドライバ戦略が異なり別局面に至るため意図的。
+  const SEED_RIICHI = 381;
+  const SEED_MELD = 1;
+  const SEED_RESULT = 1;
+
+  /** ページ全体へ axe(WCAG 2.1 A/AA)を実行し違反ゼロを検証する。 */
+  async function auditPage(page: Page): Promise<void> {
+    const results = await new AxeBuilder({ page })
+      .withTags([...WCAG_TAGS])
+      .analyze();
+    expect(results.violations, formatViolations(results.violations)).toEqual(
+      [],
+    );
+  }
+
+  /** 盤面ルートの進行状態(テスト用フック data-phase / data-pending)を読む。 */
+  async function boardState(
+    board: Locator,
+  ): Promise<{ phase: string | null; pending: string | null } | null> {
+    return board
+      .evaluate((el) => ({
+        phase: el.getAttribute("data-phase"),
+        pending: el.getAttribute("data-pending"),
+      }))
+      .catch(() => null);
+  }
+
+  for (const theme of THEMES) {
+    test(`リーチ宣言バッジが描画された状態で WCAG 2.1 A/AA 違反ゼロ [${theme}]`, async ({
+      page,
+    }) => {
+      await openScreen(page, gameScreen, theme, `?seed=${SEED_RIICHI}`);
+
+      const board = page.locator("[data-phase]").first();
+      const handOptions = () =>
+        page
+          .getByRole("listbox", { name: "自家の手牌" })
+          .first()
+          .getByRole("option");
+      // リーチ宣言バッジ(variant="riichi")は自家スロット(section)内の "リーチ" テキスト。
+      // 操作パネルの「リーチ」ボタンは section 外なので、自家 region 内へ限定して誤検知を防ぐ。
+      const riichiBadge = page
+        .getByRole("region", { name: /^あなた/ })
+        .first()
+        .getByText("リーチ");
+
+      // 自家は先頭牌から打牌して進める。engine が「リーチ」ボタンを出した手番(門前テンパイ)で
+      // リーチ宣言する。seed 固定によりこの半荘は数手でリーチ可能局面へ決定的に到達する。
+      for (let turn = 0; turn < 60; turn++) {
+        if (await riichiBadge.count()) break;
+        const state = await boardState(board);
+        if (state === null) {
+          await page.waitForTimeout(20);
+          continue;
+        }
+        if (state.phase !== "playing") break; // 想定外(半荘/局が先に終わった)。
+        if (state.pending === "humanReact") {
+          // リーチは門前が条件のため鳴きは見送る(スルー)。
+          await page.getByRole("button", { name: "スルー" }).first().click();
+          continue;
+        }
+        if (state.pending !== "humanDiscard") {
+          await page.waitForTimeout(20);
+          continue;
+        }
+        const armButton = page.getByRole("button", {
+          name: "リーチ",
+          exact: true,
+        });
+        if (await armButton.count()) {
+          // リーチ宣言 = 「リーチ」で武装 → テンパイを保つ宣言牌を選ぶ。どの牌が有効かは engine が
+          // 決めるため、武装し直しながら手牌を順に試す(無効牌は no-op で武装解除されるだけ)。
+          // 成功打で手牌枚数が変わる(index がずれる)ため、option 数は毎回読み直して古い index の
+          // 空振り(flake)を避ける。バッジ出現(=宣言成立)で即座に打ち切る。
+          for (
+            let k = 0;
+            !(await riichiBadge.count()) && k < (await handOptions().count());
+            k++
+          ) {
+            const arm = page.getByRole("button", {
+              name: "リーチ",
+              exact: true,
+            });
+            if (await arm.count()) await arm.first().click();
+            await handOptions().nth(k).click();
+          }
+          continue;
+        }
+        // まだリーチ不可の手番: 先頭牌を打って進める。
+        await handOptions().first().click();
+      }
+
+      // リーチ宣言バッジ(variant="riichi")が自家スロットに描画された状態を監査する。
+      await expect(riichiBadge.first()).toBeVisible();
+      await auditPage(page);
+    });
+
+    test(`鳴き(ポン)副露が描画された状態で WCAG 2.1 A/AA 違反ゼロ [${theme}]`, async ({
+      page,
+    }) => {
+      await openScreen(page, gameScreen, theme, `?seed=${SEED_MELD}`);
+
+      const board = page.locator("[data-phase]").first();
+      // 副露(ポン/カン)の卓表示は `Melds` の `<ul aria-label="副露">`(role=list)。
+      const melds = page.getByRole("list", { name: "副露" });
+
+      // 自家は打牌はツモ切り相当(先頭牌)で進め、鳴ける場面(humanReact)では必ずポン/カンする。
+      // 他家(AI)は鳴かないため、副露が出るのは自家のポン成立時のみ = そこで停止して監査する。
+      for (let step = 0; step < 400; step++) {
+        if (await melds.count()) break;
+        const state = await boardState(board);
+        if (state === null) {
+          await page.waitForTimeout(20);
+          continue;
+        }
+        if (state.phase === "roundEnd") {
+          await page.getByRole("button", { name: "次の局へ" }).first().click();
+          continue;
+        }
+        if (state.pending === "humanReact") {
+          const pon = page.getByRole("button", { name: "ポン" });
+          const kan = page.getByRole("button", { name: "カン" });
+          if (await pon.count()) await pon.first().click();
+          else if (await kan.count()) await kan.first().click();
+          else
+            await page.getByRole("button", { name: "スルー" }).first().click();
+          continue;
+        }
+        if (state.pending === "humanDiscard") {
+          await page
+            .getByRole("listbox", { name: "自家の手牌" })
+            .first()
+            .getByRole("option")
+            .first()
+            .click();
+          continue;
+        }
+        await page.waitForTimeout(20);
+      }
+
+      // 副露(ポン)が卓に描画された状態を監査する。
+      await expect(melds.first()).toBeVisible();
+      await auditPage(page);
+    });
+
+    test(`和了の役表示(role="alert")と --danger 点差が描画された状態で WCAG 2.1 A/AA 違反ゼロ [${theme}]`, async ({
+      page,
+    }) => {
+      await openScreen(page, gameScreen, theme, `?seed=${SEED_RESULT}`);
+
+      const board = page.locator("[data-phase]").first();
+      // 自家は打牌(先頭牌)・ロン/鳴きは見送り(スルー)で進め、素点移動のある決着(マイナス点差)
+      // を伴う局終了(roundEnd)まで到達させる。点差ゼロの流局が来たら次局へ進めて続行する。
+      for (let step = 0; step < 800; step++) {
+        const state = await boardState(board);
+        if (state === null) {
+          await page.waitForTimeout(20);
+          continue;
+        }
+        if (state.phase === "roundEnd") {
+          // 点差(マイナス表示 = --danger)が出ていれば監査対象の局。無ければ次局へ。
+          if (await page.getByText(/マイナス/).count()) break;
+          await page.getByRole("button", { name: "次の局へ" }).first().click();
+          continue;
+        }
+        if (state.phase === "gameEnd") break;
+        if (state.pending === "humanReact") {
+          await page.getByRole("button", { name: "スルー" }).first().click();
+          continue;
+        }
+        if (state.pending === "humanDiscard") {
+          await page
+            .getByRole("listbox", { name: "自家の手牌" })
+            .first()
+            .getByRole("option")
+            .first()
+            .click();
+          continue;
+        }
+        await page.waitForTimeout(20);
+      }
+
+      // 局終了の決着通知が `role="alert"`(assertive ライブリージョン)へ入る。
+      await expect(board).toHaveAttribute("data-phase", "roundEnd");
+      await expect(page.getByRole("alert").first()).not.toHaveText("");
+      // 点差の減少(`--danger`)が色のみに依存せず `sr-only` テキストで併記されている
+      // (スペック5 5.2.1)。色付き数値自体は `aria-hidden` の装飾のため、意味はこのテキストが担う。
+      await expect(page.getByText(/マイナス/).first()).toBeAttached();
+      await auditPage(page);
     });
   }
 });

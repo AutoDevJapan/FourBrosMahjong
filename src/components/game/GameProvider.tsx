@@ -80,6 +80,29 @@ export interface GameContextValue {
 
 const GameContext = createContext<GameContextValue | null>(null);
 
+/**
+ * 決定的再現用の乱数 seed を URL クエリ `?seed=<非負整数>` から読む(テスト専用フック)。
+ *
+ * E2E(状態駆動 a11y 監査など)が特定局面へ**決定的に**到達するための最小の状態注入口。
+ * seed 付与時のみ `createGame({ seed })` で半荘を固定再現する。**本番挙動は変えない**:
+ * - **本番ビルドでは丸ごと無効**(`NODE_ENV === "production"` で早期 return)。エンドユーザーが
+ *   `?seed` で壁・配牌を決定的再現し「良い配牌を引くまで seed を探す」等の完全性侵害をできないよう、
+ *   本フックは本番バンドルから実質デッドコード化する(サンマ賭博テーマの完全性 / #159 レビュー指摘)。
+ *   E2E は dev サーバ(`pnpm dev` = development)で走るため引き続き機能する。
+ * - クエリ無し(通常導線の `/game`)は `null` を返し、既定の乱数半荘(`createGame()`)のまま。
+ * - サーバ(`window` 不在)・非整数・負値は `null`(既定へフォールバック)。`?seed=1.5` の様な
+ *   誤読(`>>>0` による 1 への丸め)を避けるため「非負整数」に厳格化する。
+ * seed は盤面の牌列(乱数)を固定するだけで、席割り・進行規則・UI の分岐は一切変えない。
+ */
+function seedFromLocation(): number | null {
+  if (process.env.NODE_ENV === "production") return null;
+  if (typeof window === "undefined") return null;
+  const raw = new URLSearchParams(window.location.search).get("seed");
+  if (raw === null || raw.trim() === "") return null;
+  const seed = Number(raw);
+  return Number.isInteger(seed) && seed >= 0 ? seed : null;
+}
+
 export interface GameProviderProps {
   children: React.ReactNode;
   /** 初期エンジン状態(テスト/決定的再現用)。既定は新規半荘。 */
@@ -89,9 +112,13 @@ export interface GameProviderProps {
 export function GameProvider({ children, initialGame }: GameProviderProps) {
   // 実対局の乱数状態は初期化子で1度だけ生成する。SSR とクライアント初回描画の不一致は、
   // 盤面を描く `GameBoard` 側のマウントゲート(クライアントでのみ盤面を描画)で回避する。
-  const [engine, setEngine] = useState<EngineState>(
-    () => initialGame ?? createGame(),
-  );
+  // `initialGame`(単体テストの明示注入)を最優先し、次に URL の `?seed`(E2E の決定的再現)、
+  // どちらも無ければ既定の乱数半荘。seed 経路は本番導線(クエリ無し)では発火しない。
+  const [engine, setEngine] = useState<EngineState>(() => {
+    if (initialGame) return initialGame;
+    const seed = seedFromLocation();
+    return seed !== null ? createGame({ seed }) : createGame();
+  });
 
   // 遷移は「イベントハンドラ内で現在の engine から1度だけ」算出し、その**値**を `setEngine` へ渡す。
   // engine の遷移は内部で `Wall` 等を可変更新するため、`setEngine((s) => transition(s))` の
