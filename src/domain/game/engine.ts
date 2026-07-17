@@ -387,6 +387,80 @@ function ronOrder(discarder: SeatKey): [SeatKey, SeatKey] {
 }
 
 // ---------------------------------------------------------------------------
+// アクション可否述語(can_*) — 純関数・決定的(issue #139)
+//
+// 各公開アクションの「その局面で宣言できるか」を、最小の入力だけを取る純述語へ
+// 切り出したもの。OpenRiichi(GPL / 設計思想のみ参照)の `RoundState.can_*` が
+// 「壁レベルのガード(海底・カン残)× プレイヤーレベルの可否」を分解している設計を
+// 参考に、本作の可否分岐を網羅監査できる粒度へ整理した(コードは流用していない)。
+// engine 内部(`buildHumanPending` / `canHumanCall` / `riichiAnkanTiles`)はこれらへ
+// 委譲し**挙動は不変**。境界(海底・リーチ中・鳴き後・放銃者自身・枚数不足・非門前・
+// 点棒不足)を engine 全体を組まずに単体検証できるよう公開する。
+// リーチ後暗槓の送り槓ガードは {@link canAnkanAfterRiichi}(Q18 / #116)を参照。
+// ---------------------------------------------------------------------------
+
+/**
+ * 海底(ライブ牌 0)か(純述語)。海底では嶺上補充ができないためカン・鳴きは不可
+ * (標準慣行・#128)。ロン/ツモ自体は海底摸月・河底撈魚として可(別判定)。
+ */
+export function isHaitei(remainingLiveTiles: number): boolean {
+  return remainingLiveTiles === 0;
+}
+
+/**
+ * 他家の打牌に対しポン(need=2)/大明槓(need=3)を宣言できるか(純述語)。
+ * - 放銃者自身(`isDiscarder`)は自分の打牌を鳴けない。
+ * - リーチ後(`inRiichi`)は鳴けない。
+ * - 海底(`haitei`)は鳴けない(嶺上補充不可)。
+ * - 門前手牌 `concealed` に打牌 `tile` と同種が `need` 枚以上あること(赤フラグ無視)。
+ * サンマはチーが無いため対象はポン/大明槓のみ(上家限定のチー判定は存在しない)。
+ */
+export function canCallMeldOnDiscard(params: {
+  readonly concealed: readonly Tile[];
+  readonly tile: Tile;
+  readonly need: number;
+  readonly inRiichi: boolean;
+  readonly haitei: boolean;
+  readonly isDiscarder: boolean;
+}): boolean {
+  const { concealed, tile, need, inRiichi, haitei, isDiscarder } = params;
+  if (isDiscarder || inRiichi || haitei) return false;
+  return concealed.filter((t) => sameKind(t, tile)).length >= need;
+}
+
+/**
+ * 自ツモ番でカン(暗槓・加槓)を宣言できる局面か(純述語)。
+ * ツモ牌がある(`hasDrawn` = 自ツモ番)かつ海底でない(嶺上補充ができる)こと。
+ * 具体的な牌種(暗刻の4枚目 / 既存ポンの4枚目)の有無は候補列挙側が別に判定する。
+ */
+export function canKanOnDrawTurn(hasDrawn: boolean, haitei: boolean): boolean {
+  return hasDrawn && !haitei;
+}
+
+/**
+ * リーチを宣言できる局面か(純述語)。
+ * - ツモ牌がある(`hasDrawn` = 自ツモ番)。
+ * - 門前(`isMenzen` = 副露なし。暗槓のみは門前とみなす=`isConcealedHand`)。
+ * - 持ち点が供託1,000点以上(`points >= 1,000`)。
+ * - テンパイを保つ打牌が存在する(`hasTenpaiKeepingDiscard`)。
+ * 既にリーチ済みの席へは engine 側が打牌選択を出さない(自動ツモ切り)ため対象外。
+ */
+export function canDeclareRiichi(params: {
+  readonly hasDrawn: boolean;
+  readonly isMenzen: boolean;
+  readonly points: number;
+  readonly hasTenpaiKeepingDiscard: boolean;
+}): boolean {
+  const { hasDrawn, isMenzen, points, hasTenpaiKeepingDiscard } = params;
+  return (
+    hasDrawn &&
+    isMenzen &&
+    points >= RIICHI_STICK_POINTS &&
+    hasTenpaiKeepingDiscard
+  );
+}
+
+// ---------------------------------------------------------------------------
 // 局の生成・進行
 // ---------------------------------------------------------------------------
 
@@ -539,7 +613,7 @@ function pump(state: EngineState): EngineState {
 
     // 1. ツモ(未ツモなら山から引く)。山が尽きていれば流局。
     if (hand.drawn === null) {
-      if (hand.wall.remainingLiveTiles === 0) {
+      if (isHaitei(hand.wall.remainingLiveTiles)) {
         return settleDraw(s);
       }
       const raw = hand.wall.draw();
@@ -548,7 +622,7 @@ function pump(state: EngineState): EngineState {
       hand.tempMiss[seat] = false; // 同巡内フリテンは次の自ツモで解消。
     }
 
-    const haitei = hand.wall.remainingLiveTiles === 0;
+    const haitei = isHaitei(hand.wall.remainingLiveTiles);
 
     if (isHuman) {
       if (hand.riichi[seat]) {
@@ -700,7 +774,7 @@ function riichiAnkanTiles(hand: HandState, seat: SeatKey): Tile[] {
   const drawn = hand.drawn;
   if (drawn === null) return [];
   // 海底(ライブ牌 0 = 嶺上を引けない)ではカン不可(標準慣行・#128)。
-  if (hand.wall.remainingLiveTiles === 0) return [];
+  if (isHaitei(hand.wall.remainingLiveTiles)) return [];
   return canAnkanAfterRiichi(hand.hands[seat], drawn) ? [drawn] : [];
 }
 
@@ -720,28 +794,34 @@ function buildHumanPending(state: EngineState, seat: SeatKey): Pending {
   const hand = state.hand;
   if (hand === null) return null;
   const drawn = hand.drawn;
-  const haitei = hand.wall.remainingLiveTiles === 0;
+  const haitei = isHaitei(hand.wall.remainingLiveTiles);
   const canTsumo =
     drawn !== null && analyzeTsumo(state, seat, drawn, haitei) !== null;
 
   const pool = [...hand.hands[seat], ...(drawn ? [drawn] : [])];
   const menzen = isConcealedHand(hand.melds[seat]);
   const occupant = seatOccupant(hand.seating, seat);
-  const riichiTiles =
-    drawn !== null && menzen && state.points[occupant] >= RIICHI_STICK_POINTS
-      ? riichiDiscardTiles(hand, seat)
-      : [];
+  // リーチ候補牌の算出ガード。可否の最終判定は canDeclareRiichi が担うが、点棒不足時は
+  // 公開状態 `pending.riichiTiles` を空に保つ(挙動不変)ため、ここでも 1,000 点で足切りする。
+  const riichiEligible =
+    drawn !== null && menzen && state.points[occupant] >= RIICHI_STICK_POINTS;
+  const riichiTiles = riichiEligible ? riichiDiscardTiles(hand, seat) : [];
   // 海底(ライブ牌 0 = 嶺上を引けない)ではカン(暗槓・加槓)不可(標準慣行・#128)。
-  const ankanTiles = drawn !== null && !haitei ? ankanCandidates(pool) : [];
-  const kakanTiles =
-    drawn !== null && !haitei ? kakanCandidates(hand, seat, pool) : [];
+  const canKan = canKanOnDrawTurn(drawn !== null, haitei);
+  const ankanTiles = canKan ? ankanCandidates(pool) : [];
+  const kakanTiles = canKan ? kakanCandidates(hand, seat, pool) : [];
   // 喰い替え禁止: ポン直後のみ、ポンした牌と同種の打牌を禁止(現物喰い替え / スペック1 1.4)。
   const forbiddenDiscards = hand.ponnedKind !== null ? [hand.ponnedKind] : [];
 
   return {
     kind: "humanDiscard",
     canTsumo,
-    canRiichi: riichiTiles.length > 0,
+    canRiichi: canDeclareRiichi({
+      hasDrawn: drawn !== null,
+      isMenzen: menzen,
+      points: state.points[occupant],
+      hasTenpaiKeepingDiscard: riichiTiles.length > 0,
+    }),
     riichiTiles,
     ankanTiles,
     kakanTiles,
@@ -780,7 +860,10 @@ function applyDiscard(
   return resolveDiscard(state);
 }
 
-/** 自家がポン/明槓できるか(必要枚数 need = ポン2 / 明槓3)。 */
+/**
+ * 自家がポン/明槓できるか(必要枚数 need = ポン2 / 明槓3)。
+ * 自席が着席していれば純述語 {@link canCallMeldOnDiscard} へ委譲する(抜け番は不可)。
+ */
 function canHumanCall(
   hand: HandState,
   humanSeat: SeatKey | null,
@@ -789,11 +872,15 @@ function canHumanCall(
   haitei: boolean,
   need: number,
 ): boolean {
-  if (humanSeat === null || humanSeat === discarder) return false;
-  if (hand.riichi[humanSeat]) return false; // リーチ後は鳴けない。
-  if (haitei) return false; // 海底牌は鳴けない。
-  const count = hand.hands[humanSeat].filter((t) => sameKind(t, tile)).length;
-  return count >= need;
+  if (humanSeat === null) return false; // 抜け番(未着席)は鳴けない。
+  return canCallMeldOnDiscard({
+    concealed: hand.hands[humanSeat],
+    tile,
+    need,
+    inRiichi: hand.riichi[humanSeat],
+    haitei,
+    isDiscarder: humanSeat === discarder,
+  });
 }
 
 /** 直前の打牌に対するロン/鳴き(頭ハネ順)を解決。未決着なら手番を送る。 */
@@ -801,7 +888,7 @@ function resolveDiscard(state: EngineState): EngineState {
   const hand = state.hand;
   if (hand === null || hand.pendingDiscard === null) return state;
   const { seat: discarder, tile } = hand.pendingDiscard;
-  const haitei = hand.wall.remainingLiveTiles === 0;
+  const haitei = isHaitei(hand.wall.remainingLiveTiles);
   const humanSeat = humanSeatOf(hand);
 
   // 1. ロン(頭ハネ順)。ロンは鳴きより優先。
@@ -1446,7 +1533,7 @@ export function declareAnkan(state: EngineState, tile: Tile): EngineState {
   const hand = state.hand;
   // 海底(ライブ牌 0 = 嶺上を引けない)ではカン不可(#128)。pending でも空にしているが
   // 直接呼び出しに対する防御として no-op で拒否する。
-  if (hand.wall.remainingLiveTiles === 0) return state;
+  if (isHaitei(hand.wall.remainingLiveTiles)) return state;
   const seat = humanSeatOf(hand);
   if (seat === null || hand.turn !== seat || hand.drawn === null) return state;
 
@@ -1507,7 +1594,7 @@ export function declareKakan(state: EngineState, tile: Tile): EngineState {
   const hand = state.hand;
   // 海底(ライブ牌 0 = 嶺上を引けない)ではカン不可(#128)。pending でも空にしているが
   // 直接呼び出しに対する防御として no-op で拒否する。
-  if (hand.wall.remainingLiveTiles === 0) return state;
+  if (isHaitei(hand.wall.remainingLiveTiles)) return state;
   const seat = humanSeatOf(hand);
   if (seat === null || hand.turn !== seat || hand.drawn === null) return state;
 
@@ -1568,7 +1655,7 @@ export function declareTsumo(state: EngineState): EngineState {
   }
   const seat = seatOfPlayer(state.hand.seating, HUMAN_ID);
   if (seat === null) return state;
-  const haitei = state.hand.wall.remainingLiveTiles === 0;
+  const haitei = isHaitei(state.hand.wall.remainingLiveTiles);
   const analysis = analyzeTsumo(state, seat, state.hand.drawn, haitei);
   if (analysis === null) return state;
   return settleWin(
@@ -1596,7 +1683,7 @@ export function declareRon(state: EngineState): EngineState {
   const { tile, from } = state.pending;
   const seat = seatOfPlayer(state.hand.seating, HUMAN_ID);
   if (seat === null) return state;
-  const haitei = state.hand.wall.remainingLiveTiles === 0;
+  const haitei = isHaitei(state.hand.wall.remainingLiveTiles);
   const analysis = analyzeRon(state, seat, tile, haitei);
   if (analysis === null) return state;
   return settleWin(
