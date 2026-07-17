@@ -71,6 +71,14 @@ export default function GameBoard() {
       if (pending?.kind !== "humanDiscard") return;
       // リーチ後は打牌が自動ツモ切りに固定されるため、手牌選択は無効(ツモ/ツモ切りボタンで操作)。
       if (pending.locked) return;
+      // 喰い替え禁止(#105 / スペック1 1.4): ポン直後に同種牌は切れない(選択不可・no-op)。
+      if (
+        pending.forbiddenDiscards.some(
+          (f) => f.suit === tile.suit && f.rank === tile.rank,
+        )
+      ) {
+        return;
+      }
       if (riichiArmed && pending.canRiichi) {
         controls.riichi(tile);
         setRiichiArmed(false);

@@ -13,12 +13,18 @@
  *   **裏ドラ**開示(リーチ和了時)、**一発**(リーチ後1巡以内・鳴きを挟むと消滅)、ダブルリーチ。
  * - **鳴き(自家のみ)**: ポン・明槓(他家打牌)・暗槓・加槓(自家ツモ番)。嶺上ツモ・鳴き喰い下がりは
  *   既存 hand が対応。鳴きは一発を消滅させる。
+ * - **喰い替え禁止(現物)**(#105 / スペック1 1.4「喰い替えなし」): サンマはチーが無くポンのみのため
+ *   喰い替えは**現物喰い替え**(ポンした牌と同種を直後に切る)に限られる。ポン直後の打牌でその牌種を
+ *   禁止する(`hand.ponnedKind` を `discard` が参照し `isKuikaeForbidden` で no-op)。
  *
  * ## 割り切り(MVP / フォローアップ issue 化)
  * - 他家(AI)は**手牌効率(向聴・受け入れ)ベースの打牌**(#98)。有効牌を残し、赤5/ドラを温存し、
  *   他家の現物を優先して切る(→ `src/domain/game/ai.ts`)。ツモ/ロンは和了形が成立すれば自動宣言するが、
  *   **リーチ・鳴きはしない**。
- * - 加槓に対する槍槓(チャンカン)は未対応(AI は槍槓しない)。リーチ後の暗槓も不可(→ issue)。
+ * - 加槓に対する槍槓(チャンカン)は未対応(AI は槍槓しない)。この四兄弟麻雀 SSOT は槍槓の可否を
+ *   明記せず一意に定まらないため未確定化(Q17 / #105 フォローアップ・要ユーザー承認)。
+ * - リーチ後の暗槓も不可。SSOT に可否・条件の明記がなく一意に定まらないため未確定化
+ *   (Q18 / #105 フォローアップ・要ユーザー承認)。
  * - 北抜き(ガリ)は**自動**で処理する(手動選択は未対応)。
  * - パオ(責任払い)は**自家の鳴きで確定した大三元/大四喜/四槓子**に対応(#99)。ポン/大明槓で
  *   パオ役満が確定した瞬間に責任者(打牌者)を記録し、和了時 `resolveWinPayment` で責任払い
@@ -41,6 +47,7 @@ import { countDoraHan } from "@/domain/dora/han";
 import { chooseDiscard } from "@/domain/game/ai";
 import type { MeldInput } from "@/domain/hand/decompose";
 import { canRon } from "@/domain/hand/furiten";
+import { isKuikaeForbidden } from "@/domain/hand/kuikae";
 import { type Meld, isConcealedHand } from "@/domain/hand/meld";
 import { isTenpai } from "@/domain/hand/tenpai";
 import { sameKind, tileKey } from "@/domain/hand/tile-identity";
@@ -159,6 +166,11 @@ interface HandState {
   pendingDiscard: { seat: SeatKey; tile: Tile } | null;
   /** 直前の打牌に対しロン/鳴きを見送った席(頭ハネ解決の再入で参照)。 */
   passedRonSeats: SeatKey[];
+  /**
+   * 直前にポンした牌(喰い替え禁止用 / #105・スペック1 1.4)。ポン直後の打牌で
+   * この牌と同種を切る=現物喰い替えは非合法手として禁止する。打牌が済めば null。
+   */
+  ponnedKind: Tile | null;
 }
 
 /** 半荘終了時の1プレイヤー分の確定精算(ソシー内訳)。 */
@@ -203,6 +215,11 @@ export type Pending =
       readonly ankanTiles: readonly Tile[];
       /** 加槓できる牌(既存ポンに4枚目)。 */
       readonly kakanTiles: readonly Tile[];
+      /**
+       * 喰い替え禁止で切れない牌種(#105 / スペック1 1.4)。ポン直後のみ、ポンした牌と
+       * 同種の1牌種が入る(それ以外は空)。UI は選択不可にし、`discard` も no-op にする。
+       */
+      readonly forbiddenDiscards: readonly Tile[];
       /** リーチ後で打牌が自動ツモ切りに固定されているか。 */
       readonly locked: boolean;
     }
@@ -436,6 +453,7 @@ function beginRound(state: EngineState): EngineState {
     paoResponsible: {},
     pendingDiscard: null,
     passedRonSeats: [],
+    ponnedKind: null,
   };
   const next: EngineState = {
     ...state,
@@ -539,6 +557,7 @@ function pump(state: EngineState): EngineState {
               riichiTiles: [],
               ankanTiles: [],
               kakanTiles: [],
+              forbiddenDiscards: [],
               locked: true,
             },
           };
@@ -629,6 +648,8 @@ function buildHumanPending(state: EngineState, seat: SeatKey): Pending {
       : [];
   const ankanTiles = drawn !== null ? ankanCandidates(pool) : [];
   const kakanTiles = drawn !== null ? kakanCandidates(hand, seat, pool) : [];
+  // 喰い替え禁止: ポン直後のみ、ポンした牌と同種の打牌を禁止(現物喰い替え / スペック1 1.4)。
+  const forbiddenDiscards = hand.ponnedKind !== null ? [hand.ponnedKind] : [];
 
   return {
     kind: "humanDiscard",
@@ -637,6 +658,7 @@ function buildHumanPending(state: EngineState, seat: SeatKey): Pending {
     riichiTiles,
     ankanTiles,
     kakanTiles,
+    forbiddenDiscards,
     locked: false,
   };
 }
@@ -664,6 +686,7 @@ function applyDiscard(
   hand.discards[seat] = [...hand.discards[seat], discarded];
   hand.drawn = null;
   hand.fromKan = false;
+  hand.ponnedKind = null; // 打牌で喰い替え禁止の窓(ポン直後の1打)を閉じる。
   hand.ippatsu[seat] = false; // 自分の打牌で一発の権利は消える。
   hand.pendingDiscard = { seat, tile: discarded };
   hand.passedRonSeats = [];
@@ -1105,6 +1128,11 @@ export function discard(state: EngineState, tile: Tile): EngineState {
   if (seat === null || state.hand.turn !== seat) return state;
   const useTile =
     state.pending.locked && state.hand.drawn !== null ? state.hand.drawn : tile;
+  // 喰い替え禁止(現物): ポン直後にポンした牌と同種を切るのは非合法手 → no-op で拒否。
+  const ponnedKind = state.hand.ponnedKind;
+  if (ponnedKind !== null && isKuikaeForbidden(ponnedKind, useTile)) {
+    return state;
+  }
   const after = applyDiscard({ ...state, pending: null }, seat, useTile);
   return pump(after);
 }
@@ -1221,6 +1249,8 @@ export function declarePon(state: EngineState): EngineState {
   hand.drawn = null;
   hand.fromKan = false;
   hand.turn = seat;
+  // 喰い替え禁止: 直後の打牌でこの牌種(ポンした牌)を切れないよう記録する(スペック1 1.4)。
+  hand.ponnedKind = tile;
   // ポン後は打牌が必要(ツモなし)。
   return { ...state, pending: buildHumanPending(state, seat) };
 }
