@@ -1,18 +1,31 @@
-"use client";
-
 /**
  * 設定ページ(`/settings`)。
  *
- * スペック6(`documents/spec/screen-design-and-routing.md` 6.2 / 6.6)で
- * **Client Component** として定義された表示設定画面。現時点の設定項目は
- * ダークモードの手動切替(スペック5 5.4.1)のみ。`localStorage` / `matchMedia`
- * を操作する `ThemeToggle` を内包するためページ全体を Client にしている。
+ * スペック6(`documents/spec/screen-design-and-routing.md` 6.2 / 6.6)の表示設定画面。
+ * 現時点の設定項目はダークモードの手動切替(スペック5 5.4.1)のみ。
+ *
+ * Server/Client 境界(スペック6 6.6「ページ全体を `"use client"` にしない」原則):
+ * ブラウザAPI(`localStorage` / `matchMedia`)を操作する対話部分は葉の
+ * **Client Component** `ThemeToggle` に閉じており、ページ自体は静的な殻
+ * (見出し・ナビゲーション・メタデータ)なので **Server Component** のまま保つ。
+ * これにより `metadata`(下記)を export でき、ルート `layout.tsx` の title
+ * テンプレート `%s | 四兄弟麻雀` が適用される(Issue #94。Client のままだと
+ * `metadata` を持てず `title.default` にフォールバックし `/rules` と不整合になる)。
  *
  * 画面遷移(スペック6 6.3): ロビー `/` ⇄ 設定 `/settings`。「戻る」導線を持つ。
  */
 
+import type { Metadata } from "next";
 import Link from "next/link";
 import { ThemeToggle } from "@/components/layout/ThemeToggle";
+
+export const metadata: Metadata = {
+  // layout.tsx の title テンプレート `%s | 四兄弟麻雀` により
+  // 「設定 | 四兄弟麻雀」として出力される(`/rules` と一貫)。
+  title: "設定",
+  description:
+    "四兄弟麻雀の表示設定。テーマ(システム設定に従う / ライト / ダーク)の手動切替ができます。",
+};
 
 export default function SettingsPage() {
   return (
