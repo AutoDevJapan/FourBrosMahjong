@@ -283,6 +283,51 @@ test.describe("対局画面(/game)", () => {
     ).toBeLessThanOrEqual(1);
   });
 
+  test("決定的seedでAIのリーチと副露が実際の卓に表示される(issue #169)", async ({
+    page,
+  }) => {
+    test.setTimeout(60_000);
+    await page.goto("/game?seed=1");
+
+    const board = page.locator("[data-phase]").first();
+    let sawAiRiichi = false;
+    let sawAiMeld = false;
+    for (let step = 0; step < 600 && (!sawAiRiichi || !sawAiMeld); step++) {
+      // 自家はリーチも鳴きもしないため、現れたバッジ/副露は必ずAIのもの。
+      sawAiRiichi ||=
+        (await page.getByTestId("status-badge-riichi").count()) > 0;
+      sawAiMeld ||=
+        (await page.getByRole("list", { name: "副露" }).count()) > 0;
+      if (sawAiRiichi && sawAiMeld) break;
+
+      const state = await board
+        .evaluate((element) => ({
+          phase: element.getAttribute("data-phase"),
+          pending: element.getAttribute("data-pending"),
+        }))
+        .catch(() => null);
+      if (state === null) {
+        await page.waitForTimeout(20);
+      } else if (state.phase === "roundEnd") {
+        await page.getByRole("button", { name: "次の局へ" }).first().click();
+      } else if (state.pending === "humanReact") {
+        await page.getByRole("button", { name: "スルー" }).first().click();
+      } else if (state.pending === "humanDiscard") {
+        await page
+          .getByRole("listbox", { name: "自家の手牌" })
+          .first()
+          .getByRole("option")
+          .first()
+          .click();
+      } else {
+        await page.waitForTimeout(20);
+      }
+    }
+
+    expect(sawAiRiichi).toBe(true);
+    expect(sawAiMeld).toBe(true);
+  });
+
   test("自家の手牌は矢印キーでフォーカス移動できる(ロービングタブインデックス / スペック5 5.2.2)", async ({
     page,
   }) => {

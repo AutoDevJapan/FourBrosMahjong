@@ -17,10 +17,9 @@
  *   喰い替えは**現物喰い替え**(ポンした牌と同種を直後に切る)に限られる。ポン直後の打牌でその牌種を
  *   禁止する(`hand.ponnedKind` を `discard` が参照し `isKuikaeForbidden` で no-op)。
  *
- * ## 割り切り(MVP / フォローアップ issue 化)
- * - 他家(AI)は**手牌効率(向聴・受け入れ)ベースの打牌**(#98)。有効牌を残し、赤5/ドラを温存し、
- *   他家の現物を優先して切る(→ `src/domain/game/ai.ts`)。ツモ/ロンは和了形が成立すれば自動宣言するが、
- *   **リーチ・鳴きはしない**。
+ * ## AI
+ * - 他家(AI)は**手牌効率(向聴・受け入れ)ベースの打牌**(#98)に加え、合法ならリーチ・ポン・
+ *   各種カンも行う(#169)。判断は和了を最優先し、既存の公開可否述語と候補列挙を共有する。
  * - 加槓に対する槍槓(チャンカン)は**対応済み**(Q17 = 槍槓あり・ユーザー承認 / #115)。加槓宣言時、
  *   その加槓牌でロンできる他家がいれば加槓は不成立(横取り)= 槍槓ロン(`chankan` 1翻)として精算する。
  *   `declareKakan` は自家(p0)専用のため応答者は他家(AI)。
@@ -32,7 +31,7 @@
  *   待ち・面子構成が変わらない(送り槓でない)場合のみ許可する。七対子テンパイでの暗槓は不可
  *   (`canAnkanAfterRiichi` が判定)。加槓に対する槍槓横取りは Q17 / #115 の範囲。
  * - 北抜き(ガリ)は**自動**で処理する(手動選択は未対応)。
- * - パオ(責任払い)は**自家の鳴きで確定した大三元/大四喜/四槓子**に対応(#99)。ポン/大明槓で
+ * - パオ(責任払い)は**鳴きで確定した大三元/大四喜/四槓子**に対応(#99)。ポン/大明槓で
  *   パオ役満が確定した瞬間に責任者(打牌者)を記録し、和了時 `resolveWinPayment` で責任払い
  *   (ロン折半・ツモ全額・本場)を行う(判定は `scoring/pao.ts`)。役満祝儀は別枠で、支払者は
  *   **抜け番を含む和了者以外の3兄弟**とする(Q14 確定・ユーザー承認 2026-07-17 / #129)。
@@ -45,20 +44,20 @@
 import { dealStartingHands } from "@/domain/deal/deal";
 import type { DiceRoll } from "@/domain/dora/dice";
 import {
-  type DoraSet,
   createDoraSet,
+  type DoraSet,
   resolveDora,
 } from "@/domain/dora/doraSet";
 import { countDoraHan } from "@/domain/dora/han";
 import { chooseDiscard } from "@/domain/game/ai";
-import { type MeldInput, decomposeAll } from "@/domain/hand/decompose";
+import { decomposeAll, type MeldInput } from "@/domain/hand/decompose";
 import { canRon } from "@/domain/hand/furiten";
 import { isKuikaeForbidden } from "@/domain/hand/kuikae";
-import { type Meld, isConcealedHand } from "@/domain/hand/meld";
+import { isConcealedHand, type Meld } from "@/domain/hand/meld";
 import { isTenpai, waitingTiles } from "@/domain/hand/tenpai";
 import { sameKind, tileKey } from "@/domain/hand/tile-identity";
-import { type WinAnalysis, analyzeWin } from "@/domain/hand/win";
-import { type Rng, createSeededRng } from "@/domain/random/rng";
+import { analyzeWin, type WinAnalysis } from "@/domain/hand/win";
+import { createSeededRng, type Rng } from "@/domain/random/rng";
 import {
   advanceRound,
   createInitialRound,
@@ -78,11 +77,11 @@ import {
   YAKUMAN_BONUS,
 } from "@/domain/scoring/settlement";
 import {
-  type SeatedPlayerRef,
   resolveWinPayment,
+  type SeatedPlayerRef,
 } from "@/domain/scoring/win-payment";
 import { HONOR, type Tile } from "@/domain/tiles/tile";
-import { type Wall, WallEmptyError, buildWall } from "@/domain/wall/wall";
+import { buildWall, type Wall, WallEmptyError } from "@/domain/wall/wall";
 
 /** プレイヤー識別子(4兄弟)。`p0` は常に自家(人間)。 */
 export type PlayerId = "p0" | "p1" | "p2" | "p3";
@@ -614,10 +613,14 @@ function drawKanReplacement(hand: HandState, seat: SeatKey): void {
  * AI 手番の打牌を手牌効率(向聴・受け入れ)ベースで選ぶ(#98)。
  * 他家の河から現物(危険牌回避)、表ドラ+赤5から打点温存を加味する。
  * 和了牌の温存は考えない(和了は本関数の前段でツモ宣言済み)。
- * 他家(AI)は #97 でも鳴き・リーチをしないため常に門前13枚 → `hand.hands[seat]` を直接使える。
+ * 副露後は門前牌だけを評価対象にし、既存の手牌効率ロジックで打牌を選ぶ。
  */
-function chooseAiDiscard(hand: HandState, seat: SeatKey, drawn: Tile): Tile {
-  const tiles = [...hand.hands[seat], drawn];
+function chooseAiDiscard(
+  hand: HandState,
+  seat: SeatKey,
+  drawn: Tile | null,
+): Tile {
+  const tiles = [...hand.hands[seat], ...(drawn ? [drawn] : [])];
   const opponentDiscards = (["east", "south", "west"] as SeatKey[])
     .filter((s) => s !== seat)
     .map((s) => hand.discards[s]);
@@ -627,14 +630,184 @@ function chooseAiDiscard(hand: HandState, seat: SeatKey, drawn: Tile): Tile {
   return chooseDiscard({ tiles, opponentDiscards, doraKinds });
 }
 
+/** AIのリーチ宣言。合法な宣言牌のうち手牌効率AIが選んだ牌を切る。 */
+function applyAiRiichi(state: EngineState, seat: SeatKey): EngineState {
+  const hand = state.hand;
+  if (hand === null || hand.drawn === null) return state;
+  const candidates = riichiDiscardTiles(hand, seat);
+  const occupant = seatOccupant(hand.seating, seat);
+  if (
+    !canDeclareRiichi({
+      hasDrawn: true,
+      isMenzen: isConcealedHand(hand.melds[seat]),
+      points: state.points[occupant],
+      hasTenpaiKeepingDiscard: candidates.length > 0,
+    })
+  ) {
+    return state;
+  }
+  const selected = chooseAiDiscard(hand, seat, hand.drawn);
+  const tile =
+    candidates.find((candidate) => sameTile(candidate, selected)) ??
+    candidates[0];
+  hand.riichi[seat] = true;
+  hand.doubleRiichi[seat] = hand.discards[seat].length === 0 && !hand.callsMade;
+  const callsMadeBeforeDeclaration = hand.callsMade;
+  const next: EngineState = {
+    ...state,
+    points: {
+      ...state.points,
+      [occupant]: state.points[occupant] - RIICHI_STICK_POINTS,
+    },
+    riichiSticks: state.riichiSticks + 1,
+  };
+  const discarded = applyDiscard(next, seat, tile);
+  if (
+    discarded.phase === "playing" &&
+    discarded.hand !== null &&
+    discarded.hand.callsMade === callsMadeBeforeDeclaration
+  ) {
+    discarded.hand.ippatsu[seat] = true;
+  }
+  return discarded;
+}
+
+/** AIの暗槓。槍槓(国士のみ)判定後、成立すれば嶺上牌を補充する。 */
+function applyAiAnkan(
+  state: EngineState,
+  seat: SeatKey,
+  tile: Tile,
+): EngineState {
+  const hand = state.hand;
+  if (hand === null || hand.drawn === null) return state;
+  const pool = [...hand.hands[seat], hand.drawn];
+  const { taken, rest } = takeKind(pool, tile, 4);
+  if (taken.length < 4) return state;
+  const ankanTile = taken[0];
+  for (const candidate of ronOrder(seat)) {
+    const win = analyzeRon(state, candidate, ankanTile, false, true);
+    if (win === null || win.form.kind !== "thirteenOrphans") continue;
+    return settleWin(state, {
+      winnerSeat: candidate,
+      winType: "ron",
+      winningTile: ankanTile,
+      analysis: win,
+      discarderSeat: seat,
+      haitei: false,
+    });
+  }
+  hand.hands[seat] = rest;
+  hand.drawn = null;
+  hand.melds[seat] = [
+    ...hand.melds[seat],
+    { type: "kan", tiles: taken, concealed: true },
+  ];
+  clearAllIppatsu(hand);
+  hand.callsMade = true;
+  drawKanReplacement(hand, seat);
+  return state;
+}
+
+/** AIの加槓。槍槓ロンが無ければポンを明槓へ更新し嶺上牌を補充する。 */
+function applyAiKakan(
+  state: EngineState,
+  seat: SeatKey,
+  tile: Tile,
+): EngineState {
+  const hand = state.hand;
+  if (hand === null || hand.drawn === null) return state;
+  const target = hand.melds[seat].find(
+    (meld) => meld.type === "pon" && sameKind(meld.tiles[0], tile),
+  );
+  if (target === undefined) return state;
+  const pool = [...hand.hands[seat], hand.drawn];
+  const { taken, rest } = takeKind(pool, tile, 1);
+  if (taken.length < 1) return state;
+  const kakanTile = taken[0];
+  for (const candidate of ronOrder(seat)) {
+    const win = analyzeRon(state, candidate, kakanTile, false, true);
+    if (win === null) continue;
+    return settleWin(state, {
+      winnerSeat: candidate,
+      winType: "ron",
+      winningTile: kakanTile,
+      analysis: win,
+      discarderSeat: seat,
+      haitei: false,
+    });
+  }
+  hand.hands[seat] = rest;
+  hand.drawn = null;
+  hand.melds[seat] = hand.melds[seat].map((meld) =>
+    meld === target
+      ? {
+          type: "kan",
+          tiles: [...meld.tiles, kakanTile],
+          concealed: false,
+        }
+      : meld,
+  );
+  clearAllIppatsu(hand);
+  hand.callsMade = true;
+  drawKanReplacement(hand, seat);
+  return state;
+}
+
+/** AIのポン/大明槓を成立させる。大明槓は嶺上牌補充まで行う。 */
+function applyAiCall(
+  state: EngineState,
+  caller: SeatKey,
+  discarder: SeatKey,
+  tile: Tile,
+  kan: boolean,
+): EngineState {
+  const hand = state.hand;
+  if (hand === null) return state;
+  const need = kan ? 3 : 2;
+  const { taken, rest } = takeKind(hand.hands[caller], tile, need);
+  if (taken.length < need) return state;
+  const meld: Meld = {
+    type: kan ? "kan" : "pon",
+    tiles: [tile, ...taken],
+    concealed: false,
+  };
+  hand.hands[caller] = rest;
+  recordPaoResponsible(hand, caller, discarder, hand.melds[caller], meld);
+  hand.melds[caller] = [...hand.melds[caller], meld];
+  removeCalledTileFromRiver(hand, discarder, tile);
+  clearAllIppatsu(hand);
+  hand.callsMade = true;
+  hand.pendingDiscard = null;
+  hand.passedRonSeats = [];
+  hand.drawn = null;
+  hand.fromKan = false;
+  hand.turn = caller;
+  if (kan) {
+    drawKanReplacement(hand, caller);
+    return state;
+  }
+  // 現物喰い替えは禁止。ポンで同種牌は2枚消費済みなので、残る場合も候補から除く。
+  const legal = hand.hands[caller].filter(
+    (candidate) => !sameKind(candidate, tile),
+  );
+  const chosen = chooseAiDiscard(
+    { ...hand, hands: { ...hand.hands, [caller]: legal } },
+    caller,
+    null,
+  );
+  return applyDiscard(state, caller, chosen);
+}
+
 /**
  * 進行を人間の意思決定点(自家の打牌 / 鳴き / ロン)まで、または局・半荘の終了まで進める。
- * AI 手番は自動で処理する(リーチ・鳴きはせず、手牌効率で打牌する #98)。
+ * AI 手番は自動で処理する(和了→カン→リーチ→手牌効率打牌、#98 / #169)。
  */
 function pump(state: EngineState): EngineState {
   let s = state;
   for (let guard = 0; guard < 100000; guard++) {
     if (s.phase !== "playing" || s.hand === null) return s;
+    // 鳴き連鎖などで自家の新しい意思決定点が生じたら、自動進行せず入力を待つ。
+    if (s.pending !== null) return s;
     const hand = s.hand;
     const seat = hand.turn;
     const isHuman = seatOccupant(hand.seating, seat) === HUMAN_ID;
@@ -692,7 +865,44 @@ function pump(state: EngineState): EngineState {
       });
     }
 
-    // AI: 手牌効率(向聴・受け入れ)ベースで打牌を選ぶ(#98)。リーチ・鳴きはしない。
+    // リーチ後はツモ和了を逃したら、合法な暗槓を除いて自動ツモ切り。
+    if (hand.riichi[seat]) {
+      const riichiKan = riichiAnkanTiles(hand, seat);
+      if (riichiKan.length > 0) {
+        s = applyAiAnkan(s, seat, riichiKan[0]);
+        if (s.phase !== "playing" || s.pending !== null) return s;
+        continue;
+      }
+      s = applyDiscard(s, seat, hand.drawn);
+      if (s.phase !== "playing" || s.pending !== null) return s;
+      continue;
+    }
+
+    // AI: 海底でなければ加槓→暗槓の順で合法なカンを宣言する。
+    if (canKanOnDrawTurn(hand.drawn !== null, haitei)) {
+      const pool = [...hand.hands[seat], hand.drawn];
+      const kakan = kakanCandidates(hand, seat, pool);
+      if (kakan.length > 0) {
+        s = applyAiKakan(s, seat, kakan[0]);
+        if (s.phase !== "playing" || s.pending !== null) return s;
+        continue;
+      }
+      const ankan = ankanCandidates(pool);
+      if (ankan.length > 0) {
+        s = applyAiAnkan(s, seat, ankan[0]);
+        if (s.phase !== "playing" || s.pending !== null) return s;
+        continue;
+      }
+    }
+
+    // 門前テンパイならリーチを宣言する。供託・合法牌は人間と同じ述語で判定する。
+    const riichiState = applyAiRiichi(s, seat);
+    if (riichiState !== s) {
+      s = riichiState;
+      if (s.phase !== "playing" || s.pending !== null) return s;
+      continue;
+    }
+
     const chosen = chooseAiDiscard(hand, seat, hand.drawn);
     s = applyDiscard(s, seat, chosen);
     if (s.phase !== "playing" || s.pending !== null) return s;
@@ -949,11 +1159,27 @@ function resolveDiscard(state: EngineState): EngineState {
     });
   }
 
-  // 2. 自家の鳴き(ロンを見送っていない場合のみ)。
-  if (humanSeat !== null && !hand.passedRonSeats.includes(humanSeat)) {
-    const canPon = canHumanCall(hand, humanSeat, discarder, tile, haitei, 2);
-    const canKan = canHumanCall(hand, humanSeat, discarder, tile, haitei, 3);
-    if (canPon || canKan) {
+  // 2. 鳴き(頭ハネと同じ巡目順)。大明槓をポンより優先する。
+  for (const candidate of ronOrder(discarder)) {
+    if (hand.passedRonSeats.includes(candidate)) continue;
+    const canPon = canCallMeldOnDiscard({
+      concealed: hand.hands[candidate],
+      tile,
+      need: 2,
+      inRiichi: hand.riichi[candidate],
+      haitei,
+      isDiscarder: false,
+    });
+    const canKan = canCallMeldOnDiscard({
+      concealed: hand.hands[candidate],
+      tile,
+      need: 3,
+      inRiichi: hand.riichi[candidate],
+      haitei,
+      isDiscarder: false,
+    });
+    if (!canPon && !canKan) continue;
+    if (candidate === humanSeat) {
       return {
         ...state,
         pending: {
@@ -966,6 +1192,7 @@ function resolveDiscard(state: EngineState): EngineState {
         },
       };
     }
+    return applyAiCall(state, candidate, discarder, tile, canKan);
   }
 
   // 3. ロン・鳴きなし → 手番送り。
@@ -1464,6 +1691,7 @@ export function declareRiichi(state: EngineState, tile: Tile): EngineState {
   hand.riichi[seat] = true;
   // ダブルリーチ = 自分の第一打・鳴きなし。
   hand.doubleRiichi[seat] = hand.discards[seat].length === 0 && !hand.callsMade;
+  const callsMadeBeforeDeclaration = hand.callsMade;
 
   const newPoints = {
     ...state.points,
@@ -1477,7 +1705,13 @@ export function declareRiichi(state: EngineState, tile: Tile): EngineState {
   };
   const s2 = applyDiscard(s1, seat, tile);
   // 一発の権利を開く(applyDiscard 内で一旦 false にされるため後付けで true)。
-  if (s2.hand) s2.hand.ippatsu[seat] = true;
+  if (
+    s2.phase === "playing" &&
+    s2.hand !== null &&
+    s2.hand.callsMade === callsMadeBeforeDeclaration
+  ) {
+    s2.hand.ippatsu[seat] = true;
+  }
   return pump(s2);
 }
 
@@ -1775,6 +2009,8 @@ export function passRon(state: EngineState): EngineState {
   }
   hand.passedRonSeats = [...hand.passedRonSeats, seat];
   const after = resolveDiscard({ ...state, pending: null });
+  // AIが鳴いた直後の打牌に対して新たな自家応答が生じた場合は、その入力待ちを保持する。
+  if (after.pending !== null) return after;
   return pump(after);
 }
 
