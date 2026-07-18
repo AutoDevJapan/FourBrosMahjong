@@ -56,6 +56,30 @@ function renderBoard(seed = 1) {
   );
 }
 
+/** 他家の加槓に対する槍槓応答(#208)の pending を注入して描画する。 */
+function renderBoardWithChankanPending() {
+  const game = createGame({ seed: 1 });
+  if (game.hand === null) throw new Error("hand must be initialized");
+  return render(
+    <GameProvider
+      initialGame={{
+        ...game,
+        pending: {
+          kind: "humanReact",
+          tile: { suit: "pin", rank: 3, isRed: false },
+          from: "south",
+          canRon: true,
+          canPon: false,
+          canKan: false,
+          chankan: "kakan",
+        },
+      }}
+    >
+      <GameBoard />
+    </GameProvider>,
+  );
+}
+
 function renderBoardWithKita() {
   const game = createGame({ seed: 1 });
   if (game.hand === null) throw new Error("hand must be initialized");
@@ -115,6 +139,25 @@ describe("GameBoard (spec 6.6 client island / engine-driven)", () => {
     expect(
       pulledKitaCount({ roundKey: "east-1-0", count: 1 }, "east-1-1", 1),
     ).toBe(1);
+  });
+
+  it("槍槓応答(#208)ではロン/スルーのみ提示し、槍槓である旨を案内する", () => {
+    renderBoardWithChankanPending();
+
+    expect(
+      screen.getAllByRole("button", { name: "ロン" }).length,
+    ).toBeGreaterThan(0);
+    expect(
+      screen.getAllByRole("button", { name: "スルー" }).length,
+    ).toBeGreaterThan(0);
+    expect(
+      screen.queryByRole("button", { name: "ポン" }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.getAllByText(
+        "他家のカン宣言に槍槓ロンできます。ロン / スルーを選べます。",
+      ).length,
+    ).toBeGreaterThan(0);
   });
 
   it("自家の手牌をクリックすると打牌され対局が進行する", async () => {

@@ -356,6 +356,10 @@ export default function GameBoard() {
         : "半荘終了。結果を確認するか、新しい半荘を開始できます。";
     }
     if (pending?.kind === "humanReact") {
+      // 槍槓応答(#208): 他家の槓宣言への横取りロン機会であることを明示する。
+      if (pending.chankan !== undefined) {
+        return "他家のカン宣言に槍槓ロンできます。ロン / スルーを選べます。";
+      }
       // 実際に選べる操作だけを案内する(存在しない選択肢を誤って提示しない)。
       const choices = [
         pending.canRon ? "ロン" : null,
@@ -381,6 +385,7 @@ export default function GameBoard() {
     if (tileFeedback) return tileFeedback;
     if (pending?.kind === "humanDiscard") return "あなたの手番です。";
     if (pending?.kind === "humanReact") {
+      if (pending.chankan !== undefined) return "槍槓ロンできます。";
       return pending.canRon ? "ロンできます。" : "鳴きできます。";
     }
     return "";
