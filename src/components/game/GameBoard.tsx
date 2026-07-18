@@ -128,11 +128,23 @@ export default function GameBoard() {
 
   // 半荘終了 → 結果画面へ(スペック6 6.3)。engine の確定結果は GameProvider が保持し、
   // 遷移先の /game/result が読み取る(スペック6 6.5 / 6.9)。
+  //
+  // 自動遷移は「対局中に gameEnd へ**遷移した瞬間**」の1回だけ、`router.replace` で行う(#206 /
+  // #207)。`replace` により履歴へ /game と /game/result の重複エントリを積まず、結果画面から
+  // ブラウザ「戻る」で最終的にロビーへ帰れる。終局済み journal の復元やブラウザバックなど
+  // 「マウント時点で既に gameEnd」の場合は遷移せず、操作パネルの「結果を見る / 新しい半荘を
+  // 開始」を出口として提示する(ロビーの「対局を開始」からの再訪でも /game に留まれる)。
+  // /game/result 直接アクセス時のリロード復元(#190)は GameProvider の journal 再生が担う
+  // ため、この変更の影響を受けない。
+  const previousPhase = useRef(phase);
   useEffect(() => {
-    if (mounted && phase === "gameEnd") {
-      router.push("/game/result");
+    const transitionedToGameEnd =
+      previousPhase.current !== "gameEnd" && phase === "gameEnd";
+    previousPhase.current = phase;
+    if (transitionedToGameEnd) {
+      router.replace("/game/result");
     }
-  }, [mounted, phase, router]);
+  }, [phase, router]);
 
   const handleSelectTile = useCallback(
     (_index: number, tile: TileData) => {
@@ -219,6 +231,8 @@ export default function GameBoard() {
       ];
     }
     if (phase === "gameEnd") {
+      // 終局後の /game の出口(#207): 結果確認に加えて、その場で新規半荘を開始できる。
+      // `newGame` は journal を新規半荘で上書きするため、以後の /game 再訪は新しい対局になる。
       return [
         {
           key: "result",
@@ -226,6 +240,12 @@ export default function GameBoard() {
           icon: "▶",
           onClick: () => router.push("/game/result"),
           primary: true,
+        },
+        {
+          key: "newGame",
+          label: "新しい半荘を開始",
+          icon: "新",
+          onClick: controls.newGame,
         },
       ];
     }
@@ -321,7 +341,8 @@ export default function GameBoard() {
 
   const hint = useMemo(() => {
     if (phase === "roundEnd") return roundSummary?.label ?? "";
-    if (phase === "gameEnd") return "半荘終了。結果を確認できます。";
+    if (phase === "gameEnd")
+      return "半荘終了。結果を確認するか、新しい半荘を開始できます。";
     if (pending?.kind === "humanReact") {
       // 実際に選べる操作だけを案内する(存在しない選択肢を誤って提示しない)。
       const choices = [
