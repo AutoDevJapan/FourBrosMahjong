@@ -1,6 +1,12 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono, Noto_Sans_JP } from "next/font/google";
 import { ThemeStorageSync } from "@/components/layout/ThemeStorageSync";
+import {
+  DEFAULT_DESCRIPTION,
+  DEFAULT_TITLE,
+  SITE_URL,
+  socialMetadata,
+} from "@/app/_lib/metadata";
 import "./globals.css";
 
 // 欧文フォント(ラテン)。和文グリフは持たないため、日本語は下記 Noto Sans JP に
@@ -28,12 +34,17 @@ const notoSansJP = Noto_Sans_JP({
 });
 
 export const metadata: Metadata = {
+  metadataBase: SITE_URL,
   title: {
-    default: "四兄弟麻雀 - FourBrosMahjong",
+    default: DEFAULT_TITLE,
     template: "%s | 四兄弟麻雀",
   },
-  description:
-    "「ギャンブル四兄弟」の麻雀企画をモチーフにした、関西式三人打ち(サンマ)ベースの四人回し麻雀ゲーム。オール赤5・ガリ(北抜きドラ)・サイコロ連動ドラが特徴の非公式ファンメイド作品です。",
+  description: DEFAULT_DESCRIPTION,
+  ...socialMetadata({
+    title: DEFAULT_TITLE,
+    description: DEFAULT_DESCRIPTION,
+    path: "/",
+  }),
 };
 
 /**

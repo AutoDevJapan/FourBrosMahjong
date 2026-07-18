@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import Link from "next/link";
+import { socialMetadata } from "@/app/_lib/metadata";
 
 /**
  * ルール説明ページ(`/rules`)。
@@ -20,12 +21,19 @@ import Link from "next/link";
  * 別issueのスコープ)。
  */
 
+const description =
+  "四兄弟麻雀(関西式サンマ・四人回し)のルール要約。オール赤5・ガリ(北抜きドラ)・サイコロ連動ドラ・ソシー精算などの独自ルールを説明します。";
+
 export const metadata: Metadata = {
   // layout.tsx の title テンプレート `%s | 四兄弟麻雀` により
   // 「ルール説明 | 四兄弟麻雀」として出力される。
   title: "ルール説明",
-  description:
-    "四兄弟麻雀(関西式サンマ・四人回し)のルール要約。オール赤5・ガリ(北抜きドラ)・サイコロ連動ドラ・ソシー精算などの独自ルールを説明します。",
+  description,
+  ...socialMetadata({
+    title: "ルール説明 | 四兄弟麻雀",
+    description,
+    path: "/rules",
+  }),
 };
 
 /** ルール要約の1セクション。`<details>` で折りたためる。 */
