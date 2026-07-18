@@ -500,4 +500,39 @@ test.describe("対局画面(/game)", () => {
       "喰い替え禁止のため、この牌は打牌できません。",
     );
   });
+
+  test("複数家の4組目のカンで四槓散了を表示し、次局へ進める(#183)", async ({
+    page,
+  }) => {
+    test.setTimeout(120_000);
+    await page.goto("/game?seed=47");
+    const board = page.locator("[data-phase]").first();
+    const hand = page.getByRole("listbox", { name: "自家の手牌" }).first();
+
+    for (let step = 0; step < 1500; step++) {
+      if (await page.getByText("四槓散了", { exact: true }).count()) break;
+      const phase = await board.getAttribute("data-phase");
+      const pending = await board.getAttribute("data-pending");
+      if (phase === "roundEnd") {
+        await page.getByRole("button", { name: "次の局へ" }).first().click();
+      } else if (pending === "humanReact") {
+        await page.getByRole("button", { name: "スルー" }).first().click();
+      } else if (pending === "humanDiscard") {
+        await hand.getByRole("option").first().click();
+      } else {
+        await page.waitForTimeout(20);
+      }
+    }
+
+    await expect(board).toHaveAttribute("data-phase", "roundEnd");
+    await expect(board).toHaveAttribute("data-round-kind", "draw");
+    await expect(
+      page.getByText("四槓散了", { exact: true }).first(),
+    ).toBeVisible();
+    await expect(
+      page.getByRole("button", { name: "次の局へ" }).first(),
+    ).toBeVisible();
+    await page.getByRole("button", { name: "次の局へ" }).first().click();
+    await expect(board).toHaveAttribute("data-phase", "playing");
+  });
 });
