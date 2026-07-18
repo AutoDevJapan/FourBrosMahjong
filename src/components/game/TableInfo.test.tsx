@@ -10,6 +10,7 @@ describe("TableInfo (spec 6.4.2)", () => {
       handNumber: 1,
       honba: 2,
       riichiSticks: 1,
+      remainingLiveTiles: 37,
       dice: [6, 6],
       doraCount: 3,
     };
@@ -18,6 +19,7 @@ describe("TableInfo (spec 6.4.2)", () => {
     expect(screen.getByText("東1局")).toBeInTheDocument();
     expect(screen.getByText("本場")).toBeInTheDocument();
     expect(screen.getByText("供託")).toBeInTheDocument();
+    expect(screen.getByLabelText("残り山 37枚")).toBeInTheDocument();
     // honba value
     expect(screen.getByText("2")).toBeInTheDocument();
     expect(screen.getByLabelText("サイコロ 6と6、ドラ3枚")).toBeInTheDocument();
@@ -29,6 +31,7 @@ describe("TableInfo (spec 6.4.2)", () => {
       handNumber: 3,
       honba: 0,
       riichiSticks: 0,
+      remainingLiveTiles: 12,
       dice: [2, 5],
       doraCount: 1,
     };
@@ -48,6 +51,7 @@ describe("TableInfo (spec 6.4.2)", () => {
           handNumber: 1,
           honba: 0,
           riichiSticks: 0,
+          remainingLiveTiles: 52,
           dice,
           doraCount: count,
         }}

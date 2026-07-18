@@ -225,6 +225,42 @@ test.describe("対局画面(/game)", () => {
     ).toContainText("ガリ2");
   });
 
+  test("残り山をdesktop・320px・全体盤面で表示し、進行に追従する(#189)", async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 900, height: 900 });
+    await page.goto("/game?seed=0");
+    const board = page.locator("[data-phase]").first();
+    const remaining = page.getByLabel("残り山 52枚");
+    await expect(remaining.first()).toBeVisible();
+
+    await page
+      .getByRole("listbox", { name: "自家の手牌" })
+      .first()
+      .getByRole("option")
+      .first()
+      .click();
+    await expect(remaining).toHaveCount(0);
+    await expect(
+      page.locator('[aria-label^="残り山 "]:visible').first(),
+    ).toBeVisible();
+
+    await page.setViewportSize({ width: 320, height: 800 });
+    await expect(
+      page.getByLabel(/^残り山 \d+枚$/).filter({ visible: true }),
+    ).toBeVisible();
+    await expect
+      .poll(() =>
+        page.evaluate(() => document.documentElement.scrollWidth <= innerWidth),
+      )
+      .toBe(true);
+
+    await page.getByRole("button", { name: "全体盤面" }).click();
+    const dialog = page.getByRole("dialog", { name: "全体盤面" });
+    await expect(dialog.getByLabel(/^残り山 \d+枚$/)).toBeVisible();
+    await expect(board).toHaveAttribute("data-phase", "playing");
+  });
+
   test("サイコロ根拠と和了時の役・ドラ・支払い内訳を確認できる(#170)", async ({
     page,
   }) => {

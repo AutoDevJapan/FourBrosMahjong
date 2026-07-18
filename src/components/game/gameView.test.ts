@@ -37,3 +37,32 @@ describe("selectView kita projection", () => {
     }
   });
 });
+
+describe("selectView remaining wall projection(#189)", () => {
+  it("配牌北の自動補充後の残り山をengineからそのまま写像する", () => {
+    const game = createGame({ seed: 0 });
+    expect(game.hand?.wall.remainingLiveTiles).toBe(52);
+    expect(selectView(game).tableInfo.remainingLiveTiles).toBe(52);
+  });
+
+  it("通常ツモとカン/北抜きの嶺上補充による減少を反映する", () => {
+    const game = createGame({ seed: 42 });
+    const wall = game.hand?.wall;
+    if (!wall) throw new Error("hand must exist");
+    const initial = wall.remainingLiveTiles;
+
+    wall.draw();
+    expect(selectView(game).tableInfo.remainingLiveTiles).toBe(initial - 1);
+    wall.drawReplacement();
+    expect(selectView(game).tableInfo.remainingLiveTiles).toBe(initial - 2);
+  });
+
+  it("海底では残り山0を写像する", () => {
+    const game = createGame({ seed: 99 });
+    const wall = game.hand?.wall;
+    if (!wall) throw new Error("hand must exist");
+    while (wall.remainingLiveTiles > 0) wall.draw();
+
+    expect(selectView(game).tableInfo.remainingLiveTiles).toBe(0);
+  });
+});
