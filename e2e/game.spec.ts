@@ -474,7 +474,7 @@ test.describe("対局画面(/game)", () => {
     ).toBeVisible();
   });
 
-  test("リーチ宣言候補と非候補をマウス・キーボード・SRへ明示する(#168)", async ({
+  test("リーチ宣言候補と非候補をマウス・キーボード・SRへ明示し、同じ禁止理由も再通知する(#168 / #250)", async ({
     page,
   }) => {
     await page.goto("/game?seed=381");
@@ -506,15 +506,42 @@ test.describe("対局画面(/game)", () => {
     await expect(ineligible.first()).toHaveAttribute("aria-disabled", "true");
     await expect(ineligible.first()).toContainText("禁止");
 
+    const liveRegion = page.locator('[aria-live="polite"]').first();
+    await liveRegion.evaluate((region) => {
+      region.setAttribute("data-test-mutations", "0");
+      new MutationObserver((records) => {
+        const childListChanges = records.filter(
+          (record) => record.type === "childList",
+        ).length;
+        const previous = Number(
+          region.getAttribute("data-test-mutations") ?? "0",
+        );
+        region.setAttribute(
+          "data-test-mutations",
+          String(previous + childListChanges),
+        );
+      }).observe(region, { childList: true, subtree: true });
+    });
+
     // `aria-disabled` を尊重する Playwright の通常 click は拒否されるため、実ブラウザでの
     // ポインターイベントを再現する force click で理由通知を検証する。
     await ineligible.first().click({ force: true });
-    await expect(page.locator('[aria-live="polite"]').first()).toHaveText(
+    await expect(liveRegion).toHaveText(
       "この牌ではテンパイを保てないため、リーチ宣言できません。",
     );
+    const firstEventMutations = Number(
+      await liveRegion.getAttribute("data-test-mutations"),
+    );
+    expect(firstEventMutations).toBeGreaterThan(0);
     await ineligible.first().focus();
     await page.keyboard.press("Enter");
     await expect(ineligible.first()).toHaveAttribute("aria-disabled", "true");
+    // 文言が同じでも、別操作として子ノードが交換されれば AT が再通知を観測できる。
+    await expect
+      .poll(async () =>
+        Number(await liveRegion.getAttribute("data-test-mutations")),
+      )
+      .toBeGreaterThan(firstEventMutations);
 
     await eligible.first().click();
     await expect(

@@ -31,8 +31,8 @@ import Modal from "../common/Modal";
 import { tileLabel } from "../common/tileLabel";
 import ActionPanel, { type ActionItem } from "./ActionPanel";
 import { useGame } from "./GameProvider";
-import LiveRegion from "./LiveRegion";
 import type { HandTileState } from "./Hand";
+import LiveRegion from "./LiveRegion";
 import PlayerSlot from "./PlayerSlot";
 import Table from "./Table";
 import type { SeatPosition, TileData } from "./types";
@@ -116,7 +116,18 @@ export default function GameBoard() {
 
   // リーチ宣言モード: オンのとき、次に選んだ手牌が「リーチ宣言牌」として切られる。
   const [riichiArmed, setRiichiArmed] = useState(false);
-  const [tileFeedback, setTileFeedback] = useState("");
+  const [tileFeedback, setTileFeedback] = useState({
+    message: "",
+    eventId: 0,
+  });
+  // live region は同じ文字列を再代入しただけでは DOM mutation が起きず、AT が再通知できない。
+  // 操作イベントごとに連番を進め、LiveRegion 内の子ノードを交換して同一理由も再通知可能にする。
+  const announceBlockedTile = useCallback((message: string) => {
+    setTileFeedback((previous) => ({
+      message,
+      eventId: previous.eventId + 1,
+    }));
+  }, []);
   const canRiichi = pending?.kind === "humanDiscard" && pending.canRiichi;
   // リーチ可能な打牌待ちでなくなったら arming を解除する(レンダー中の前回値比較 =
   // set-state-in-effect を避ける React 公認の「前回レンダー情報の保持」パターン)。
@@ -165,7 +176,7 @@ export default function GameBoard() {
       ) {
         return;
       }
-      setTileFeedback("");
+      setTileFeedback((previous) => ({ ...previous, message: "" }));
       if (riichiArmed && pending.canRiichi) {
         controls.riichi(tile);
         setRiichiArmed(false);
@@ -321,7 +332,7 @@ export default function GameBoard() {
           label: riichiArmed ? "リーチ解除" : "リーチ",
           icon: "宣",
           onClick: () => {
-            setTileFeedback("");
+            setTileFeedback((previous) => ({ ...previous, message: "" }));
             setRiichiArmed((armed) => !armed);
           },
           primary: riichiArmed,
@@ -382,14 +393,14 @@ export default function GameBoard() {
   }, [phase, pending, roundSummary, riichiArmed, redirecting]);
 
   const announcement = useMemo(() => {
-    if (tileFeedback) return tileFeedback;
+    if (tileFeedback.message) return tileFeedback.message;
     if (pending?.kind === "humanDiscard") return "あなたの手番です。";
     if (pending?.kind === "humanReact") {
       if (pending.chankan !== undefined) return "槍槓ロンできます。";
       return pending.canRon ? "ロンできます。" : "鳴きできます。";
     }
     return "";
-  }, [pending, tileFeedback]);
+  }, [pending, tileFeedback.message]);
 
   const assertive = useMemo(() => {
     if (phase === "roundEnd" || phase === "gameEnd") {
@@ -414,10 +425,10 @@ export default function GameBoard() {
         onSelectTile={onSelect}
         handReadOnly={handReadOnly}
         handTileStates={handTileStates}
-        onBlockedTile={setTileFeedback}
+        onBlockedTile={announceBlockedTile}
       />
     ),
-    [slots, handTileStates],
+    [slots, handTileStates, announceBlockedTile],
   );
 
   // クロス配置のグリッド(段階①)。可視制御クラスと自家手牌の打牌ハンドラを差し替えて、
@@ -531,6 +542,7 @@ export default function GameBoard() {
 
       <LiveRegion
         politeMessage={announcement}
+        politeMessageKey={tileFeedback.eventId}
         secondaryPoliteMessage={kitaAnnouncement}
         assertiveMessage={assertive}
       />
