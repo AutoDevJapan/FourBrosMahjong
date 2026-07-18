@@ -189,6 +189,66 @@ describe("GameBoard (spec 6.6 client island / engine-driven)", () => {
   });
 });
 
+describe("GameBoard 打牌フェーズ外の自家手牌(#257)", () => {
+  /** 最初の局終了(roundEnd)直後の状態(seed 固定で決定的)。 */
+  function roundEndGame(seed = 2024): EngineState {
+    const { journal } = walkToGameEnd(seed);
+    const firstNextRound = journal.actions.findIndex(
+      (action) => action.type === "nextRound",
+    );
+    if (firstNextRound === -1) {
+      throw new Error("roundEnd を通過しない journal");
+    }
+    return replayJournal({
+      ...journal,
+      actions: journal.actions.slice(0, firstNextRound),
+    });
+  }
+
+  /** 自家手牌が閲覧専用(静的 list)で、禁止バッジ・理由文が無いことを検証する。 */
+  function expectReadOnlyHand() {
+    // 対話ロール(listbox/option)は公開されない(#187 の全体盤面モーダルと同一挙動)。
+    expect(
+      screen.queryAllByRole("listbox", { name: "自家の手牌" }),
+    ).toHaveLength(0);
+    expect(screen.queryAllByRole("option")).toHaveLength(0);
+    // 静的 list としては公開され続ける(牌の閲覧は可能)。
+    expect(
+      screen.getAllByRole("list", { name: "自家の手牌" }).length,
+    ).toBeGreaterThan(0);
+    // 「禁止」バッジと disabled 理由文の読み上げノイズが無い(スペック5 5.2.3)。
+    expect(screen.queryAllByText("禁止")).toHaveLength(0);
+    expect(screen.queryAllByLabelText(/現在は打牌できません/)).toHaveLength(0);
+  }
+
+  it("局終了(roundEnd)では自家手牌が閲覧専用になり、禁止バッジ・理由文が付かない", () => {
+    render(
+      <GameProvider initialGame={roundEndGame()}>
+        <GameBoard />
+      </GameProvider>,
+    );
+    expectReadOnlyHand();
+  });
+
+  it("半荘終了(gameEnd)でも自家手牌は閲覧専用で、禁止バッジ・理由文が付かない", () => {
+    render(
+      <GameProvider initialGame={finishedGame()}>
+        <GameBoard />
+      </GameProvider>,
+    );
+    expectReadOnlyHand();
+  });
+
+  it("他家打牌への応答待ち(humanReact)でも自家手牌は閲覧専用(操作は ActionPanel が担う)", () => {
+    renderBoardWithChankanPending();
+    expectReadOnlyHand();
+    // 応答操作自体は ActionPanel 側で提供され続ける。
+    expect(
+      screen.getAllByRole("button", { name: "ロン" }).length,
+    ).toBeGreaterThan(0);
+  });
+});
+
 describe("GameBoard 終局後の出口(#206 / #207)", () => {
   it("対局中に gameEnd へ遷移した瞬間だけ router.replace で結果画面へ自動遷移する", async () => {
     const user = userEvent.setup();
