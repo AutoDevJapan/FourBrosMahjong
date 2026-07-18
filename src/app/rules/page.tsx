@@ -1,6 +1,11 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { socialMetadata } from "@/app/_lib/metadata";
+import {
+  OKA,
+  RETURN_POINTS,
+  STARTING_POINTS,
+} from "@/domain/scoring/settlement";
 
 /**
  * ルール説明ページ(`/rules`)。
@@ -135,6 +140,14 @@ const ruleSections: RuleSection[] = [
     heading: "5. 精算・祝儀(ソシー)",
     defaultOpen: true,
     items: [
+      {
+        label: "配給原点・返し",
+        body: `1人${STARTING_POINTS.toLocaleString("ja-JP")}点持ち(4人合計${(STARTING_POINTS * 4).toLocaleString("ja-JP")}点)、${RETURN_POINTS.toLocaleString("ja-JP")}点返し。`,
+      },
+      {
+        label: "ソシー精算",
+        body: `最終持ち点から${RETURN_POINTS.toLocaleString("ja-JP")}点を引いた素点に順位ウマを加え、1位にはオカ${OKA.toLocaleString("ja-JP")}を加算する。オカは4人分の配給原点と返しの差額合計。`,
+      },
       { label: "ウマ", body: "+10 / +5 / -5 / -10。" },
       {
         label: "役満祝儀",

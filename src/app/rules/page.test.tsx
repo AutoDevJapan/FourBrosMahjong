@@ -1,5 +1,10 @@
 import { render, screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
+import {
+  OKA,
+  RETURN_POINTS,
+  STARTING_POINTS,
+} from "@/domain/scoring/settlement";
 import RulesPage from "./page";
 
 /**
@@ -33,6 +38,23 @@ describe("RulesPage (/rules)", () => {
     for (const section of sections) {
       expect(section.querySelector("summary")).not.toBeNull();
     }
+  });
+
+  it("実装定数と一致する配給原点・返し・オカとソシー精算を説明する(#196)", () => {
+    render(<RulesPage />);
+
+    expect(
+      screen.getByText(
+        `1人${STARTING_POINTS.toLocaleString("ja-JP")}点持ち(4人合計${(STARTING_POINTS * 4).toLocaleString("ja-JP")}点)、${RETURN_POINTS.toLocaleString("ja-JP")}点返し。`,
+      ),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        new RegExp(
+          `素点に順位ウマを加え、1位にはオカ${OKA.toLocaleString("ja-JP")}を加算`,
+        ),
+      ),
+    ).toBeInTheDocument();
   });
 
   it("ロビー(/)へ戻る導線を持つ", () => {
