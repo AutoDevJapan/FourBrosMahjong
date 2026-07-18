@@ -11,13 +11,14 @@ const ROUND_WIND_LABEL: Record<TableInfoData["roundWind"], string> = {
   east: "東",
   south: "南",
 };
+const DIE_FACE = ["", "⚀", "⚁", "⚂", "⚃", "⚄", "⚅"] as const;
 
 export interface TableInfoProps {
   info: TableInfoData;
 }
 
 export default function TableInfo({ info }: TableInfoProps) {
-  const { roundWind, handNumber, honba, riichiSticks } = info;
+  const { roundWind, handNumber, honba, riichiSticks, dice, doraCount } = info;
   const roundLabel = `${ROUND_WIND_LABEL[roundWind]}${handNumber}局`;
 
   return (
@@ -25,6 +26,16 @@ export default function TableInfo({ info }: TableInfoProps) {
       <div className="flex items-baseline gap-1">
         <dt className="sr-only">場と局</dt>
         <dd className="text-base font-bold">{roundLabel}</dd>
+      </div>
+      <div
+        className="flex items-baseline gap-1"
+        aria-label={`サイコロ ${dice[0]}と${dice[1]}、ドラ${doraCount}枚`}
+      >
+        <dt className="text-xs opacity-80">サイコロ</dt>
+        <dd className="font-mono tabular-nums">
+          {DIE_FACE[dice[0]] ?? dice[0]} {dice[0]}・
+          {DIE_FACE[dice[1]] ?? dice[1]} {dice[1]} → ドラ{doraCount}枚
+        </dd>
       </div>
       <div className="flex items-baseline gap-1">
         <dt className="text-xs opacity-80">本場</dt>

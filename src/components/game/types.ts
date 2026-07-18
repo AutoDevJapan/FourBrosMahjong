@@ -116,6 +116,10 @@ export interface TableInfoData {
   readonly honba: number;
   /** 供託(リーチ棒)本数。 */
   readonly riichiSticks: number;
+  /** 開門サイコロ2個の出目。 */
+  readonly dice: readonly [number, number];
+  /** 出目から決まった表ドラ表示枚数。 */
+  readonly doraCount: number;
 }
 
 /** ドラ表示(スペック6 6.4.2 `DoraIndicator`)。 */

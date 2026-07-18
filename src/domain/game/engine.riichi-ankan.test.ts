@@ -1,7 +1,7 @@
+import { describe, expect, it } from "vitest";
 import { resolveDora } from "@/domain/dora/doraSet";
 import { sameKind } from "@/domain/hand/tile-identity";
 import { HONOR, type Suit, type Tile } from "@/domain/tiles/tile";
-import { describe, expect, it } from "vitest";
 import {
   canAnkanAfterRiichi,
   createGame,
@@ -290,6 +290,19 @@ describe("declareAnkan: リーチ後暗槓の結線(Q18 / #116)", () => {
     expect(s2.lastRound?.kind).toBe("win");
     expect(s2.lastRound?.winnerId).toBe("p0");
     expect(s2.lastRound?.riichiWin).toBe(true);
+    const detail = s2.lastRound?.winDetails;
+    expect(detail).toBeDefined();
+    expect(detail?.yaku.map((yaku) => yaku.name)).toContain("嶺上開花");
+    expect(detail?.dora.total).toBe(
+      (detail?.dora.omote ?? 0) +
+        (detail?.dora.ura ?? 0) +
+        (detail?.dora.aka ?? 0) +
+        (detail?.dora.gari ?? 0),
+    );
+    expect(detail?.totalHan).toBe(
+      (detail?.yakuHan ?? 0) + (detail?.dora.total ?? 0),
+    );
+    expect(detail?.payments.length).toBeGreaterThan(0);
   });
 
   it("送り槓(合法暗槓でない牌)の暗槓要求は no-op で拒否する", () => {

@@ -223,6 +223,45 @@ test.describe("対局画面(/game)", () => {
     ).toContainText("ガリ1");
   });
 
+  test("サイコロ根拠と和了時の役・ドラ・支払い内訳を確認できる(#170)", async ({
+    page,
+  }) => {
+    test.setTimeout(120_000);
+    await page.goto("/game?seed=1");
+    await expect(page.getByLabel(/サイコロ .*ドラ\d枚/).first()).toBeVisible();
+    const board = page.locator("[data-phase]").first();
+    for (let step = 0; step < 1200; step++) {
+      const state = await board.evaluate((el) => ({
+        phase: el.getAttribute("data-phase"),
+        pending: el.getAttribute("data-pending"),
+        kind: el.getAttribute("data-round-kind"),
+      }));
+      if (state.phase === "roundEnd") {
+        if (state.kind === "win") break;
+        await page.getByRole("button", { name: "次の局へ" }).first().click();
+      } else if (state.pending === "humanReact") {
+        await page.getByRole("button", { name: "スルー" }).first().click();
+      } else if (state.pending === "humanDiscard") {
+        await page
+          .getByRole("listbox", { name: "自家の手牌" })
+          .first()
+          .getByRole("option")
+          .first()
+          .click();
+      }
+    }
+    await expect(
+      page.getByRole("heading", { name: "和了内訳" }).first(),
+    ).toBeVisible();
+    await expect(page.getByText("表ドラ").first()).toBeVisible();
+    await expect(page.getByText("裏ドラ").first()).toBeVisible();
+    await expect(page.getByText("赤5").first()).toBeVisible();
+    await expect(page.getByText("ガリ").first()).toBeVisible();
+    await expect(
+      page.getByRole("list", { name: "支払い内訳" }).first(),
+    ).toBeVisible();
+  });
+
   test("自家の手牌は矢印キーでフォーカス移動できる(ロービングタブインデックス / スペック5 5.2.2)", async ({
     page,
   }) => {

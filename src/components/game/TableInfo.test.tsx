@@ -10,6 +10,8 @@ describe("TableInfo (spec 6.4.2)", () => {
       handNumber: 1,
       honba: 2,
       riichiSticks: 1,
+      dice: [6, 6],
+      doraCount: 3,
     };
     render(<TableInfo info={info} />);
 
@@ -18,6 +20,7 @@ describe("TableInfo (spec 6.4.2)", () => {
     expect(screen.getByText("供託")).toBeInTheDocument();
     // honba value
     expect(screen.getByText("2")).toBeInTheDocument();
+    expect(screen.getByLabelText("サイコロ 6と6、ドラ3枚")).toBeInTheDocument();
   });
 
   it("labels a south round correctly", () => {
@@ -26,8 +29,32 @@ describe("TableInfo (spec 6.4.2)", () => {
       handNumber: 3,
       honba: 0,
       riichiSticks: 0,
+      dice: [2, 5],
+      doraCount: 1,
     };
     render(<TableInfo info={info} />);
     expect(screen.getByText("南3局")).toBeInTheDocument();
+  });
+
+  it.each([
+    { dice: [2, 5] as const, count: 1 },
+    { dice: [3, 3] as const, count: 2 },
+    { dice: [6, 6] as const, count: 3 },
+  ])("サイコロ$diceからドラ$count枚の根拠を表示する", ({ dice, count }) => {
+    render(
+      <TableInfo
+        info={{
+          roundWind: "east",
+          handNumber: 1,
+          honba: 0,
+          riichiSticks: 0,
+          dice,
+          doraCount: count,
+        }}
+      />,
+    );
+    expect(
+      screen.getByLabelText(`サイコロ ${dice[0]}と${dice[1]}、ドラ${count}枚`),
+    ).toBeInTheDocument();
   });
 });
