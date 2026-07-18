@@ -24,6 +24,26 @@ test.describe("browser security headers", () => {
     });
   }
 
+  for (const route of ["/icon.svg", "/tiles/Pin1.svg"]) {
+    test(`${route} はcache可能なSVG専用ポリシーを返す`, async ({ request }) => {
+      const response = await request.get(route);
+      const headers = response.headers();
+
+      expect(response.ok()).toBe(true);
+      expect(headers["content-type"]).toContain("image/svg+xml");
+      expect(headers["content-security-policy"]).toContain(
+        "default-src 'none'",
+      );
+      expect(headers["content-security-policy"]).toContain(
+        "frame-ancestors 'none'",
+      );
+      expect(headers["content-security-policy"]).toContain("sandbox");
+      expect(headers["content-security-policy"]).not.toContain("nonce-");
+      expect(headers["x-content-type-options"]).toBe("nosniff");
+      expect(headers["x-frame-options"]).toBe("DENY");
+    });
+  }
+
   test("nonce CSP下でテーマ初期化とNext.js hydrationが動作する", async ({
     page,
   }) => {
