@@ -15,6 +15,8 @@ import { tileLabel } from "../common/tileLabel";
 
 export interface HandProps {
   tiles: readonly TileData[];
+  /** 閲覧専用表示。listbox操作・選択状態・フォーカスを公開しない。 */
+  readOnly?: boolean;
   /** 牌が選択(打牌候補として決定)されたときに呼ぶ。UIイベントのみでドメイン計算は行わない。 */
   onSelect?: (index: number, tile: TileData) => void;
   /** アクセシブルな一覧名。 */
@@ -32,6 +34,7 @@ export interface HandTileState {
 
 export default function Hand({
   tiles,
+  readOnly = false,
   onSelect,
   label = "自家の手牌",
   tileStates = [],
@@ -86,6 +89,36 @@ export default function Hand({
     },
     [tiles, focusIndex, onSelect, tileStates, onBlockedSelect],
   );
+
+  if (readOnly) {
+    return (
+      <ul aria-label={label} className="flex flex-wrap gap-1">
+        {tiles.map((tile, index) => {
+          const state = tileStates[index];
+          const accessibleLabel = state?.indicator
+            ? `${tileLabel(tile)}、${state.indicator}`
+            : tileLabel(tile);
+          return (
+            <li
+              key={`${tile.suit}-${tile.rank}-${index}`}
+              aria-label={accessibleLabel}
+              className="relative rounded-md"
+            >
+              <Tile tile={tile} decorative />
+              {state?.indicator ? (
+                <span
+                  aria-hidden="true"
+                  className="absolute inset-x-0 bottom-0 rounded-b bg-background/95 px-0.5 text-center font-bold text-[0.55rem] leading-tight text-foreground"
+                >
+                  {state.indicator}
+                </span>
+              ) : null}
+            </li>
+          );
+        })}
+      </ul>
+    );
+  }
 
   return (
     <ul

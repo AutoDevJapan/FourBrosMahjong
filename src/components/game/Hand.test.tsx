@@ -103,4 +103,18 @@ describe("Hand (roving tabindex listbox, spec 5.2.2)", () => {
     expect(eligible).toHaveClass("ring-2");
     expect(screen.getByText("リーチ可")).toBeInTheDocument();
   });
+
+  it("閲覧専用では静的listとして表示し、選択・フォーカス操作を公開しない", () => {
+    render(<Hand tiles={tiles} readOnly />);
+
+    const list = screen.getByRole("list", { name: "自家の手牌" });
+    expect(list).toBeInTheDocument();
+    expect(screen.getAllByRole("listitem")).toHaveLength(tiles.length);
+    expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
+    expect(screen.queryByRole("option")).not.toBeInTheDocument();
+    for (const item of screen.getAllByRole("listitem")) {
+      expect(item).not.toHaveAttribute("tabindex");
+      expect(item).not.toHaveAttribute("aria-selected");
+    }
+  });
 });

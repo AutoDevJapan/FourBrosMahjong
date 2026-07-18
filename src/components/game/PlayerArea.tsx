@@ -29,6 +29,8 @@ export interface PlayerAreaProps {
   compact?: boolean;
   /** 自家の打牌選択ハンドラ(UIイベントのみ)。 */
   onSelectTile?: (index: number, tile: TileData) => void;
+  /** 自家手牌を閲覧専用の静的リストとして表示する。 */
+  handReadOnly?: boolean;
   handTileStates?: readonly HandTileState[];
   onBlockedTile?: (message: string) => void;
 }
@@ -38,6 +40,7 @@ export default function PlayerArea({
   isSelf,
   compact = false,
   onSelectTile,
+  handReadOnly = false,
   handTileStates,
   onBlockedTile,
 }: PlayerAreaProps) {
@@ -85,6 +88,7 @@ export default function PlayerArea({
           {isSelf && hand ? (
             <Hand
               tiles={hand}
+              readOnly={handReadOnly}
               onSelect={onSelectTile}
               tileStates={handTileStates}
               onBlockedSelect={onBlockedTile}

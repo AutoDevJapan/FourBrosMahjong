@@ -18,6 +18,8 @@ export interface PlayerSlotProps {
   compact?: boolean;
   /** 自家の打牌選択ハンドラ(UIイベントのみ)。 */
   onSelectTile?: (index: number, tile: TileData) => void;
+  /** 全体盤面モーダル等で、自家手牌を閲覧専用にする。 */
+  handReadOnly?: boolean;
   handTileStates?: readonly HandTileState[];
   onBlockedTile?: (message: string) => void;
 }
@@ -27,6 +29,7 @@ export default function PlayerSlot({
   content,
   compact = false,
   onSelectTile,
+  handReadOnly = false,
   handTileStates,
   onBlockedTile,
 }: PlayerSlotProps) {
@@ -39,6 +42,7 @@ export default function PlayerSlot({
       isSelf={position === "self"}
       compact={compact}
       onSelectTile={position === "self" ? onSelectTile : undefined}
+      handReadOnly={position === "self" ? handReadOnly : undefined}
       handTileStates={position === "self" ? handTileStates : undefined}
       onBlockedTile={position === "self" ? onBlockedTile : undefined}
     />
