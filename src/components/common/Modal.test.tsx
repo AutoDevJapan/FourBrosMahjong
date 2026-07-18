@@ -90,4 +90,54 @@ describe("Modal (spec 5.2.2 dialog / focus trap / Escape)", () => {
     await user.keyboard("{Escape}");
     expect(opener).toHaveFocus();
   });
+
+  it("Portal 外のページ全体を inert にし、閉じると既存属性を復元する", () => {
+    const { unmount } = render(
+      <>
+        <button type="button">背景ボタン</button>
+        <Modal title="全体盤面" onClose={vi.fn()}>
+          <p>本文</p>
+        </Modal>
+      </>,
+    );
+    const backgroundRoot = screen.getByRole("dialog").parentElement
+      ?.previousElementSibling as HTMLElement | null;
+    expect(backgroundRoot).not.toBeNull();
+    expect(backgroundRoot).toHaveAttribute("inert");
+    expect(backgroundRoot).toHaveAttribute("aria-hidden", "true");
+
+    unmount();
+    expect(backgroundRoot).not.toHaveAttribute("inert");
+    expect(backgroundRoot).not.toHaveAttribute("aria-hidden");
+  });
+
+  it("外部へ移されたフォーカスを回収し、Escape と復帰を維持する", async () => {
+    const user = userEvent.setup();
+    function Harness() {
+      const [open, setOpen] = useState(false);
+      return (
+        <div>
+          <button type="button" onClick={() => setOpen(true)}>
+            開く
+          </button>
+          <button type="button">背景ボタン</button>
+          {open ? (
+            <Modal title="全体盤面" onClose={() => setOpen(false)}>
+              <button type="button">中身</button>
+            </Modal>
+          ) : null}
+        </div>
+      );
+    }
+    render(<Harness />);
+    const opener = screen.getByRole("button", { name: "開く" });
+    await user.click(opener);
+    const dialog = screen.getByRole("dialog", { name: "全体盤面" });
+
+    (screen.getByText("背景ボタン") as HTMLButtonElement).focus();
+    expect(dialog).toHaveFocus();
+    await user.keyboard("{Escape}");
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(opener).toHaveFocus();
+  });
 });
