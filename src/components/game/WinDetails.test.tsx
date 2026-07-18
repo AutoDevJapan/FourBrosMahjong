@@ -63,4 +63,35 @@ describe("WinDetails", () => {
     );
     expect(screen.getByText("一郎: 7,500点")).toBeInTheDocument();
   });
+
+  it("天和+国士無双と合計2倍役満を和了内訳に表示する", () => {
+    const summary: RoundSummary = {
+      kind: "win",
+      label: "あなたのツモ 96,000点",
+      deltas: { p0: 96000, p1: -48000, p2: -48000, p3: 0 },
+      winDetails: {
+        winType: "tsumo",
+        dealer: true,
+        yaku: [
+          { name: "天和", han: 0, yakuman: 1 },
+          { name: "国士無双", han: 0, yakuman: 1 },
+        ],
+        yakuHan: 0,
+        dora: { omote: 0, ura: 0, aka: 0, gari: 0, total: 0 },
+        totalHan: 0,
+        yakuman: 2,
+        category: "yakuman",
+        honba: 0,
+        riichiSticks: 0,
+        payments: [],
+        stickPayout: 0,
+      },
+    };
+    render(<WinDetails summary={summary} />);
+    expect(screen.getByText("天和")).toBeInTheDocument();
+    expect(screen.getByText("国士無双")).toBeInTheDocument();
+    expect(screen.getByText("合計").nextElementSibling).toHaveTextContent(
+      "2倍役満",
+    );
+  });
 });

@@ -38,6 +38,37 @@ const openKan = (notation: string): Meld => ({
   concealed: false,
 });
 
+describe("天和/地和と特殊形の複合役満(#184)", () => {
+  it.each([
+    ["heaven", "tenhou"],
+    ["earth", "chiihou"],
+  ] as const)("国士無双+%sを2倍役満として合算する", (blessing, id) => {
+    const analysis = analyzeWin({
+      concealedTiles: parseTiles("119m 19p 19s 1234567z"),
+      winningTile: parseTile("1m"),
+      winType: "tsumo",
+      blessing,
+    });
+    expect(analysis?.yaku.map((y) => y.id)).toEqual(
+      expect.arrayContaining([id, "kokushi"]),
+    );
+    expect(analysis?.yakuman).toBe(2);
+  });
+
+  it("通常形でも天和と構成役満を合算する", () => {
+    const analysis = analyzeWin({
+      concealedTiles: parseTiles("555z 666z 777z 111p 99p"),
+      winningTile: parseTile("9p"),
+      winType: "tsumo",
+      blessing: "heaven",
+    });
+    expect(analysis?.yaku.map((y) => y.id)).toEqual(
+      expect.arrayContaining(["tenhou", "daisangen"]),
+    );
+    expect(analysis?.yakuman).toBeGreaterThanOrEqual(2);
+  });
+});
+
 // ---------------------------------------------------------------------------
 // 北(ガリ)役牌除外の明示ガード(spec 3.0 #83-3)
 // ---------------------------------------------------------------------------

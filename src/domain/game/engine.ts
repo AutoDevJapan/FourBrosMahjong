@@ -1234,6 +1234,7 @@ function analyzeTsumo(
 ): WinAnalysis | null {
   const hand = state.hand;
   if (hand === null) return null;
+  const blessing = blessingForTsumo(seat, hand.discards, hand.callsMade);
   return analyzeWin({
     concealedTiles: [...hand.hands[seat], winningTile],
     melds: hand.melds[seat],
@@ -1246,7 +1247,21 @@ function analyzeTsumo(
     ippatsu: hand.ippatsu[seat],
     haitei,
     rinshan: hand.fromKan,
+    blessing,
   });
+}
+
+/**
+ * 天和/地和の権利を実対局状態から導く。
+ * 東の初回自摸は天和、南/西の最初の自摸は地和。いずれも局中の鳴きで消滅する。
+ */
+export function blessingForTsumo(
+  seat: SeatKey,
+  discards: Readonly<Record<SeatKey, readonly Tile[]>>,
+  callsMade: boolean,
+): "heaven" | "earth" | undefined {
+  if (callsMade || discards[seat].length !== 0) return undefined;
+  return seat === "east" ? "heaven" : "earth";
 }
 
 /**
