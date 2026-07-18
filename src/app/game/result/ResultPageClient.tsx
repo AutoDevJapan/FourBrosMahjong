@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import { useSyncExternalStore } from "react";
 import { useGame } from "@/components/game/GameProvider";
 import RankingTable from "@/components/result/RankingTable";
 import SoshiiBreakdown from "@/components/result/SoshiiBreakdown";
@@ -10,7 +11,14 @@ import SoshiiBreakdown from "@/components/result/SoshiiBreakdown";
 export default function ResultPageClient() {
   const { view, controls } = useGame();
   const router = useRouter();
-  const result = view.result;
+  // sessionStorage はクライアントでのみ復元される。SSR は未確定状態を描くため、初回
+  // hydration も同じ形に揃え、マウント後に確定結果へ切り替える。
+  const mounted = useSyncExternalStore(
+    () => () => {},
+    () => true,
+    () => false,
+  );
+  const result = mounted ? view.result : null;
 
   // ソシー内訳カードは最終順位テーブル(`RankingTable`)と同じく順位(rank)昇順で並べ、
   // 上部テーブル(1位→最下位)と視線移動を一致させる(issue #150 要検討点1)。
