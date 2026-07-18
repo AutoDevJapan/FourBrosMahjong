@@ -173,17 +173,17 @@ export default function GameBoard() {
     [pending, controls, riichiArmed],
   );
 
+  // 打牌フェーズ(humanDiscard)でのみ自家手牌を対話可能にする。局終了(roundEnd/gameEnd)や
+  // 他家打牌への応答待ち(humanReact)では閲覧専用の静的 list として描画し、牌ごとの
+  // 「禁止」バッジ・理由文を付けない(#257 / スペック5 5.2.3 の読み上げ渋滞回避)。
+  const handInteractive = pending?.kind === "humanDiscard";
+
   const handTileStates = useMemo<readonly HandTileState[]>(() => {
     const self = slots.self;
     if (self.kind !== "seated" || !self.player.hand) return [];
+    // 打牌フェーズ外は `Hand` の readOnly 経路で描画するため、個別の牌状態を構築しない(#257)。
+    if (pending?.kind !== "humanDiscard") return [];
     return self.player.hand.map((tile) => {
-      if (pending?.kind !== "humanDiscard") {
-        return {
-          disabled: true,
-          reason: "現在は打牌できません。",
-          indicator: "禁止",
-        };
-      }
       if (pending.locked) {
         return {
           disabled: true,
@@ -395,7 +395,8 @@ export default function GameBoard() {
     return "";
   }, [phase, roundSummary]);
 
-  // `onSelect` を明示的に受け取り、全体盤面モーダル(閲覧専用)では自家手牌の打牌を無効化できる。
+  // `onSelect` を明示的に受け取り、全体盤面モーダル(閲覧専用)や打牌フェーズ外(#257)では
+  // `handReadOnly` で自家手牌を静的 list 表示に切り替える。
   // `PlayerSlot` は position==="self" のときだけ `onSelectTile` を配線するため、他家スロットでは無害。
   const renderSlot = useCallback(
     (
@@ -484,7 +485,12 @@ export default function GameBoard() {
        */}
       <div>
         {/* 段階①: 卓幅 >= 360px はクロス配置。牌・隙間は .board-cross の clamp()/cqi で流体縮小。 */}
-        {crossBoard("hidden @min-[360px]:grid", handleSelectTile)}
+        {crossBoard(
+          "hidden @min-[360px]:grid",
+          handleSelectTile,
+          true,
+          !handInteractive,
+        )}
 
         {/* 段階②: 卓幅 < 360px は自家フォーカス表示。他家はコンパクト帯へ縮小。 */}
         <div className="flex flex-col gap-3 @min-[360px]:hidden">
@@ -507,7 +513,7 @@ export default function GameBoard() {
             {renderSlot("across", true)}
             {renderSlot("right", true)}
           </div>
-          {renderSlot("self", false, handleSelectTile)}
+          {renderSlot("self", false, handleSelectTile, !handInteractive)}
           {phase === "roundEnd" && roundSummary ? (
             <WinDetails summary={roundSummary} />
           ) : null}
