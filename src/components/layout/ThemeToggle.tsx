@@ -57,8 +57,11 @@ const SERVER_SNAPSHOT: ThemeSnapshot = {
 const subscribers = new Set<() => void>();
 // `getSnapshot` の参照安定性を保つためのキャッシュ(値が同一なら同じ参照を返す)。
 let cachedSnapshot: ThemeSnapshot | null = null;
+// localStorage が利用できないタブでも、現在のセッション中は選択と実テーマを
+// 一致させる。永続化に成功した時点、または別タブの storage 通知で破棄する。
+let volatilePreference: ThemePreference | null = null;
 
-/** `localStorage` から手動選択を読む。未選択・不正値・アクセス不可は "system"。 */
+/** 永続値を読み、保存不可時だけ現在タブの揮発設定へフォールバックする。 */
 function readStoredPreference(): ThemePreference {
   try {
     const stored = localStorage.getItem(STORAGE_KEY);
@@ -68,7 +71,7 @@ function readStoredPreference(): ThemePreference {
   } catch {
     // localStorage 不可(プライベートモード等)は system 扱いにフォールバック。
   }
-  return "system";
+  return volatilePreference ?? "system";
 }
 
 function getClientSnapshot(): ThemeSnapshot {
@@ -112,6 +115,7 @@ function subscribe(callback: () => void): () => void {
   };
   const onStorage = (event: StorageEvent) => {
     if (event.key === STORAGE_KEY || event.key === null) {
+      volatilePreference = null;
       // 別タブでの選択をこのタブの DOM へ同期(localStorage は書き換えない)。
       writeThemeToDom(readStoredPreference());
       cachedSnapshot = null;
@@ -136,13 +140,23 @@ function applyPreference(preference: ThemePreference): void {
     } else {
       localStorage.setItem(STORAGE_KEY, preference);
     }
+    volatilePreference = null;
   } catch {
-    // localStorage 保存不可(プライベートモード等)でも DOM 反映は済んでいる。
+    // 保存不可でもこのタブ内の選択を保持し、DOM・radio・状態文言を一致させる。
+    volatilePreference = preference;
   }
   cachedSnapshot = null;
   for (const callback of subscribers) {
     callback();
   }
+}
+
+/** 全ページ共通の storage listener から別タブのテーマをDOMへ同期する。 */
+export function syncThemeFromStorage(): void {
+  volatilePreference = null;
+  writeThemeToDom(readStoredPreference());
+  cachedSnapshot = null;
+  for (const callback of subscribers) callback();
 }
 
 export function ThemeToggle() {

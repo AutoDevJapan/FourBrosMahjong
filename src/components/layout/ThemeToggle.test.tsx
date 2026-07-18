@@ -27,6 +27,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  vi.restoreAllMocks();
   localStorage.clear();
   document.documentElement.removeAttribute("data-theme");
 });
@@ -85,5 +86,23 @@ describe("ThemeToggle", () => {
     expect(status).toHaveTextContent("システム設定に追従中");
     // 未選択なので data-theme は付与されない。
     expect(document.documentElement.hasAttribute("data-theme")).toBe(false);
+  });
+
+  it("localStorageへの保存失敗時も現在タブの選択と表示を一致させる", async () => {
+    const user = userEvent.setup();
+    vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
+      throw new DOMException("QuotaExceededError");
+    });
+    render(<ThemeToggle />);
+
+    await user.click(screen.getByRole("radio", { name: "ダーク" }));
+
+    expect(document.documentElement.getAttribute("data-theme")).toBe("dark");
+    expect(screen.getByRole("radio", { name: "ダーク" })).toBeChecked();
+    expect(screen.getByText(/現在の表示:/)).toHaveTextContent(
+      "ダーク(手動で固定中)",
+    );
+    // removeItem は利用可能な想定なので、モジュール内の揮発設定も後続テスト前に戻す。
+    await user.click(screen.getByRole("radio", { name: "システム設定に従う" }));
   });
 });

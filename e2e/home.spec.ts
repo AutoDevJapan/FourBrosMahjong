@@ -159,4 +159,38 @@ test.describe("設定ページ(ダークモード手動切替)", () => {
     await expect(page.locator("html")).toHaveAttribute("data-theme", "light");
     await expect(page.getByRole("radio", { name: "ライト" })).toBeChecked();
   });
+
+  test("別タブのテーマ変更がロビーにも即時反映される(issue #179)", async ({
+    page,
+    context,
+  }) => {
+    const settingsPage = await context.newPage();
+    await page.goto("/");
+    await settingsPage.goto("/settings");
+
+    await settingsPage.getByRole("radio", { name: "ダーク" }).check();
+    await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
+
+    await settingsPage.getByRole("radio", { name: "ライト" }).check();
+    await expect(page.locator("html")).toHaveAttribute("data-theme", "light");
+  });
+
+  test("保存失敗時もradio・状態文言・実テーマが一致する(issue #180)", async ({
+    page,
+  }) => {
+    await page.addInitScript(() => {
+      Storage.prototype.setItem = () => {
+        throw new DOMException("QuotaExceededError");
+      };
+    });
+    await page.goto("/settings");
+
+    await page.getByRole("radio", { name: "ダーク" }).click();
+
+    await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
+    await expect(page.getByRole("radio", { name: "ダーク" })).toBeChecked();
+    await expect(page.getByText(/現在の表示:/)).toHaveText(
+      "現在の表示: ダーク(手動で固定中)",
+    );
+  });
 });
