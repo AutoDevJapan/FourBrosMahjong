@@ -3,7 +3,47 @@ import { describe, expect, it } from "vitest";
 import type { RoundSummary } from "@/domain/game/engine";
 import WinDetails from "./WinDetails";
 
+const winSummary: RoundSummary = {
+  kind: "win",
+  label: "あなたのツモ 12,000点",
+  deltas: { p0: 13000, p1: -7500, p2: -4500, p3: 0 },
+  winDetails: {
+    winType: "tsumo",
+    dealer: false,
+    yaku: [{ name: "立直", han: 1, yakuman: 0 }],
+    yakuHan: 1,
+    dora: { omote: 0, ura: 0, aka: 0, gari: 0, total: 0 },
+    totalHan: 1,
+    yakuman: 0,
+    category: "normal",
+    honba: 0,
+    riichiSticks: 0,
+    payments: [],
+    stickPayout: 0,
+  },
+};
+
 describe("WinDetails", () => {
+  it("複数のレスポンシブ盤面でも各内訳を自身の見出しでラベル付けする", () => {
+    const { container } = render(
+      <>
+        <WinDetails summary={winSummary} />
+        <WinDetails summary={winSummary} />
+      </>,
+    );
+
+    const sections = screen.getAllByRole("region", { name: "和了内訳" });
+    expect(sections).toHaveLength(2);
+    const labelledBy = sections.map((section) =>
+      section.getAttribute("aria-labelledby"),
+    );
+    expect(new Set(labelledBy).size).toBe(2);
+    for (const id of labelledBy) {
+      expect(id).not.toBeNull();
+      expect(container.querySelectorAll(`[id="${id}"]`)).toHaveLength(1);
+    }
+  });
+
   it("流局では和了内訳を描画しない", () => {
     const { container } = render(
       <WinDetails

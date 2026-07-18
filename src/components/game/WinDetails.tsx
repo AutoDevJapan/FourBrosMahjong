@@ -1,3 +1,4 @@
+import { useId } from "react";
 import type { RoundSummary } from "@/domain/game/engine";
 
 const CATEGORY: Record<string, string> = {
@@ -11,13 +12,17 @@ const CATEGORY: Record<string, string> = {
 
 export default function WinDetails({ summary }: { summary: RoundSummary }) {
   const detail = summary.winDetails;
+  // GameBoard はコンテナ幅に応じて切り替える2つの盤面ツリーを同時に DOM へ置くため、
+  // 固定 id だと両方の WinDetails が同じ見出しを名乗ってしまう。インスタンスごとの id で
+  // aria-labelledby を必ず自身の見出しへ結び付ける。
+  const titleId = useId();
   if (!detail) return null;
   return (
     <section
-      aria-labelledby="win-details-title"
+      aria-labelledby={titleId}
       className="rounded-lg border border-foreground/15 bg-foreground/[.03] p-3 text-sm"
     >
-      <h2 id="win-details-title" className="font-bold">
+      <h2 id={titleId} className="font-bold">
         和了内訳
       </h2>
       <p>
