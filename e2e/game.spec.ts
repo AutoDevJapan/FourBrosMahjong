@@ -109,15 +109,19 @@ test.describe("対局画面(/game)", () => {
     // 盤面ルートの data-phase / data-pending(進行状態のテスト用フック)を読み、局面に応じて
     // 操作を1つ選んで進める。自家は打牌(ツモ切り相当)・ロンは見送り、局終了ごとに次局へ。
     // 半荘終了で GameBoard が /game/result へ自動遷移する(スペック6 6.3)。
-    const board = page.locator("[data-phase]").first();
     for (let step = 0; step < 1500; step++) {
       if (new URL(page.url()).pathname === "/game/result") break;
-      const state = await board
-        .evaluate((el) => ({
-          phase: el.getAttribute("data-phase"),
-          pending: el.getAttribute("data-pending"),
-        }))
-        .catch(() => null);
+      // locator.evaluate は対象が遷移で消えた場合も既定タイムアウトまで待つ。結果画面への
+      // replace 中は盤面が先に外れるため、即時 DOM 参照にして URL を速やかに再確認する。
+      const state = await page.evaluate(() => {
+        const el = document.querySelector("[data-phase]");
+        return el
+          ? {
+              phase: el.getAttribute("data-phase"),
+              pending: el.getAttribute("data-pending"),
+            }
+          : null;
+      });
       if (state === null) {
         // 遷移直後などで盤面が一時的に取れないときは URL 確認へ回す。
         await page.waitForTimeout(20);
