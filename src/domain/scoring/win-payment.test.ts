@@ -144,6 +144,78 @@ describe("resolveWinPayment — 本場・供託", () => {
       }),
     ).toThrow(RangeError);
   });
+
+  it.each([
+    Number.NaN,
+    Number.POSITIVE_INFINITY,
+    1.5,
+    Number.MAX_SAFE_INTEGER + 1,
+  ])("本場 %s は非負の安全整数でないため拒否する", (invalid) => {
+    expect(() =>
+      resolveWinPayment({
+        winner: C1,
+        winType: "tsumo",
+        score: mangan,
+        others: [D, C2],
+        honba: invalid,
+      }),
+    ).toThrow(RangeError);
+  });
+
+  it("本場の乗算結果が安全整数範囲を超える場合も拒否する", () => {
+    expect(() =>
+      resolveWinPayment({
+        winner: C1,
+        winType: "tsumo",
+        score: mangan,
+        others: [D, C2],
+        honba: Number.MAX_SAFE_INTEGER,
+      }),
+    ).toThrow(RangeError);
+  });
+
+  it.each([
+    Number.NaN,
+    Number.POSITIVE_INFINITY,
+    1.5,
+    Number.MAX_SAFE_INTEGER + 1,
+  ])("供託 %s は非負の安全整数でないため拒否する", (invalid) => {
+    expect(() =>
+      resolveWinPayment({
+        winner: C1,
+        winType: "ron",
+        score: mangan,
+        discarderId: "dealer",
+        others: [D, C2],
+        riichiSticks: invalid,
+      }),
+    ).toThrow(RangeError);
+  });
+
+  it("供託の換算結果が安全整数範囲を超える場合も拒否する", () => {
+    expect(() =>
+      resolveWinPayment({
+        winner: C1,
+        winType: "ron",
+        score: mangan,
+        discarderId: "dealer",
+        others: [D, C2],
+        riichiSticks: Number.MAX_SAFE_INTEGER,
+      }),
+    ).toThrow(RangeError);
+  });
+
+  it("外部から渡された非有限の ScoreResult を支払い前に拒否する", () => {
+    expect(() =>
+      resolveWinPayment({
+        winner: C1,
+        winType: "ron",
+        score: { ...mangan, ronTotal: Number.POSITIVE_INFINITY },
+        discarderId: "dealer",
+        others: [D, C2],
+      }),
+    ).toThrow(RangeError);
+  });
 });
 
 describe("resolveWinPayment — パオ(責任払い)", () => {
