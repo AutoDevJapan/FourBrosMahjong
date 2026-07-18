@@ -71,6 +71,9 @@ export interface UmaBreakdown {
 export class SoshiiLedger {
   private readonly _balances: Map<PlayerId, number>;
   private _bonusAwarded = false;
+  private _rawScoreApplied = false;
+  private _umaApplied = false;
+  private _finalPoints: Map<PlayerId, number> | null = null;
 
   /** @param playerIds 4兄弟のID。重複不可。 */
   constructor(playerIds: readonly PlayerId[]) {
@@ -93,15 +96,59 @@ export class SoshiiLedger {
     this._balances.set(id, current + amount);
   }
 
+  /** 最終持ち点が登録プレイヤー全員を重複なく含むことを、加算前に検証する。 */
+  private assertCompleteFinalPoints(
+    finalPoints: readonly PlayerPoints[],
+  ): void {
+    if (finalPoints.length !== this._balances.size) {
+      throw new RangeError(
+        `finalPoints must contain exactly ${this._balances.size} players, received ${finalPoints.length}.`,
+      );
+    }
+    const seen = new Set<PlayerId>();
+    for (const { playerId, points } of finalPoints) {
+      if (!this._balances.has(playerId)) {
+        throw new RangeError(`unknown playerId: ${playerId}`);
+      }
+      if (seen.has(playerId)) {
+        throw new RangeError(`duplicate playerId: ${playerId}`);
+      }
+      if (!Number.isFinite(points)) {
+        throw new RangeError(`points must be finite, received ${points}.`);
+      }
+      seen.add(playerId);
+    }
+    if (this._finalPoints === null) {
+      this._finalPoints = new Map(
+        finalPoints.map(({ playerId, points }) => [playerId, points]),
+      );
+      return;
+    }
+    for (const { playerId, points } of finalPoints) {
+      if (this._finalPoints.get(playerId) !== points) {
+        throw new RangeError(
+          `final points changed between settlement stages for playerId: ${playerId}`,
+        );
+      }
+    }
+  }
+
   /**
    * ① 素点をソシーへ反映(1点=1ソシー、返し 40,000 基準)。
    * 各プレイヤーに `points − 返し40,000` を加算する。オカ(1位加点)は
    * {@link applyUma} 側で付与し、両者の合計で総和ゼロになる。
    */
   applyRawScore(finalPoints: readonly PlayerPoints[]): void {
+    if (this._rawScoreApplied) {
+      throw new RangeError(
+        "applyRawScore can only be applied once per ledger.",
+      );
+    }
+    this.assertCompleteFinalPoints(finalPoints);
     for (const { playerId, points } of finalPoints) {
       this.add(playerId, points - RETURN_POINTS);
     }
+    this._rawScoreApplied = true;
   }
 
   /**
@@ -116,11 +163,15 @@ export class SoshiiLedger {
    * @throws RangeError プレイヤー数が4でない、または未知のIDのとき。
    */
   applyUma(finalPoints: readonly PlayerPoints[]): UmaBreakdown[] {
-    if (finalPoints.length !== 4) {
+    if (this._umaApplied) {
+      throw new RangeError("applyUma can only be applied once per ledger.");
+    }
+    if (this._balances.size !== 4) {
       throw new RangeError(
-        `applyUma requires exactly 4 players, received ${finalPoints.length}.`,
+        `applyUma requires a four-player ledger, received ${this._balances.size}.`,
       );
     }
+    this.assertCompleteFinalPoints(finalPoints);
     const ranked = finalPoints
       .map((p, index) => ({ p, index }))
       .sort((a, b) => b.p.points - a.p.points || a.index - b.index);
@@ -132,6 +183,7 @@ export class SoshiiLedger {
       this.add(p.playerId, uma + oka);
       breakdown.push({ playerId: p.playerId, rank, uma, oka });
     });
+    this._umaApplied = true;
     return breakdown;
   }
 

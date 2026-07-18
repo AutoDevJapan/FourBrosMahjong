@@ -4,8 +4,8 @@ import {
   OKA,
   type PlayerPoints,
   RETURN_POINTS,
-  STARTING_POINTS,
   SoshiiLedger,
+  STARTING_POINTS,
   UMA,
   YAKUMAN_BONUS,
 } from "./settlement";
@@ -52,6 +52,38 @@ describe("applyRawScore — 素点(返し40000基準)", () => {
     // 140000 − 160000 = −20000 = −OKA
     expect(sum(l.balances())).toBe(-OKA);
   });
+
+  it("欠員・重複・未知IDは加算前に拒否し、残高を変えない", () => {
+    const invalidInputs: PlayerPoints[][] = [
+      [{ playerId: "A", points: 140000 }],
+      [
+        { playerId: "A", points: 35000 },
+        { playerId: "A", points: 35000 },
+        { playerId: "C", points: 35000 },
+        { playerId: "D", points: 35000 },
+      ],
+      [
+        { playerId: "A", points: 35000 },
+        { playerId: "B", points: 35000 },
+        { playerId: "C", points: 35000 },
+        { playerId: "X", points: 35000 },
+      ],
+    ];
+    for (const input of invalidInputs) {
+      const l = new SoshiiLedger(IDS);
+      expect(() => l.applyRawScore(input)).toThrow(RangeError);
+      expect(l.balances()).toEqual({ A: 0, B: 0, C: 0, D: 0 });
+    }
+  });
+
+  it("同じ台帳への二重適用を拒否する", () => {
+    const l = new SoshiiLedger(IDS);
+    const finals = IDS.map((playerId) => ({ playerId, points: 35000 }));
+    l.applyRawScore(finals);
+    const once = l.balances();
+    expect(() => l.applyRawScore(finals)).toThrow(RangeError);
+    expect(l.balances()).toEqual(once);
+  });
 });
 
 describe("applyUma — 4人ウマ+オカ(Q13)", () => {
@@ -96,6 +128,25 @@ describe("applyUma — 4人ウマ+オカ(Q13)", () => {
       ]),
     ).toThrow(RangeError);
   });
+
+  it("4件でも重複IDなら加算前に拒否し、二重適用も拒否する", () => {
+    const l = new SoshiiLedger(IDS);
+    expect(() =>
+      l.applyUma([
+        { playerId: "A", points: 35000 },
+        { playerId: "A", points: 35000 },
+        { playerId: "A", points: 35000 },
+        { playerId: "A", points: 35000 },
+      ]),
+    ).toThrow(RangeError);
+    expect(l.balances()).toEqual({ A: 0, B: 0, C: 0, D: 0 });
+
+    const finals = IDS.map((playerId) => ({ playerId, points: 35000 }));
+    l.applyUma(finals);
+    const once = l.balances();
+    expect(() => l.applyUma(finals)).toThrow(RangeError);
+    expect(l.balances()).toEqual(once);
+  });
 });
 
 describe("素点+ウマ+オカ の総和ゼロ(ゼロサム不変条件)", () => {
@@ -112,6 +163,24 @@ describe("素点+ウマ+オカ の総和ゼロ(ゼロサム不変条件)", () =>
     expect(sum(l.balances())).toBe(0);
     // 1位A: (61000-40000) + 10000 + 20000
     expect(l.balanceOf("A")).toBe(21000 + UMA[0] + OKA);
+  });
+
+  it("素点と順位で異なる最終持ち点スナップショットを拒否する", () => {
+    const l = new SoshiiLedger(IDS);
+    const finals: PlayerPoints[] = IDS.map((playerId) => ({
+      playerId,
+      points: 35000,
+    }));
+    l.applyRawScore(finals);
+    const beforeUma = l.balances();
+    expect(() =>
+      l.applyUma(
+        finals.map((p) =>
+          p.playerId === "A" ? { ...p, points: p.points + 1000 } : p,
+        ),
+      ),
+    ).toThrow(RangeError);
+    expect(l.balances()).toEqual(beforeUma);
   });
 });
 
