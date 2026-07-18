@@ -392,6 +392,21 @@ test.describe("対局画面(/game)", () => {
     await expect(dialog).toBeVisible();
     await expect(dialog).toHaveAttribute("aria-modal", "true");
 
+    // 閲覧専用の自家手牌は静的listであり、操作可能なlistbox/optionを公開しない(#187)。
+    const modalHand = dialog.getByRole("list", { name: "自家の手牌" });
+    await expect(modalHand).toBeVisible();
+    await expect(dialog.getByRole("listbox")).toHaveCount(0);
+    await expect(dialog.getByRole("option")).toHaveCount(0);
+    await expect(modalHand.getByRole("listitem")).toHaveCount(14);
+
+    // フォーカストラップ内で唯一の操作対象は閉じるボタン。Tab/Shift+Tabともそこに留まる。
+    await page.keyboard.press("Tab");
+    await expect(dialog.getByRole("button", { name: "閉じる" })).toBeFocused();
+    await page.keyboard.press("Tab");
+    await expect(dialog.getByRole("button", { name: "閉じる" })).toBeFocused();
+    await page.keyboard.press("Shift+Tab");
+    await expect(dialog.getByRole("button", { name: "閉じる" })).toBeFocused();
+
     // Escape でフォーカストラップ付きモーダルを閉じられる(スペック5 5.2.2)。
     await page.keyboard.press("Escape");
     await expect(dialog).toBeHidden();

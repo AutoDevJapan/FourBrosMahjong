@@ -367,12 +367,14 @@ export default function GameBoard() {
       position: SeatPosition,
       compact: boolean,
       onSelect?: (index: number, tile: TileData) => void,
+      handReadOnly = false,
     ) => (
       <PlayerSlot
         position={position}
         content={slots[position]}
         compact={compact}
         onSelectTile={onSelect}
+        handReadOnly={handReadOnly}
         handTileStates={handTileStates}
         onBlockedTile={setTileFeedback}
       />
@@ -387,6 +389,7 @@ export default function GameBoard() {
       visibilityClass: string,
       onSelfSelect?: (index: number, tile: TileData) => void,
       withActions = true,
+      handReadOnly = false,
     ) => (
       <div
         className={`board-cross mx-auto w-full max-w-4xl grid-cols-[minmax(0,1fr)_minmax(0,1.5fr)_minmax(0,1fr)] gap-[var(--board-gap)] ${visibilityClass}`}
@@ -404,7 +407,7 @@ export default function GameBoard() {
           {renderSlot("right", false)}
         </div>
         <div className="col-span-3 col-start-1 row-start-3">
-          {renderSlot("self", false, onSelfSelect)}
+          {renderSlot("self", false, onSelfSelect, handReadOnly)}
         </div>
         {withActions ? (
           <div className="col-span-3 col-start-1 row-start-4">
@@ -483,7 +486,7 @@ export default function GameBoard() {
       {boardOpen ? (
         <Modal title="全体盤面" onClose={() => setBoardOpen(false)}>
           <div className="@container">
-            {crossBoard("grid", undefined, false)}
+            {crossBoard("grid", undefined, false, true)}
           </div>
         </Modal>
       ) : null}

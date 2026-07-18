@@ -167,6 +167,43 @@ test.describe("状態駆動 a11y 監査(狭幅・モーダル / #148)", () => {
       expect(modal.violations, formatViolations(modal.violations)).toEqual([]);
     });
   }
+
+  test("強制色・reduced-motionでも閲覧専用モーダルは静的listでaxe違反ゼロ(#187)", async ({
+    page,
+  }) => {
+    await page.setViewportSize(NARROW);
+    await page.emulateMedia({
+      forcedColors: "active",
+      reducedMotion: "reduce",
+    });
+    await openScreen(page, gameScreen, "ライト", "?seed=1");
+    await page.getByRole("button", { name: "全体盤面" }).click();
+
+    const dialog = page.getByRole("dialog", { name: "全体盤面" });
+    await expect(
+      dialog.getByRole("list", { name: "自家の手牌" }),
+    ).toBeVisible();
+    await expect(dialog.getByRole("listbox")).toHaveCount(0);
+    await expect(dialog.getByRole("option")).toHaveCount(0);
+    expect(
+      await page.evaluate(
+        () =>
+          matchMedia("(forced-colors: active)").matches &&
+          matchMedia("(prefers-reduced-motion: reduce)").matches,
+      ),
+    ).toBe(true);
+
+    const results = await new AxeBuilder({ page })
+      .withTags([...WCAG_TAGS])
+      // forced-colorsではUAが描画色を置換する一方、axeは置換前後を混在させて
+      // 白地に元の白文字(1.05:1)と誤判定する。通常色のcontrastは上の監査で担保し、
+      // ここでは強制色時の構造・名前・ロールを無除外で監査する。
+      .disableRules(["color-contrast"])
+      .analyze();
+    expect(results.violations, formatViolations(results.violations)).toEqual(
+      [],
+    );
+  });
 });
 
 /**
