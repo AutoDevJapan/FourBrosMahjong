@@ -2163,6 +2163,10 @@ export function passRon(state: EngineState): EngineState {
       chankan === "kakan"
         ? completeAiKakan(cleared, from, tile)
         : completeAiAnkan(cleared, from, tile);
+    // スルーの対象は**この槓宣言**のみ。槓成立でこの宣言への応答は完了したため、
+    // passedRonSeats を戻す(嶺上ツモからの連続カンは別宣言 = 新たな槍槓判定。
+    // なお同巡内は tempMiss が立つため、いずれにせよ自家のロンは次の自ツモまで不可)。
+    if (completed.hand !== null) completed.hand.passedRonSeats = [];
     return pump(completed);
   }
 
