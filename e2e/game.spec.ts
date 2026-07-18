@@ -228,7 +228,20 @@ test.describe("対局画面(/game)", () => {
   }) => {
     test.setTimeout(120_000);
     await page.goto("/game?seed=1");
-    await expect(page.getByLabel(/サイコロ .*ドラ\d枚/).first()).toBeVisible();
+    await expect(
+      page.getByLabel(/サイコロ .*ドラ\d枚/).filter({ visible: true }),
+    ).toBeVisible();
+    await page.setViewportSize({ width: 320, height: 800 });
+    await expect(
+      page.getByLabel(/サイコロ .*ドラ\d枚/).filter({ visible: true }),
+    ).toBeVisible();
+    expect(
+      await page.evaluate(
+        () =>
+          document.documentElement.scrollWidth -
+          document.documentElement.clientWidth,
+      ),
+    ).toBeLessThanOrEqual(1);
     const board = page.locator("[data-phase]").first();
     for (let step = 0; step < 1200; step++) {
       const state = await board.evaluate((el) => ({
@@ -253,13 +266,26 @@ test.describe("対局画面(/game)", () => {
     await expect(
       page.getByRole("heading", { name: "和了内訳" }).first(),
     ).toBeVisible();
-    await expect(page.getByText("表ドラ").first()).toBeVisible();
-    await expect(page.getByText("裏ドラ").first()).toBeVisible();
-    await expect(page.getByText("赤5").first()).toBeVisible();
-    await expect(page.getByText("ガリ").first()).toBeVisible();
+    await expect(
+      page.getByText("表ドラ").filter({ visible: true }),
+    ).toBeVisible();
+    await expect(
+      page.getByText("裏ドラ").filter({ visible: true }),
+    ).toBeVisible();
+    await expect(page.getByText("赤5").filter({ visible: true })).toBeVisible();
+    await expect(
+      page.getByText("ガリ").filter({ visible: true }),
+    ).toBeVisible();
     await expect(
       page.getByRole("list", { name: "支払い内訳" }).first(),
     ).toBeVisible();
+    expect(
+      await page.evaluate(
+        () =>
+          document.documentElement.scrollWidth -
+          document.documentElement.clientWidth,
+      ),
+    ).toBeLessThanOrEqual(1);
   });
 
   test("自家の手牌は矢印キーでフォーカス移動できる(ロービングタブインデックス / スペック5 5.2.2)", async ({

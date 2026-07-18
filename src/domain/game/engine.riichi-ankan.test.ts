@@ -278,8 +278,12 @@ describe("declareAnkan: リーチ後暗槓の結線(Q18 / #116)", () => {
     expect(setup).not.toBeNull();
     if (setup === null) return;
     const { state, ankanTile } = setup;
+    const stateWithHonba = {
+      ...state,
+      round: { ...state.round, honba: 2 },
+    };
 
-    const s1 = declareAnkan(state, ankanTile);
+    const s1 = declareAnkan(stateWithHonba, ankanTile);
     // 嶺上ツモが和了牌 → 嶺上開花+リーチでツモ和了が提示される。
     expect(s1.pending?.kind).toBe("humanDiscard");
     if (s1.pending?.kind !== "humanDiscard") return;
@@ -303,6 +307,10 @@ describe("declareAnkan: リーチ後暗槓の結線(Q18 / #116)", () => {
       (detail?.yakuHan ?? 0) + (detail?.dora.total ?? 0),
     );
     expect(detail?.payments.length).toBeGreaterThan(0);
+    expect(detail?.honba).toBe(2);
+    expect(
+      detail?.payments.reduce((sum, payment) => sum + payment.amount, 0),
+    ).toBe((s2.lastRound?.deltas.p0 ?? 0) - (detail?.stickPayout ?? 0));
   });
 
   it("送り槓(合法暗槓でない牌)の暗槓要求は no-op で拒否する", () => {

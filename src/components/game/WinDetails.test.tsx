@@ -4,6 +4,19 @@ import type { RoundSummary } from "@/domain/game/engine";
 import WinDetails from "./WinDetails";
 
 describe("WinDetails", () => {
+  it("流局では和了内訳を描画しない", () => {
+    const { container } = render(
+      <WinDetails
+        summary={{
+          kind: "draw",
+          label: "流局",
+          deltas: { p0: 0, p1: 0, p2: 0, p3: 0 },
+        }}
+      />,
+    );
+    expect(container).toBeEmptyDOMElement();
+  });
+
   it("役・ドラ4区分・合計翻・本場供託・支払いを表示する", () => {
     const summary: RoundSummary = {
       kind: "win",
