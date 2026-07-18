@@ -120,6 +120,23 @@ test.describe("自動 a11y 監査(axe-core)", () => {
       });
     }
   }
+
+  test("卓情報の generic 要素を aria-label で命名しない(#204)", async ({
+    page,
+  }) => {
+    await page.goto("/game?seed=0");
+    await expect(page.getByTestId("dice-info").first()).toBeVisible();
+
+    const results = await new AxeBuilder({ page })
+      .include('[data-testid="dice-info"]')
+      .include('[data-testid="remaining-live-tiles"]')
+      .analyze();
+    const prohibited = [...results.violations, ...results.incomplete].filter(
+      (result) => result.id === "aria-prohibited-attr",
+    );
+
+    expect(prohibited, formatViolations(prohibited)).toEqual([]);
+  });
 });
 
 /**
