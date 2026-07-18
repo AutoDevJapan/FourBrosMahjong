@@ -16,7 +16,7 @@
  *
  * 永続範囲は同一タブのセッション内だけであり、バックエンド/複数デバイス同期は行わない。
  */
-import { createContext, useContext, useMemo, useState } from "react";
+import { createContext, useContext, useMemo, useRef, useState } from "react";
 import {
   createGame,
   type EngineState,
@@ -148,26 +148,34 @@ export function GameProvider({ children, initialGame }: GameProviderProps) {
   // `initialGame`(単体テストの明示注入)を最優先し、次に URL の `?seed`(E2E の決定的再現)、
   // どちらも無ければ既定の乱数半荘。seed 経路は本番導線(クエリ無し)では発火しない。
   const [session, setSession] = useState(() => initialSession(initialGame));
-  const { engine, journal } = session;
+  // React が再レンダーする前に操作イベントが連続しても、必ず直前の確定 session から
+  // 次の遷移を計算する。engine は Wall/RNG を含め入力を可変更新するため、レンダー時点の
+  // session をクロージャから再利用するとライブ状態だけが二重に進み、journal と分岐する。
+  const sessionRef = useRef(session);
+  const { engine } = session;
 
-  // 遷移は「イベントハンドラ内で現在の engine から1度だけ」算出し、その**値**を `setEngine` へ渡す。
-  // engine の遷移は内部で `Wall` 等を可変更新するため、`setEngine((s) => transition(s))` の
-  // 関数型更新にすると React Strict Mode(開発時)の updater 二重呼び出しで**同じ状態を2回
-  // 破壊的に進めて**局が壊れる。controls は現在の engine を閉じ込めて毎レンダー再生成する
-  // (イベントハンドラは二重呼び出しされないため、遷移は必ず1回だけ適用される)。
+  // engine の遷移は内部で `Wall` 等を可変更新するため、React Strict Mode で再実行され得る
+  // 関数型 updater の中では実行しない。同期 ref 上で1度だけ遷移し、その確定値を state へ渡す。
+  // ref は同一レンダー中の連続イベントにも即時反映され、engine と journal を同じ順序で進める。
   const controls = useMemo<GameControls>(() => {
     const commit = (action: GameAction) => {
+      const { engine, journal } = sessionRef.current;
       const nextEngine = applyGameAction(engine, action);
       if (journal === null) {
-        setSession({ engine: nextEngine, journal: null });
+        const nextSession = { engine: nextEngine, journal: null };
+        sessionRef.current = nextSession;
+        setSession(nextSession);
         return;
       }
       const nextJournal: GameJournal = {
         ...journal,
         actions: [...journal.actions, action],
       };
+      const nextSession = { engine: nextEngine, journal: nextJournal };
+      // storage / React state より先に同期 ref を進め、同一 tick の次イベントを直列化する。
+      sessionRef.current = nextSession;
       saveJournal(window.sessionStorage, nextJournal);
-      setSession({ engine: nextEngine, journal: nextJournal });
+      setSession(nextSession);
     };
     const tileAction = (
       type: "discard" | "riichi" | "ankan" | "kakan",
@@ -188,11 +196,16 @@ export function GameProvider({ children, initialGame }: GameProviderProps) {
       newGame: () => {
         const seed = freshSeed();
         const nextJournal: GameJournal = { version: 1, seed, actions: [] };
+        const nextSession = {
+          engine: createGame({ seed }),
+          journal: nextJournal,
+        };
+        sessionRef.current = nextSession;
         saveJournal(window.sessionStorage, nextJournal);
-        setSession({ engine: createGame({ seed }), journal: nextJournal });
+        setSession(nextSession);
       },
     };
-  }, [engine, journal]);
+  }, []);
 
   const value = useMemo<GameContextValue>(
     () => ({
