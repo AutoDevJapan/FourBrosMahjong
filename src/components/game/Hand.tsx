@@ -44,6 +44,16 @@ export default function Hand({
   const [selectedIndex, setSelectedIndex] = useState<number | null>(null);
   const optionRefs = useRef<(HTMLLIElement | null)[]>([]);
 
+  // ポン・カン等で手牌が縮小して activeIndex が範囲外になると、tabIndex=0 の option が
+  // 0個になりキーボードで手牌へ到達できなくなる。末尾へクランプしてロービングタブ
+  // インデックスの不変条件(常にちょうど1牌が tabIndex=0)を保つ(スペック5 5.2.2)。
+  // GameBoard の prevCanRiichi と同様の「レンダー中に state を調整する」React 公認
+  // パターン(ここでは範囲外かどうかを props から直接判定できるため前回値の保持は不要)。
+  const maxIndex = Math.max(tiles.length - 1, 0);
+  if (activeIndex > maxIndex) {
+    setActiveIndex(maxIndex);
+  }
+
   const focusIndex = useCallback((index: number) => {
     setActiveIndex(index);
     optionRefs.current[index]?.focus();
