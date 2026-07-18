@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   createGame,
   declareAnkan,
@@ -14,10 +14,13 @@ import {
   seatOfPlayer,
   tsumogiri,
 } from "@/domain/game/engine";
+import { walkToGameEnd } from "./finishedGameFixture";
 import {
   applyGameAction,
   type GameJournal,
   loadJournal,
+  MAX_JOURNAL_ACTIONS,
+  MAX_JOURNAL_BYTES,
   parseJournal,
   replayJournal,
   saveJournal,
@@ -205,6 +208,87 @@ describe("game persistence journal", () => {
     JSON.stringify({ version: 1, seed: 1, actions: [{ type: "discard" }] }),
   ])("破損・旧versionを拒否する: %s", (raw) => {
     expect(parseJournal(raw)).toBeNull();
+  });
+
+  it("raw上限超過をJSON.parseより前に拒否する", () => {
+    const parse = vi.spyOn(JSON, "parse");
+    const raw = " ".repeat(MAX_JOURNAL_BYTES / 2 + 1);
+
+    expect(parseJournal(raw)).toBeNull();
+    expect(parse).not.toHaveBeenCalled();
+    parse.mockRestore();
+  });
+
+  it("action件数の境界を検証する", () => {
+    const action = { type: "tsumogiri" } as const;
+    expect(
+      parseJournal(
+        JSON.stringify({
+          version: 1,
+          seed: 1,
+          actions: Array(MAX_JOURNAL_ACTIONS).fill(action),
+        }),
+      ),
+    ).not.toBeNull();
+    expect(
+      parseJournal(
+        JSON.stringify({
+          version: 1,
+          seed: 1,
+          actions: Array(MAX_JOURNAL_ACTIONS + 1).fill(action),
+        }),
+      ),
+    ).toBeNull();
+  });
+
+  it("正規の完走journalはリソース上限内で読み戻せる", () => {
+    const { journal, state } = walkToGameEnd(0);
+
+    expect(state.phase).toBe("gameEnd");
+    expect(journal.actions.length).toBeLessThanOrEqual(MAX_JOURNAL_ACTIONS);
+    expect(parseJournal(JSON.stringify(journal))).toEqual(journal);
+  });
+
+  it.each([
+    { version: 1, seed: 0x1_0000_0000, actions: [] },
+    { version: 1, seed: 1, actions: [], extra: "payload" },
+    {
+      version: 1,
+      seed: 1,
+      actions: [{ type: "tsumogiri", extra: "payload" }],
+    },
+    {
+      version: 1,
+      seed: 1,
+      actions: [
+        {
+          type: "discard",
+          tile: { suit: "honor", rank: 8, isRed: false },
+        },
+      ],
+    },
+    {
+      version: 1,
+      seed: 1,
+      actions: [
+        {
+          type: "discard",
+          tile: { suit: "honor", rank: 5, isRed: true },
+        },
+      ],
+    },
+    {
+      version: 1,
+      seed: 1,
+      actions: [
+        {
+          type: "discard",
+          tile: { suit: "man", rank: 1, isRed: false, extra: "payload" },
+        },
+      ],
+    },
+  ])("domain外または余剰payloadを拒否する: %#", (journal) => {
+    expect(parseJournal(JSON.stringify(journal))).toBeNull();
   });
 
   it("破損記録はload時に削除する", () => {

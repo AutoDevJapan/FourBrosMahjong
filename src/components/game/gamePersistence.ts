@@ -17,6 +17,12 @@ import type { Tile } from "@/domain/tiles/tile";
 
 const GAME_SESSION_KEY = "four-bros-mahjong.game.v1";
 const VERSION = 1;
+// engine は最大32局で終了し、完走fixtureも5,000遷移を安全ガードにしている。
+// これを超える履歴は正規の対局から生成されないものとして、再生前に拒否する。
+export const MAX_JOURNAL_ACTIONS = 5_000;
+// sessionStorage 由来の文字列はメインスレッドで同期 parse される。JSON.parse 前に
+// UTF-16 の保存量（1 code unit = 2 bytes）を制限し、巨大入力による初期描画停止を防ぐ。
+export const MAX_JOURNAL_BYTES = 1024 * 1024;
 
 export type GameAction =
   | { readonly type: "discard"; readonly tile: Tile }
@@ -50,32 +56,62 @@ const noTileActions = new Set([
 function isTile(value: unknown): value is Tile {
   if (!value || typeof value !== "object") return false;
   const tile = value as Record<string, unknown>;
+  if (!hasOnlyKeys(tile, ["suit", "rank", "isRed"])) return false;
+  const suit = tile.suit;
+  const rank = tile.rank;
+  const validRank =
+    (suit === "honor" &&
+      Number.isInteger(rank) &&
+      Number(rank) >= 1 &&
+      Number(rank) <= 7) ||
+    (["man", "pin", "sou"].includes(String(suit)) &&
+      Number.isInteger(rank) &&
+      Number(rank) >= 1 &&
+      Number(rank) <= 9);
   return (
-    ["man", "pin", "sou", "honor"].includes(String(tile.suit)) &&
-    Number.isInteger(tile.rank) &&
-    typeof tile.isRed === "boolean"
+    validRank &&
+    typeof tile.isRed === "boolean" &&
+    (!tile.isRed || (suit !== "honor" && rank === 5))
+  );
+}
+
+function hasOnlyKeys(
+  value: Record<string, unknown>,
+  expected: readonly string[],
+): boolean {
+  const keys = Object.keys(value);
+  return (
+    keys.length === expected.length && expected.every((key) => key in value)
   );
 }
 
 function isAction(value: unknown): value is GameAction {
   if (!value || typeof value !== "object") return false;
   const action = value as Record<string, unknown>;
-  if (noTileActions.has(String(action.type))) return true;
+  if (noTileActions.has(String(action.type))) {
+    return hasOnlyKeys(action, ["type"]);
+  }
   return (
     ["discard", "riichi", "ankan", "kakan"].includes(String(action.type)) &&
+    hasOnlyKeys(action, ["type", "tile"]) &&
     isTile(action.tile)
   );
 }
 
 export function parseJournal(raw: string): GameJournal | null {
+  if (raw.length * 2 > MAX_JOURNAL_BYTES) return null;
   try {
     const value = JSON.parse(raw) as Record<string, unknown>;
     if (
+      !value ||
+      typeof value !== "object" ||
+      !hasOnlyKeys(value, ["version", "seed", "actions"]) ||
       value.version !== VERSION ||
       !Number.isSafeInteger(value.seed) ||
       Number(value.seed) < 0 ||
+      Number(value.seed) > 0xffffffff ||
       !Array.isArray(value.actions) ||
-      value.actions.length > 100_000 ||
+      value.actions.length > MAX_JOURNAL_ACTIONS ||
       !value.actions.every(isAction)
     ) {
       return null;
