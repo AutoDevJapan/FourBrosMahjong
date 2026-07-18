@@ -118,7 +118,18 @@ export function applyGameAction(
 
 export function replayJournal(journal: GameJournal): EngineState {
   let state = createGame({ seed: journal.seed });
-  for (const action of journal.actions) state = applyGameAction(state, action);
+  for (const [index, action] of journal.actions.entries()) {
+    const next = applyGameAction(state, action);
+    // engine の公開操作は不正な局面・牌を例外ではなく同一 state の no-op で拒否する。
+    // 保存履歴では no-op を読み飛ばすと後続 action を異なる局面へ適用してしまうため、
+    // ジャーナル破損として呼び出し元へ通知し、新規対局へのフォールバックを促す。
+    if (next === state) {
+      throw new Error(
+        `Invalid game journal action at index ${index}: ${action.type}`,
+      );
+    }
+    state = next;
+  }
   return state;
 }
 

@@ -178,6 +178,27 @@ describe("game persistence journal", () => {
   });
 
   it.each([
+    {
+      label: "手牌に存在しない北の打牌",
+      action: {
+        type: "discard",
+        tile: { suit: "honor", rank: 4, isRed: false },
+      },
+    },
+    { label: "playing中の次局開始", action: { type: "nextRound" } },
+  ] as const)("局面上不正な操作を破損として拒否する: $label", ({ action }) => {
+    const journal: GameJournal = {
+      version: 1,
+      seed: 0,
+      actions: [action],
+    };
+
+    expect(() => replayJournal(journal)).toThrow(
+      `Invalid game journal action at index 0: ${action.type}`,
+    );
+  });
+
+  it.each([
     "not-json",
     JSON.stringify({ version: 0, seed: 1, actions: [] }),
     JSON.stringify({ version: 1, seed: -1, actions: [] }),
