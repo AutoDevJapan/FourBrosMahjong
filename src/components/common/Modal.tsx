@@ -12,7 +12,7 @@
  * 卓UIの「全体盤面」等をスタッキング順の影響を受けずに最前面へ出すため `document.body` へ
  * ポータルする。表示制御(開閉状態)は呼び出し元が持ち、本コンポーネントは開いている間だけ描画する。
  */
-import { useCallback, useEffect, useId, useRef } from "react";
+import { useCallback, useEffect, useEffectEvent, useId, useRef } from "react";
 import { createPortal } from "react-dom";
 
 export interface ModalProps {
@@ -36,26 +36,71 @@ function focusableElements(root: HTMLElement): HTMLElement[] {
 }
 
 export default function Modal({ title, onClose, children }: ModalProps) {
+  const overlayRef = useRef<HTMLDivElement>(null);
   const dialogRef = useRef<HTMLDivElement>(null);
+  const requestClose = useEffectEvent(onClose);
   const titleId = useId();
 
-  // 開いている間だけ、開く前のフォーカス位置を退避し、閉じたら復帰する。
+  // Portal の外にあるページ全体を modal の間だけ隔離する。呼び出し元の一部分だけを
+  // inert にすると、GameBoard の兄弟（ページヘッダー等）が操作可能なまま残るため、
+  // body 直下に portal された overlay 以外を対象にする。既存属性は閉じる際に正確に戻す。
   useEffect(() => {
     const previouslyFocused = document.activeElement as HTMLElement | null;
-    // ダイアログ自体へ初期フォーカスを移す(トラップの起点)。
-    dialogRef.current?.focus();
+    const overlay = overlayRef.current;
+    const dialog = dialogRef.current;
+    if (!overlay || !dialog) return;
+
+    const isolated = Array.from(document.body.children)
+      .filter(
+        (element): element is HTMLElement =>
+          element instanceof HTMLElement && element !== overlay,
+      )
+      .map((element) => ({
+        element,
+        inert: element.inert,
+        inertAttribute: element.hasAttribute("inert"),
+        ariaHidden: element.getAttribute("aria-hidden"),
+      }));
+    for (const { element } of isolated) {
+      element.inert = true;
+      element.setAttribute("inert", "");
+      element.setAttribute("aria-hidden", "true");
+    }
+
+    // inert を適用した後にダイアログへ初期フォーカスを移す。
+    dialog.focus();
+
+    // inert を実装しない環境や支援技術・スクリプトによる外部 focus() に対しても、
+    // modal 外へ出たフォーカスを即座にダイアログへ回収する。
+    const keepFocusInside = (event: FocusEvent) => {
+      if (event.target instanceof Node && !overlay.contains(event.target)) {
+        dialog.focus();
+      }
+    };
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      event.preventDefault();
+      event.stopPropagation();
+      requestClose();
+    };
+    document.addEventListener("focusin", keepFocusInside, true);
+    document.addEventListener("keydown", closeOnEscape, true);
+
     return () => {
-      previouslyFocused?.focus?.();
+      document.removeEventListener("focusin", keepFocusInside, true);
+      document.removeEventListener("keydown", closeOnEscape, true);
+      for (const { element, inert, inertAttribute, ariaHidden } of isolated) {
+        element.inert = inert;
+        if (!inertAttribute) element.removeAttribute("inert");
+        if (ariaHidden === null) element.removeAttribute("aria-hidden");
+        else element.setAttribute("aria-hidden", ariaHidden);
+      }
+      if (previouslyFocused?.isConnected) previouslyFocused.focus();
     };
   }, []);
 
   const handleKeyDown = useCallback(
     (event: React.KeyboardEvent<HTMLDivElement>) => {
-      if (event.key === "Escape") {
-        event.stopPropagation();
-        onClose();
-        return;
-      }
       if (event.key !== "Tab") return;
       const dialog = dialogRef.current;
       if (!dialog) return;
@@ -79,7 +124,7 @@ export default function Modal({ title, onClose, children }: ModalProps) {
         first.focus();
       }
     },
-    [onClose],
+    [],
   );
 
   // SSR 時(document 不在)は描画しない。呼び出し元はクライアント境界内で使う。
@@ -87,6 +132,7 @@ export default function Modal({ title, onClose, children }: ModalProps) {
 
   return createPortal(
     <div
+      ref={overlayRef}
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4"
       // オーバーレイのクリックで閉じる(装飾要素のため presentation)。
       onClick={onClose}

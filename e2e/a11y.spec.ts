@@ -185,6 +185,51 @@ test.describe("状態駆動 a11y 監査(狭幅・モーダル / #148)", () => {
     });
   }
 
+  test("モーダル中はPortal外のページ全体を隔離し、外部フォーカスを回収・復元する(#252)", async ({
+    page,
+  }) => {
+    await page.setViewportSize(NARROW);
+    await openScreen(page, gameScreen, "ライト", "?seed=0");
+    const openButton = page.getByRole("button", { name: "全体盤面" });
+    await openButton.focus();
+    await openButton.press("Enter");
+
+    const dialog = page.getByRole("dialog", { name: "全体盤面" });
+    await expect(dialog).toBeFocused();
+    const backgroundLink = page.locator('a[href="/"]');
+    await expect(backgroundLink).not.toHaveAttribute("tabindex");
+    expect(
+      await backgroundLink.evaluate((link) => {
+        const pageRoot = Array.from(document.body.children).find((child) =>
+          child.contains(link),
+        );
+        return {
+          inert: pageRoot?.hasAttribute("inert"),
+          ariaHidden: pageRoot?.getAttribute("aria-hidden"),
+        };
+      }),
+    ).toEqual({ inert: true, ariaHidden: "true" });
+
+    // 支援技術やスクリプトが背景へ直接 focus() しても dialog へ即時回収される。
+    await backgroundLink.evaluate((link: HTMLElement) => link.focus());
+    await expect(dialog).toBeFocused();
+
+    await page.keyboard.press("Escape");
+    await expect(dialog).toHaveCount(0);
+    await expect(openButton).toBeFocused();
+    expect(
+      await backgroundLink.evaluate((link) => {
+        const pageRoot = Array.from(document.body.children).find((child) =>
+          child.contains(link),
+        );
+        return {
+          inert: pageRoot?.hasAttribute("inert"),
+          ariaHidden: pageRoot?.getAttribute("aria-hidden"),
+        };
+      }),
+    ).toEqual({ inert: false, ariaHidden: null });
+  });
+
   test("強制色・reduced-motionでも閲覧専用モーダルは静的listでaxe違反ゼロ(#187)", async ({
     page,
   }) => {

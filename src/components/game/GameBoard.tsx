@@ -23,7 +23,6 @@ import {
   useCallback,
   useEffect,
   useMemo,
-  useRef,
   useState,
   useSyncExternalStore,
 } from "react";
@@ -101,19 +100,6 @@ export default function GameBoard() {
     const timer = window.setTimeout(() => setKitaAnnouncement(""), 1500);
     return () => window.clearTimeout(timer);
   }, [kitaAnnouncement]);
-  // 全体盤面を開いている間は盤面本体を `inert` にする(下記 return 参照)。inert 化はトリガー
-  // ボタンから即座にフォーカスを奪う(祖先が inert になると activeElement は body へ落ちる)ため、
-  // Modal 側の「開く前の activeElement へ復帰」だけでは body へ戻ってしまう。トリガー参照を保持し、
-  // モーダルが閉じた(inert 解除後の)タイミングでこのボタンへ確実にフォーカスを戻す。
-  const boardTriggerRef = useRef<HTMLButtonElement>(null);
-  const wasBoardOpen = useRef(boardOpen);
-  useEffect(() => {
-    if (wasBoardOpen.current && !boardOpen) {
-      boardTriggerRef.current?.focus();
-    }
-    wasBoardOpen.current = boardOpen;
-  }, [boardOpen]);
-
   // リーチ宣言モード: オンのとき、次に選んだ手牌が「リーチ宣言牌」として切られる。
   const [riichiArmed, setRiichiArmed] = useState(false);
   const [tileFeedback, setTileFeedback] = useState({
@@ -493,11 +479,10 @@ export default function GameBoard() {
        * 盤面本体(段階①/段階②)。いずれか一方だけがコンテナクエリの display:none で
        * 可視化されるため、AT・E2E のロール照会には常に1側だけが露出する(非表示側は
        * display:none で a11y ツリー・ロールクエリ双方から除外される)。
-       * 全体盤面モーダル(段階②の補完)を開いている間はクロス配置を dialog 内に再掲するため、
-       * この盤面本体を `inert` + `aria-hidden` で AT・フォーカス・ロールクエリから確実に外し、
-       * 自家 region / 手牌 listbox 等のアクセシブル名が dialog と二重露出しないようにする。
+       * 全体盤面モーダル(段階②の補完)を開いている間の背景隔離は、Portal 外のページヘッダーも
+       * 含めて Modal が一括して所有する。
        */}
-      <div inert={boardOpen} aria-hidden={boardOpen || undefined}>
+      <div>
         {/* 段階①: 卓幅 >= 360px はクロス配置。牌・隙間は .board-cross の clamp()/cqi で流体縮小。 */}
         {crossBoard("hidden @min-[360px]:grid", handleSelectTile)}
 
@@ -508,7 +493,6 @@ export default function GameBoard() {
               自分手番フォーカス表示
             </p>
             <button
-              ref={boardTriggerRef}
               type="button"
               onClick={() => setBoardOpen(true)}
               className="inline-flex items-center gap-1.5 rounded-lg border border-foreground/25 px-3 py-1.5 text-xs font-medium hover:bg-foreground/5"
