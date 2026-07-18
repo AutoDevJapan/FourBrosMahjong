@@ -165,7 +165,8 @@ test.describe("対局画面(/game)", () => {
   test("開始時、自家の手番がライブリージョンへ通知され操作パネルが操作可能(スペック5 5.2.2 / 5.2.3)", async ({
     page,
   }) => {
-    await page.goto("/game");
+    // seed=0 は開始ツモが北ではなく、通常の手番通知を決定的に検証できる。
+    await page.goto("/game?seed=0");
 
     // 自家の手番(打牌待ち)は polite ライブリージョンへ通知される(sr-only だが DOM 常駐)。
     await expect(page.locator('[aria-live="polite"]').first()).toHaveText(
@@ -176,6 +177,34 @@ test.describe("対局画面(/game)", () => {
     const actionPanel = page.getByRole("group", { name: "操作パネル" }).first();
     await expect(actionPanel).toBeVisible();
     await expect(actionPanel.getByRole("button").first()).toBeVisible();
+  });
+
+  test("決定的seedの抜き北を公開し、320pxと全体盤面でもガリ枚数を確認できる(#171)", async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 700, height: 900 });
+    await page.goto("/game?seed=1");
+
+    const self = page.getByRole("region", { name: "あなた(東家)" });
+    await expect(self.getByTestId("kita-display")).toContainText("ガリ1");
+    await expect(
+      self.getByTestId("kita-display").locator('[data-face="Pei"]'),
+    ).toHaveCount(1);
+    await expect(
+      page
+        .locator('[aria-live="polite"]')
+        .filter({ hasText: "北を抜きました" }),
+    ).toHaveText("北を抜きました。嶺上牌を補充しました。ガリは合計1枚です。");
+
+    await page.setViewportSize({ width: 320, height: 800 });
+    await expect(self.getByTestId("kita-display")).toContainText("ガリ1");
+    await page.getByRole("button", { name: "全体盤面" }).click();
+    const dialog = page.getByRole("dialog", { name: "全体盤面" });
+    await expect(
+      dialog
+        .getByRole("region", { name: "あなた(東家)" })
+        .getByTestId("kita-display"),
+    ).toContainText("ガリ1");
   });
 
   test("自家の手牌は矢印キーでフォーカス移動できる(ロービングタブインデックス / スペック5 5.2.2)", async ({

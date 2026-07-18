@@ -11,6 +11,7 @@ describe("PlayerSlot (seated / bench switch, spec 6.4.1)", () => {
         name: "あなた",
         points: 35000,
         seatWind: "east",
+        kitaCount: 0,
         hand: [
           { suit: "man", rank: 1 },
           { suit: "sou", rank: 9 },
@@ -32,6 +33,7 @@ describe("PlayerSlot (seated / bench switch, spec 6.4.1)", () => {
         name: "下家",
         points: 25000,
         seatWind: "west",
+        kitaCount: 0,
         handCount: 13,
         discards: [],
       },

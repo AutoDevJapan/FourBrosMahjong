@@ -5,13 +5,15 @@
  * 親・手番・リーチの状態は色のみに依存せずアイコン+テキストで併記する(スペック5 5.2.1)。
  * どのプレイヤーが自家/他家/親かの決定(Q10)には関与せず、与えられた割り当てを描くだけ。
  */
-import type { SeatWind, SeatedPlayerView, TileData } from "./types";
+
 import Discards from "./Discards";
 import Hand from "./Hand";
+import KitaDisplay from "./KitaDisplay";
 import Melds from "./Melds";
 import OpponentHand from "./OpponentHand";
 import ScoreDisplay from "./ScoreDisplay";
 import StatusBadge from "./StatusBadge";
+import type { SeatedPlayerView, SeatWind, TileData } from "./types";
 
 const SEAT_WIND_LABEL: Record<SeatWind, string> = {
   east: "東家",
@@ -35,8 +37,17 @@ export default function PlayerArea({
   compact = false,
   onSelectTile,
 }: PlayerAreaProps) {
-  const { name, points, pointsDelta, seatWind, status, hand, melds, discards } =
-    player;
+  const {
+    name,
+    points,
+    pointsDelta,
+    seatWind,
+    status,
+    hand,
+    melds,
+    kitaCount,
+    discards,
+  } = player;
 
   return (
     <section
@@ -62,6 +73,8 @@ export default function PlayerArea({
       </header>
 
       <ScoreDisplay points={points} delta={pointsDelta} />
+
+      <KitaDisplay count={kitaCount} compact={compact} />
 
       {!compact ? (
         <div className="rounded bg-foreground/[.03] p-1.5">

@@ -1,0 +1,39 @@
+import { describe, expect, it } from "vitest";
+import { createGame } from "@/domain/game/engine";
+import { selectView } from "./gameView";
+
+describe("selectView kita projection", () => {
+  it("0/1/2/4枚の抜き北を全着席者の公開ビューへ写像する", () => {
+    const zero = createGame({ seed: 0 });
+    expect(zero.hand).not.toBeNull();
+    if (zero.hand === null) return;
+    zero.hand.kita = { east: 0, south: 0, west: 0 };
+    const zeroView = selectView(zero);
+    for (const position of ["self", "right", "across"] as const) {
+      const slot = zeroView.slots[position];
+      expect(slot.kind).toBe("seated");
+      if (slot.kind === "seated") expect(slot.player.kitaCount).toBe(0);
+    }
+
+    const publicCounts = [
+      { east: 1, south: 2, west: 4 },
+      { east: 4, south: 1, west: 2 },
+    ] as const;
+    for (const counts of publicCounts) {
+      zero.hand.kita = { ...counts };
+      const view = selectView(zero);
+      const expected = {
+        self: counts.east,
+        right: counts.south,
+        across: counts.west,
+      };
+      for (const position of ["self", "right", "across"] as const) {
+        const slot = view.slots[position];
+        expect(slot.kind).toBe("seated");
+        if (slot.kind === "seated") {
+          expect(slot.player.kitaCount).toBe(expected[position]);
+        }
+      }
+    }
+  });
+});
