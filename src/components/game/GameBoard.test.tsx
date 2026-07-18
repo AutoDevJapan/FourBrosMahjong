@@ -1,14 +1,9 @@
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import {
-  createGame,
-  discard,
-  type EngineState,
-  passRon,
-  proceedToNextRound,
-} from "@/domain/game/engine";
+import { createGame, type EngineState } from "@/domain/game/engine";
 import { tileLabel } from "../common/tileLabel";
+import { walkToGameEnd } from "./finishedGameFixture";
 import GameBoard, { pulledKitaCount } from "./GameBoard";
 import { type GameAction, replayJournal } from "./gamePersistence";
 import { GameProvider } from "./GameProvider";
@@ -22,46 +17,14 @@ vi.mock("next/navigation", () => ({
 beforeEach(() => {
   routerMock.push.mockClear();
   routerMock.replace.mockClear();
+  // `newGame` は sessionStorage へ journal を書き込む。現状の各テストは journal を読み戻さない
+  // (常に initialGame を注入する)が、後続テストへの書き残しを避けるため毎回クリアする。
   window.sessionStorage.clear();
 });
 
-/**
- * 実エンジンで1半荘を完走させる操作列(打牌はツモ切り・ロンは見送り)を記録する(決定的)。
- *
- * engine の遷移は内部状態(Wall等)を破壊的に更新するため、途中局面を state の参照で
- * 取り置くことはできない。操作列として記録し、`replayJournal` で必要な局面(完走 /
- * 最終操作の直前)を毎回**新規に**再構築する。
- */
-const finishedActionsCache = new Map<number, readonly GameAction[]>();
-function finishedActions(seed: number): readonly GameAction[] {
-  const cached = finishedActionsCache.get(seed);
-  if (cached) return cached;
-  let s = createGame({ seed });
-  const actions: GameAction[] = [];
-  for (let guard = 0; guard < 5000 && s.phase !== "gameEnd"; guard++) {
-    if (s.phase === "roundEnd") {
-      actions.push({ type: "nextRound" });
-      s = proceedToNextRound(s);
-    } else if (s.pending?.kind === "humanDiscard") {
-      const drawn = s.hand?.drawn;
-      if (!drawn) throw new Error("打牌待ちなのにツモ牌がない");
-      actions.push({ type: "discard", tile: drawn });
-      s = discard(s, drawn);
-    } else if (s.pending?.kind === "humanReact") {
-      actions.push({ type: "passRon" });
-      s = passRon(s);
-    } else {
-      throw new Error(`予期しない局面: phase=${s.phase}`);
-    }
-  }
-  if (s.phase !== "gameEnd") throw new Error("半荘が終了しなかった");
-  finishedActionsCache.set(seed, actions);
-  return actions;
-}
-
-/** 半荘を完走した終局(gameEnd)状態を新規構築する。 */
+/** 半荘を完走した終局(gameEnd)状態(seed 固定で決定的)。 */
 function finishedGame(seed = 2024): EngineState {
-  return replayJournal({ version: 1, seed, actions: finishedActions(seed) });
+  return walkToGameEnd(seed).state;
 }
 
 /** 終局の1手前の局面と、gameEnd へ遷移させる最終操作を返す。 */
@@ -69,10 +32,14 @@ function gameBeforeEnd(seed = 2024): {
   state: EngineState;
   lastAction: GameAction;
 } {
-  const actions = finishedActions(seed);
-  const lastAction = actions[actions.length - 1];
+  const { journal } = walkToGameEnd(seed);
+  const lastAction = journal.actions[journal.actions.length - 1];
   return {
-    state: replayJournal({ version: 1, seed, actions: actions.slice(0, -1) }),
+    // engine の遷移は内部状態を破壊的に更新するため、途中局面は journal の部分再生で新規構築する。
+    state: replayJournal({
+      ...journal,
+      actions: journal.actions.slice(0, -1),
+    }),
     lastAction,
   };
 }
@@ -190,7 +157,8 @@ describe("GameBoard 終局後の出口(#206 / #207)", () => {
     );
     expect(routerMock.replace).not.toHaveBeenCalled();
 
-    // 記録済みの最終操作を UI から実行して gameEnd へ遷移させる。
+    // 記録済みの最終操作を UI から実行して gameEnd へ遷移させる。gameEnd は打牌/スルーの
+    // 決着処理からのみ到達する(`proceedToNextRound` は gameEnd を返さない)ため、この2択で足りる。
     if (lastAction.type === "discard") {
       await user.click(
         screen.getAllByRole("option", { name: tileLabel(lastAction.tile) })[0],
@@ -198,13 +166,20 @@ describe("GameBoard 終局後の出口(#206 / #207)", () => {
     } else if (lastAction.type === "passRon") {
       await user.click(screen.getAllByRole("button", { name: "スルー" })[0]);
     } else {
-      await user.click(screen.getAllByRole("button", { name: "次の局へ" })[0]);
+      throw new Error(`最終操作を UI から実行できない: ${lastAction.type}`);
     }
 
     // 自動遷移は replace(履歴を汚さない)。push は使わない(#206)。
     expect(routerMock.replace).toHaveBeenCalledWith("/game/result");
     expect(routerMock.replace).toHaveBeenCalledTimes(1);
     expect(routerMock.push).not.toHaveBeenCalled();
+    // 自動遷移が予約されている間は出口パネルを描かず、遷移案内のみ表示する(明滅防止)。
+    expect(
+      screen.queryByRole("button", { name: "新しい半荘を開始" }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.getAllByText("半荘終了。結果画面へ移動します。").length,
+    ).toBeGreaterThan(0);
   });
 
   it("終局済み状態でマウントされた場合は自動遷移せず、結果を見る/新しい半荘を開始の出口を提示する", async () => {

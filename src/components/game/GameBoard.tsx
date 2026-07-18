@@ -136,15 +136,21 @@ export default function GameBoard() {
   // 開始」を出口として提示する(ロビーの「対局を開始」からの再訪でも /game に留まれる)。
   // /game/result 直接アクセス時のリロード復元(#190)は GameProvider の journal 再生が担う
   // ため、この変更の影響を受けない。
-  const previousPhase = useRef(phase);
+  //
+  // 遷移検知は上記 prevCanRiichi と同じ「レンダー中の前回値比較」パターンで行い、遷移で
+  // 到達した gameEnd だけ `redirecting` を立てる。`redirecting` の間は出口パネルを描かず
+  // 遷移案内のみ表示するため、自動遷移前の1フレームに出口パネルが明滅しない。
+  const [prevPhase, setPrevPhase] = useState(phase);
+  const [redirecting, setRedirecting] = useState(false);
+  if (prevPhase !== phase) {
+    setPrevPhase(phase);
+    setRedirecting(phase === "gameEnd");
+  }
   useEffect(() => {
-    const transitionedToGameEnd =
-      previousPhase.current !== "gameEnd" && phase === "gameEnd";
-    previousPhase.current = phase;
-    if (transitionedToGameEnd) {
+    if (redirecting) {
       router.replace("/game/result");
     }
-  }, [phase, router]);
+  }, [redirecting, router]);
 
   const handleSelectTile = useCallback(
     (_index: number, tile: TileData) => {
@@ -231,6 +237,9 @@ export default function GameBoard() {
       ];
     }
     if (phase === "gameEnd") {
+      // 結果画面への自動遷移(replace)が予約されている間は出口パネルを描かない
+      // (遷移前の1フレームにパネルが明滅するのを避ける)。
+      if (redirecting) return [];
       // 終局後の /game の出口(#207): 結果確認に加えて、その場で新規半荘を開始できる。
       // `newGame` は journal を新規半荘で上書きするため、以後の /game 再訪は新しい対局になる。
       return [
@@ -337,12 +346,15 @@ export default function GameBoard() {
       return items;
     }
     return [];
-  }, [phase, pending, controls, router, riichiArmed]);
+  }, [phase, pending, controls, router, riichiArmed, redirecting]);
 
   const hint = useMemo(() => {
     if (phase === "roundEnd") return roundSummary?.label ?? "";
-    if (phase === "gameEnd")
-      return "半荘終了。結果を確認するか、新しい半荘を開始できます。";
+    if (phase === "gameEnd") {
+      return redirecting
+        ? "半荘終了。結果画面へ移動します。"
+        : "半荘終了。結果を確認するか、新しい半荘を開始できます。";
+    }
     if (pending?.kind === "humanReact") {
       // 実際に選べる操作だけを案内する(存在しない選択肢を誤って提示しない)。
       const choices = [
@@ -363,7 +375,7 @@ export default function GameBoard() {
       return "牌を選んで打牌してください(北抜きは自動)。";
     }
     return "";
-  }, [phase, pending, roundSummary, riichiArmed]);
+  }, [phase, pending, roundSummary, riichiArmed, redirecting]);
 
   const announcement = useMemo(() => {
     if (tileFeedback) return tileFeedback;
