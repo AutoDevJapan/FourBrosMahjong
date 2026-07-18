@@ -19,12 +19,23 @@ export interface HandProps {
   onSelect?: (index: number, tile: TileData) => void;
   /** アクセシブルな一覧名。 */
   label?: string;
+  tileStates?: readonly HandTileState[];
+  onBlockedSelect?: (message: string) => void;
+}
+
+export interface HandTileState {
+  readonly disabled?: boolean;
+  readonly reason?: string;
+  readonly indicator?: string;
+  readonly highlighted?: boolean;
 }
 
 export default function Hand({
   tiles,
   onSelect,
   label = "自家の手牌",
+  tileStates = [],
+  onBlockedSelect,
 }: HandProps) {
   const [activeIndex, setActiveIndex] = useState(0);
   const [selectedIndex, setSelectedIndex] = useState<number | null>(null);
@@ -60,6 +71,12 @@ export default function Hand({
         case "Enter":
         case " ":
           event.preventDefault();
+          if (tileStates[index]?.disabled) {
+            onBlockedSelect?.(
+              tileStates[index].reason ?? "この牌は選べません。",
+            );
+            break;
+          }
           setSelectedIndex(index);
           onSelect?.(index, tiles[index]);
           break;
@@ -67,7 +84,7 @@ export default function Hand({
           break;
       }
     },
-    [tiles, focusIndex, onSelect],
+    [tiles, focusIndex, onSelect, tileStates, onBlockedSelect],
   );
 
   return (
@@ -79,7 +96,15 @@ export default function Hand({
     >
       {tiles.map((tile, index) => {
         const isActive = index === activeIndex;
-        const isSelected = index === selectedIndex;
+        const state = tileStates[index];
+        const disabled = state?.disabled ?? false;
+        // 局面更新後に同じ index が禁止牌へ変わっても、以前の選択リングを残さない。
+        const isSelected = index === selectedIndex && !disabled;
+        const accessibleLabel = state?.reason
+          ? `${tileLabel(tile)}、${state.reason}`
+          : state?.indicator
+            ? `${tileLabel(tile)}、${state.indicator}`
+            : tileLabel(tile);
         return (
           <li
             // 同一牌が複数あるため index を key に含める。
@@ -89,19 +114,39 @@ export default function Hand({
             }}
             role="option"
             aria-selected={isSelected}
-            aria-label={tileLabel(tile)}
+            aria-label={accessibleLabel}
+            aria-disabled={disabled || undefined}
             tabIndex={isActive ? 0 : -1}
             onKeyDown={(event) => handleKeyDown(event, index)}
             onClick={() => {
+              if (disabled) {
+                setActiveIndex(index);
+                onBlockedSelect?.(state?.reason ?? "この牌は選べません。");
+                return;
+              }
               setSelectedIndex(index);
               setActiveIndex(index);
               onSelect?.(index, tile);
             }}
-            className={`cursor-pointer rounded-md transition-transform ${
-              isSelected ? "-translate-y-1 ring-2 ring-turn-highlight" : ""
-            }`}
+            className={`relative rounded-md transition-transform ${
+              disabled
+                ? "cursor-not-allowed opacity-45 grayscale"
+                : "cursor-pointer hover:-translate-y-0.5"
+            } ${
+              state?.highlighted
+                ? "ring-2 ring-turn-highlight ring-offset-2 ring-offset-background"
+                : ""
+            } ${isSelected ? "-translate-y-1 ring-2 ring-turn-highlight" : ""}`}
           >
             <Tile tile={tile} decorative />
+            {state?.indicator ? (
+              <span
+                aria-hidden="true"
+                className="absolute inset-x-0 bottom-0 rounded-b bg-background/95 px-0.5 text-center font-bold text-[0.55rem] leading-tight text-foreground"
+              >
+                {state.indicator}
+              </span>
+            ) : null}
           </li>
         );
       })}

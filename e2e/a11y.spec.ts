@@ -274,22 +274,14 @@ test.describe("状態駆動 a11y 監査(リーチ/鳴き/和了アラート/ト�
           exact: true,
         });
         if (await armButton.count()) {
-          // リーチ宣言 = 「リーチ」で武装 → テンパイを保つ宣言牌を選ぶ。どの牌が有効かは engine が
-          // 決めるため、武装し直しながら手牌を順に試す(無効牌は no-op で武装解除されるだけ)。
-          // 成功打で手牌枚数が変わる(index がずれる)ため、option 数は毎回読み直して古い index の
-          // 空振り(flake)を避ける。バッジ出現(=宣言成立)で即座に打ち切る。
-          for (
-            let k = 0;
-            !(await riichiBadge.count()) && k < (await handOptions().count());
-            k++
-          ) {
-            const arm = page.getByRole("button", {
-              name: "リーチ",
-              exact: true,
-            });
-            if (await arm.count()) await arm.first().click();
-            await handOptions().nth(k).click();
-          }
+          // リーチ宣言 = 「リーチ」で武装 → engine が合法とした「リーチ可」の牌を選ぶ。
+          // 合法性は aria-label にも公開されるため、無効牌の試行に依存せず決定的に操作できる。
+          await armButton.first().click();
+          await page
+            .getByRole("listbox", { name: "自家の手牌" })
+            .getByRole("option", { name: /リーチ可/ })
+            .first()
+            .click();
           continue;
         }
         // まだリーチ不可の手番: 先頭牌を打って進める。

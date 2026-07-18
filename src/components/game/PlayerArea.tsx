@@ -7,7 +7,7 @@
  */
 
 import Discards from "./Discards";
-import Hand from "./Hand";
+import Hand, { type HandTileState } from "./Hand";
 import KitaDisplay from "./KitaDisplay";
 import Melds from "./Melds";
 import OpponentHand from "./OpponentHand";
@@ -29,6 +29,8 @@ export interface PlayerAreaProps {
   compact?: boolean;
   /** 自家の打牌選択ハンドラ(UIイベントのみ)。 */
   onSelectTile?: (index: number, tile: TileData) => void;
+  handTileStates?: readonly HandTileState[];
+  onBlockedTile?: (message: string) => void;
 }
 
 export default function PlayerArea({
@@ -36,6 +38,8 @@ export default function PlayerArea({
   isSelf,
   compact = false,
   onSelectTile,
+  handTileStates,
+  onBlockedTile,
 }: PlayerAreaProps) {
   const {
     name,
@@ -79,7 +83,12 @@ export default function PlayerArea({
       {!compact ? (
         <div className="rounded bg-foreground/[.03] p-1.5">
           {isSelf && hand ? (
-            <Hand tiles={hand} onSelect={onSelectTile} />
+            <Hand
+              tiles={hand}
+              onSelect={onSelectTile}
+              tileStates={handTileStates}
+              onBlockedSelect={onBlockedTile}
+            />
           ) : (
             <OpponentHand count={player.handCount ?? 0} />
           )}

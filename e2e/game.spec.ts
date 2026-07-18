@@ -111,7 +111,7 @@ test.describe("対局画面(/game)", () => {
     // 半荘終了で GameBoard が /game/result へ自動遷移する(スペック6 6.3)。
     const board = page.locator("[data-phase]").first();
     for (let step = 0; step < 1500; step++) {
-      if (/\/game\/result$/.test(page.url())) break;
+      if (new URL(page.url()).pathname === "/game/result") break;
       const state = await board
         .evaluate((el) => ({
           phase: el.getAttribute("data-phase"),
@@ -148,7 +148,7 @@ test.describe("対局画面(/game)", () => {
       await page.waitForTimeout(20);
     }
 
-    await expect(page).toHaveURL(/\/game\/result$/);
+    await expect(page).toHaveURL((url) => url.pathname === "/game/result");
     await expect(page).toHaveTitle("対局結果 | 四兄弟麻雀");
     await expect(
       page.getByRole("heading", { level: 1, name: "対局結果" }),
@@ -410,5 +410,92 @@ test.describe("対局画面(/game)", () => {
     await expect(
       page.getByRole("group", { name: "操作パネル" }).first(),
     ).toBeVisible();
+  });
+
+  test("リーチ宣言候補と非候補をマウス・キーボード・SRへ明示する(#168)", async ({
+    page,
+  }) => {
+    await page.goto("/game?seed=381");
+    const board = page.locator("[data-phase]").first();
+    const hand = page.getByRole("listbox", { name: "自家の手牌" }).first();
+
+    for (let step = 0; step < 60; step++) {
+      const riichi = page.getByRole("button", { name: "リーチ", exact: true });
+      if (await riichi.count()) {
+        await riichi.first().click();
+        break;
+      }
+      const pending = await board.getAttribute("data-pending");
+      if (pending === "humanReact") {
+        await page.getByRole("button", { name: "スルー" }).first().click();
+      } else if (pending === "humanDiscard") {
+        await hand.getByRole("option").first().click();
+      } else {
+        await page.waitForTimeout(20);
+      }
+    }
+
+    const eligible = hand.getByRole("option", { name: /リーチ可/ });
+    const ineligible = hand.getByRole("option", {
+      name: /リーチ宣言できません/,
+    });
+    await expect(eligible.first()).toBeVisible();
+    await expect(eligible.first()).not.toHaveAttribute("aria-disabled");
+    await expect(ineligible.first()).toHaveAttribute("aria-disabled", "true");
+    await expect(ineligible.first()).toContainText("禁止");
+
+    // `aria-disabled` を尊重する Playwright の通常 click は拒否されるため、実ブラウザでの
+    // ポインターイベントを再現する force click で理由通知を検証する。
+    await ineligible.first().click({ force: true });
+    await expect(page.locator('[aria-live="polite"]').first()).toHaveText(
+      "この牌ではテンパイを保てないため、リーチ宣言できません。",
+    );
+    await ineligible.first().focus();
+    await page.keyboard.press("Enter");
+    await expect(ineligible.first()).toHaveAttribute("aria-disabled", "true");
+
+    await eligible.first().click();
+    await expect(
+      page
+        .getByRole("region", { name: /^あなた/ })
+        .getByTestId("status-badge-riichi"),
+    ).toBeVisible();
+  });
+
+  test("ポン直後の喰い替え禁止牌を明示し、操作時に理由を通知する(#168)", async ({
+    page,
+  }) => {
+    test.setTimeout(120_000);
+    await page.goto("/game?seed=29");
+    const board = page.locator("[data-phase]").first();
+    const hand = page.getByRole("listbox", { name: "自家の手牌" }).first();
+    let forbidden = hand.getByRole("option", { name: /喰い替え禁止/ });
+
+    for (let step = 0; step < 50 && !(await forbidden.count()); step++) {
+      const phase = await board.getAttribute("data-phase");
+      const pending = await board.getAttribute("data-pending");
+      if (phase === "roundEnd") {
+        await page.getByRole("button", { name: "次の局へ" }).first().click();
+      } else if (pending === "humanReact") {
+        const pon = page.getByRole("button", { name: "ポン" });
+        if (await pon.count()) await pon.first().click();
+        else await page.getByRole("button", { name: "スルー" }).first().click();
+      } else if (pending === "humanDiscard") {
+        const legal = hand.locator(
+          '[role="option"]:not([aria-disabled="true"])',
+        );
+        await legal.first().click();
+      } else {
+        await page.waitForTimeout(20);
+      }
+      forbidden = hand.getByRole("option", { name: /喰い替え禁止/ });
+    }
+
+    await expect(forbidden.first()).toHaveAttribute("aria-disabled", "true");
+    await expect(forbidden.first()).toContainText("禁止");
+    await forbidden.first().click({ force: true });
+    await expect(page.locator('[aria-live="polite"]').first()).toHaveText(
+      "喰い替え禁止のため、この牌は打牌できません。",
+    );
   });
 });

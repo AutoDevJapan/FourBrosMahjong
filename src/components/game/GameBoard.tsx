@@ -32,6 +32,7 @@ import { tileLabel } from "../common/tileLabel";
 import ActionPanel, { type ActionItem } from "./ActionPanel";
 import { useGame } from "./GameProvider";
 import LiveRegion from "./LiveRegion";
+import type { HandTileState } from "./Hand";
 import PlayerSlot from "./PlayerSlot";
 import Table from "./Table";
 import type { SeatPosition, TileData } from "./types";
@@ -115,6 +116,7 @@ export default function GameBoard() {
 
   // リーチ宣言モード: オンのとき、次に選んだ手牌が「リーチ宣言牌」として切られる。
   const [riichiArmed, setRiichiArmed] = useState(false);
+  const [tileFeedback, setTileFeedback] = useState("");
   const canRiichi = pending?.kind === "humanDiscard" && pending.canRiichi;
   // リーチ可能な打牌待ちでなくなったら arming を解除する(レンダー中の前回値比較 =
   // set-state-in-effect を避ける React 公認の「前回レンダー情報の保持」パターン)。
@@ -145,6 +147,7 @@ export default function GameBoard() {
       ) {
         return;
       }
+      setTileFeedback("");
       if (riichiArmed && pending.canRiichi) {
         controls.riichi(tile);
         setRiichiArmed(false);
@@ -154,6 +157,54 @@ export default function GameBoard() {
     },
     [pending, controls, riichiArmed],
   );
+
+  const handTileStates = useMemo<readonly HandTileState[]>(() => {
+    const self = slots.self;
+    if (self.kind !== "seated" || !self.player.hand) return [];
+    return self.player.hand.map((tile) => {
+      if (pending?.kind !== "humanDiscard") {
+        return {
+          disabled: true,
+          reason: "現在は打牌できません。",
+          indicator: "禁止",
+        };
+      }
+      if (pending.locked) {
+        return {
+          disabled: true,
+          reason:
+            "リーチ中は手牌から打牌できません。ツモ切りを選んでください。",
+          indicator: "禁止",
+        };
+      }
+      if (
+        pending.forbiddenDiscards.some(
+          (forbidden) =>
+            forbidden.suit === tile.suit && forbidden.rank === tile.rank,
+        )
+      ) {
+        return {
+          disabled: true,
+          reason: "喰い替え禁止のため、この牌は打牌できません。",
+          indicator: "禁止",
+        };
+      }
+      if (!riichiArmed) return {};
+      const eligible = pending.riichiTiles.some(
+        (candidate) =>
+          candidate.suit === tile.suit &&
+          candidate.rank === tile.rank &&
+          candidate.isRed === !!tile.isRed,
+      );
+      return eligible
+        ? { highlighted: true, indicator: "リーチ可" }
+        : {
+            disabled: true,
+            reason: "この牌ではテンパイを保てないため、リーチ宣言できません。",
+            indicator: "禁止",
+          };
+    });
+  }, [pending, riichiArmed, slots.self]);
 
   const actions = useMemo<ActionItem[]>(() => {
     if (phase === "roundEnd") {
@@ -240,7 +291,10 @@ export default function GameBoard() {
           key: "riichi",
           label: riichiArmed ? "リーチ解除" : "リーチ",
           icon: "宣",
-          onClick: () => setRiichiArmed((armed) => !armed),
+          onClick: () => {
+            setTileFeedback("");
+            setRiichiArmed((armed) => !armed);
+          },
           primary: riichiArmed,
         });
       }
@@ -291,12 +345,13 @@ export default function GameBoard() {
   }, [phase, pending, roundSummary, riichiArmed]);
 
   const announcement = useMemo(() => {
+    if (tileFeedback) return tileFeedback;
     if (pending?.kind === "humanDiscard") return "あなたの手番です。";
     if (pending?.kind === "humanReact") {
       return pending.canRon ? "ロンできます。" : "鳴きできます。";
     }
     return "";
-  }, [pending]);
+  }, [pending, tileFeedback]);
 
   const assertive = useMemo(() => {
     if (phase === "roundEnd" || phase === "gameEnd") {
@@ -318,9 +373,11 @@ export default function GameBoard() {
         content={slots[position]}
         compact={compact}
         onSelectTile={onSelect}
+        handTileStates={handTileStates}
+        onBlockedTile={setTileFeedback}
       />
     ),
-    [slots],
+    [slots, handTileStates],
   );
 
   // クロス配置のグリッド(段階①)。可視制御クラスと自家手牌の打牌ハンドラを差し替えて、
