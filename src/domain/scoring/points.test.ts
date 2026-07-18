@@ -67,6 +67,13 @@ describe("computeScore — 4翻以下(符なし=一律30符)", () => {
     expect(() => computeScore(han(0), false)).toThrow(RangeError);
     expect(() => computeScore(han(2.5), false)).toThrow(RangeError);
   });
+
+  it.each([Number.NaN, Number.POSITIVE_INFINITY, Number.MAX_VALUE])(
+    "han=%s は安全整数でないため RangeError",
+    (invalid) => {
+      expect(() => computeScore(han(invalid), false)).toThrow(RangeError);
+    },
+  );
 });
 
 describe("computeScore — ツモ配分(Q12 ツモ損なし・北家折半)", () => {
@@ -145,6 +152,27 @@ describe("computeScore — 構成役満(倍数対応)", () => {
     const r = computeScore({ han: 0, yakumanMultiplier: 2 }, false);
     expect(r.basePoints).toBe(16000);
     expect(r.ronTotal).toBe(64000);
+  });
+
+  it.each([
+    Number.NaN,
+    Number.POSITIVE_INFINITY,
+    -1,
+    1.5,
+    Number.MAX_SAFE_INTEGER + 1,
+  ])("役満倍数 %s は非負の安全整数でないため RangeError", (invalid) => {
+    expect(() =>
+      computeScore({ han: 0, yakumanMultiplier: invalid }, false),
+    ).toThrow(RangeError);
+  });
+
+  it("乗算後の点数が安全整数範囲を超える役満倍数を拒否する", () => {
+    expect(() =>
+      computeScore(
+        { han: 0, yakumanMultiplier: Number.MAX_SAFE_INTEGER },
+        false,
+      ),
+    ).toThrow(RangeError);
   });
 });
 
