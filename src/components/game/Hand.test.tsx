@@ -104,6 +104,51 @@ describe("Hand (roving tabindex listbox, spec 5.2.2)", () => {
     expect(screen.getByText("リーチ可")).toBeInTheDocument();
   });
 
+  it("手牌がactiveIndexより短く縮小しても、ちょうど1牌がタブ順に残り打牌できる(#199)", async () => {
+    const fourteen: TileData[] = Array.from({ length: 14 }, (_, i) => ({
+      suit: "pin",
+      rank: (i % 9) + 1,
+    }));
+    const eleven = fourteen.slice(0, 11);
+    const onSelect = vi.fn();
+    const user = userEvent.setup();
+    const { rerender } = render(<Hand tiles={fourteen} onSelect={onSelect} />);
+
+    // End キーで末尾(index 13)へ移動してから、ポン/カン相当で 11 枚へ縮小する。
+    screen.getAllByRole("option")[0].focus();
+    await user.keyboard("{End}");
+    rerender(<Hand tiles={eleven} onSelect={onSelect} />);
+
+    // ロービングタブインデックスの不変条件: 常にちょうど1牌が tabIndex=0。
+    const options = screen.getAllByRole("option");
+    const tabbable = options.filter(
+      (option) => option.getAttribute("tabindex") === "0",
+    );
+    expect(tabbable).toHaveLength(1);
+    expect(tabbable[0]).toBe(options[options.length - 1]);
+
+    // Tab で手牌へ到達 → Enter で打牌、まで完結できること(スペック5 5.2.2)。
+    await user.tab();
+    expect(options[10]).toHaveFocus();
+    await user.keyboard("{Enter}");
+    expect(onSelect).toHaveBeenCalledWith(10, eleven[10]);
+  });
+
+  it("手牌が増えてもactiveIndexは維持される(ツモ後の位置保持)", async () => {
+    const user = userEvent.setup();
+    const { rerender } = render(<Hand tiles={tiles} />);
+
+    screen.getAllByRole("option")[0].focus();
+    await user.keyboard("{ArrowRight}");
+    rerender(<Hand tiles={[...tiles, { suit: "man", rank: 9 }]} />);
+
+    const options = screen.getAllByRole("option");
+    expect(options[1]).toHaveAttribute("tabindex", "0");
+    expect(
+      options.filter((option) => option.getAttribute("tabindex") === "0"),
+    ).toHaveLength(1);
+  });
+
   it("閲覧専用では静的listとして表示し、選択・フォーカス操作を公開しない", () => {
     render(<Hand tiles={tiles} readOnly />);
 
