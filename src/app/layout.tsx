@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono, Noto_Sans_JP } from "next/font/google";
+import { ThemeStorageSync } from "@/components/layout/ThemeStorageSync";
 import "./globals.css";
 
 // 欧文フォント(ラテン)。和文グリフは持たないため、日本語は下記 Noto Sans JP に
@@ -65,7 +66,10 @@ export default function RootLayout({
       <head>
         <script dangerouslySetInnerHTML={{ __html: themeInitScript }} />
       </head>
-      <body className="antialiased">{children}</body>
+      <body className="antialiased">
+        <ThemeStorageSync />
+        {children}
+      </body>
     </html>
   );
 }
