@@ -235,7 +235,9 @@ test.describe("対局画面(/game)", () => {
     await page.setViewportSize({ width: 900, height: 900 });
     await page.goto("/game?seed=0");
     const board = page.locator("[data-phase]").first();
-    const remaining = page.getByLabel("残り山 52枚");
+    const remaining = page.getByTestId("remaining-live-tiles").filter({
+      hasText: /残り山\s*52枚/,
+    });
     await expect(remaining.first()).toBeVisible();
 
     await page
@@ -246,12 +248,15 @@ test.describe("対局画面(/game)", () => {
       .click();
     await expect(remaining).toHaveCount(0);
     await expect(
-      page.locator('[aria-label^="残り山 "]:visible').first(),
+      page
+        .getByTestId("remaining-live-tiles")
+        .filter({ visible: true })
+        .first(),
     ).toBeVisible();
 
     await page.setViewportSize({ width: 320, height: 800 });
     await expect(
-      page.getByLabel(/^残り山 \d+枚$/).filter({ visible: true }),
+      page.getByTestId("remaining-live-tiles").filter({ visible: true }),
     ).toBeVisible();
     await expect
       .poll(() =>
@@ -261,7 +266,7 @@ test.describe("対局画面(/game)", () => {
 
     await page.getByRole("button", { name: "全体盤面" }).click();
     const dialog = page.getByRole("dialog", { name: "全体盤面" });
-    await expect(dialog.getByLabel(/^残り山 \d+枚$/)).toBeVisible();
+    await expect(dialog.getByTestId("remaining-live-tiles")).toBeVisible();
     await expect(board).toHaveAttribute("data-phase", "playing");
   });
 
@@ -271,11 +276,11 @@ test.describe("対局画面(/game)", () => {
     test.setTimeout(120_000);
     await page.goto("/game?seed=1");
     await expect(
-      page.getByLabel(/サイコロ .*ドラ\d枚/).filter({ visible: true }),
+      page.getByTestId("dice-info").filter({ visible: true }),
     ).toBeVisible();
     await page.setViewportSize({ width: 320, height: 800 });
     await expect(
-      page.getByLabel(/サイコロ .*ドラ\d枚/).filter({ visible: true }),
+      page.getByTestId("dice-info").filter({ visible: true }),
     ).toBeVisible();
     expect(
       await page.evaluate(
