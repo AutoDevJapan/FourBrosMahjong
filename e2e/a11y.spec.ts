@@ -493,11 +493,14 @@ test.describe("キーボードのみ操作(a11y 補強)", () => {
     await firstTile.focus();
     await expect(firstTile).toHaveAttribute("tabindex", "0");
 
-    // Enter で打牌でき、対局が進行する(打牌後も自家の手牌一覧は描画され続ける)。
+    // Enter で打牌でき、対局が進行する。手牌の DOM/key が更新されても実フォーカスを
+    // active option に維持し、次の矢印操作を Tab なしで継続できる(#248)。
     await firstTile.press("Enter");
-    await expect(
-      page.getByRole("listbox", { name: "自家の手牌" }),
-    ).toBeVisible();
+    const updatedHand = page.getByRole("listbox", { name: "自家の手牌" });
+    await expect(updatedHand).toBeVisible();
+    await expect(updatedHand.locator('[role="option"]:focus')).toHaveCount(1);
+    await page.keyboard.press("ArrowRight");
+    await expect(updatedHand.locator('[role="option"]:focus')).toHaveCount(1);
   });
 
   test("/game は手番をライブリージョンで通知し、打牌をキーボードのみで実行できる(5.2.2 / 5.2.3)", async ({
