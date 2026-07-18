@@ -284,6 +284,13 @@ test.describe("対局画面(/game)", () => {
     await expect(
       page.getByRole("heading", { name: "和了内訳" }).first(),
     ).toBeVisible();
+    // 和了者の和了形(手牌+和了牌)が表向きで開示される(#259)。
+    await expect(
+      page.getByRole("list", { name: "和了形" }).first(),
+    ).toBeVisible();
+    await expect(
+      page.getByRole("listitem", { name: /和了牌/ }).first(),
+    ).toBeVisible();
     for (const label of ["表ドラ", "裏ドラ", "赤5", "ガリ"]) {
       await expect(
         page.getByText(label, { exact: true }).filter({ visible: true }),
