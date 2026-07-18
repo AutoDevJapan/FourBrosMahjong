@@ -26,7 +26,10 @@
  * - 国士無双の暗槓槍槓は**対応済み**(Q17 フォローアップ・#126・ユーザー承認・国士のみ暗槓槍槓可)。
  *   国士無双テンパイの他家に限り、暗槓(4枚目を暗槓した瞬間)に対しても槍槓ロンを認める。
  *   応答者の和了形が国士無双(`thirteenOrphans`)の場合のみ横取り成立とし、それ以外の役では
- *   暗槓に対する槍槓は不可(暗槓成立)。`declareAnkan` の槍槓分岐で判定する。
+ *   暗槓に対する槍槓は不可(暗槓成立)。判定は `resolveChankan` に集約する。
+ * - **AI の加槓・暗槓に対する自家の槍槓は選択制**(#208)。通常ロンと同じ
+ *   `pending: humanReact`(ロン / スルー)を立てて入力を待ち、スルー時は `passRon` が
+ *   見逃しフリテン(同巡内 / リーチ後は恒久)を適用した上で槓を成立させ進行を再開する。
  * - リーチ後の暗槓は**条件付きで許可**(Q18 / #116・ユーザー承認済み・標準慣行)。ツモ牌での暗槓に限り、
  *   待ち・面子構成が変わらない(送り槓でない)場合のみ許可する。七対子テンパイでの暗槓は不可
  *   (`canAnkanAfterRiichi` が判定)。加槓に対する槍槓横取りは Q17 / #115 の範囲。
@@ -267,6 +270,13 @@ export type Pending =
       readonly canPon: boolean;
       /** 明槓(大明槓)できるか。 */
       readonly canKan: boolean;
+      /**
+       * 槍槓応答か(#208)。`"kakan"` = 加槓・`"ankan"` = 暗槓(国士のみ / Q17・#126)への
+       * 槍槓ロン機会。`undefined` は通常の打牌応答。槍槓応答では `tile` = 槓宣言牌、
+       * `from` = 槓宣言席で、ポン/明槓は常に不可(`canPon`/`canKan` = false)。
+       * スルー時は `passRon` が通常ロンと同じフリテン処理の後、槓を成立させ進行を再開する。
+       */
+      readonly chankan?: "kakan" | "ankan";
     }
   | null;
 
@@ -720,8 +730,57 @@ function applyAiRiichi(state: EngineState, seat: SeatKey): EngineState {
   return discarded;
 }
 
-/** AIの暗槓。槍槓(国士のみ)判定後、成立すれば嶺上牌を補充する。 */
-function applyAiAnkan(
+/**
+ * 槍槓候補を頭ハネ順(`ronOrder`)に解決する(Q17・#115 / 国士暗槓は #126 / 選択制は #208)。
+ *
+ * - 暗槓(`kind: "ankan"`)は和了形が国士無双(`thirteenOrphans`)の候補のみ対象。
+ * - 候補が**自家(p0)**なら即和了させず `pending: humanReact`(`chankan` 付き)を立てて
+ *   入力を待つ(通常ロンと同じ「ロン / スルー」の選択制 / #208)。
+ * - 候補が他家(AI)なら従来どおり即 `settleWin`(槍槓ロン成立・槓は不成立)。
+ * - スルー済みの席(`passedRonSeats`)は候補から除く(スルー後の再入で残候補を解決する)。
+ * - 誰も横取りできなければ `null` を返す(呼び出し側が槓を成立させる)。
+ */
+function resolveChankan(
+  state: EngineState,
+  seat: SeatKey,
+  kanTile: Tile,
+  kind: "kakan" | "ankan",
+): EngineState | null {
+  const hand = state.hand;
+  if (hand === null) return null;
+  for (const candidate of ronOrder(seat)) {
+    if (hand.passedRonSeats.includes(candidate)) continue;
+    const win = analyzeRon(state, candidate, kanTile, false, true);
+    if (win === null) continue;
+    if (kind === "ankan" && win.form.kind !== "thirteenOrphans") continue;
+    if (seatOccupant(hand.seating, candidate) === HUMAN_ID) {
+      return {
+        ...state,
+        pending: {
+          kind: "humanReact",
+          tile: kanTile,
+          from: seat,
+          canRon: true,
+          canPon: false,
+          canKan: false,
+          chankan: kind,
+        },
+      };
+    }
+    return settleWin(state, {
+      winnerSeat: candidate,
+      winType: "ron",
+      winningTile: kanTile,
+      analysis: win,
+      discarderSeat: seat,
+      haitei: false,
+    });
+  }
+  return null;
+}
+
+/** 暗槓を成立させる(槍槓なし確定後): 槓子化・四槓散了判定・嶺上補充。 */
+function completeAiAnkan(
   state: EngineState,
   seat: SeatKey,
   tile: Tile,
@@ -731,19 +790,6 @@ function applyAiAnkan(
   const pool = [...hand.hands[seat], hand.drawn];
   const { taken, rest } = takeKind(pool, tile, 4);
   if (taken.length < 4) return state;
-  const ankanTile = taken[0];
-  for (const candidate of ronOrder(seat)) {
-    const win = analyzeRon(state, candidate, ankanTile, false, true);
-    if (win === null || win.form.kind !== "thirteenOrphans") continue;
-    return settleWin(state, {
-      winnerSeat: candidate,
-      winType: "ron",
-      winningTile: ankanTile,
-      analysis: win,
-      discarderSeat: seat,
-      haitei: false,
-    });
-  }
   hand.hands[seat] = rest;
   hand.drawn = null;
   hand.melds[seat] = [
@@ -758,8 +804,8 @@ function applyAiAnkan(
   return state;
 }
 
-/** AIの加槓。槍槓ロンが無ければポンを明槓へ更新し嶺上牌を補充する。 */
-function applyAiKakan(
+/** 加槓を成立させる(槍槓なし確定後): ポン→明槓更新・四槓散了判定・嶺上補充。 */
+function completeAiKakan(
   state: EngineState,
   seat: SeatKey,
   tile: Tile,
@@ -774,18 +820,6 @@ function applyAiKakan(
   const { taken, rest } = takeKind(pool, tile, 1);
   if (taken.length < 1) return state;
   const kakanTile = taken[0];
-  for (const candidate of ronOrder(seat)) {
-    const win = analyzeRon(state, candidate, kakanTile, false, true);
-    if (win === null) continue;
-    return settleWin(state, {
-      winnerSeat: candidate,
-      winType: "ron",
-      winningTile: kakanTile,
-      analysis: win,
-      discarderSeat: seat,
-      haitei: false,
-    });
-  }
   hand.hands[seat] = rest;
   hand.drawn = null;
   hand.melds[seat] = hand.melds[seat].map((meld) =>
@@ -803,6 +837,47 @@ function applyAiKakan(
   if (abortiveDraw !== null) return abortiveDraw;
   drawKanReplacement(hand, seat);
   return state;
+}
+
+/**
+ * AIの暗槓。槍槓(国士のみ)判定後、成立すれば嶺上牌を補充する。
+ * 自家に槍槓機会があれば `pending: humanReact`(ロン / スルー)で停止する(#208)。
+ */
+function applyAiAnkan(
+  state: EngineState,
+  seat: SeatKey,
+  tile: Tile,
+): EngineState {
+  const hand = state.hand;
+  if (hand === null || hand.drawn === null) return state;
+  const pool = [...hand.hands[seat], hand.drawn];
+  const { taken } = takeKind(pool, tile, 4);
+  if (taken.length < 4) return state;
+  const chankan = resolveChankan(state, seat, taken[0], "ankan");
+  if (chankan !== null) return chankan;
+  return completeAiAnkan(state, seat, tile);
+}
+
+/**
+ * AIの加槓。槍槓ロンが無ければポンを明槓へ更新し嶺上牌を補充する。
+ * 自家に槍槓機会があれば `pending: humanReact`(ロン / スルー)で停止する(#208)。
+ */
+function applyAiKakan(
+  state: EngineState,
+  seat: SeatKey,
+  tile: Tile,
+): EngineState {
+  const hand = state.hand;
+  if (hand === null || hand.drawn === null) return state;
+  const target = hand.melds[seat].find(
+    (meld) => meld.type === "pon" && sameKind(meld.tiles[0], tile),
+  );
+  if (target === undefined) return state;
+  const { taken } = takeKind([...hand.hands[seat], hand.drawn], tile, 1);
+  if (taken.length < 1) return state;
+  const chankan = resolveChankan(state, seat, taken[0], "kakan");
+  if (chankan !== null) return chankan;
+  return completeAiKakan(state, seat, tile);
 }
 
 /** AIのポン/大明槓を成立させる。大明槓は嶺上牌補充まで行う。 */
@@ -1908,24 +1983,15 @@ export function declareAnkan(state: EngineState, tile: Tile): EngineState {
   // 暗槓の4枚目に対しても槍槓ロンを認める。応答者の和了形が国士無双(`thirteenOrphans`)で
   // ある場合のみ横取り成立とし、それ以外の役(標準/七対子)では暗槓に対する槍槓は不可
   // (= 暗槓成立・従来どおり)。頭ハネ・フリテンは通常ロンと同じく `ronOrder` / `analyzeRon`
-  // を再利用する。`declareAnkan` は自家(p0)専用のため応答者は必ず他家(AI)。
-  const ankanTile = taken[0];
-  for (const candidate of ronOrder(seat)) {
-    const chankanWin = analyzeRon(state, candidate, ankanTile, false, true);
-    if (chankanWin === null) continue;
-    if (chankanWin.form.kind !== "thirteenOrphans") continue; // 国士以外は暗槓槍槓不可
-    return settleWin(
-      { ...state, pending: null },
-      {
-        winnerSeat: candidate,
-        winType: "ron",
-        winningTile: ankanTile,
-        analysis: chankanWin,
-        discarderSeat: seat,
-        haitei: false,
-      },
-    );
-  }
+  // を再利用する(判定は `resolveChankan` に集約 / #208)。`declareAnkan` は自家(p0)
+  // 専用のため応答者は必ず他家(AI)= 即 `settleWin` し入力待ちは発生しない。
+  const chankan = resolveChankan(
+    { ...state, pending: null },
+    seat,
+    taken[0],
+    "ankan",
+  );
+  if (chankan !== null) return chankan;
 
   hand.hands[seat] = rest;
   hand.drawn = null;
@@ -1974,23 +2040,16 @@ export function declareKakan(state: EngineState, tile: Tile): EngineState {
   // 槍槓(チャンカン / Q17 = 槍槓あり・#115): 加槓宣言牌でロンできる他家がいれば、
   // 加槓は不成立(牌は手に戻らず横取り)= 槍槓ロンを成立させる。頭ハネ(上家取り)は
   // 通常ロンと同じ `ronOrder` に従い、最先の1人のみが和了する。加槓者は放銃者(discarder)
-  // として支払う。応答者は既存のフリテン・役判定(`analyzeRon` + `chankan` 役)を再利用する。
-  // 現状 `declareKakan` は自家(p0)専用のため応答者は必ず他家(AI)= 入力待ちは発生しない。
-  for (const candidate of ronOrder(seat)) {
-    const chankanWin = analyzeRon(state, candidate, kakanTile, false, true);
-    if (chankanWin === null) continue;
-    return settleWin(
-      { ...state, pending: null },
-      {
-        winnerSeat: candidate,
-        winType: "ron",
-        winningTile: kakanTile,
-        analysis: chankanWin,
-        discarderSeat: seat,
-        haitei: false,
-      },
-    );
-  }
+  // として支払う。応答者は既存のフリテン・役判定(`analyzeRon` + `chankan` 役)を再利用する
+  // (判定は `resolveChankan` に集約 / #208)。`declareKakan` は自家(p0)専用のため
+  // 応答者は必ず他家(AI)= 即 `settleWin` し入力待ちは発生しない。
+  const chankan = resolveChankan(
+    { ...state, pending: null },
+    seat,
+    kakanTile,
+    "kakan",
+  );
+  if (chankan !== null) return chankan;
 
   // 槍槓なし → 加槓成立。嶺上ツモへ進む。
   hand.hands[seat] = rest;
@@ -2036,7 +2095,7 @@ export function declareTsumo(state: EngineState): EngineState {
   );
 }
 
-/** 自家のロン和了宣言。 */
+/** 自家のロン和了宣言(通常ロン / 槍槓ロン)。 */
 export function declareRon(state: EngineState): EngineState {
   if (
     state.phase !== "playing" ||
@@ -2046,12 +2105,19 @@ export function declareRon(state: EngineState): EngineState {
   ) {
     return state;
   }
-  const { tile, from } = state.pending;
+  const { tile, from, chankan } = state.pending;
   const seat = seatOfPlayer(state.hand.seating, HUMAN_ID);
   if (seat === null) return state;
-  const haitei = isHaitei(state.hand.wall.remainingLiveTiles);
-  const analysis = analyzeRon(state, seat, tile, haitei);
+  // 槍槓は嶺上ツモ前の割り込みのため海底(河底)とは併存しない(#115)。
+  const haitei =
+    chankan === undefined && isHaitei(state.hand.wall.remainingLiveTiles);
+  const analysis = analyzeRon(state, seat, tile, haitei, chankan !== undefined);
   if (analysis === null) return state;
+  // 暗槓への槍槓は国士無双のみ(Q17 フォローアップ・#126)。pending 構築時にも
+  // 検証済みだが、直接呼び出しに対する防御として再確認する。
+  if (chankan === "ankan" && analysis.form.kind !== "thirteenOrphans") {
+    return state;
+  }
   return settleWin(
     { ...state, pending: null },
     {
@@ -2077,12 +2143,29 @@ export function passRon(state: EngineState): EngineState {
   const seat = seatOfPlayer(state.hand.seating, HUMAN_ID);
   if (seat === null) return state;
   const hand = state.hand;
-  // ロンを見送った場合はフリテン(同巡内 / リーチ後は恒久)。
+  // ロンを見送った場合はフリテン(同巡内 / リーチ後は恒久)。槍槓の見逃しも同じ扱い(#208)。
   if (state.pending.canRon) {
     hand.tempMiss[seat] = true;
     if (hand.riichi[seat]) hand.riichiMiss[seat] = true;
   }
   hand.passedRonSeats = [...hand.passedRonSeats, seat];
+
+  // 槍槓のスルー(#208): 頭ハネの残候補(他家=AI)を解決し、誰も横取りしなければ
+  // 中断していた槓(加槓 / 暗槓)を成立させて嶺上補充 → 進行を再開する。
+  const chankan = state.pending.chankan;
+  if (chankan !== undefined) {
+    const { tile, from } = state.pending;
+    const cleared: EngineState = { ...state, pending: null };
+    const remaining = resolveChankan(cleared, from, tile, chankan);
+    // 自家はスルー済み(passedRonSeats)のため、残候補の槍槓は他家の即和了のみ。
+    if (remaining !== null) return remaining;
+    const completed =
+      chankan === "kakan"
+        ? completeAiKakan(cleared, from, tile)
+        : completeAiAnkan(cleared, from, tile);
+    return pump(completed);
+  }
+
   const after = resolveDiscard({ ...state, pending: null });
   // AIが鳴いた直後の打牌に対して新たな自家応答が生じた場合は、その入力待ちを保持する。
   if (after.pending !== null) return after;
