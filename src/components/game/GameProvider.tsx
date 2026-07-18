@@ -161,6 +161,9 @@ export function GameProvider({ children, initialGame }: GameProviderProps) {
     const commit = (action: GameAction) => {
       const { engine, journal } = sessionRef.current;
       const nextEngine = applyGameAction(engine, action);
+      // engine が局面上不正な操作を同一 state の no-op として拒否した場合は、
+      // 再生不能なイベントを journal に残さない。
+      if (nextEngine === engine) return;
       if (journal === null) {
         const nextSession = { engine: nextEngine, journal: null };
         sessionRef.current = nextSession;

@@ -54,7 +54,9 @@ describe("GameProvider concurrent controls (#230)", () => {
       screen.getByTestId("live-view").textContent ?? "null",
     ) as GameViewState;
     expect(journal).not.toBeNull();
-    expect(journal?.actions).toHaveLength(2);
+    // 1回目の打牌後、同じ牌をもう一度指定する操作は engine が拒否するため
+    // 再生不能な no-op を journal へ記録しない。
+    expect(journal?.actions).toHaveLength(1);
     expect(liveView).toEqual(selectView(replayJournal(journal!)));
   });
 });

@@ -1825,6 +1825,14 @@ export function discard(state: EngineState, tile: Tile): EngineState {
   if (seat === null || state.hand.turn !== seat) return state;
   const useTile =
     state.pending.locked && state.hand.drawn !== null ? state.hand.drawn : tile;
+  // UI や永続化ジャーナルから存在しない牌を渡されても、applyDiscard の内部
+  // フォールバック（末尾牌）で別の牌を捨てて状態を壊さないよう公開境界で拒否する。
+  const available = [
+    ...state.hand.hands[seat],
+    ...(state.hand.drawn === null ? [] : [state.hand.drawn]),
+  ];
+  if (!available.some((candidate) => sameTile(candidate, useTile)))
+    return state;
   // 喰い替え禁止(現物): ポン直後にポンした牌と同種を切るのは非合法手 → no-op で拒否。
   const ponnedKind = state.hand.ponnedKind;
   if (ponnedKind !== null && isKuikaeForbidden(ponnedKind, useTile)) {
