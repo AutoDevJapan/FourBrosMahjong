@@ -160,6 +160,7 @@ export function selectView(engine: EngineState): GameViewState {
     handNumber: engine.round.roundNumber,
     honba: engine.round.honba,
     riichiSticks: engine.riichiSticks,
+    remainingLiveTiles: engine.hand?.wall.remainingLiveTiles ?? 0,
     dice: engine.hand?.dice ?? [1, 2],
     doraCount: engine.hand?.doraSet.count ?? 0,
   };

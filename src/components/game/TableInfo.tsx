@@ -18,7 +18,15 @@ export interface TableInfoProps {
 }
 
 export default function TableInfo({ info }: TableInfoProps) {
-  const { roundWind, handNumber, honba, riichiSticks, dice, doraCount } = info;
+  const {
+    roundWind,
+    handNumber,
+    honba,
+    riichiSticks,
+    remainingLiveTiles,
+    dice,
+    doraCount,
+  } = info;
   const roundLabel = `${ROUND_WIND_LABEL[roundWind]}${handNumber}局`;
 
   return (
@@ -44,6 +52,13 @@ export default function TableInfo({ info }: TableInfoProps) {
       <div className="flex items-baseline gap-1">
         <dt className="text-xs opacity-80">供託</dt>
         <dd className="font-mono tabular-nums">{riichiSticks}</dd>
+      </div>
+      <div
+        className="flex items-baseline gap-1 whitespace-nowrap"
+        aria-label={`残り山 ${remainingLiveTiles}枚`}
+      >
+        <dt className="text-xs opacity-80">残り山</dt>
+        <dd className="font-mono tabular-nums">{remainingLiveTiles}枚</dd>
       </div>
     </dl>
   );
