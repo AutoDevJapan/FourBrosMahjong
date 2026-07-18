@@ -103,8 +103,6 @@ describe("ThemeToggle", () => {
       "ダーク(手動で固定中)",
     );
     // removeItem は利用可能な想定なので、モジュール内の揮発設定も後続テスト前に戻す。
-    await user.click(
-      screen.getByRole("radio", { name: "システム設定に従う" }),
-    );
+    await user.click(screen.getByRole("radio", { name: "システム設定に従う" }));
   });
 });
