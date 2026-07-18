@@ -1,6 +1,10 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import GameBoard from "@/components/game/GameBoard";
+import { socialMetadata } from "@/app/_lib/metadata";
+
+const description =
+  "関西式三人打ちをベースにした四人回しの四兄弟麻雀をプレイする対局画面です。";
 
 /**
  * 対局画面(`/game`)。スペック6 6.6 の「Server shell + Client island」構成。
@@ -13,6 +17,12 @@ import GameBoard from "@/components/game/GameBoard";
  */
 export const metadata: Metadata = {
   title: "対局",
+  description,
+  ...socialMetadata({
+    title: "対局 | 四兄弟麻雀",
+    description,
+    path: "/game",
+  }),
 };
 
 export default function GamePage() {

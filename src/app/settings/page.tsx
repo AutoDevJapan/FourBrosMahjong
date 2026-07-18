@@ -18,13 +18,21 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { ThemeToggle } from "@/components/layout/ThemeToggle";
+import { socialMetadata } from "@/app/_lib/metadata";
+
+const description =
+  "四兄弟麻雀の表示設定。テーマ(システム設定に従う / ライト / ダーク)の手動切替ができます。";
 
 export const metadata: Metadata = {
   // layout.tsx の title テンプレート `%s | 四兄弟麻雀` により
   // 「設定 | 四兄弟麻雀」として出力される(`/rules` と一貫)。
   title: "設定",
-  description:
-    "四兄弟麻雀の表示設定。テーマ(システム設定に従う / ライト / ダーク)の手動切替ができます。",
+  description,
+  ...socialMetadata({
+    title: "設定 | 四兄弟麻雀",
+    description,
+    path: "/settings",
+  }),
 };
 
 export default function SettingsPage() {
