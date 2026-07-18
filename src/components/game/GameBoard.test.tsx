@@ -22,6 +22,17 @@ function renderBoard(seed = 1) {
   );
 }
 
+function renderBoardWithKita() {
+  const game = createGame({ seed: 1 });
+  if (game.hand === null) throw new Error("hand must be initialized");
+  game.hand.kita = { east: 2, south: 0, west: 1 };
+  return render(
+    <GameProvider initialGame={game}>
+      <GameBoard />
+    </GameProvider>,
+  );
+}
+
 describe("GameBoard (spec 6.6 client island / engine-driven)", () => {
   it("実エンジン状態から卓情報・自家手牌・抜け番スロット・操作パネルを描画する", () => {
     renderBoard();
@@ -39,6 +50,24 @@ describe("GameBoard (spec 6.6 client island / engine-driven)", () => {
     expect(
       screen.getAllByRole("button", { name: "ツモ" }).length,
     ).toBeGreaterThan(0);
+  });
+
+  it("決定的な公開状態から全プレイヤーの抜き北を表示し、自家の連続北抜きを通知する", () => {
+    renderBoardWithKita();
+
+    const self = screen.getAllByRole("region", { name: "あなた(東家)" });
+    expect(self.some((region) => region.textContent?.includes("ガリ2"))).toBe(
+      true,
+    );
+    const west = screen.getAllByRole("region", { name: "二郎(西家)" });
+    expect(west.some((region) => region.textContent?.includes("ガリ1"))).toBe(
+      true,
+    );
+    expect(
+      screen.getByText(
+        "北を2枚抜きました。嶺上牌を補充しました。ガリは合計2枚です。",
+      ),
+    ).toBeInTheDocument();
   });
 
   it("自家の手牌をクリックすると打牌され対局が進行する", async () => {

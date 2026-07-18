@@ -22,8 +22,8 @@ import type {
   DoraData,
   GameResultView,
   GameViewState,
-  SeatPosition,
   SeatedPlayerView,
+  SeatPosition,
   SeatWind,
   SlotContent,
   TableInfoData,
@@ -114,6 +114,7 @@ function buildSlotContent(engine: EngineState, id: PlayerId): SlotContent {
       hasDeclaredRiichi: hand ? hand.riichi[seat] : false,
     },
     ...(melds.length > 0 ? { melds } : {}),
+    kitaCount: hand?.kita[seat] ?? 0,
     discards: hand ? hand.discards[seat].map(toTileData) : [],
     ...(isSelf && hand
       ? {

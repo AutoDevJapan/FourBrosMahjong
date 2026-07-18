@@ -57,6 +57,21 @@ export default function GameBoard() {
   // 全体盤面モーダル(スペック5 5.3.2 段階②): フォーカス表示でコンパクト化された他家情報を
   // クロス配置のまま再確認するための開閉状態。モーダルの表示自体は `< 360px` でのみ意味を持つ。
   const [boardOpen, setBoardOpen] = useState(false);
+  const selfKitaCount =
+    slots.self.kind === "seated" ? slots.self.player.kitaCount : 0;
+  // 自動北抜きは engine 遷移内で完了するため、公開枚数の増加を UI イベントとして保持する。
+  // 初期配牌で抜いた場合も 0→N として通知し、局替わりの N→0 では通知を消す。
+  const [observedKitaCount, setObservedKitaCount] = useState(0);
+  const [kitaAnnouncement, setKitaAnnouncement] = useState("");
+  if (observedKitaCount !== selfKitaCount) {
+    const pulled = selfKitaCount - observedKitaCount;
+    setObservedKitaCount(selfKitaCount);
+    setKitaAnnouncement(
+      pulled > 0
+        ? `北を${pulled === 1 ? "" : `${pulled}枚`}抜きました。嶺上牌を補充しました。ガリは合計${selfKitaCount}枚です。`
+        : "",
+    );
+  }
   // 全体盤面を開いている間は盤面本体を `inert` にする(下記 return 参照)。inert 化はトリガー
   // ボタンから即座にフォーカスを奪う(祖先が inert になると activeElement は body へ落ちる)ため、
   // Modal 側の「開く前の activeElement へ復帰」だけでは body へ戻ってしまう。トリガー参照を保持し、
@@ -248,12 +263,13 @@ export default function GameBoard() {
   }, [phase, pending, roundSummary, riichiArmed]);
 
   const announcement = useMemo(() => {
+    if (kitaAnnouncement) return kitaAnnouncement;
     if (pending?.kind === "humanDiscard") return "あなたの手番です。";
     if (pending?.kind === "humanReact") {
       return pending.canRon ? "ロンできます。" : "鳴きできます。";
     }
     return "";
-  }, [pending]);
+  }, [pending, kitaAnnouncement]);
 
   const assertive = useMemo(() => {
     if (phase === "roundEnd" || phase === "gameEnd") {

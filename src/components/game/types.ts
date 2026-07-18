@@ -68,6 +68,8 @@ export interface SeatedPlayerView {
   readonly handCount?: number;
   /** 副露(ポン・カン)。晒した面子を全員分表示する。 */
   readonly melds?: readonly MeldView[];
+  /** 公開された抜き北(ガリ)の枚数。全員が常時確認できる公開情報。 */
+  readonly kitaCount: number;
   /** 河(捨て牌)。着席3人分表示する。 */
   readonly discards: readonly TileData[];
 }
