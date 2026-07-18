@@ -8,10 +8,10 @@
  * UI として提供し、選択された牌の扱い(実際の打牌処理)はドメイン層の責務(スペック6 6.8)。
  * 各牌の名称は `option` 要素側の `aria-label` が担うため、内側の `Tile` は装飾扱いにする。
  */
-import { useCallback, useRef, useState } from "react";
-import type { TileData } from "./types";
+import { useCallback, useLayoutEffect, useRef, useState } from "react";
 import Tile from "../common/Tile";
 import { tileLabel } from "../common/tileLabel";
+import type { TileData } from "./types";
 
 export interface HandProps {
   tiles: readonly TileData[];
@@ -44,6 +44,7 @@ export default function Hand({
   const [selectedIndex, setSelectedIndex] = useState<number | null>(null);
   const [previousTiles, setPreviousTiles] = useState(tiles);
   const optionRefs = useRef<(HTMLLIElement | null)[]>([]);
+  const handHadFocus = useRef(false);
 
   // 打牌・鳴き等で手牌が更新されたら、旧 index にあった牌の選択状態を持ち越さない。
   // GameProvider の view は engine 更新時だけ新しい手牌配列を生成するため、参照比較により
@@ -62,6 +63,14 @@ export default function Hand({
   if (activeIndex > maxIndex) {
     setActiveIndex(maxIndex);
   }
+
+  useLayoutEffect(() => {
+    // キーボード操作中の option は、打牌・鳴きで key/index が変わると DOM から外れて
+    // body へフォーカスが落ちる。更新前に手牌内へ実フォーカスがあった場合だけ、DOM 更新後の
+    // クランプ済み active option へ戻す。手牌外へ移動済みなら下記 blur が false にする。
+    if (!handHadFocus.current || tiles.length === 0) return;
+    optionRefs.current[Math.min(activeIndex, tiles.length - 1)]?.focus();
+  }, [tiles, activeIndex]);
 
   const focusIndex = useCallback((index: number) => {
     setActiveIndex(index);
@@ -144,6 +153,14 @@ export default function Hand({
       role="listbox"
       aria-label={label}
       aria-orientation="horizontal"
+      onFocusCapture={() => {
+        handHadFocus.current = true;
+      }}
+      onBlurCapture={(event) => {
+        if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
+          handHadFocus.current = false;
+        }
+      }}
       className="flex flex-wrap gap-1"
     >
       {tiles.map((tile, index) => {
