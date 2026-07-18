@@ -5,8 +5,8 @@ import type { Tile } from "@/domain/tiles/tile";
 import {
   createGame,
   declareAnkan,
-  declareKan,
   declareKakan,
+  declareKan,
   discard,
   type EngineState,
   type Pending,
@@ -189,11 +189,12 @@ describe("engine: 四槓散了(#183)", () => {
     const state = baseWithThreeKans(5);
     const hand = state.hand;
     if (!hand) throw new Error("hand required");
-    const tile = parseTile("7s");
-    hand.hands.east = parseTiles("7s 1m 9m 1s 9s");
+    // AI の戦略ゲート(#210)を通る役牌(白)の大明槓にする。
+    const tile = parseTile("5z");
+    hand.hands.east = parseTiles("5z 1m 9m 1s 9s");
     hand.drawn = tile;
     hand.turn = "east";
-    hand.hands.south = parseTiles("7s 7s 7s 2m 4m 6m 8m 2s 4s 2p 4p 6p 8p");
+    hand.hands.south = parseTiles("5z 5z 5z 2m 4m 6m 8m 2s 4s 2p 4p 6p 8p");
     const armed = { ...state, pending: discardPending() };
     const live = hand.wall.remainingLiveTiles;
 

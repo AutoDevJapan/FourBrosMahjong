@@ -18,8 +18,8 @@
  *   禁止する(`hand.ponnedKind` を `discard` が参照し `isKuikaeForbidden` で no-op)。
  *
  * ## AI
- * - 他家(AI)は**手牌効率(向聴・受け入れ)ベースの打牌**(#98)に加え、合法ならリーチ・ポン・
- *   各種カンも行う(#169)。判断は和了を最優先し、既存の公開可否述語と候補列挙を共有する。
+ * - 他家(AI)は**手牌効率(向聴・受け入れ)ベースの打牌**(#98)に加え、リーチ・各種カンを行う。
+ *   ポン/大明槓は合法性に加え、ナシナシで役無しを固定しない戦略ゲート(#210)を通す。
  * - 加槓に対する槍槓(チャンカン)は**対応済み**(Q17 = 槍槓あり・ユーザー承認 / #115)。加槓宣言時、
  *   その加槓牌でロンできる他家がいれば加槓は不成立(横取り)= 槍槓ロン(`chankan` 1翻)として精算する。
  *   `declareKakan` は自家(p0)専用のため応答者は他家(AI)。
@@ -52,7 +52,7 @@ import {
   resolveDora,
 } from "@/domain/dora/doraSet";
 import { countDoraHan } from "@/domain/dora/han";
-import { chooseDiscard } from "@/domain/game/ai";
+import { chooseDiscard, shouldCallMeld } from "@/domain/game/ai";
 import { decomposeAll, type MeldInput } from "@/domain/hand/decompose";
 import { canRon } from "@/domain/hand/furiten";
 import { isKuikaeForbidden } from "@/domain/hand/kuikae";
@@ -1339,6 +1339,16 @@ function resolveDiscard(state: EngineState): EngineState {
           canKan,
         },
       };
+    }
+    if (
+      !shouldCallMeld({
+        tile,
+        melds: hand.melds[candidate],
+        seatWind: SEAT_WIND_NUMBER[candidate],
+        roundWind: roundWindNumber(state.round),
+      })
+    ) {
+      continue;
     }
     return applyAiCall(resolvedState, candidate, discarder, tile, canKan);
   }

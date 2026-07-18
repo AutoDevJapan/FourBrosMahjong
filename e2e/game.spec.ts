@@ -528,7 +528,7 @@ test.describe("対局画面(/game)", () => {
     page,
   }) => {
     test.setTimeout(120_000);
-    await page.goto("/game?seed=29");
+    await page.goto("/game?seed=12");
     const board = page.locator("[data-phase]").first();
     const hand = page.getByRole("listbox", { name: "自家の手牌" }).first();
     let forbidden = hand.getByRole("option", { name: /喰い替え禁止/ });
@@ -565,7 +565,7 @@ test.describe("対局画面(/game)", () => {
     page,
   }) => {
     test.setTimeout(120_000);
-    await page.goto("/game?seed=47");
+    await page.goto("/game?seed=62");
     const board = page.locator("[data-phase]").first();
     const hand = page.getByRole("listbox", { name: "自家の手牌" }).first();
 
@@ -593,6 +593,8 @@ test.describe("対局画面(/game)", () => {
       page.getByRole("button", { name: "次の局へ" }).first(),
     ).toBeVisible();
     await page.getByRole("button", { name: "次の局へ" }).first().click();
-    await expect(board).toHaveAttribute("data-phase", "playing");
+    // 次局が AI の自動進行だけで即時決着する場合もあるため、playing 固定ではなく
+    // 四槓散了の局から実際に遷移したことを検証する。
+    await expect(page.getByText("四槓散了", { exact: true })).toHaveCount(0);
   });
 });
