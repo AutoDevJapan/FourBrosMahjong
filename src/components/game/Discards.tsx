@@ -17,7 +17,9 @@ export default function Discards({ tiles, limit }: DiscardsProps) {
   return (
     <ul
       aria-label="捨て牌"
-      className="grid grid-flow-row auto-rows-min grid-cols-6 gap-0.5"
+      // grid-cols-6(1fr 列)はスロット幅いっぱいにセルが引き伸ばされ河が散らばるため、
+      // 列幅を牌の内容基準(max-content)にして 6 枚/段を gap-0.5 のみで密に並べる(#258)。
+      className="grid w-fit grid-flow-row auto-rows-min grid-cols-[repeat(6,max-content)] gap-0.5"
     >
       {shown.map((tile, i) => (
         // 河は同一牌が複数並ぶため index を key に含める(捨て順の同一性は保持不要)。
