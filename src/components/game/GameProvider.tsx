@@ -114,14 +114,24 @@ export function freshSeed(): number {
   return values[0];
 }
 
+/** Storage の getter 自体が SecurityError を投げる環境ではメモリ内対局へ退避する。 */
+function sessionStorageOrNull(): Storage | null {
+  if (typeof window === "undefined") return null;
+  try {
+    return window.sessionStorage;
+  } catch {
+    return null;
+  }
+}
+
 function initialSession(initialGame?: EngineState): {
   engine: EngineState;
   journal: GameJournal | null;
 } {
   if (initialGame) return { engine: initialGame, journal: null };
   const urlSeed = seedFromLocation();
-  const stored =
-    typeof window === "undefined" ? null : loadJournal(window.sessionStorage);
+  const storage = sessionStorageOrNull();
+  const stored = storage === null ? null : loadJournal(storage);
   if (stored && (urlSeed === null || stored.seed === urlSeed)) {
     try {
       return { engine: replayJournal(stored), journal: stored };
@@ -130,9 +140,9 @@ function initialSession(initialGame?: EngineState): {
     }
   }
   const seed = urlSeed ?? freshSeed();
-  const journal: GameJournal = { version: 1, seed, actions: [] };
-  if (typeof window !== "undefined")
-    saveJournal(window.sessionStorage, journal);
+  const journal: GameJournal | null =
+    storage === null ? null : { version: 1, seed, actions: [] };
+  if (storage !== null && journal !== null) saveJournal(storage, journal);
   return { engine: createGame({ seed }), journal };
 }
 
@@ -177,7 +187,8 @@ export function GameProvider({ children, initialGame }: GameProviderProps) {
       const nextSession = { engine: nextEngine, journal: nextJournal };
       // storage / React state より先に同期 ref を進め、同一 tick の次イベントを直列化する。
       sessionRef.current = nextSession;
-      saveJournal(window.sessionStorage, nextJournal);
+      const storage = sessionStorageOrNull();
+      if (storage !== null) saveJournal(storage, nextJournal);
       setSession(nextSession);
     };
     const tileAction = (
@@ -198,13 +209,16 @@ export function GameProvider({ children, initialGame }: GameProviderProps) {
       nextRound: () => commit({ type: "nextRound" }),
       newGame: () => {
         const seed = freshSeed();
-        const nextJournal: GameJournal = { version: 1, seed, actions: [] };
+        const storage = sessionStorageOrNull();
+        const nextJournal: GameJournal | null =
+          storage === null ? null : { version: 1, seed, actions: [] };
         const nextSession = {
           engine: createGame({ seed }),
           journal: nextJournal,
         };
         sessionRef.current = nextSession;
-        saveJournal(window.sessionStorage, nextJournal);
+        if (storage !== null && nextJournal !== null)
+          saveJournal(storage, nextJournal);
         setSession(nextSession);
       },
     };
