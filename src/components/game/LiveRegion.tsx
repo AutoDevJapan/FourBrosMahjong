@@ -11,18 +11,24 @@
 export interface LiveRegionProps {
   /** 進行通知(`aria-live="polite"`)。 */
   politeMessage?: string;
+  /** 通常進行を上書きせず並行して伝える一時的な進行通知。 */
+  secondaryPoliteMessage?: string;
   /** 結果確定通知(`role="alert"` = `aria-live="assertive"`)。 */
   assertiveMessage?: string;
 }
 
 export default function LiveRegion({
   politeMessage = "",
+  secondaryPoliteMessage = "",
   assertiveMessage = "",
 }: LiveRegionProps) {
   return (
     <>
       <div aria-live="polite" aria-atomic="true" className="sr-only">
         {politeMessage}
+      </div>
+      <div aria-live="polite" aria-atomic="true" className="sr-only">
+        {secondaryPoliteMessage}
       </div>
       <div role="alert" aria-atomic="true" className="sr-only">
         {assertiveMessage}

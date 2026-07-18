@@ -2,7 +2,7 @@ import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { createGame } from "@/domain/game/engine";
-import GameBoard from "./GameBoard";
+import GameBoard, { pulledKitaCount } from "./GameBoard";
 import { GameProvider } from "./GameProvider";
 
 // App Router の useRouter を jsdom 用にスタブ(遷移は本テストの対象外)。
@@ -68,6 +68,19 @@ describe("GameBoard (spec 6.6 client island / engine-driven)", () => {
         "北を2枚抜きました。嶺上牌を補充しました。ガリは合計2枚です。",
       ),
     ).toBeInTheDocument();
+    expect(screen.getByText("あなたの手番です。")).toBeInTheDocument();
+  });
+
+  it("同じガリ枚数でも局キーが変われば新しい北抜きとして検知する", () => {
+    expect(
+      pulledKitaCount({ roundKey: "east-1-0", count: 1 }, "east-1-0", 1),
+    ).toBe(0);
+    expect(
+      pulledKitaCount({ roundKey: "east-1-0", count: 1 }, "east-2-0", 1),
+    ).toBe(1);
+    expect(
+      pulledKitaCount({ roundKey: "east-1-0", count: 1 }, "east-1-1", 1),
+    ).toBe(1);
   });
 
   it("自家の手牌をクリックすると打牌され対局が進行する", async () => {

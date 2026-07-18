@@ -190,9 +190,11 @@ test.describe("対局画面(/game)", () => {
     await expect(
       self.getByTestId("kita-display").locator('[data-face="Pei"]'),
     ).toHaveCount(1);
-    await expect(page.locator('[aria-live="polite"]').first()).toHaveText(
-      "北を抜きました。嶺上牌を補充しました。ガリは合計1枚です。",
-    );
+    await expect(
+      page
+        .locator('[aria-live="polite"]')
+        .filter({ hasText: "北を抜きました" }),
+    ).toHaveText("北を抜きました。嶺上牌を補充しました。ガリは合計1枚です。");
 
     await page.setViewportSize({ width: 320, height: 800 });
     await expect(self.getByTestId("kita-display")).toContainText("ガリ1");

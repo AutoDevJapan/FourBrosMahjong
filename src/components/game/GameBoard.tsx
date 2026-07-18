@@ -39,6 +39,20 @@ import type { SeatPosition, TileData } from "./types";
 /** 外部ストア購読なしのダミー(クライアント判定にのみ使う)。 */
 const noopSubscribe = () => () => {};
 
+interface KitaObservation {
+  readonly roundKey: string;
+  readonly count: number;
+}
+
+/** 局替わりは0枚を起点として扱い、同じガリ枚数の次局も増加イベントとして検知する。 */
+export function pulledKitaCount(
+  previous: KitaObservation,
+  roundKey: string,
+  count: number,
+): number {
+  return count - (previous.roundKey === roundKey ? previous.count : 0);
+}
+
 export default function GameBoard() {
   const { view, phase, pending, roundSummary, controls } = useGame();
   const { slots, tableInfo, dora } = view;
@@ -59,19 +73,32 @@ export default function GameBoard() {
   const [boardOpen, setBoardOpen] = useState(false);
   const selfKitaCount =
     slots.self.kind === "seated" ? slots.self.player.kitaCount : 0;
+  const roundKey = `${tableInfo.roundWind}-${tableInfo.handNumber}-${tableInfo.honba}`;
   // 自動北抜きは engine 遷移内で完了するため、公開枚数の増加を UI イベントとして保持する。
   // 初期配牌で抜いた場合も 0→N として通知し、局替わりの N→0 では通知を消す。
-  const [observedKitaCount, setObservedKitaCount] = useState(0);
+  const [kitaObservation, setKitaObservation] = useState<KitaObservation>({
+    roundKey,
+    count: 0,
+  });
   const [kitaAnnouncement, setKitaAnnouncement] = useState("");
-  if (observedKitaCount !== selfKitaCount) {
-    const pulled = selfKitaCount - observedKitaCount;
-    setObservedKitaCount(selfKitaCount);
+  if (
+    kitaObservation.roundKey !== roundKey ||
+    kitaObservation.count !== selfKitaCount
+  ) {
+    const pulled = pulledKitaCount(kitaObservation, roundKey, selfKitaCount);
+    setKitaObservation({ roundKey, count: selfKitaCount });
     setKitaAnnouncement(
       pulled > 0
         ? `北を${pulled === 1 ? "" : `${pulled}枚`}抜きました。嶺上牌を補充しました。ガリは合計${selfKitaCount}枚です。`
         : "",
     );
   }
+  // 同じ文言の次回イベントでも live region に DOM 変更を発生させられるよう、一時通知は消去する。
+  useEffect(() => {
+    if (!kitaAnnouncement) return;
+    const timer = window.setTimeout(() => setKitaAnnouncement(""), 1500);
+    return () => window.clearTimeout(timer);
+  }, [kitaAnnouncement]);
   // 全体盤面を開いている間は盤面本体を `inert` にする(下記 return 参照)。inert 化はトリガー
   // ボタンから即座にフォーカスを奪う(祖先が inert になると activeElement は body へ落ちる)ため、
   // Modal 側の「開く前の activeElement へ復帰」だけでは body へ戻ってしまう。トリガー参照を保持し、
@@ -263,13 +290,12 @@ export default function GameBoard() {
   }, [phase, pending, roundSummary, riichiArmed]);
 
   const announcement = useMemo(() => {
-    if (kitaAnnouncement) return kitaAnnouncement;
     if (pending?.kind === "humanDiscard") return "あなたの手番です。";
     if (pending?.kind === "humanReact") {
       return pending.canRon ? "ロンできます。" : "鳴きできます。";
     }
     return "";
-  }, [pending, kitaAnnouncement]);
+  }, [pending]);
 
   const assertive = useMemo(() => {
     if (phase === "roundEnd" || phase === "gameEnd") {
@@ -397,7 +423,11 @@ export default function GameBoard() {
         </Modal>
       ) : null}
 
-      <LiveRegion politeMessage={announcement} assertiveMessage={assertive} />
+      <LiveRegion
+        politeMessage={announcement}
+        secondaryPoliteMessage={kitaAnnouncement}
+        assertiveMessage={assertive}
+      />
     </div>
   );
 }
