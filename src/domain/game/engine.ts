@@ -173,6 +173,8 @@ interface HandState {
   paoResponsible: Partial<Record<SeatKey, PlayerId>>;
   /** 直前の打牌(ロン/鳴き判定の対象)。解決後に null。 */
   pendingDiscard: { seat: SeatKey; tile: Tile } | null;
+  /** 宣言牌の応答解決待ちのリーチ席。ロンされなければ供託を確定する。 */
+  pendingRiichiSeat: SeatKey | null;
   /** 直前の打牌に対しロン/鳴きを見送った席(頭ハネ解決の再入で参照)。 */
   passedRonSeats: SeatKey[];
   /**
@@ -570,6 +572,7 @@ function beginRound(state: EngineState): EngineState {
     callsMade: false,
     paoResponsible: {},
     pendingDiscard: null,
+    pendingRiichiSeat: null,
     passedRonSeats: [],
     ponnedKind: null,
   };
@@ -710,16 +713,9 @@ function applyAiRiichi(state: EngineState, seat: SeatKey): EngineState {
     candidates[0];
   hand.riichi[seat] = true;
   hand.doubleRiichi[seat] = hand.discards[seat].length === 0 && !hand.callsMade;
+  hand.pendingRiichiSeat = seat;
   const callsMadeBeforeDeclaration = hand.callsMade;
-  const next: EngineState = {
-    ...state,
-    points: {
-      ...state.points,
-      [occupant]: state.points[occupant] - RIICHI_STICK_POINTS,
-    },
-    riichiSticks: state.riichiSticks + 1,
-  };
-  const discarded = applyDiscard(next, seat, tile);
+  const discarded = applyDiscard(state, seat, tile);
   if (
     discarded.phase === "playing" &&
     discarded.hand !== null &&
@@ -1250,6 +1246,25 @@ function canHumanCall(
   });
 }
 
+/** 宣言牌がロンされなかったリーチの供託を確定する。 */
+function commitPendingRiichi(
+  state: EngineState,
+  discarder: SeatKey,
+): EngineState {
+  const hand = state.hand;
+  if (hand === null || hand.pendingRiichiSeat !== discarder) return state;
+  const declarerId = seatOccupant(hand.seating, discarder);
+  hand.pendingRiichiSeat = null;
+  return {
+    ...state,
+    points: {
+      ...state.points,
+      [declarerId]: state.points[declarerId] - RIICHI_STICK_POINTS,
+    },
+    riichiSticks: state.riichiSticks + 1,
+  };
+}
+
 /** 直前の打牌に対するロン/鳴き(頭ハネ順)を解決。未決着なら手番を送る。 */
 function resolveDiscard(state: EngineState): EngineState {
   const hand = state.hand;
@@ -1288,6 +1303,10 @@ function resolveDiscard(state: EngineState): EngineState {
     });
   }
 
+  // 宣言牌がロンされなかった時点でリーチ成立。鳴きの有無にかかわらず供託を確定する。
+  // ロン時は settleWin が先に返るため、未成立の1,000点は支払われず、供託にも含まれない。
+  const resolvedState = commitPendingRiichi(state, discarder);
+
   // 2. 鳴き(頭ハネと同じ巡目順)。大明槓をポンより優先する。
   for (const candidate of ronOrder(discarder)) {
     if (hand.passedRonSeats.includes(candidate)) continue;
@@ -1310,7 +1329,7 @@ function resolveDiscard(state: EngineState): EngineState {
     if (!canPon && !canKan) continue;
     if (candidate === humanSeat) {
       return {
-        ...state,
+        ...resolvedState,
         pending: {
           kind: "humanReact",
           tile,
@@ -1321,14 +1340,14 @@ function resolveDiscard(state: EngineState): EngineState {
         },
       };
     }
-    return applyAiCall(state, candidate, discarder, tile, canKan);
+    return applyAiCall(resolvedState, candidate, discarder, tile, canKan);
   }
 
   // 3. ロン・鳴きなし → 手番送り。
   hand.pendingDiscard = null;
   hand.passedRonSeats = [];
   hand.turn = NEXT_SEAT[discarder];
-  return state;
+  return resolvedState;
 }
 
 // ---------------------------------------------------------------------------
@@ -1433,6 +1452,18 @@ function settleWin(state: EngineState, win: WinInput): EngineState {
   const hand = state.hand;
   if (hand === null) return state;
   const { winnerSeat, winType, winningTile, analysis } = win;
+  // リーチ宣言牌でのロンは宣言不成立。供託はまだ計上していないため、宣言フラグだけ戻す。
+  if (
+    winType === "ron" &&
+    win.discarderSeat !== undefined &&
+    hand.pendingRiichiSeat === win.discarderSeat
+  ) {
+    const declarer = win.discarderSeat;
+    hand.riichi[declarer] = false;
+    hand.doubleRiichi[declarer] = false;
+    hand.ippatsu[declarer] = false;
+    hand.pendingRiichiSeat = null;
+  }
   const winnerId = seatOccupant(hand.seating, winnerSeat);
   const isDealerWin = winnerSeat === "east";
   const isRiichiWin = hand.riichi[winnerSeat];
@@ -1835,16 +1866,11 @@ export function declareRiichi(state: EngineState, tile: Tile): EngineState {
   hand.riichi[seat] = true;
   // ダブルリーチ = 自分の第一打・鳴きなし。
   hand.doubleRiichi[seat] = hand.discards[seat].length === 0 && !hand.callsMade;
+  hand.pendingRiichiSeat = seat;
   const callsMadeBeforeDeclaration = hand.callsMade;
 
-  const newPoints = {
-    ...state.points,
-    [occupant]: state.points[occupant] - RIICHI_STICK_POINTS,
-  };
   const s1: EngineState = {
     ...state,
-    points: newPoints,
-    riichiSticks: state.riichiSticks + 1,
     pending: null,
   };
   const s2 = applyDiscard(s1, seat, tile);
@@ -1893,6 +1919,7 @@ export function declarePon(state: EngineState): EngineState {
   const seat = humanSeatOf(hand);
   if (seat === null || hand.pendingDiscard === null) return state;
   const { seat: discarder, tile } = hand.pendingDiscard;
+  state = commitPendingRiichi(state, discarder);
   const { taken, rest } = takeKind(hand.hands[seat], tile, 2);
   if (taken.length < 2) return state;
 
@@ -1933,6 +1960,7 @@ export function declareKan(state: EngineState): EngineState {
   const seat = humanSeatOf(hand);
   if (seat === null || hand.pendingDiscard === null) return state;
   const { seat: discarder, tile } = hand.pendingDiscard;
+  state = commitPendingRiichi(state, discarder);
   const { taken, rest } = takeKind(hand.hands[seat], tile, 3);
   if (taken.length < 3) return state;
 
