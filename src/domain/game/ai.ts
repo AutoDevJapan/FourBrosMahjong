@@ -7,7 +7,8 @@
  * 温存する・危険牌を避ける、を優先度付きで判断する純ロジックへ置き換える。
  *
  * スコープ(過剰設計の回避):
- * - **鳴き(ポン/カン/チー)・リーチの判断は含めない**(別 issue #97 の責務)。門前の打牌選択のみ。
+ * - 打牌選択に加え、ナシナシで役無しを確定させないための最小限のポン/大明槓判断を扱う。
+ *   リーチ判断は含めない。
  * - 向聴/受け入れは自家の見えている情報(自分の14枚)のみで算出する。相手の手牌は覗かない。
  * - サンマの実在牌種(萬子1・9のみ / 字牌 東南西北白發中)に閉じて受け入れを数える
  *   ({@link SANMA_TILE_KINDS})。
@@ -19,14 +20,53 @@
  * 純関数・決定的・React/DOM 非依存。
  */
 
-import type { Suit, Tile } from "@/domain/tiles/tile";
+import type { Meld } from "@/domain/hand/meld";
 import {
   isYaochu,
   SANMA_TILE_KINDS,
   tileKey,
 } from "@/domain/hand/tile-identity";
+import { HONOR, type Suit, type Tile } from "@/domain/tiles/tile";
 
 const RED_FIVE_SUITS: ReadonlySet<Suit> = new Set(["pin", "sou"]);
+
+/** AI が他家の打牌を鳴くか判断するために必要な公開文脈。 */
+export interface CallMeldContext {
+  readonly tile: Tile;
+  readonly melds: readonly Meld[];
+  readonly seatWind: number;
+  readonly roundWind: number;
+}
+
+/** 三元牌、場風、自風（北はガリ専用）か。 */
+function isValueHonor(
+  tile: Tile,
+  seatWind: number,
+  roundWind: number,
+): boolean {
+  if (tile.suit !== "honor" || tile.rank === HONOR.NORTH) return false;
+  return (
+    tile.rank >= HONOR.WHITE ||
+    tile.rank === seatWind ||
+    tile.rank === roundWind
+  );
+}
+
+/**
+ * ナシナシ規則下の AI のポン/大明槓判断。
+ * 今回の鳴きで役牌を確定するか、既に役牌副露があって役が確定済みの場合だけ鳴く。
+ * ドラは役ではなく、鳴いた後は門前へ戻れないため判断材料にしない。
+ */
+export function shouldCallMeld(ctx: CallMeldContext): boolean {
+  if (isValueHonor(ctx.tile, ctx.seatWind, ctx.roundWind)) return true;
+  return ctx.melds.some((meld) => {
+    const representative = meld.tiles[0];
+    return (
+      representative !== undefined &&
+      isValueHonor(representative, ctx.seatWind, ctx.roundWind)
+    );
+  });
+}
 
 /** 種別(suit+rank)から `Tile` を生成(赤5筒/5索は不変条件どおり赤)。 */
 function makeTile(suit: Suit, rank: number): Tile {
