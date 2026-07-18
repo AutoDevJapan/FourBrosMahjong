@@ -22,6 +22,9 @@ jobs:
   ci:
     name: lint / typecheck / format / test / build
     runs-on: ubuntu-latest
+    # 個別ツールが終了しない回帰でも、既定の6時間まで品質ゲートを占有させない。
+    # 通常実行時間には十分な余裕を持たせつつ、異常時は30分で失敗として返す。
+    timeout-minutes: 30
     steps:
       - name: Checkout
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
