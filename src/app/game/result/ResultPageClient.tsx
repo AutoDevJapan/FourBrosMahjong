@@ -42,7 +42,14 @@ export default function ResultPageClient() {
         </Link>
       </header>
 
-      {result === null ? (
+      {!mounted ? (
+        <div
+          role="status"
+          className="flex min-h-40 items-center justify-center rounded-lg border border-foreground/15 p-6 text-sm text-foreground/70"
+        >
+          対局結果を読み込んでいます…
+        </div>
+      ) : result === null ? (
         // 半荘が終了していない/結果未確定のまま直接アクセスされた場合のフォールバック(スペック6 6.8)。
         <div className="flex flex-col items-start gap-4 rounded-lg border border-foreground/15 p-6">
           <p className="text-sm text-foreground/70">
@@ -57,6 +64,10 @@ export default function ResultPageClient() {
         </div>
       ) : (
         <>
+          {/* hydration 後の復元完了を、巨大な順位表を丸ごと再読させず簡潔に通知する。 */}
+          <p role="status" className="sr-only">
+            対局結果を読み込みました。
+          </p>
           <section
             aria-labelledby="ranking-heading"
             className="flex flex-col gap-3"

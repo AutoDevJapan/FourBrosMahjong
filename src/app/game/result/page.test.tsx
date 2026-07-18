@@ -1,4 +1,5 @@
 import { render, screen, within } from "@testing-library/react";
+import { renderToString } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 import { walkToGameEnd } from "@/components/game/finishedGameFixture";
 import { GameProvider } from "@/components/game/GameProvider";
@@ -16,6 +17,19 @@ function finishedGame(seed = 2024): EngineState {
 }
 
 describe("/game/result page (spec 6.2 / 6.6)", () => {
+  it("SSR/hydration 待ちは未確定と誤案内せず、読み込み状態を表明する(issue #235)", () => {
+    const html = renderToString(
+      <GameProvider initialGame={finishedGame()}>
+        <ResultPage />
+      </GameProvider>,
+    );
+
+    expect(html).toContain("対局結果を読み込んでいます…");
+    expect(html).toContain('role="status"');
+    expect(html).not.toContain("まだ半荘の結果が確定していません");
+    expect(html).not.toContain("最終順位");
+  });
+
   it("GameProvider の確定結果(実精算)から順位表とソシー内訳を描画する", () => {
     render(
       <GameProvider initialGame={finishedGame()}>
@@ -29,6 +43,9 @@ describe("/game/result page (spec 6.2 / 6.6)", () => {
     expect(
       screen.getByRole("heading", { name: "最終順位" }),
     ).toBeInTheDocument();
+    expect(screen.getByRole("status")).toHaveTextContent(
+      "対局結果を読み込みました。",
+    );
     // 順位表とソシー内訳の双方に順位が現れる。
     expect(screen.getAllByText("1位").length).toBeGreaterThan(0);
     // ソシー内訳セクションは自家(あなた)のリージョンを持つ。
