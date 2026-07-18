@@ -102,8 +102,16 @@ function seedFromLocation(): number | null {
   return Number.isSafeInteger(seed) && seed >= 0 ? seed : null;
 }
 
-function freshSeed(): number {
-  return Date.now() >>> 0;
+/**
+ * 通常対局の壁を決める、予測困難な uint32 seed を生成する。
+ *
+ * 時刻由来の seed は開始時刻から全牌順を総当たりできるため使わない。
+ * Web Crypto はブラウザとサポート対象の Node.js の双方で利用できる。
+ */
+export function freshSeed(): number {
+  const values = new Uint32Array(1);
+  globalThis.crypto.getRandomValues(values);
+  return values[0];
 }
 
 function initialSession(initialGame?: EngineState): {
