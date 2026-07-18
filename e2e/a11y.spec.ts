@@ -301,7 +301,7 @@ test.describe("状態駆動 a11y 監査(リーチ/鳴き/和了アラート/ト�
       await auditPage(page);
     });
 
-    test(`鳴き(ポン)副露が描画された状態で WCAG 2.1 A/AA 違反ゼロ [${theme}]`, async ({
+    test(`鳴き副露が描画された状態で WCAG 2.1 A/AA 違反ゼロ [${theme}]`, async ({
       page,
     }) => {
       await openScreen(page, gameScreen, theme, `?seed=${SEED_MELD}`);
@@ -310,8 +310,8 @@ test.describe("状態駆動 a11y 監査(リーチ/鳴き/和了アラート/ト�
       // 副露(ポン/カン)の卓表示は `Melds` の `<ul aria-label="副露">`(role=list)。
       const melds = page.getByRole("list", { name: "副露" });
 
-      // 自家は打牌はツモ切り相当(先頭牌)で進め、鳴ける場面(humanReact)では必ずポン/カンする。
-      // 他家(AI)は鳴かないため、副露が出るのは自家のポン成立時のみ = そこで停止して監査する。
+      // 自家は先頭牌で進め、鳴ける場面ではポン/カンする。AIの自動鳴きも含め、最初に
+      // 実対局経路で副露が現れた時点で停止して監査する(issue #169)。
       for (let step = 0; step < 400; step++) {
         if (await melds.count()) break;
         const state = await boardState(board);
@@ -343,7 +343,7 @@ test.describe("状態駆動 a11y 監査(リーチ/鳴き/和了アラート/ト�
         await page.waitForTimeout(20);
       }
 
-      // 副露(ポン)が卓に描画された状態を監査する。
+      // 副露が卓に描画された状態を監査する。
       await expect(melds.first()).toBeVisible();
       await auditPage(page);
     });

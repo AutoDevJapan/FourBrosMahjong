@@ -119,7 +119,7 @@ describe("engine: 鳴き・リーチ・裏ドラ・一発(#97)", () => {
     };
     for (const seed of [1, 2, 3, 5, 8, 13, 21, 42, 99, 2024]) {
       const s = playAggressive(seed, tally);
-      expect(s.phase).toBe("gameEnd");
+      expect(s.phase, `seed=${seed}`).toBe("gameEnd");
       expect(s.result).toHaveLength(4);
 
       // 持ち点総和 === 140,000 − 場に残る供託(未回収リーチ棒 × 1,000)。
