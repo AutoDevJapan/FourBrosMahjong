@@ -43,6 +43,13 @@ export default defineConfig({
           environment: "node",
           globals: true,
           include: ["src/**/*.{test,spec}.ts"],
+          // 重い決定的テスト(例: cross-validation の 40k 手オラクル照合、
+          // engine.melds-riichi の全公開アクション走破)は、全ファイル並列実行時の
+          // CPU 競合で Vitest 既定の 5,000ms を超えることがある(issue #262)。
+          // 既定値への暗黙依存を避け、網羅性(反復回数)を維持したまま
+          // タイムアウト由来の flaky を防ぐため、unit プロジェクトのみ余裕を持たせる。
+          // component(jsdom)側は軽量な UI テストのみなので、ハング検出のため既定値を維持。
+          testTimeout: 30_000,
         },
       },
       {
