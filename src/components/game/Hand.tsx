@@ -42,7 +42,16 @@ export default function Hand({
 }: HandProps) {
   const [activeIndex, setActiveIndex] = useState(0);
   const [selectedIndex, setSelectedIndex] = useState<number | null>(null);
+  const [previousTiles, setPreviousTiles] = useState(tiles);
   const optionRefs = useRef<(HTMLLIElement | null)[]>([]);
+
+  // 打牌・鳴き等で手牌が更新されたら、旧 index にあった牌の選択状態を持ち越さない。
+  // GameProvider の view は engine 更新時だけ新しい手牌配列を生成するため、参照比較により
+  // GameBoard 内の無関係な再レンダーでは選択を維持しつつ、手牌構成の更新を検出できる。
+  if (previousTiles !== tiles) {
+    setPreviousTiles(tiles);
+    if (selectedIndex !== null) setSelectedIndex(null);
+  }
 
   // ポン・カン等で手牌が縮小して activeIndex が範囲外になると、tabIndex=0 の option が
   // 0個になりキーボードで手牌へ到達できなくなる。末尾へクランプしてロービングタブ
