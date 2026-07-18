@@ -214,6 +214,18 @@ export interface RoundSummary {
   readonly winDetails?: {
     readonly winType: "tsumo" | "ron";
     readonly dealer: boolean;
+    /** 和了者の表示名(#259)。 */
+    readonly winnerName: string;
+    /** 和了者の席(東=親)。 */
+    readonly winnerSeat: SeatKey;
+    /**
+     * 和了確定時に固定した門前手牌(和了牌を除く。副露・ガリは含まない — それらは
+     * 卓上の既存表示が公開情報として担う)。次局遷移で `hand.hands` は失われるため、
+     * 局終了後の開示(#259)はこのスナップショットを参照する。
+     */
+    readonly hand: readonly Tile[];
+    /** 和了牌(ツモ牌 / ロンした打牌・槍槓牌)。 */
+    readonly winningTile: Tile;
     readonly yaku: readonly {
       readonly name: string;
       readonly han: number;
@@ -1573,6 +1585,11 @@ function settleWin(state: EngineState, win: WinInput): EngineState {
         winDetails: {
           winType,
           dealer: isDealerWin,
+          winnerName: nameOf(state, winnerId),
+          winnerSeat,
+          // 次局遷移で hand.hands は破棄されるため、和了確定時にコピーで固定する(#259)。
+          hand: [...hand.hands[winnerSeat]],
+          winningTile,
           yaku: analysis.yaku.map(({ name, han, yakuman }) => ({
             name,
             han,
