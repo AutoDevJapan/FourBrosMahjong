@@ -44,6 +44,52 @@ test.describe("対局状態のsession復元(#190)", () => {
     await expect(visibleHand(page).getByRole("option")).toHaveCount(14);
   });
 
+  test("リーチ宣言後reloadで宣言状態と手牌を復元する", async ({ page }) => {
+    await page.goto("/game?seed=381");
+    const board = page.locator("[data-phase]").first();
+    const hand = visibleHand(page);
+
+    for (let step = 0; step < 60; step++) {
+      const riichi = page.getByRole("button", { name: "リーチ", exact: true });
+      if (await riichi.count()) {
+        await riichi.first().click();
+        await hand
+          .getByRole("option", { name: /リーチ可/ })
+          .first()
+          .click();
+        break;
+      }
+      if ((await board.getAttribute("data-pending")) === "humanReact") {
+        await page.getByRole("button", { name: "スルー" }).first().click();
+      } else {
+        await hand.getByRole("option").first().click();
+      }
+    }
+
+    const badge = page
+      .getByRole("region", { name: /^あなた/ })
+      .getByTestId("status-badge-riichi");
+    await expect(badge).toBeVisible();
+    const declaredHand = await hand.getByRole("option").allTextContents();
+    await expect
+      .poll(() =>
+        page.evaluate(() =>
+          JSON.parse(
+            sessionStorage.getItem("four-bros-mahjong.game.v1") ?? "null",
+          )?.actions.some(
+            (action: { type: string }) => action.type === "riichi",
+          ),
+        ),
+      )
+      .toBe(true);
+
+    await page.reload();
+    await expect(badge).toBeVisible();
+    await expect
+      .poll(() => visibleHand(page).getByRole("option").allTextContents())
+      .toEqual(declaredHand);
+  });
+
   test("半荘結果をresult reload後も保持する", async ({ page }) => {
     test.setTimeout(120_000);
     // 先にロビーを踏んでおき、終局の自動遷移(replace)後の「戻る」到達先を検証可能にする。
