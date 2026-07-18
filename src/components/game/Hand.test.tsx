@@ -55,4 +55,52 @@ describe("Hand (roving tabindex listbox, spec 5.2.2)", () => {
     expect(onSelect).toHaveBeenCalledWith(0, tiles[0]);
     expect(options[0]).toHaveAttribute("aria-selected", "true");
   });
+
+  it("操作不可牌はマウス・キーボードで選択せず、理由を通知する", async () => {
+    const onSelect = vi.fn();
+    const onBlockedSelect = vi.fn();
+    const user = userEvent.setup();
+    render(
+      <Hand
+        tiles={tiles}
+        onSelect={onSelect}
+        onBlockedSelect={onBlockedSelect}
+        tileStates={[
+          {
+            disabled: true,
+            reason: "喰い替え禁止のため、この牌は打牌できません。",
+            indicator: "禁止",
+          },
+        ]}
+      />,
+    );
+    const forbidden = screen.getByRole("option", {
+      name: /一萬、喰い替え禁止/,
+    });
+    expect(forbidden).toHaveAttribute("aria-disabled", "true");
+    expect(screen.getByText("禁止")).toBeInTheDocument();
+
+    await user.click(forbidden);
+    forbidden.focus();
+    await user.keyboard("{Enter}");
+
+    expect(onSelect).not.toHaveBeenCalled();
+    expect(onBlockedSelect).toHaveBeenCalledTimes(2);
+    expect(onBlockedSelect).toHaveBeenLastCalledWith(
+      "喰い替え禁止のため、この牌は打牌できません。",
+    );
+  });
+
+  it("リーチ宣言可能牌をDOM名・見た目の両方で強調する", () => {
+    render(
+      <Hand
+        tiles={tiles}
+        tileStates={[{ indicator: "リーチ可", highlighted: true }]}
+      />,
+    );
+    const eligible = screen.getByRole("option", { name: "一萬、リーチ可" });
+    expect(eligible).not.toHaveAttribute("aria-disabled");
+    expect(eligible).toHaveClass("ring-2");
+    expect(screen.getByText("リーチ可")).toBeInTheDocument();
+  });
 });

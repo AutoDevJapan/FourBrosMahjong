@@ -8,6 +8,7 @@
 import type { SeatPosition, SlotContent, TileData } from "./types";
 import BenchArea from "./BenchArea";
 import PlayerArea from "./PlayerArea";
+import type { HandTileState } from "./Hand";
 
 export interface PlayerSlotProps {
   /** 物理スロット位置。`self` のとき手牌を表向き+操作可能にする。 */
@@ -17,6 +18,8 @@ export interface PlayerSlotProps {
   compact?: boolean;
   /** 自家の打牌選択ハンドラ(UIイベントのみ)。 */
   onSelectTile?: (index: number, tile: TileData) => void;
+  handTileStates?: readonly HandTileState[];
+  onBlockedTile?: (message: string) => void;
 }
 
 export default function PlayerSlot({
@@ -24,6 +27,8 @@ export default function PlayerSlot({
   content,
   compact = false,
   onSelectTile,
+  handTileStates,
+  onBlockedTile,
 }: PlayerSlotProps) {
   if (content.kind === "bench") {
     return <BenchArea player={content.player} compact={compact} />;
@@ -34,6 +39,8 @@ export default function PlayerSlot({
       isSelf={position === "self"}
       compact={compact}
       onSelectTile={position === "self" ? onSelectTile : undefined}
+      handTileStates={position === "self" ? handTileStates : undefined}
+      onBlockedTile={position === "self" ? onBlockedTile : undefined}
     />
   );
 }
