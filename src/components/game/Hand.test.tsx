@@ -149,6 +149,23 @@ describe("Hand (roving tabindex listbox, spec 5.2.2)", () => {
     ).toHaveLength(1);
   });
 
+  it("打牌で手牌が更新されたら、旧indexの選択状態を別の牌へ引き継がない(#214)", async () => {
+    const user = userEvent.setup();
+    const { rerender } = render(<Hand tiles={tiles} />);
+
+    await user.click(screen.getAllByRole("option")[1]);
+    expect(screen.getAllByRole("option")[1]).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
+
+    // index 1 を打牌すると、旧 index 2 の牌が index 1 へ繰り上がる。
+    rerender(<Hand tiles={[tiles[0], tiles[2]]} />);
+
+    expect(screen.queryAllByRole("option", { selected: true })).toHaveLength(0);
+    expect(screen.getAllByRole("option")[1]).not.toHaveClass("-translate-y-1");
+  });
+
   it("閲覧専用では静的listとして表示し、選択・フォーカス操作を公開しない", () => {
     render(<Hand tiles={tiles} readOnly />);
 
