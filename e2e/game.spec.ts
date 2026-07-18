@@ -266,16 +266,11 @@ test.describe("対局画面(/game)", () => {
     await expect(
       page.getByRole("heading", { name: "和了内訳" }).first(),
     ).toBeVisible();
-    await expect(
-      page.getByText("表ドラ").filter({ visible: true }),
-    ).toBeVisible();
-    await expect(
-      page.getByText("裏ドラ").filter({ visible: true }),
-    ).toBeVisible();
-    await expect(page.getByText("赤5").filter({ visible: true })).toBeVisible();
-    await expect(
-      page.getByText("ガリ").filter({ visible: true }),
-    ).toBeVisible();
+    for (const label of ["表ドラ", "裏ドラ", "赤5", "ガリ"]) {
+      await expect(
+        page.getByText(label, { exact: true }).filter({ visible: true }),
+      ).toBeVisible();
+    }
     await expect(
       page.getByRole("list", { name: "支払い内訳" }).first(),
     ).toBeVisible();
