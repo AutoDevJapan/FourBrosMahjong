@@ -468,7 +468,9 @@ function thirteenOrphansYaku(): Yaku[] {
  */
 export function detectYaku(form: WinForm, input: YakuInput): Yaku[] {
   if (form.kind === "thirteenOrphans") {
-    return thirteenOrphansYaku();
+    // 国士無双も天和/地和とは複合する。特殊形だけ文脈役の集計を迂回すると
+    // 仕様上の「複数役満は倍数を合計」を満たせないため、両方を返す。
+    return applyNashiNashi([...contextYaku(input), ...thirteenOrphansYaku()]);
   }
 
   const raw: RawYaku[] = [...contextYaku(input), ...wholeHandYaku(input)];
