@@ -1,13 +1,8 @@
 import { render, screen, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
+import { walkToGameEnd } from "@/components/game/finishedGameFixture";
 import { GameProvider } from "@/components/game/GameProvider";
-import {
-  createGame,
-  discard,
-  type EngineState,
-  passRon,
-  proceedToNextRound,
-} from "@/domain/game/engine";
+import { createGame, type EngineState } from "@/domain/game/engine";
 import ResultPage from "./page";
 
 // App Router の useRouter を jsdom 用にスタブ。
@@ -17,20 +12,7 @@ vi.mock("next/navigation", () => ({
 
 /** 実エンジンで1半荘を完走させ、確定結果を持つ状態を返す(決定的)。 */
 function finishedGame(seed = 2024): EngineState {
-  let s = createGame({ seed });
-  for (let guard = 0; guard < 5000 && s.phase !== "gameEnd"; guard++) {
-    if (s.phase === "roundEnd") {
-      s = proceedToNextRound(s);
-      continue;
-    }
-    if (s.pending?.kind === "humanDiscard") {
-      const drawn = s.hand?.drawn;
-      s = drawn ? discard(s, drawn) : s;
-    } else if (s.pending?.kind === "humanReact") {
-      s = passRon(s);
-    }
-  }
-  return s;
+  return walkToGameEnd(seed).state;
 }
 
 describe("/game/result page (spec 6.2 / 6.6)", () => {

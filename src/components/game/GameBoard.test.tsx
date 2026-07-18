@@ -1,14 +1,48 @@
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, it, vi } from "vitest";
-import { createGame } from "@/domain/game/engine";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { createGame, type EngineState } from "@/domain/game/engine";
+import { tileLabel } from "../common/tileLabel";
+import { walkToGameEnd } from "./finishedGameFixture";
 import GameBoard, { pulledKitaCount } from "./GameBoard";
+import { type GameAction, replayJournal } from "./gamePersistence";
 import { GameProvider } from "./GameProvider";
 
-// App Router の useRouter を jsdom 用にスタブ(遷移は本テストの対象外)。
+// App Router の useRouter を jsdom 用にスタブ(push/replace の呼び分けを検証する)。
+const routerMock = vi.hoisted(() => ({ push: vi.fn(), replace: vi.fn() }));
 vi.mock("next/navigation", () => ({
-  useRouter: () => ({ push: vi.fn() }),
+  useRouter: () => routerMock,
 }));
+
+beforeEach(() => {
+  routerMock.push.mockClear();
+  routerMock.replace.mockClear();
+  // `newGame` は sessionStorage へ journal を書き込む。現状の各テストは journal を読み戻さない
+  // (常に initialGame を注入する)が、後続テストへの書き残しを避けるため毎回クリアする。
+  window.sessionStorage.clear();
+});
+
+/** 半荘を完走した終局(gameEnd)状態(seed 固定で決定的)。 */
+function finishedGame(seed = 2024): EngineState {
+  return walkToGameEnd(seed).state;
+}
+
+/** 終局の1手前の局面と、gameEnd へ遷移させる最終操作を返す。 */
+function gameBeforeEnd(seed = 2024): {
+  state: EngineState;
+  lastAction: GameAction;
+} {
+  const { journal } = walkToGameEnd(seed);
+  const lastAction = journal.actions[journal.actions.length - 1];
+  return {
+    // engine の遷移は内部状態を破壊的に更新するため、途中局面は journal の部分再生で新規構築する。
+    state: replayJournal({
+      ...journal,
+      actions: journal.actions.slice(0, -1),
+    }),
+    lastAction,
+  };
+}
 
 /**
  * 実対局エンジン(seed 固定 = 決定的)で盤面を描画する。
@@ -152,5 +186,70 @@ describe("GameBoard (spec 6.6 client island / engine-driven)", () => {
     // Escape でフォーカストラップ付きモーダルを閉じられる(5.2.2)。
     await user.keyboard("{Escape}");
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  });
+});
+
+describe("GameBoard 終局後の出口(#206 / #207)", () => {
+  it("対局中に gameEnd へ遷移した瞬間だけ router.replace で結果画面へ自動遷移する", async () => {
+    const user = userEvent.setup();
+    const { state, lastAction } = gameBeforeEnd();
+    render(
+      <GameProvider initialGame={state}>
+        <GameBoard />
+      </GameProvider>,
+    );
+    expect(routerMock.replace).not.toHaveBeenCalled();
+
+    // 記録済みの最終操作を UI から実行して gameEnd へ遷移させる。gameEnd は打牌/スルーの
+    // 決着処理からのみ到達する(`proceedToNextRound` は gameEnd を返さない)ため、この2択で足りる。
+    if (lastAction.type === "discard") {
+      await user.click(
+        screen.getAllByRole("option", { name: tileLabel(lastAction.tile) })[0],
+      );
+    } else if (lastAction.type === "passRon") {
+      await user.click(screen.getAllByRole("button", { name: "スルー" })[0]);
+    } else {
+      throw new Error(`最終操作を UI から実行できない: ${lastAction.type}`);
+    }
+
+    // 自動遷移は replace(履歴を汚さない)。push は使わない(#206)。
+    expect(routerMock.replace).toHaveBeenCalledWith("/game/result");
+    expect(routerMock.replace).toHaveBeenCalledTimes(1);
+    expect(routerMock.push).not.toHaveBeenCalled();
+    // 自動遷移が予約されている間は出口パネルを描かず、遷移案内のみ表示する(明滅防止)。
+    expect(
+      screen.queryByRole("button", { name: "新しい半荘を開始" }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.getAllByText("半荘終了。結果画面へ移動します。").length,
+    ).toBeGreaterThan(0);
+  });
+
+  it("終局済み状態でマウントされた場合は自動遷移せず、結果を見る/新しい半荘を開始の出口を提示する", async () => {
+    const user = userEvent.setup();
+    render(
+      <GameProvider initialGame={finishedGame()}>
+        <GameBoard />
+      </GameProvider>,
+    );
+
+    // 終局 journal の復元・結果画面からのブラウザバック相当(マウント時点で gameEnd)では
+    // 強制リダイレクトしない(#207: ロビー「対局を開始」で /game に留まれる)。
+    expect(routerMock.replace).not.toHaveBeenCalled();
+    expect(routerMock.push).not.toHaveBeenCalled();
+
+    // 「結果を見る」はユーザー操作としての push 遷移。
+    await user.click(screen.getAllByRole("button", { name: "結果を見る" })[0]);
+    expect(routerMock.push).toHaveBeenCalledWith("/game/result");
+
+    // 「新しい半荘を開始」で新規半荘が始まり、打牌待ちの操作パネルへ戻る。
+    await user.click(
+      screen.getAllByRole("button", { name: "新しい半荘を開始" })[0],
+    );
+    expect(
+      screen.getAllByRole("button", { name: "ツモ" }).length,
+    ).toBeGreaterThan(0);
+    // 新規半荘の開始(gameEnd → playing)でも自動遷移は発火しない。
+    expect(routerMock.replace).not.toHaveBeenCalled();
   });
 });
