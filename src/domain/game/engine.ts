@@ -563,6 +563,7 @@ function beginRound(state: EngineState): EngineState {
     passedRonSeats: [],
     ponnedKind: null,
   };
+  autoPullDealtNorths(hand);
   const next: EngineState = {
     ...state,
     hand,
@@ -589,6 +590,24 @@ function autoPullNorth(hand: HandState, seat: SeatKey, tile: Tile): Tile {
     }
   }
   return current;
+}
+
+/**
+ * 配牌に含まれる北をガリとして抜き、抜いた枚数ぶん嶺上牌で13枚へ補充する。
+ * 補充牌も北なら {@link autoPullNorth} が連続して抜くため、手牌に北を残さない。
+ */
+function autoPullDealtNorths(hand: HandState): void {
+  for (const seat of SEATS) {
+    const concealed: Tile[] = [];
+    for (const tile of hand.hands[seat]) {
+      if (tile.suit === "honor" && tile.rank === HONOR.NORTH) {
+        concealed.push(autoPullNorth(hand, seat, tile));
+      } else {
+        concealed.push(tile);
+      }
+    }
+    hand.hands[seat] = concealed;
+  }
 }
 
 /** カン後の嶺上補充(北抜きも自動処理)。`drawn` と `fromKan` を更新する。 */

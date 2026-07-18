@@ -142,7 +142,7 @@ describe("engine: AIのリーチ・鳴き・カン(#169)", () => {
     observeAiActions(1, ["riichi", "pon", "kakan"]);
   });
 
-  it("seed=3でAIが大明槓・暗槓し、牌保存則を維持する", () => {
-    observeAiActions(3, ["daiminkan", "ankan"]);
+  it("seed=7でAIが大明槓・暗槓し、牌保存則を維持する", () => {
+    observeAiActions(7, ["daiminkan", "ankan"]);
   });
 });

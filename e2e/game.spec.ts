@@ -195,32 +195,34 @@ test.describe("対局画面(/game)", () => {
     await expect(actionPanel.getByRole("button").first()).toBeVisible();
   });
 
-  test("決定的seedの抜き北を公開し、320pxと全体盤面でもガリ枚数を確認できる(#171)", async ({
+  test("配牌北とツモ北を公開し、320pxと全体盤面でもガリ枚数を確認できる(#171/#178)", async ({
     page,
   }) => {
     await page.setViewportSize({ width: 700, height: 900 });
     await page.goto("/game?seed=1");
 
     const self = page.getByRole("region", { name: "あなた(東家)" });
-    await expect(self.getByTestId("kita-display")).toContainText("ガリ1");
+    await expect(self.getByTestId("kita-display")).toContainText("ガリ2");
     await expect(
       self.getByTestId("kita-display").locator('[data-face="Pei"]'),
-    ).toHaveCount(1);
+    ).toHaveCount(2);
     await expect(
       page
         .locator('[aria-live="polite"]')
-        .filter({ hasText: "北を抜きました" }),
-    ).toHaveText("北を抜きました。嶺上牌を補充しました。ガリは合計1枚です。");
+        .filter({ hasText: "北を2枚抜きました" }),
+    ).toHaveText(
+      "北を2枚抜きました。嶺上牌を補充しました。ガリは合計2枚です。",
+    );
 
     await page.setViewportSize({ width: 320, height: 800 });
-    await expect(self.getByTestId("kita-display")).toContainText("ガリ1");
+    await expect(self.getByTestId("kita-display")).toContainText("ガリ2");
     await page.getByRole("button", { name: "全体盤面" }).click();
     const dialog = page.getByRole("dialog", { name: "全体盤面" });
     await expect(
       dialog
         .getByRole("region", { name: "あなた(東家)" })
         .getByTestId("kita-display"),
-    ).toContainText("ガリ1");
+    ).toContainText("ガリ2");
   });
 
   test("サイコロ根拠と和了時の役・ドラ・支払い内訳を確認できる(#170)", async ({
