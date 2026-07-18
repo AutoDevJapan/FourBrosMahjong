@@ -63,9 +63,8 @@ test.describe("トップページ(ロビー)", () => {
     await expect(
       page.getByRole("heading", { level: 1, name: "ルール説明" }),
     ).toBeVisible();
-    await expect(
-      page.getByText("配給原点・返し", { exact: true }),
-    ).toBeVisible();
+    // ラベルは「配給原点・返し: 」のようにコロン+空白を伴って描画されるため部分一致で確認する。
+    await expect(page.getByText("配給原点・返し").first()).toBeVisible();
     await expect(
       page.getByText(/1人35,000点持ち\(4人合計140,000点\)、40,000点返し/),
     ).toBeVisible();
