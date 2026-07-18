@@ -22,6 +22,7 @@ describe("RulesPage (/rules)", () => {
     expect(screen.getAllByText(/オール赤5/).length).toBeGreaterThan(0);
     expect(screen.getAllByText(/ガリ\(北抜きドラ\)/).length).toBeGreaterThan(0);
     expect(screen.getAllByText(/サイコロ連動/).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/四槓散了/).length).toBeGreaterThan(0);
   });
 
   it("折りたたみセクションを details/summary で提供する", () => {

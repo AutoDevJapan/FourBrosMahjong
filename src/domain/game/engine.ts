@@ -629,6 +629,35 @@ function drawKanReplacement(hand: HandState, seat: SeatKey): void {
 }
 
 /**
+ * 複数家にまたがる4組目のカンを四槓散了として途中流局にする。
+ * 1人だけの4槓は四槓子の和了機会を残すため継続する。
+ * 呼び出し側は槍槓判定を先に完了し、槓子を状態へ反映した直後に本関数を呼ぶ。
+ */
+function settleFourKanAbortiveDraw(state: EngineState): EngineState | null {
+  const hand = state.hand;
+  if (hand === null) return null;
+  const owners = SEATS.filter((seat) =>
+    hand.melds[seat].some((meld) => meld.type === "kan"),
+  );
+  const kanCount = SEATS.reduce(
+    (total, seat) =>
+      total + hand.melds[seat].filter((meld) => meld.type === "kan").length,
+    0,
+  );
+  if (kanCount < 4 || owners.length < 2) return null;
+
+  const deltas = Object.fromEntries(ALL_IDS.map((id) => [id, 0])) as Record<
+    PlayerId,
+    number
+  >;
+  return finishRound(state, {
+    outcome: "dealerContinues",
+    isDraw: true,
+    summary: { kind: "draw", label: "四槓散了", deltas },
+  });
+}
+
+/**
  * AI 手番の打牌を手牌効率(向聴・受け入れ)ベースで選ぶ(#98)。
  * 他家の河から現物(危険牌回避)、表ドラ+赤5から打点温存を加味する。
  * 和了牌の温存は考えない(和了は本関数の前段でツモ宣言済み)。
@@ -723,6 +752,8 @@ function applyAiAnkan(
   ];
   clearAllIppatsu(hand);
   hand.callsMade = true;
+  const abortiveDraw = settleFourKanAbortiveDraw(state);
+  if (abortiveDraw !== null) return abortiveDraw;
   drawKanReplacement(hand, seat);
   return state;
 }
@@ -768,6 +799,8 @@ function applyAiKakan(
   );
   clearAllIppatsu(hand);
   hand.callsMade = true;
+  const abortiveDraw = settleFourKanAbortiveDraw(state);
+  if (abortiveDraw !== null) return abortiveDraw;
   drawKanReplacement(hand, seat);
   return state;
 }
@@ -802,6 +835,8 @@ function applyAiCall(
   hand.fromKan = false;
   hand.turn = caller;
   if (kan) {
+    const abortiveDraw = settleFourKanAbortiveDraw(state);
+    if (abortiveDraw !== null) return abortiveDraw;
     drawKanReplacement(hand, caller);
     return state;
   }
@@ -1840,6 +1875,8 @@ export function declareKan(state: EngineState): EngineState {
   hand.pendingDiscard = null;
   hand.passedRonSeats = [];
   hand.turn = seat;
+  const abortiveDraw = settleFourKanAbortiveDraw(state);
+  if (abortiveDraw !== null) return abortiveDraw;
   drawKanReplacement(hand, seat); // 嶺上ツモ
   return { ...state, pending: buildHumanPending(state, seat) };
 }
@@ -1898,6 +1935,8 @@ export function declareAnkan(state: EngineState, tile: Tile): EngineState {
   ];
   clearAllIppatsu(hand);
   hand.callsMade = true;
+  const abortiveDraw = settleFourKanAbortiveDraw(state);
+  if (abortiveDraw !== null) return abortiveDraw;
   drawKanReplacement(hand, seat); // 嶺上ツモ
   // リーチ中の暗槓(Q18・#116)は打牌の自由が無いため、pump に委ねて嶺上ツモ和了 /
   // 連続暗槓 / 自動ツモ切りを解決する(通常の打牌待ちに戻さない)。
@@ -1963,6 +2002,8 @@ export function declareKakan(state: EngineState, tile: Tile): EngineState {
   );
   clearAllIppatsu(hand);
   hand.callsMade = true;
+  const abortiveDraw = settleFourKanAbortiveDraw(state);
+  if (abortiveDraw !== null) return abortiveDraw;
   drawKanReplacement(hand, seat); // 嶺上ツモ
   return { ...state, pending: buildHumanPending(state, seat) };
 }
