@@ -160,6 +160,8 @@ export function selectView(engine: EngineState): GameViewState {
     handNumber: engine.round.roundNumber,
     honba: engine.round.honba,
     riichiSticks: engine.riichiSticks,
+    dice: engine.hand?.dice ?? [1, 2],
+    doraCount: engine.hand?.doraSet.count ?? 0,
   };
 
   // 裏ドラはリーチ和了の局終了時のみ開示する(スペック2 2.2)。

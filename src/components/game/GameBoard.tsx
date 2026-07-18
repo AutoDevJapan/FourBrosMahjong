@@ -35,6 +35,7 @@ import LiveRegion from "./LiveRegion";
 import PlayerSlot from "./PlayerSlot";
 import Table from "./Table";
 import type { SeatPosition, TileData } from "./types";
+import WinDetails from "./WinDetails";
 
 /** 外部ストア購読なしのダミー(クライアント判定にのみ使う)。 */
 const noopSubscribe = () => () => {};
@@ -350,12 +351,15 @@ export default function GameBoard() {
         </div>
         {withActions ? (
           <div className="col-span-3 col-start-1 row-start-4">
+            {phase === "roundEnd" && roundSummary ? (
+              <WinDetails summary={roundSummary} />
+            ) : null}
             <ActionPanel actions={actions} hint={hint} />
           </div>
         ) : null}
       </div>
     ),
-    [renderSlot, tableInfo, dora, actions, hint],
+    [renderSlot, tableInfo, dora, actions, hint, phase, roundSummary],
   );
 
   if (!mounted) {
@@ -374,6 +378,7 @@ export default function GameBoard() {
       className="@container w-full"
       data-phase={phase}
       data-pending={pending?.kind ?? "none"}
+      data-round-kind={roundSummary?.kind ?? "none"}
     >
       {/*
        * 盤面本体(段階①/段階②)。いずれか一方だけがコンテナクエリの display:none で
@@ -410,6 +415,9 @@ export default function GameBoard() {
             {renderSlot("right", true)}
           </div>
           {renderSlot("self", false, handleSelectTile)}
+          {phase === "roundEnd" && roundSummary ? (
+            <WinDetails summary={roundSummary} />
+          ) : null}
           <ActionPanel actions={actions} hint={hint} />
         </div>
       </div>

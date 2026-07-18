@@ -1,7 +1,7 @@
+import { describe, expect, it } from "vitest";
 import { resolveDora } from "@/domain/dora/doraSet";
 import { sameKind } from "@/domain/hand/tile-identity";
 import { HONOR, type Suit, type Tile } from "@/domain/tiles/tile";
-import { describe, expect, it } from "vitest";
 import {
   canAnkanAfterRiichi,
   createGame,
@@ -278,8 +278,12 @@ describe("declareAnkan: リーチ後暗槓の結線(Q18 / #116)", () => {
     expect(setup).not.toBeNull();
     if (setup === null) return;
     const { state, ankanTile } = setup;
+    const stateWithHonba = {
+      ...state,
+      round: { ...state.round, honba: 2 },
+    };
 
-    const s1 = declareAnkan(state, ankanTile);
+    const s1 = declareAnkan(stateWithHonba, ankanTile);
     // 嶺上ツモが和了牌 → 嶺上開花+リーチでツモ和了が提示される。
     expect(s1.pending?.kind).toBe("humanDiscard");
     if (s1.pending?.kind !== "humanDiscard") return;
@@ -290,6 +294,23 @@ describe("declareAnkan: リーチ後暗槓の結線(Q18 / #116)", () => {
     expect(s2.lastRound?.kind).toBe("win");
     expect(s2.lastRound?.winnerId).toBe("p0");
     expect(s2.lastRound?.riichiWin).toBe(true);
+    const detail = s2.lastRound?.winDetails;
+    expect(detail).toBeDefined();
+    expect(detail?.yaku.map((yaku) => yaku.name)).toContain("嶺上開花");
+    expect(detail?.dora.total).toBe(
+      (detail?.dora.omote ?? 0) +
+        (detail?.dora.ura ?? 0) +
+        (detail?.dora.aka ?? 0) +
+        (detail?.dora.gari ?? 0),
+    );
+    expect(detail?.totalHan).toBe(
+      (detail?.yakuHan ?? 0) + (detail?.dora.total ?? 0),
+    );
+    expect(detail?.payments.length).toBeGreaterThan(0);
+    expect(detail?.honba).toBe(2);
+    expect(
+      detail?.payments.reduce((sum, payment) => sum + payment.amount, 0),
+    ).toBe((s2.lastRound?.deltas.p0 ?? 0) - (detail?.stickPayout ?? 0));
   });
 
   it("送り槓(合法暗槓でない牌)の暗槓要求は no-op で拒否する", () => {

@@ -206,6 +206,34 @@ export interface RoundSummary {
   readonly winnerId?: PlayerId;
   /** リーチ和了か(裏ドラ開示の判定に使う)。 */
   readonly riichiWin?: boolean;
+  /** 和了時点で固定した、GUI検算用の表示スナップショット。 */
+  readonly winDetails?: {
+    readonly winType: "tsumo" | "ron";
+    readonly dealer: boolean;
+    readonly yaku: readonly {
+      readonly name: string;
+      readonly han: number;
+      readonly yakuman: number;
+    }[];
+    readonly yakuHan: number;
+    readonly dora: {
+      readonly omote: number;
+      readonly ura: number;
+      readonly aka: number;
+      readonly gari: number;
+      readonly total: number;
+    };
+    readonly totalHan: number;
+    readonly yakuman: number;
+    readonly category: string;
+    readonly honba: number;
+    readonly riichiSticks: number;
+    readonly payments: readonly {
+      readonly name: string;
+      readonly amount: number;
+    }[];
+    readonly stickPayout: number;
+  };
 }
 
 /** 期待する入力(自家の意思決定点)。playing 中のみ非 null。 */
@@ -1124,7 +1152,36 @@ function settleWin(state: EngineState, win: WinInput): EngineState {
     {
       outcome,
       isDraw: false,
-      summary: { kind: "win", label, deltas, winnerId, riichiWin: isRiichiWin },
+      summary: {
+        kind: "win",
+        label,
+        deltas,
+        winnerId,
+        riichiWin: isRiichiWin,
+        winDetails: {
+          winType,
+          dealer: isDealerWin,
+          yaku: analysis.yaku.map(({ name, han, yakuman }) => ({
+            name,
+            han,
+            yakuman,
+          })),
+          yakuHan: analysis.han,
+          dora: doraBreak,
+          totalHan: analysis.han + doraBreak.total,
+          yakuman: analysis.yakuman,
+          category: score.category,
+          honba: state.round.honba,
+          riichiSticks: state.riichiSticks,
+          payments: Object.entries(payment.deltas)
+            .filter(([, delta]) => delta < 0)
+            .map(([id, delta]) => ({
+              name: nameOf(state, id as PlayerId),
+              amount: -delta,
+            })),
+          stickPayout: payment.stickPayout,
+        },
+      },
     },
   );
 }
