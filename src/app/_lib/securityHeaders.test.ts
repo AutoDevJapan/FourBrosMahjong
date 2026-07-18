@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   contentSecurityPolicy,
   STATIC_SECURITY_HEADERS,
+  SVG_CONTENT_SECURITY_POLICY,
 } from "./securityHeaders";
 
 describe("contentSecurityPolicy", () => {
@@ -37,5 +38,13 @@ describe("static security headers", () => {
     expect(STATIC_SECURITY_HEADERS["Permissions-Policy"]).toContain(
       "camera=()",
     );
+  });
+
+  it("直接開かれたSVG documentの能動的な機能を無効化する", () => {
+    expect(SVG_CONTENT_SECURITY_POLICY).toContain("default-src 'none'");
+    expect(SVG_CONTENT_SECURITY_POLICY).toContain("style-src 'unsafe-inline'");
+    expect(SVG_CONTENT_SECURITY_POLICY).toContain("frame-ancestors 'none'");
+    expect(SVG_CONTENT_SECURITY_POLICY).toContain("sandbox");
+    expect(SVG_CONTENT_SECURITY_POLICY).not.toContain("nonce-");
   });
 });

@@ -11,6 +11,22 @@ export const STATIC_SECURITY_HEADERS = {
 } as const;
 
 /**
+ * SVG is inert when embedded as an image, but becomes an active document when
+ * opened directly. Keep this policy stable so public SVG assets remain
+ * cacheable instead of sending them through the per-request nonce proxy.
+ * Inline styles are required by the bundled tile artwork.
+ */
+export const SVG_CONTENT_SECURITY_POLICY = [
+  "default-src 'none'",
+  "style-src 'unsafe-inline'",
+  "object-src 'none'",
+  "base-uri 'none'",
+  "form-action 'none'",
+  "frame-ancestors 'none'",
+  "sandbox",
+].join("; ");
+
+/**
  * Create a per-response CSP. The nonce makes the small theme bootstrap and
  * Next.js' own inline runtime scripts executable without allowing arbitrary
  * inline JavaScript. `strict-dynamic` lets those trusted runtime scripts load
