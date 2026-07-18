@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono, Noto_Sans_JP } from "next/font/google";
+import { headers } from "next/headers";
 import { ThemeStorageSync } from "@/components/layout/ThemeStorageSync";
 import {
   DEFAULT_DESCRIPTION,
@@ -59,11 +60,15 @@ export const metadata: Metadata = {
  */
 const themeInitScript = `(function(){try{var t=localStorage.getItem("theme");if(t==="light"||t==="dark"){document.documentElement.setAttribute("data-theme",t);}}catch(e){}})();`;
 
-export default function RootLayout({
+export default async function RootLayout({
   children,
 }: Readonly<{
   children: React.ReactNode;
 }>) {
+  // src/proxy.ts generates this nonce and also puts it in the CSP request
+  // header, which makes Next.js apply the same nonce to its framework scripts.
+  const nonce = (await headers()).get("x-nonce") ?? undefined;
+
   return (
     // フォント変数(--font-geist-sans / --font-geist-mono / --font-noto-sans-jp)は
     // <html> に付与する。Tailwind v4 が @theme の --font-sans から導出する
@@ -75,7 +80,13 @@ export default function RootLayout({
       suppressHydrationWarning
     >
       <head>
-        <script dangerouslySetInnerHTML={{ __html: themeInitScript }} />
+        <script
+          nonce={nonce}
+          // Browsers deliberately hide nonce values from DOM attribute reads;
+          // React therefore observes an empty client value during hydration.
+          suppressHydrationWarning
+          dangerouslySetInnerHTML={{ __html: themeInitScript }}
+        />
       </head>
       <body className="antialiased">
         <ThemeStorageSync />
