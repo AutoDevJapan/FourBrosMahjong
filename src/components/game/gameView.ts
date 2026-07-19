@@ -82,23 +82,26 @@ function buildSlotContent(engine: EngineState, id: PlayerId): SlotContent {
     : seatingOf(engine.round);
   const seat = seatOfPlayer(seating, id);
 
+  // 半荘を終える局は roundEnd を経由せず gameEnd へ直行する(engine spec 2.8)ため、
+  // 最終局の点数増減(±デルタ)は gameEnd でも表示する(#277)。gameEnd の残存供託
+  // 畳み込み(#282)は抜け番にも及び得るため、着席・抜け番の両方で写像する。
+  const showDelta =
+    (engine.phase === "roundEnd" || engine.phase === "gameEnd") &&
+    engine.lastRound
+      ? engine.lastRound.deltas[id]
+      : 0;
+
   if (seat === null) {
     const bench: BenchPlayerView = {
       name: nameOf(engine, id),
       points: engine.points[id],
+      ...(showDelta !== 0 ? { pointsDelta: showDelta } : {}),
     };
     return { kind: "bench", player: bench };
   }
 
   const isSelf = id === HUMAN_ID;
   const isTurn = engine.phase === "playing" && hand?.turn === seat;
-  // 半荘を終える局は roundEnd を経由せず gameEnd へ直行する(engine spec 2.8)ため、
-  // 最終局の点数増減(±デルタ)は gameEnd でも表示する(#277)。
-  const showDelta =
-    (engine.phase === "roundEnd" || engine.phase === "gameEnd") &&
-    engine.lastRound
-      ? engine.lastRound.deltas[id]
-      : 0;
   const melds = hand
     ? hand.melds[seat].map((m) => ({
         type: m.type,

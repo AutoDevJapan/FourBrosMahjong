@@ -189,6 +189,99 @@ describe("engine 残存供託リーチ棒の帰属(Q15 = 1位取得 / #130・Q20
     expect(soshiiSum(end)).toBe(0);
   });
 
+  it("残存供託は最終局デルタへ畳み込まれ、帰属記録つきで三者一貫の検算が成立する(#282)", () => {
+    // 実際の流局決着に近い形: ノーテン罰符(テンパイ1人 = p3 が +3,000、ノーテン2人が
+    // −1,500ずつ)を deltas に持つサマリで南4流局終了。供託2本が場に残存し、
+    // 単独最高の p0 が取得する。
+    const roundDeltas: Record<PlayerId, number> = {
+      p0: -1500,
+      p1: -1500,
+      p2: 0, // 抜け番
+      p3: 3000,
+    };
+    // 局開始時点の持ち点(sum = 138,000 = 140,000 − 供託2本)。
+    const startPoints: Record<PlayerId, number> = {
+      p0: 51500,
+      p1: 41500,
+      p2: 25000,
+      p3: 20000,
+    };
+    // finishRound へ渡すのは局精算後の持ち点。
+    const points = Object.fromEntries(
+      ORDER.map((id) => [id, startPoints[id] + roundDeltas[id]]),
+    ) as Record<PlayerId, number>;
+    const conclusion: RoundConclusion = {
+      outcome: "dealerPasses",
+      isDraw: true,
+      summary: {
+        kind: "draw",
+        label: "流局(テンパイ1人)",
+        deltas: roundDeltas,
+      },
+    };
+    const end = finishRound(endGameStateWith(points, 2), conclusion);
+
+    expect(end.phase).toBe("gameEnd");
+    // (a) 供託カウントは 0(場から下りた)。
+    expect(end.riichiSticks).toBe(0);
+    // (b) 受取者のデルタに残存供託が畳み込まれる(−1,500 + 2,000 = +500)。
+    expect(end.lastRound?.deltas.p0).toBe(-1500 + 2000);
+    // 受取者以外のデルタは局の移動のまま。
+    expect(end.lastRound?.deltas.p1).toBe(-1500);
+    expect(end.lastRound?.deltas.p2).toBe(0);
+    expect(end.lastRound?.deltas.p3).toBe(3000);
+    // (c) 三者一貫: 局開始持ち点 + 表示デルタ = 表示持ち点 が全員で成立する。
+    for (const id of ORDER) {
+      expect(startPoints[id] + (end.lastRound?.deltas[id] ?? 0)).toBe(
+        end.points[id],
+      );
+    }
+    // 帰属記録(表示・検算用スナップショット)。
+    expect(end.lastRound?.residualSticks).toEqual({
+      recipientId: "p0",
+      recipientName: "あなた",
+      sticks: 2,
+      points: 2000,
+    });
+    // デルタ総和 = 残存供託ぶんだけ正(場の供託 2本 → 0本 と相殺し卓全体では不変)。
+    const deltaSum = ORDER.reduce(
+      (a, id) => a + (end.lastRound?.deltas[id] ?? 0),
+      0,
+    );
+    expect(deltaSum).toBe(2000);
+    expect(soshiiSum(end)).toBe(0);
+  });
+
+  it("供託が残存しなければ最終局デルタは不変で帰属記録も付かない(#282)", () => {
+    const points: Record<PlayerId, number> = {
+      p0: 50000,
+      p1: 40000,
+      p2: 30000,
+      p3: 20000,
+    };
+    const end = finishRound(endGameStateWith(points, 0), OORASU_DRAW);
+
+    expect(end.phase).toBe("gameEnd");
+    expect(end.lastRound?.deltas).toEqual({ p0: 0, p1: 0, p2: 0, p3: 0 });
+    expect(end.lastRound?.residualSticks).toBeUndefined();
+  });
+
+  it("残存供託が抜け番へ帰属した場合もデルタへ畳み込まれる(#282 × Q19)", () => {
+    // 南4 の抜け番 = p2 が単独最高 → 残存供託3本(3,000点)を取得。
+    const points: Record<PlayerId, number> = {
+      p0: 30000,
+      p1: 28000,
+      p2: 52000,
+      p3: 27000,
+    };
+    const end = finishRound(endGameStateWith(points, 3), OORASU_DRAW);
+
+    expect(end.lastRound?.deltas.p2).toBe(3000);
+    expect(end.lastRound?.residualSticks?.recipientId).toBe("p2");
+    expect(end.lastRound?.residualSticks?.sticks).toBe(3);
+    expect(end.points.p2).toBe(52000 + 3000);
+  });
+
   it("抜け番(南4=p2)を含む同点最高でも席順で裁定する(Q19 比較 × Q20 帰属)", () => {
     // 南4 の抜け番 = p2。着席 p1 と抜け番 p2 が最高点タイ → 抜け番も比較対象(Q19)だが、
     // 席順(order 上で p1 が p2 より上位)で最上位の p1 が総取りする。

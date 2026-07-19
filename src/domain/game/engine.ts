@@ -210,6 +210,21 @@ export interface RoundSummary {
   readonly winnerId?: PlayerId;
   /** リーチ和了か(裏ドラ開示の判定に使う)。 */
   readonly riichiWin?: boolean;
+  /**
+   * 半荘終了時に場へ残った供託リーチ棒の帰属記録(#282)。流局(トビ流局含む)で半荘が
+   * 終わり供託が残存したときのみ `endGame` が設定する。残存分は `deltas[recipientId]` へ
+   * 畳み込み済み(和了時の `stickPayout` と同じく供託は複数局分でも受取者のデルタに含める)
+   * のため、本フィールドはその内訳(誰が何本・何点を取得したか)の表示・検算用スナップショット。
+   */
+  readonly residualSticks?: {
+    /** 帰属先(Q15 = 最終持ち点最高 / Q20 = 同点最高は席順上位)。 */
+    readonly recipientId: PlayerId;
+    readonly recipientName: string;
+    /** 残存本数。 */
+    readonly sticks: number;
+    /** 加算点(= sticks × 1,000)。 */
+    readonly points: number;
+  };
   /** 和了時点で固定した、GUI検算用の表示スナップショット。 */
   readonly winDetails?: {
     readonly winType: "tsumo" | "ron";
@@ -1787,10 +1802,30 @@ function endGame(state: EngineState): EngineState {
   const residual = state.riichiSticks * RIICHI_STICK_POINTS;
   const points: Record<PlayerId, number> = { ...state.points };
   let riichiSticks = state.riichiSticks;
+  let lastRound = state.lastRound;
   if (residual > 0) {
     const recipient = residualRiichiRecipient(state.order, points);
     points[recipient] += residual;
     riichiSticks = 0; // 供託を素点へ移し、場から下ろす。
+    // gameEnd の決着表示は「局開始持ち点 + 表示デルタ = 表示持ち点」「供託カウント 0 と整合」
+    // を保つ必要がある(#282)。和了決着では複数局分の供託回収(`stickPayout`)が和了者の
+    // デルタに含まれるのと同じ扱いで、残存供託の受取も最終局デルタへ畳み込み、内訳を
+    // `residualSticks` に記録して hint 表示・事後検算を可能にする。
+    if (lastRound !== null) {
+      lastRound = {
+        ...lastRound,
+        deltas: {
+          ...lastRound.deltas,
+          [recipient]: lastRound.deltas[recipient] + residual,
+        },
+        residualSticks: {
+          recipientId: recipient,
+          recipientName: nameOf(state, recipient),
+          sticks: state.riichiSticks,
+          points: residual,
+        },
+      };
+    }
   }
 
   const finalPoints = ALL_IDS.map((id) => ({
@@ -1819,6 +1854,7 @@ function endGame(state: EngineState): EngineState {
     ...state,
     points,
     riichiSticks,
+    lastRound,
     phase: "gameEnd",
     pending: null,
     result,

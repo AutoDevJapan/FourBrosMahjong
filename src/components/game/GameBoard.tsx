@@ -26,6 +26,7 @@ import {
   useState,
   useSyncExternalStore,
 } from "react";
+import type { RoundSummary } from "@/domain/game/engine";
 import Modal from "../common/Modal";
 import { tileLabel } from "../common/tileLabel";
 import ActionPanel, { type ActionItem } from "./ActionPanel";
@@ -52,6 +53,19 @@ export function pulledKitaCount(
   count: number,
 ): number {
   return count - (previous.roundKey === roundKey ? previous.count : 0);
+}
+
+/**
+ * 半荘終了時の残存供託の帰属を告げる一文(#282)。流局で半荘が終わり供託が残存した場合、
+ * その配分は和了内訳(`WinDetails`)に現れないため、hint / 読み上げで唯一の可視サマリになる。
+ * 残存がなければ空文字。
+ */
+export function residualSticksNote(
+  summary: Pick<RoundSummary, "residualSticks"> | null,
+): string {
+  const award = summary?.residualSticks;
+  if (!award) return "";
+  return `残存供託${award.sticks}本（${award.points.toLocaleString("ja-JP")}点）は${award.recipientName}が取得。`;
 }
 
 export default function GameBoard() {
@@ -333,8 +347,9 @@ export default function GameBoard() {
     if (phase === "gameEnd") {
       // 最終局の決着ラベル(流局サマリ含む)も併記する。和了決着の詳細は WinDetails が描く
       // が、流局で終わる半荘(南4流局完了・トビ流局)はこのラベルが唯一の可視サマリになる(#277)。
+      // 残存供託の帰属(#282)も併記し、供託カウント0・持ち点・デルタの整合を検算可能にする。
       const label = roundSummary ? `${roundSummary.label}。` : "";
-      return `${label}半荘終了。結果を確認するか、新しい半荘を開始できます。`;
+      return `${label}${residualSticksNote(roundSummary)}半荘終了。結果を確認するか、新しい半荘を開始できます。`;
     }
     if (pending?.kind === "humanReact") {
       // 槍槓応答(#208): 他家の槓宣言への横取りロン機会であることを明示する。
@@ -377,8 +392,9 @@ export default function GameBoard() {
     if (phase === "gameEnd") {
       // 自動遷移を廃止した(#277)後は /game に留まるため、通常の局終了(「次の局へ」)と
       // 半荘終了(「結果を見る」)を読み上げで区別できるよう「半荘終了」を明示する。
+      // 残存供託の帰属(#282)も読み上げに含める(視覚の hint と同一情報)。
       const label = roundSummary ? `${roundSummary.label}。` : "";
-      return `${label}半荘終了。`;
+      return `${label}${residualSticksNote(roundSummary)}半荘終了。`;
     }
     return "";
   }, [phase, roundSummary]);

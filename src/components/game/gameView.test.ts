@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { createGame } from "@/domain/game/engine";
+import {
+  createGame,
+  finishRound,
+  type PlayerId,
+  type RoundConclusion,
+  seatOfPlayer,
+} from "@/domain/game/engine";
 import { walkToGameEnd } from "./finishedGameFixture";
 import { selectView } from "./gameView";
 
@@ -16,6 +22,51 @@ describe("selectView pointsDelta projection(#277)", () => {
     if (self.kind === "seated") {
       expect(self.player.pointsDelta).toBe(state.lastRound?.deltas.p0);
       expect(self.player.pointsDelta).toBeLessThan(0);
+    }
+  });
+
+  it("gameEnd の残存供託が抜け番へ帰属したら抜け番スロットにも点差を写像する(#282)", () => {
+    // 流局で半荘が終わり供託が残存 → 単独最高の抜け番が取得(Q15 × Q19)。
+    // 抜け番の持ち点は局中不変だが、gameEnd の残存供託畳み込みで点差が生じ得る。
+    const base = createGame({ seed: 130 });
+    if (base.hand === null) throw new Error("hand must exist");
+    const seating = base.hand.seating;
+    const benchId = base.order.find(
+      (id) => seatOfPlayer(seating, id) === null,
+    ) as PlayerId;
+
+    // 抜け番を単独最高にし、供託2本を場に残して南4親流れ流局 → gameEnd。
+    const points = { p0: 25000, p1: 30000, p2: 31000, p3: 27000 };
+    points[benchId] = 52000;
+    const conclusion: RoundConclusion = {
+      outcome: "dealerPasses",
+      isDraw: true,
+      summary: {
+        kind: "draw",
+        label: "流局(テンパイ0人)",
+        deltas: { p0: 0, p1: 0, p2: 0, p3: 0 },
+      },
+    };
+    const end = finishRound(
+      {
+        ...base,
+        round: { ...base.round, wind: "south", roundNumber: 4 },
+        points,
+        riichiSticks: 2,
+      },
+      conclusion,
+    );
+    expect(end.phase).toBe("gameEnd");
+    expect(end.lastRound?.residualSticks?.recipientId).toBe(benchId);
+
+    const view = selectView(end);
+    const benchSlot = Object.values(view.slots).find(
+      (slot) => slot.kind === "bench",
+    );
+    expect(benchSlot).toBeDefined();
+    if (benchSlot?.kind === "bench") {
+      expect(benchSlot.player.pointsDelta).toBe(2000);
+      expect(benchSlot.player.points).toBe(52000 + 2000);
     }
   });
 });
