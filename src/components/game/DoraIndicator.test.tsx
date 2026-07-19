@@ -57,12 +57,15 @@ describe("DoraIndicator", () => {
     // 開示牌が表グループへ混ざらない(牌単位で表/裏が判別できる)。
     const omote = screen.getByRole("list", { name: "表ドラ表示牌" });
     expect(within(omote).getAllByRole("img")).toHaveLength(2);
-    expect(screen.getByText("裏ドラ開示")).toBeInTheDocument();
+    // 開示注記は表示され、aria-describedby で裏グループへ関連付く(SR にも開示状態が伝わる)。
+    const note = screen.getByText("裏ドラ開示");
+    expect(ura).toHaveAttribute("aria-describedby", note.id);
   });
 
-  it("裏ドラ0枚(局開始前など)では裏グループ自体を描かない", () => {
-    render(<DoraIndicator dora={{ indicators: [], uraIndicatorCount: 0 }} />);
-
+  it("裏ドラ0枚では裏グループを、表示牌なし(局開始前など)では両グループを描かない", () => {
+    const { rerender } = render(
+      <DoraIndicator dora={{ indicators, uraIndicatorCount: 0 }} />,
+    );
     expect(
       screen.getByRole("list", { name: "表ドラ表示牌" }),
     ).toBeInTheDocument();
@@ -70,5 +73,10 @@ describe("DoraIndicator", () => {
       screen.queryByRole("list", { name: "裏ドラ表示牌" }),
     ).not.toBeInTheDocument();
     expect(screen.queryByText("裏")).not.toBeInTheDocument();
+
+    // 局開始前(engine 未開始)は空の <ul> と「表」ラベルだけが残らないよう、グループごと描かない。
+    rerender(<DoraIndicator dora={{ indicators: [], uraIndicatorCount: 0 }} />);
+    expect(screen.queryByRole("list")).not.toBeInTheDocument();
+    expect(screen.queryByText("表")).not.toBeInTheDocument();
   });
 });

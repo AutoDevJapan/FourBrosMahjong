@@ -435,10 +435,14 @@ test.describe("状態駆動 a11y 監査(裏ドラ開示 / #261)", () => {
         onHumanReact: "ronOrPass",
       });
 
-      // 自家リーチ和了で局が終わり、裏ドラが開示されている。
+      // 自家リーチ和了(ツモ)で局が終わり、裏ドラが開示されている。決着種別まで固定することで、
+      // engine 変更で seed=180 が別決着(ロン等)へ変わった場合にコメントごと陳腐化せず検知できる。
       const board = page.locator("[data-phase]").first();
       await expect(board).toHaveAttribute("data-phase", "roundEnd");
       await expect(board).toHaveAttribute("data-round-kind", "win");
+      await expect(page.getByRole("alert").first()).toContainText(
+        "あなたのツモ",
+      );
       await expect(page.getByText("裏ドラ開示").first()).toBeVisible();
 
       // 表/裏が並び順ではなくグループ名で判別できる(スペック5 5.2.1 / #261)。

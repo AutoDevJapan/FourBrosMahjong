@@ -159,7 +159,9 @@ export async function advanceUntil(
       // ロック中のみ描画される)。ツモ和了できれば「ツモ」、できなければ「ツモ切り」で進める。
       const tsumogiri = page.getByRole("button", { name: "ツモ切り" });
       if (await tsumogiri.count()) {
-        const tsumo = page.getByRole("button", { name: "ツモ", exact: true });
+        const tsumo = page
+          .getByRole("button", { name: "ツモ", exact: true })
+          .first();
         if (await tsumo.isEnabled()) await tsumo.click();
         else await tsumogiri.first().click();
         continue;
