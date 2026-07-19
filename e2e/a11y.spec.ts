@@ -428,10 +428,11 @@ test.describe("状態駆動 a11y 監査(裏ドラ開示 / #261)", () => {
       // 標準戦略で進めてリーチ宣言し、以降はドライバのリーチ後分岐(ツモ和了優先/ツモ切り)と
       // ロン優先(ronOrPass)で局終了まで進める。seed=180 は自家リーチ→ツモ和了に決定的到達する。
       await declareRiichi(page);
+      // predicate は各 step 冒頭で評価されるため、roundEnd 到達時点で停止する
+      // (onRoundEnd 指定は不要 — 「次の局へ」を押す分岐には到達しない)。
       await advanceUntil(page, (state) => state?.phase === "roundEnd", {
         maxSteps: 200,
         onHumanReact: "ronOrPass",
-        onRoundEnd: "stop",
       });
 
       // 自家リーチ和了で局が終わり、裏ドラが開示されている。
