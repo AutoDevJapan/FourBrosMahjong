@@ -14,7 +14,7 @@ Under active development. The **domain layer** (`src/domain/`) implements the ga
 - `docs/README.md` — documentation navigation hub.
 - `documents/spec/` — **implementation spec (SpecDD SSOT)**: confirmed rules decomposed into I/O, states, boundary values, and completion criteria (setup/tiles, game-flow with a Mermaid state diagram, scoring/settlement, domain-model with a class diagram). Implement against this. `documents/` is the GoDD `docs_dir`.
 - `documents/spec/ui-accessibility-responsive-darkmode.md` — cross-cutting UI policy for accessibility, responsive breakpoints, and dark mode (color-independent info, keyboard/focus, breakpoints, dark mode toggle decision, color tokens, a11y verification tooling). All UI implementation must follow this policy.
-- `質問リスト.md` (repo root) — spec questions log. **Q1–Q21 are all resolved** (see 解決済み), and confirmed rules are reflected in `documents/spec/`. Any new design ambiguity is logged there as Q22+ before implementation — never guess.
+- `質問リスト.md` (repo root) — spec questions log and the **single place that tracks question status** (do not restate counts elsewhere). Resolved answers are reflected in `documents/spec/`; **open unresolved questions exist** (Q22/Q23 as of this writing — see the 未回答 section for the current list) — check it before implementing affected areas. Any new design ambiguity is logged there as a new Q entry before implementation — never guess.
 
 Config note: `config.godd` sets `display_language: ja` (respond in Japanese) and `docs_dir: documents` (GoDD spec SSOT goes under `documents/` once such content exists — kept separate from the human-facing `docs/`).
 
