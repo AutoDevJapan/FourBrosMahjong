@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   createGame,
+  type EngineState,
   finishRound,
   type PlayerId,
   type RoundConclusion,
@@ -68,6 +69,97 @@ describe("selectView pointsDelta projection(#277)", () => {
       expect(benchSlot.player.pointsDelta).toBe(2000);
       expect(benchSlot.player.points).toBe(52000 + 2000);
     }
+  });
+});
+
+describe("selectView 裏ドラ開示(#290)", () => {
+  /** 決着サマリ(和了/流局)で局を締める共通ヘルパー。 */
+  function concludeWith(
+    seed: number,
+    round: Pick<EngineState["round"], "wind" | "roundNumber">,
+    summary: RoundConclusion["summary"],
+    outcome: RoundConclusion["outcome"] = "dealerPasses",
+  ) {
+    const base = createGame({ seed });
+    if (base.hand === null) throw new Error("hand must exist");
+    return finishRound(
+      { ...base, round: { ...base.round, ...round } },
+      { outcome, isDraw: summary.kind === "draw", summary },
+    );
+  }
+
+  const riichiWinSummary: RoundConclusion["summary"] = {
+    kind: "win",
+    label: "リーチ和了",
+    deltas: { p0: 8000, p1: -8000, p2: 0, p3: 0 },
+    winnerId: "p0",
+    riichiWin: true,
+  };
+
+  it("通常局(roundEnd)のリーチ和了では裏ドラ表示牌を開示する(従来挙動)", () => {
+    const end = concludeWith(
+      7,
+      { wind: "east", roundNumber: 1 },
+      riichiWinSummary,
+    );
+    expect(end.phase).toBe("roundEnd");
+    if (end.hand === null) throw new Error("hand must exist");
+
+    const dora = selectView(end).dora;
+    expect(dora.uraIndicators).toBeDefined();
+    expect(dora.uraIndicators).toHaveLength(
+      end.hand.doraSet.uraIndicators.length,
+    );
+  });
+
+  it("半荘最終局(gameEnd 直行)のリーチ和了でも裏ドラ表示牌を開示する", () => {
+    // 南4・親流れ → roundEnd を経由せず gameEnd へ直行(#277)。
+    const end = concludeWith(
+      7,
+      { wind: "south", roundNumber: 4 },
+      riichiWinSummary,
+    );
+    expect(end.phase).toBe("gameEnd");
+    expect(end.lastRound?.riichiWin).toBe(true);
+    if (end.hand === null) throw new Error("hand must exist");
+
+    const dora = selectView(end).dora;
+    expect(dora.uraIndicators).toBeDefined();
+    expect(dora.uraIndicators).toEqual(
+      end.hand.doraSet.uraIndicators.map((t) => ({
+        suit: t.suit,
+        rank: t.rank,
+        isRed: t.isRed,
+      })),
+    );
+  });
+
+  it("gameEnd 直行でもリーチでない和了なら裏ドラを伏せたまま(回帰なし)", () => {
+    const end = concludeWith(
+      7,
+      { wind: "south", roundNumber: 4 },
+      {
+        ...riichiWinSummary,
+        label: "面前和了(リーチなし)",
+        riichiWin: false,
+      },
+    );
+    expect(end.phase).toBe("gameEnd");
+    expect(selectView(end).dora.uraIndicators).toBeUndefined();
+  });
+
+  it("gameEnd 直行の流局終局では裏ドラを伏せたまま(回帰なし)", () => {
+    const end = concludeWith(
+      7,
+      { wind: "south", roundNumber: 4 },
+      {
+        kind: "draw",
+        label: "流局(テンパイ0人)",
+        deltas: { p0: 0, p1: 0, p2: 0, p3: 0 },
+      },
+    );
+    expect(end.phase).toBe("gameEnd");
+    expect(selectView(end).dora.uraIndicators).toBeUndefined();
   });
 });
 
