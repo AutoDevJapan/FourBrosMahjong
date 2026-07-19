@@ -45,6 +45,7 @@ const SCREENS: readonly Screen[] = [
   { path: "/", name: "ロビー", heading: "四兄弟麻雀" },
   { path: "/rules", name: "ルール説明", heading: "ルール説明" },
   { path: "/settings", name: "設定", heading: "設定" },
+  { path: "/history", name: "戦績", heading: "戦績" },
   { path: "/game", name: "対局画面", heading: "対局画面" },
   { path: "/game/result", name: "対局結果", heading: "対局結果" },
 ];

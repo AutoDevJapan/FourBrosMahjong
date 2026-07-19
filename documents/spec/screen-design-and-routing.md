@@ -18,6 +18,7 @@
 | ルール説明 | `/rules` | `docs/四兄弟麻雀ルール.md` に基づくルール要約を表示する(閲覧専用) | Server |
 | 対局画面 | `/game` | 四人回しサンマの対局本体。卓・各家の手牌/河/得点・ドラ・卓情報・操作パネルを表示する | Server shell + Client island |
 | 結果画面 | `/game/result` | 半荘終了時の最終順位・ソシー内訳(素点+ウマ+祝儀)を表示する | Client |
+| 戦績 | `/history` | `localStorage` に保存された半荘結果(最終順位・ソシー内訳・終了日時)を新しい順に一覧・閲覧し、全件削除できる(issue #293)。保存は半荘終了時に `GameProvider` が自動で行い、直近20件を上限に最古から破棄する | Server shell + Client island |
 | 設定 | `/settings` | ダークモード手動切替(スペック5 5.4.1)等の表示設定 | Client |
 
 ## 6.3 画面遷移
@@ -32,6 +33,10 @@ flowchart LR
     Game -->|半荘終了 → 最終局の決着表示 → 「結果を見る」| Result["/game/result (結果画面)"]
     Result -->|ロビーへ戻る| Lobby
     Result -->|もう一半荘| Game
+    Lobby -->|戦績| History["/history (戦績)"]
+    Result -->|戦績を見る| History
+    Settings -->|戦績を見る| History
+    History -->|ロビーへ戻る| Lobby
 ```
 
 - **半荘終了時の遷移はユーザー操作(ボタン)で行い、自動遷移しない**(#277)。半荘を終える局(トビ / 南4完了 / 親トップやめ)は engine が `roundEnd` を経由せず `gameEnd` へ直行する(スペック2 2.8)ため、`/game` は `gameEnd` でも最終局の決着(和了内訳 `WinDetails`・流局サマリ・各家の点数増減)を表示し、主要ボタン「結果を見る」(push)で `/game/result` へ進む。`/game` は `gameEnd` で自動リダイレクトしないため、結果画面から「戻る」→ `/game`(最終局の決着表示)→「戻る」→ ロビーと履歴トラップなく脱出できる。終局済み journal のリロード復元・ブラウザバックでも同じ決着表示に合流する。**流局で半荘が終わり供託が残存**した場合は、engine が残存供託を最終局デルタへ畳み込み(スペック3 3.4 / #282)、hint・読み上げに「残存供託N本(N,000点)は◯◯が取得。」を併記して持ち点・点数増減・供託カウント0の三者を検算可能に保つ。
@@ -78,6 +83,8 @@ src/app/
 │   └── page.tsx                 # `/rules`   ルール説明 (Server)
 ├── settings/
 │   └── page.tsx                 # `/settings` 設定 (Client)
+├── history/
+│   └── page.tsx                 # `/history`  戦績 (Server shell + Client island) … issue #293
 └── game/
     ├── layout.tsx                # `/game` 配下の共有レイアウト (Client: GameProvider)
     ├── page.tsx                  # `/game`         対局画面
@@ -103,6 +110,7 @@ src/app/
 | `<GameBoard>` 配下(`PlayerArea`・`ActionPanel`・`LiveRegion` 等) | Client | 打牌選択・鳴き・リーチ宣言等のキーボード/ポインタ操作、`aria-live` によるライブ更新(スペック5 5.2.2, 5.2.3)にローカル状態が必要 |
 | `<Tile>`・`<ScoreDisplay>`・`<TableInfo>` 等の純表示コンポーネント(`<DoraIndicator>` は開示注記の `aria-describedby` 関連付けに `useId` を用いるため Client ツリー前提 / #261) | 値渡しのみなら Server Component として実装可能。ただし Client なコンポーネント(`GameBoard`等)の子として使われる場合、実質的にクライアントバンドルに含まれる点に留意 | props 経由で値を受け取り描画するだけの責務に留めることで、将来的な配置転換を容易にする |
 | `/game/result/page.tsx` | Client | `GameProvider` の状態(確定したソシー内訳)を `useContext` 等で読み取るため |
+| `/history/page.tsx` | Server shell + Client island | ページ自体は Server(metadata・見出し・戻る導線)とし、`localStorage` の戦績を読み書きする一覧・削除部分のみ `MatchHistoryList` として `"use client"` に分離する(issue #293) |
 
 ## 6.7 コンポーネント分割方針(`src/components/` 初期ディレクトリ構成案)
 
@@ -150,6 +158,7 @@ Q9〜Q13 は**すべて解決済み**(`質問リスト.md`)。UI は引き続き
 
 ## 6.9 対局中の状態管理に関する前提
 
+- 半荘終了時の確定結果(最終順位・ソシー内訳・終了日時)は、`GameProvider` が `localStorage`(キー `four-bros-mahjong.history.v1`)へ**戦績**として追記保存し、`/history` で閲覧・全件削除できる(issue #293)。保存件数は直近20件を上限とし、超過時は最古から破棄する。進行中の半荘のジャーナル(`sessionStorage`)と同様に読み込み時の厳密検証と容量上限で防御する。保存はこの端末のブラウザ内で完結し、以下のバックエンド不在の前提を変えない。
 - 現時点でバックエンド/永続化層・認証・複数デバイス間同期の設計は存在しない。本スペックは、四兄弟麻雀の実演形式(1台のデバイス/画面を囲んで進行する想定)に合わせ、**単一デバイス上のクライアントサイド状態(`GameProvider` の React state)** で対局を進行させることを前提とする。
 - この前提はドメイン層(スペック4)の設計とは独立しており、将来的にサーバー同期やマルチデバイス対応が必要になった場合は改めて設計を見直す(本スペックの対象外)。
 

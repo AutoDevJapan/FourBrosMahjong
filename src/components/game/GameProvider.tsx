@@ -34,6 +34,7 @@ import {
   replayJournal,
   saveJournal,
 } from "./gamePersistence";
+import { appendHistory, localStorageOrNull } from "./matchHistory";
 import type { GameViewState, TileData } from "./types";
 
 /** UI から呼べる対局操作。判定は engine 側が行う。 */
@@ -114,6 +115,33 @@ export function freshSeed(): number {
   return values[0];
 }
 
+/**
+ * 終局(gameEnd)した半荘の確定結果を戦績(`localStorage`)へ追記する(issue #293)。
+ *
+ * seed はジャーナルの seed をそのまま半荘の識別子に使い、`appendHistory` 側の
+ * 重複排除で「終局済みジャーナルのリロード再生」による二重保存を防ぐ。逆に、
+ * 終局の瞬間に保存へ失敗していても、リロード復元時に同じ seed で再追記されるため
+ * 保存漏れを補完できる。ジャーナルが無い対局(テスト注入・Storage 無効環境)は
+ * seed を持たないため保存対象外とする。
+ */
+function recordFinishedGame(engine: EngineState, seed: number): void {
+  if (engine.phase !== "gameEnd" || engine.result === null) return;
+  const storage = localStorageOrNull();
+  if (storage === null) return;
+  appendHistory(storage, {
+    seed,
+    finishedAt: Date.now(),
+    players: engine.result.map((r) => ({
+      name: r.name,
+      rank: r.rank,
+      rawScore: r.rawScore,
+      uma: r.uma,
+      bonus: r.bonus,
+      soshiiTotal: r.soshiiTotal,
+    })),
+  });
+}
+
 /** Storage の getter 自体が SecurityError を投げる環境ではメモリ内対局へ退避する。 */
 function sessionStorageOrNull(): Storage | null {
   if (typeof window === "undefined") return null;
@@ -134,7 +162,11 @@ function initialSession(initialGame?: EngineState): {
   const stored = storage === null ? null : loadJournal(storage);
   if (stored && (urlSeed === null || stored.seed === urlSeed)) {
     try {
-      return { engine: replayJournal(stored), journal: stored };
+      const engine = replayJournal(stored);
+      // 終局済み記録の復元時にも戦績への追記を試み、終局時の保存失敗を補完する
+      // (同一 seed は appendHistory 側で重複排除される)。
+      recordFinishedGame(engine, stored.seed);
+      return { engine, journal: stored };
     } catch {
       // 現在版engineで再生できない記録は新規対局へ安全にフォールバックする。
     }
@@ -174,6 +206,10 @@ export function GameProvider({ children, initialGame }: GameProviderProps) {
       // engine が局面上不正な操作を同一 state の no-op として拒否した場合は、
       // 再生不能なイベントを journal に残さない。
       if (nextEngine === engine) return;
+      // この操作で半荘が終局したら、確定結果を戦績へ追記する(issue #293)。
+      if (journal !== null && nextEngine.phase === "gameEnd") {
+        recordFinishedGame(nextEngine, journal.seed);
+      }
       if (journal === null) {
         const nextSession = { engine: nextEngine, journal: null };
         sessionRef.current = nextSession;

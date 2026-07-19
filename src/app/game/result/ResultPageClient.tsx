@@ -103,6 +103,13 @@ export default function ResultPageClient() {
             >
               もう一半荘
             </button>
+            {/* この半荘の結果は終局時に戦績(localStorage)へ保存済み(issue #293)。 */}
+            <Link
+              href="/history"
+              className="rounded-full border border-foreground/25 px-5 py-2 text-sm hover:bg-foreground/5"
+            >
+              戦績を見る
+            </Link>
             <Link
               href="/"
               className="rounded-full border border-foreground/25 px-5 py-2 text-sm hover:bg-foreground/5"
