@@ -16,13 +16,8 @@ export interface SignedSoshii {
   readonly isPositive: boolean;
 }
 
-/** 素点など符号を付けない値の整形(桁区切りのみ)。 */
-export function formatSoshii(value: number): string {
-  return value.toLocaleString("ja-JP");
-}
-
 /**
- * ウマ・祝儀・合計など、増減の向きが意味を持つ値を符号付きで整形する。
+ * 素点・ウマ・祝儀・合計など、増減の向きが意味を持つ値を符号付きで整形する。
  * マイナス記号にはハイフンではなく U+2212(−)を用い、フォント上の視認性を確保する。
  */
 export function formatSignedSoshii(value: number): SignedSoshii {
