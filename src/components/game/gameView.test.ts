@@ -1,6 +1,24 @@
 import { describe, expect, it } from "vitest";
 import { createGame } from "@/domain/game/engine";
+import { walkToGameEnd } from "./finishedGameFixture";
 import { selectView } from "./gameView";
+
+describe("selectView pointsDelta projection(#277)", () => {
+  it("半荘を終える局(gameEnd 直行)でも最終局の点数増減を写像する", () => {
+    // seed=2024 の最終局は 東4・三郎(p3)のロン 18,000点(自家 p0 が放銃)。
+    const { state } = walkToGameEnd(2024);
+    expect(state.phase).toBe("gameEnd");
+    expect(state.lastRound).not.toBeNull();
+
+    const view = selectView(state);
+    const self = view.slots.self;
+    expect(self.kind).toBe("seated");
+    if (self.kind === "seated") {
+      expect(self.player.pointsDelta).toBe(state.lastRound?.deltas.p0);
+      expect(self.player.pointsDelta).toBeLessThan(0);
+    }
+  });
+});
 
 describe("selectView kita projection", () => {
   it("0/1/2/4枚の抜き北を全着席者の公開ビューへ写像する", () => {

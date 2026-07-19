@@ -92,8 +92,11 @@ function buildSlotContent(engine: EngineState, id: PlayerId): SlotContent {
 
   const isSelf = id === HUMAN_ID;
   const isTurn = engine.phase === "playing" && hand?.turn === seat;
+  // 半荘を終える局は roundEnd を経由せず gameEnd へ直行する(engine spec 2.8)ため、
+  // 最終局の点数増減(±デルタ)は gameEnd でも表示する(#277)。
   const showDelta =
-    engine.phase === "roundEnd" && engine.lastRound
+    (engine.phase === "roundEnd" || engine.phase === "gameEnd") &&
+    engine.lastRound
       ? engine.lastRound.deltas[id]
       : 0;
   const melds = hand
