@@ -16,6 +16,8 @@ describe("contentSecurityPolicy", () => {
     expect(policy).not.toContain("script-src 'unsafe-inline'");
     expect(policy).toContain("frame-ancestors 'none'");
     expect(policy).toContain("connect-src 'self'");
+    // /sw.js の取得経路を CSP 上で明示する(issue #292)。
+    expect(policy).toContain("worker-src 'self'");
     expect(policy).toContain("object-src 'none'");
     expect(policy).toContain("upgrade-insecure-requests");
   });

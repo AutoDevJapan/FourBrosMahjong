@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { Geist, Geist_Mono, Noto_Sans_JP } from "next/font/google";
 import { headers } from "next/headers";
 import { ThemeStorageSync } from "@/components/layout/ThemeStorageSync";
+import { ServiceWorkerRegister } from "@/components/pwa/ServiceWorkerRegister";
 import {
   DEFAULT_DESCRIPTION,
   DEFAULT_TITLE,
@@ -90,6 +91,7 @@ export default async function RootLayout({
       </head>
       <body className="antialiased">
         <ThemeStorageSync />
+        <ServiceWorkerRegister />
         {children}
       </body>
     </html>
