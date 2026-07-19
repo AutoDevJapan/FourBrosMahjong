@@ -1,12 +1,20 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   createGame,
+  declarePon,
+  discard,
   type EngineState,
   finishRound,
+  HUMAN_ID,
+  passRon,
+  proceedToNextRound,
   type RoundConclusion,
+  seatOfPlayer,
+  tsumogiri,
 } from "@/domain/game/engine";
+import type { Tile } from "@/domain/tiles/tile";
 import { tileLabel } from "../common/tileLabel";
 import { walkToGameEnd } from "./finishedGameFixture";
 import GameBoard, { pulledKitaCount, residualSticksNote } from "./GameBoard";
@@ -396,5 +404,334 @@ describe("GameBoard 残存供託の帰属表示(#282)", () => {
         },
       }),
     ).toBe("残存供託1本（1,000点）は一郎が取得。");
+  });
+});
+
+describe("GameBoard 対話 a11y 経路(#285)", () => {
+  /** 牌種一致(赤ドラ差は無視)。engine の喰い替え禁止・打牌候補判定と同じ比較粒度。 */
+  function sameKind(a: Tile, b: Tile): boolean {
+    return a.suit === b.suit && a.rank === b.rank;
+  }
+
+  /** 自家(p0)の現在の純手牌(ツモ牌を除く)。 */
+  function selfHandTiles(state: EngineState): readonly Tile[] {
+    if (!state.hand) return [];
+    const seat = seatOfPlayer(state.hand.seating, HUMAN_ID);
+    return seat === null ? [] : state.hand.hands[seat];
+  }
+
+  /**
+   * 決定的方針で1手進める(打牌はツモ切り優先・応答は `usePon` ならポン、それ以外スルー・
+   * 局終了は次局へ)。`walkToGameEnd` と同系の完走方針だが、ポン方針(喰い替え禁止・加槓の
+   * 局面到達に必須)と、ポン直後(ツモ牌なし)の手出し打牌を追加でサポートする。
+   */
+  function advanceOnce(
+    state: EngineState,
+    usePon: boolean,
+  ): EngineState | null {
+    if (state.phase === "gameEnd") return null;
+    if (state.phase === "roundEnd") return proceedToNextRound(state);
+    if (state.pending?.kind === "humanDiscard") {
+      const pending = state.pending;
+      if (pending.locked) return tsumogiri(state);
+      const drawn = state.hand?.drawn;
+      if (drawn && !pending.forbiddenDiscards.some((f) => sameKind(f, drawn))) {
+        return discard(state, drawn);
+      }
+      // ポン直後はツモ牌が無いため、喰い替え禁止でない先頭の手牌を切る。
+      const candidate = selfHandTiles(state).find(
+        (tile) => !pending.forbiddenDiscards.some((f) => sameKind(f, tile)),
+      );
+      return candidate === undefined ? null : discard(state, candidate);
+    }
+    if (state.pending?.kind === "humanReact") {
+      if (usePon && state.pending.canPon) return declarePon(state);
+      return passRon(state);
+    }
+    return null;
+  }
+
+  /**
+   * seed 固定の実エンジンを決定的方針で進め、`predicate` が成立した局面を返す(到達は
+   * seed 探索で事前確認済み。将来 engine の進行が変わって未到達になれば throw で検知する)。
+   */
+  function walkTo(
+    seed: number,
+    predicate: (state: EngineState) => boolean,
+    usePon = false,
+  ): EngineState {
+    let state = createGame({ seed });
+    for (let guard = 0; guard < 3000; guard++) {
+      if (predicate(state)) return state;
+      const next = advanceOnce(state, usePon);
+      if (next === null) break;
+      state = next;
+    }
+    throw new Error(`seed=${seed} で目的局面に到達しなかった`);
+  }
+
+  /** リーチ宣言可能な自家打牌待ち(seed=53: 宣言牌は八索のみ・東1)。 */
+  function riichiReadyGame(): EngineState {
+    return walkTo(
+      53,
+      (s) => s.pending?.kind === "humanDiscard" && s.pending.canRiichi,
+    );
+  }
+
+  function renderGame(state: EngineState) {
+    return render(
+      <GameProvider initialGame={state}>
+        <GameBoard />
+      </GameProvider>,
+    );
+  }
+
+  it("リーチボタンで宣言モードに入り、適格牌に「リーチ可」・非適格牌に「禁止」+理由が付き、再押下で解除できる", async () => {
+    const user = userEvent.setup();
+    renderGame(riichiReadyGame());
+
+    // 宣言モード前はインジケータなし。
+    expect(screen.queryAllByText("リーチ可")).toHaveLength(0);
+    expect(screen.queryAllByText("禁止")).toHaveLength(0);
+
+    await user.click(screen.getAllByRole("button", { name: "リーチ" })[0]);
+
+    // 宣言モード: ボタンは解除ラベルへ、hint は宣言牌の選択を案内。
+    expect(
+      screen.getAllByRole("button", { name: "リーチ解除" }).length,
+    ).toBeGreaterThan(0);
+    expect(
+      screen.getAllByText(
+        "リーチ宣言牌を選んでください(テンパイを保つ牌のみ有効)。",
+      ).length,
+    ).toBeGreaterThan(0);
+    // 適格牌(八索)は色に依存しない「リーチ可」テキスト+aria-label で示される。
+    expect(
+      screen.getAllByRole("option", { name: "八索、リーチ可" }).length,
+    ).toBeGreaterThan(0);
+    expect(screen.getAllByText("リーチ可").length).toBeGreaterThan(0);
+    // 非適格牌(六筒)は「禁止」バッジ+理由文つきで選択不可。
+    const blocked = screen.getAllByRole("option", {
+      name: "六筒、この牌ではテンパイを保てないため、リーチ宣言できません。",
+    });
+    expect(blocked.length).toBeGreaterThan(0);
+    expect(blocked[0]).toHaveAttribute("aria-disabled", "true");
+    expect(screen.getAllByText("禁止").length).toBeGreaterThan(0);
+
+    // 非適格牌のクリックは no-op で、理由がライブリージョンへ通知される。
+    await user.click(blocked[0]);
+    expect(
+      screen.getByText(
+        "この牌ではテンパイを保てないため、リーチ宣言できません。",
+      ),
+    ).toBeInTheDocument();
+    expect(
+      screen.getAllByRole("button", { name: "リーチ解除" }).length,
+    ).toBeGreaterThan(0);
+
+    // 再押下で宣言モードを解除でき、インジケータが消える。
+    await user.click(screen.getAllByRole("button", { name: "リーチ解除" })[0]);
+    expect(
+      screen.getAllByRole("button", { name: "リーチ" }).length,
+    ).toBeGreaterThan(0);
+    expect(screen.queryAllByText("リーチ可")).toHaveLength(0);
+    expect(screen.queryAllByText("禁止")).toHaveLength(0);
+  });
+
+  it("宣言モードで適格牌を選ぶとリーチが宣言され、以後の自手番はロック表示+ツモ切り導線になる", async () => {
+    const user = userEvent.setup();
+    renderGame(riichiReadyGame());
+
+    await user.click(screen.getAllByRole("button", { name: "リーチ" })[0]);
+    await user.click(
+      screen.getAllByRole("option", { name: "八索、リーチ可" })[0],
+    );
+
+    // 自家の状態バッジに「リーチ」が付く(色非依存のテキスト表示)。
+    const selfRegions = screen.getAllByRole("region", { name: /^あなた/ });
+    expect(
+      selfRegions.some((region) => region.textContent?.includes("リーチ")),
+    ).toBe(true);
+    // 次の自手番はロック中: hint とツモ切りボタンで導線を提示。
+    expect(
+      screen.getAllByText(
+        "リーチ中です。ツモ和了かツモ切りを選んでください(北抜きは自動)。",
+      ).length,
+    ).toBeGreaterThan(0);
+    expect(
+      screen.getAllByRole("button", { name: "ツモ切り" }).length,
+    ).toBeGreaterThan(0);
+    // 全手牌が「禁止」+理由文つきで選択不可(色非依存インジケータ)。
+    const options = screen.getAllByRole("option");
+    expect(options.length).toBeGreaterThan(0);
+    for (const option of options) {
+      expect(option).toHaveAttribute("aria-disabled", "true");
+    }
+    expect(
+      screen.getAllByRole("option", {
+        name: /、リーチ中は手牌から打牌できません。ツモ切りを選んでください。$/,
+      }),
+    ).toHaveLength(options.length);
+    expect(screen.getAllByText("禁止").length).toBeGreaterThan(0);
+
+    // ロック中の牌クリックは no-op で、理由がライブリージョンへ通知される。
+    await user.click(options[0]);
+    expect(
+      screen.getByText(
+        "リーチ中は手牌から打牌できません。ツモ切りを選んでください。",
+      ),
+    ).toBeInTheDocument();
+
+    // この局面はツモ和了可能(seed=53)なので、ツモで決着し和了内訳が表示される。
+    await user.click(screen.getAllByRole("button", { name: "ツモ" })[0]);
+    expect(
+      screen.getAllByRole("heading", { name: "和了内訳" }).length,
+    ).toBeGreaterThan(0);
+  });
+
+  it("ポン直後の打牌待ちでは喰い替え禁止牌に「禁止」+理由が付き、クリックしても打牌が進行しない", async () => {
+    const user = userEvent.setup();
+    // seed=4 をポン方針で進めると、發ポン直後に手牌へ發が1枚残る打牌待ちに到達する。
+    renderGame(
+      walkTo(
+        4,
+        (s) =>
+          s.pending?.kind === "humanDiscard" &&
+          s.pending.forbiddenDiscards.length > 0 &&
+          selfHandTiles(s).some((tile) =>
+            (s.pending?.kind === "humanDiscard"
+              ? s.pending.forbiddenDiscards
+              : []
+            ).some((f) => sameKind(f, tile)),
+          ),
+        true,
+      ),
+    );
+
+    // 喰い替え禁止牌(發)は「禁止」バッジ+理由文つきで選択不可。
+    const forbidden = screen.getAllByRole("option", {
+      name: "發、喰い替え禁止のため、この牌は打牌できません。",
+    });
+    expect(forbidden.length).toBeGreaterThan(0);
+    expect(forbidden[0]).toHaveAttribute("aria-disabled", "true");
+    expect(screen.getAllByText("禁止").length).toBeGreaterThan(0);
+
+    // クリックは no-op: 理由が通知され、打牌は進行しない(禁止牌が手牌に残る)。
+    await user.click(forbidden[0]);
+    expect(
+      screen.getByText("喰い替え禁止のため、この牌は打牌できません。"),
+    ).toBeInTheDocument();
+    expect(
+      screen.getAllByRole("option", {
+        name: "發、喰い替え禁止のため、この牌は打牌できません。",
+      }),
+    ).toHaveLength(forbidden.length);
+
+    // 禁止でない牌(西)は打牌でき、対局が進行して禁止バッジが消える。
+    await user.click(screen.getAllByRole("option", { name: "西" })[0]);
+    expect(screen.queryAllByText("禁止")).toHaveLength(0);
+  });
+
+  it("暗槓できる牌があるとき「暗槓 <牌>」ボタンが現れ、実行すると自家の副露に暗槓が並ぶ", async () => {
+    const user = userEvent.setup();
+    // seed=8 をツモ切り方針で進めると、一萬4枚の暗槓が可能な打牌待ちに到達する。
+    renderGame(
+      walkTo(
+        8,
+        (s) =>
+          s.pending?.kind === "humanDiscard" && s.pending.ankanTiles.length > 0,
+      ),
+    );
+
+    const selfBefore = screen.getAllByRole("region", { name: /^あなた/ })[0];
+    expect(
+      within(selfBefore).queryAllByRole("listitem", { name: "暗槓" }),
+    ).toHaveLength(0);
+
+    await user.click(screen.getAllByRole("button", { name: "暗槓 一萬" })[0]);
+
+    // 実行後: ボタンは消え、自家の副露に暗槓が表示され、嶺上補充後の打牌待ちが続く。
+    expect(screen.queryAllByRole("button", { name: "暗槓 一萬" })).toHaveLength(
+      0,
+    );
+    const selfAfter = screen.getAllByRole("region", { name: /^あなた/ })[0];
+    expect(
+      within(selfAfter).getAllByRole("listitem", { name: "暗槓" }),
+    ).toHaveLength(1);
+    expect(
+      screen.getAllByText("牌を選んで打牌してください(北抜きは自動)。").length,
+    ).toBeGreaterThan(0);
+  });
+
+  it("加槓できる牌があるとき「加槓 <牌>」ボタンが現れ、実行するとポンがカンへ置き換わる", async () => {
+    const user = userEvent.setup();
+    // seed=1 をポン方針で進めると、東ポン済み+4枚目ツモで加槓可能な打牌待ちに到達する。
+    renderGame(
+      walkTo(
+        1,
+        (s) =>
+          s.pending?.kind === "humanDiscard" && s.pending.kakanTiles.length > 0,
+        true,
+      ),
+    );
+
+    const selfBefore = screen.getAllByRole("region", { name: /^あなた/ })[0];
+    expect(
+      within(selfBefore).getAllByRole("listitem", { name: "ポン" }).length,
+    ).toBeGreaterThan(0);
+
+    await user.click(screen.getAllByRole("button", { name: "加槓 東" })[0]);
+
+    // 実行後: ボタンは消え、自家の副露はポンからカンへ置き換わる。
+    expect(screen.queryAllByRole("button", { name: "加槓 東" })).toHaveLength(
+      0,
+    );
+    const selfAfter = screen.getAllByRole("region", { name: /^あなた/ })[0];
+    expect(
+      within(selfAfter).queryAllByRole("listitem", { name: "ポン" }),
+    ).toHaveLength(0);
+    expect(
+      within(selfAfter).getAllByRole("listitem", { name: "カン" }).length,
+    ).toBeGreaterThan(0);
+  });
+
+  it("リーチ可能でなくなった遷移で宣言モードが自動解除される(前回値比較の解除経路)", async () => {
+    const user = userEvent.setup();
+    // 実局面(seed=8 の暗槓可能局面)は canRiichi=false のため、公開 Pending の形を保ったまま
+    // リーチ可能フラグのみ注入する(状態直接構築)。暗槓の実行自体は実 engine が受理し、
+    // 遷移後の再計算で canRiichi が失われる(=打牌以外の遷移で宣言モードが取り残される)状況を作る。
+    const base = walkTo(
+      8,
+      (s) =>
+        s.pending?.kind === "humanDiscard" && s.pending.ankanTiles.length > 0,
+    );
+    if (base.pending?.kind !== "humanDiscard") throw new Error("unreachable");
+    renderGame({
+      ...base,
+      pending: { ...base.pending, canRiichi: true, riichiTiles: [] },
+    });
+
+    await user.click(screen.getAllByRole("button", { name: "リーチ" })[0]);
+    expect(
+      screen.getAllByText(
+        "リーチ宣言牌を選んでください(テンパイを保つ牌のみ有効)。",
+      ).length,
+    ).toBeGreaterThan(0);
+
+    // 宣言モードのまま暗槓を実行(打牌を経ない実遷移)。
+    await user.click(screen.getAllByRole("button", { name: "暗槓 一萬" })[0]);
+
+    // 遷移後は canRiichi が失われ、宣言モードが自動解除される(取り残された armed 表示にならない)。
+    expect(
+      screen.queryAllByRole("button", { name: "リーチ解除" }),
+    ).toHaveLength(0);
+    expect(
+      screen.queryAllByText(
+        "リーチ宣言牌を選んでください(テンパイを保つ牌のみ有効)。",
+      ),
+    ).toHaveLength(0);
+    expect(
+      screen.getAllByText("牌を選んで打牌してください(北抜きは自動)。").length,
+    ).toBeGreaterThan(0);
   });
 });
