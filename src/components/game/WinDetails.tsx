@@ -41,9 +41,17 @@ export default function WinDetails({ summary }: { summary: RoundSummary }) {
         和了形の開示(#259): 和了確定時に engine が固定した門前手牌+和了牌を表向きで示す。
         副露・ガリは卓上の既存表示(Melds / KitaDisplay)が公開情報として担うため重複させない。
         和了牌は色に依存せず「間隔+『和了』バッジ+aria-label」で区別する(スペック5 5.2.1)。
+
+        本コンポーネントの名前付きリスト(和了形/成立役/支払い内訳)は role="list" を明示する —
+        冗長だが、Tailwind preflight の list-style 除去により Safari が list セマンティクスを落とし、
+        VoiceOver がリスト名ごと読まなくなる既知挙動への対処(スペック5 5.2.5 / #270)。
       */}
       <h3 className="mt-2 font-semibold">和了形</h3>
-      <ul aria-label="和了形" className="mt-1 flex flex-wrap items-start gap-1">
+      <ul
+        role="list"
+        aria-label="和了形"
+        className="mt-1 flex flex-wrap items-start gap-1"
+      >
         {sortTiles(detail.hand).map((tile, index) => (
           <li key={`hand-${tile.suit}-${tile.rank}-${index}`}>
             <Tile tile={tile} size="river" />
@@ -62,7 +70,7 @@ export default function WinDetails({ summary }: { summary: RoundSummary }) {
           </span>
         </li>
       </ul>
-      <ul aria-label="成立役" className="mt-2 grid gap-1">
+      <ul role="list" aria-label="成立役" className="mt-2 grid gap-1">
         {detail.yaku.map((yaku, index) => (
           <li
             key={`${yaku.name}-${index}`}
@@ -101,7 +109,7 @@ export default function WinDetails({ summary }: { summary: RoundSummary }) {
         </dd>
       </dl>
       <h3 className="mt-3 font-semibold">支払い</h3>
-      <ul aria-label="支払い内訳">
+      <ul role="list" aria-label="支払い内訳">
         {detail.payments.map((payment) => (
           <li key={payment.name}>
             {payment.name}: {payment.amount.toLocaleString("ja-JP")}点

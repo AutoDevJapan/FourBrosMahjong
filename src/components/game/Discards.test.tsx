@@ -10,6 +10,9 @@ describe("Discards", () => {
     render(<Discards tiles={[tile(1), tile(2), tile(3)]} />);
     const list = screen.getByRole("list", { name: "捨て牌" });
     expect(list.querySelectorAll("li")).toHaveLength(3);
+    // role クエリは暗黙ロールでも通るため、Safari/VoiceOver 対策の明示ロールは
+    // 属性で回帰検証する(スペック5 5.2.5 / #270)。
+    expect(list).toHaveAttribute("role", "list");
   });
 
   it("limit 指定時は直近の枚数だけを表示する", () => {

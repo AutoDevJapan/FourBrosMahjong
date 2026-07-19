@@ -20,6 +20,12 @@ describe("Melds (副露の表示 / #97)", () => {
       concealed: false,
     };
     render(<Melds melds={[pon]} />);
+    // role クエリは暗黙ロールでも通るため、Safari/VoiceOver 対策の明示ロールは
+    // 属性で回帰検証する(スペック5 5.2.5 / #270)。
+    expect(screen.getByRole("list", { name: "副露" })).toHaveAttribute(
+      "role",
+      "list",
+    );
     const group = screen.getByRole("listitem");
     expect(group).toHaveAccessibleName("ポン");
     // 3枚すべて内容が見える(伏せ牌ラベルは付かない)。

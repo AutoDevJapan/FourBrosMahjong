@@ -14,8 +14,12 @@ export interface DiscardsProps {
 export default function Discards({ tiles, limit }: DiscardsProps) {
   const shown =
     typeof limit === "number" && limit >= 0 ? tiles.slice(-limit) : tiles;
+  // role="list" は冗長だが明示する — Tailwind preflight の list-style 除去により Safari が
+  // list セマンティクスを落とし、VoiceOver がリスト名ごと読まなくなる既知挙動への対処
+  // (スペック5 5.2.5 / #270)。
   return (
     <ul
+      role="list"
       aria-label="捨て牌"
       // grid-cols-6(1fr 列)はスロット幅いっぱいにセルが引き伸ばされ河が散らばるため、
       // 列幅を牌の内容基準(max-content)にして 6 枚/段を gap-0.5 のみで密に並べる(#258)。
