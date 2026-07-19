@@ -1,4 +1,5 @@
 import { expect, test } from "@playwright/test";
+import { advanceUntil, armRiichi } from "./helpers/gameDriver";
 
 /**
  * 対局画面(`/game`)の E2E 検証(#30 / #67)。
@@ -103,54 +104,18 @@ test.describe("対局画面(/game)", () => {
   test("1半荘を実プレイして結果画面へ到達し、「もう一半荘」で対局へ戻れる(スペック2 2.8 / 6.3)", async ({
     page,
   }) => {
-    test.setTimeout(180_000);
-    await page.goto("/game");
+    test.setTimeout(60_000);
+    // 決定的 seed で固定し実行時間を安定させる(#260)。seed=106 はドライバ標準戦略
+    // (先頭牌打牌・スルー・次局送り)で約20手・2局で終局する短い半荘(オフラインで
+    // engine を同一戦略で走査して選定。戦略の定義と再選定手順は e2e/helpers/gameDriver.ts)。
+    await page.goto("/game?seed=106");
 
-    // 盤面ルートの data-phase / data-pending(進行状態のテスト用フック)を読み、局面に応じて
-    // 操作を1つ選んで進める。自家は打牌(ツモ切り相当)・ロンは見送り、局終了ごとに次局へ。
     // 半荘終了で GameBoard が /game/result へ自動遷移する(スペック6 6.3)。
-    for (let step = 0; step < 1500; step++) {
-      if (new URL(page.url()).pathname === "/game/result") break;
-      // locator.evaluate は対象が遷移で消えた場合も既定タイムアウトまで待つ。結果画面への
-      // replace 中は盤面が先に外れるため、即時 DOM 参照にして URL を速やかに再確認する。
-      const state = await page.evaluate(() => {
-        const el = document.querySelector("[data-phase]");
-        return el
-          ? {
-              phase: el.getAttribute("data-phase"),
-              pending: el.getAttribute("data-pending"),
-            }
-          : null;
-      });
-      if (state === null) {
-        // 遷移直後などで盤面が一時的に取れないときは URL 確認へ回す。
-        await page.waitForTimeout(20);
-        continue;
-      }
-      if (state.phase === "gameEnd") {
-        await page.waitForTimeout(50);
-        continue;
-      }
-      if (state.phase === "roundEnd") {
-        await page.getByRole("button", { name: "次の局へ" }).first().click();
-        continue;
-      }
-      if (state.pending === "humanReact") {
-        // 鳴き/ロンは見送り(スルー)して進める。
-        await page.getByRole("button", { name: "スルー" }).first().click();
-        continue;
-      }
-      if (state.pending === "humanDiscard") {
-        await page
-          .getByRole("listbox", { name: "自家の手牌" })
-          .first()
-          .getByRole("option")
-          .first()
-          .click();
-        continue;
-      }
-      await page.waitForTimeout(20);
-    }
+    await advanceUntil(
+      page,
+      () => new URL(page.url()).pathname === "/game/result",
+      { maxSteps: 200 },
+    );
 
     await expect(page).toHaveURL((url) => url.pathname === "/game/result");
     await expect(page).toHaveTitle("対局結果 | 四兄弟麻雀");
@@ -165,6 +130,27 @@ test.describe("対局画面(/game)", () => {
     await expect(
       page.getByRole("heading", { level: 1, name: "対局画面" }),
     ).toBeVisible();
+  });
+
+  test("seed 無しの乱数半荘でも冒頭数手が進行する(乱数経路のスモーク / #260)", async ({
+    page,
+  }) => {
+    // 半荘完走は決定的 seed のテストが担う。乱数経路(本番導線)は「数手進むこと」だけを
+    // 短く確認し、実行時間の変動とフレークを持ち込まない(#260)。
+    await page.goto("/game");
+
+    const ownDiscards = page
+      .getByRole("region", { name: /^あなた/ })
+      .getByRole("list", { name: "捨て牌" })
+      .first()
+      .getByRole("listitem");
+    await advanceUntil(page, async () => (await ownDiscards.count()) >= 3, {
+      maxSteps: 60,
+    });
+    await expect(page.locator("[data-phase]").first()).toHaveAttribute(
+      "data-phase",
+      /playing|roundEnd/,
+    );
   });
 
   test("/game/result への直接アクセスでもページ固有タイトルを表示する(issue #166)", async ({
@@ -289,27 +275,12 @@ test.describe("対局画面(/game)", () => {
           document.documentElement.clientWidth,
       ),
     ).toBeLessThanOrEqual(1);
-    const board = page.locator("[data-phase]").first();
-    for (let step = 0; step < 1200; step++) {
-      const state = await board.evaluate((el) => ({
-        phase: el.getAttribute("data-phase"),
-        pending: el.getAttribute("data-pending"),
-        kind: el.getAttribute("data-round-kind"),
-      }));
-      if (state.phase === "roundEnd") {
-        if (state.kind === "win") break;
-        await page.getByRole("button", { name: "次の局へ" }).first().click();
-      } else if (state.pending === "humanReact") {
-        await page.getByRole("button", { name: "スルー" }).first().click();
-      } else if (state.pending === "humanDiscard") {
-        await page
-          .getByRole("listbox", { name: "自家の手牌" })
-          .first()
-          .getByRole("option")
-          .first()
-          .click();
-      }
-    }
+    // 和了(kind === "win")の局終了まで進める(流局は次局へ送る)。
+    await advanceUntil(
+      page,
+      (state) => state?.phase === "roundEnd" && state.kind === "win",
+      { maxSteps: 1200 },
+    );
     await expect(
       page.getByRole("heading", { name: "和了内訳" }).first(),
     ).toBeVisible();
@@ -336,40 +307,21 @@ test.describe("対局画面(/game)", () => {
     test.setTimeout(60_000);
     await page.goto("/game?seed=1");
 
-    const board = page.locator("[data-phase]").first();
+    // 自家はリーチも鳴きもしない(標準戦略)ため、現れたバッジ/副露は必ずAIのもの。
+    // 同一局で同時に出るとは限らないため、観測フラグを累積して両方見えたら停止する。
     let sawAiRiichi = false;
     let sawAiMeld = false;
-    for (let step = 0; step < 600 && (!sawAiRiichi || !sawAiMeld); step++) {
-      // 自家はリーチも鳴きもしないため、現れたバッジ/副露は必ずAIのもの。
-      sawAiRiichi ||=
-        (await page.getByTestId("status-badge-riichi").count()) > 0;
-      sawAiMeld ||=
-        (await page.getByRole("list", { name: "副露" }).count()) > 0;
-      if (sawAiRiichi && sawAiMeld) break;
-
-      const state = await board
-        .evaluate((element) => ({
-          phase: element.getAttribute("data-phase"),
-          pending: element.getAttribute("data-pending"),
-        }))
-        .catch(() => null);
-      if (state === null) {
-        await page.waitForTimeout(20);
-      } else if (state.phase === "roundEnd") {
-        await page.getByRole("button", { name: "次の局へ" }).first().click();
-      } else if (state.pending === "humanReact") {
-        await page.getByRole("button", { name: "スルー" }).first().click();
-      } else if (state.pending === "humanDiscard") {
-        await page
-          .getByRole("listbox", { name: "自家の手牌" })
-          .first()
-          .getByRole("option")
-          .first()
-          .click();
-      } else {
-        await page.waitForTimeout(20);
-      }
-    }
+    await advanceUntil(
+      page,
+      async () => {
+        sawAiRiichi ||=
+          (await page.getByTestId("status-badge-riichi").count()) > 0;
+        sawAiMeld ||=
+          (await page.getByRole("list", { name: "副露" }).count()) > 0;
+        return sawAiRiichi && sawAiMeld;
+      },
+      { maxSteps: 600 },
+    );
 
     expect(sawAiRiichi).toBe(true);
     expect(sawAiMeld).toBe(true);
@@ -478,24 +430,10 @@ test.describe("対局画面(/game)", () => {
     page,
   }) => {
     await page.goto("/game?seed=381");
-    const board = page.locator("[data-phase]").first();
     const hand = page.getByRole("listbox", { name: "自家の手牌" }).first();
 
-    for (let step = 0; step < 60; step++) {
-      const riichi = page.getByRole("button", { name: "リーチ", exact: true });
-      if (await riichi.count()) {
-        await riichi.first().click();
-        break;
-      }
-      const pending = await board.getAttribute("data-pending");
-      if (pending === "humanReact") {
-        await page.getByRole("button", { name: "スルー" }).first().click();
-      } else if (pending === "humanDiscard") {
-        await hand.getByRole("option").first().click();
-      } else {
-        await page.waitForTimeout(20);
-      }
-    }
+    // リーチ可能手番まで進めて「リーチ」で武装する(宣言牌の候補/非候補をこの後検証する)。
+    await armRiichi(page);
 
     const eligible = hand.getByRole("option", { name: /リーチ可/ });
     const ineligible = hand.getByRole("option", {
@@ -556,29 +494,15 @@ test.describe("対局画面(/game)", () => {
   }) => {
     test.setTimeout(120_000);
     await page.goto("/game?seed=12");
-    const board = page.locator("[data-phase]").first();
     const hand = page.getByRole("listbox", { name: "自家の手牌" }).first();
-    let forbidden = hand.getByRole("option", { name: /喰い替え禁止/ });
+    const forbidden = hand.getByRole("option", { name: /喰い替え禁止/ });
 
-    for (let step = 0; step < 50 && !(await forbidden.count()); step++) {
-      const phase = await board.getAttribute("data-phase");
-      const pending = await board.getAttribute("data-pending");
-      if (phase === "roundEnd") {
-        await page.getByRole("button", { name: "次の局へ" }).first().click();
-      } else if (pending === "humanReact") {
-        const pon = page.getByRole("button", { name: "ポン" });
-        if (await pon.count()) await pon.first().click();
-        else await page.getByRole("button", { name: "スルー" }).first().click();
-      } else if (pending === "humanDiscard") {
-        const legal = hand.locator(
-          '[role="option"]:not([aria-disabled="true"])',
-        );
-        await legal.first().click();
-      } else {
-        await page.waitForTimeout(20);
-      }
-      forbidden = hand.getByRole("option", { name: /喰い替え禁止/ });
-    }
+    // ポンを優先して鳴き、直後の打牌待ちで喰い替え禁止牌が現れるまで合法牌のみで進める。
+    await advanceUntil(page, async () => (await forbidden.count()) > 0, {
+      maxSteps: 50,
+      onHumanReact: "pon",
+      legalOnly: true,
+    });
 
     await expect(forbidden.first()).toHaveAttribute("aria-disabled", "true");
     await expect(forbidden.first()).toContainText("禁止");
@@ -594,22 +518,14 @@ test.describe("対局画面(/game)", () => {
     test.setTimeout(120_000);
     await page.goto("/game?seed=62");
     const board = page.locator("[data-phase]").first();
-    const hand = page.getByRole("listbox", { name: "自家の手牌" }).first();
 
-    for (let step = 0; step < 1500; step++) {
-      if (await page.getByText("四槓散了", { exact: true }).count()) break;
-      const phase = await board.getAttribute("data-phase");
-      const pending = await board.getAttribute("data-pending");
-      if (phase === "roundEnd") {
-        await page.getByRole("button", { name: "次の局へ" }).first().click();
-      } else if (pending === "humanReact") {
-        await page.getByRole("button", { name: "スルー" }).first().click();
-      } else if (pending === "humanDiscard") {
-        await hand.getByRole("option").first().click();
-      } else {
-        await page.waitForTimeout(20);
-      }
-    }
+    // 四槓散了の表示(draw の roundEnd)が出るまで進める(他の局終了は次局へ送る)。
+    await advanceUntil(
+      page,
+      async () =>
+        (await page.getByText("四槓散了", { exact: true }).count()) > 0,
+      { maxSteps: 1500 },
+    );
 
     await expect(board).toHaveAttribute("data-phase", "roundEnd");
     await expect(board).toHaveAttribute("data-round-kind", "draw");

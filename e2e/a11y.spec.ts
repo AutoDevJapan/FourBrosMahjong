@@ -1,5 +1,6 @@
 import AxeBuilder from "@axe-core/playwright";
 import { expect, type Locator, type Page, test } from "@playwright/test";
+import { advanceUntil, declareRiichi } from "./helpers/gameDriver";
 
 /**
  * 自動アクセシビリティ監査 E2E(スペック5 5.5 / #70)。
@@ -297,14 +298,17 @@ test.describe("状態駆動 a11y 監査(リーチ/鳴き/和了アラート/ト�
   if (gameScreen === undefined) throw new Error("SCREENS に /game がない");
 
   // 決定的再現 seed(オフラインで engine を「先頭牌打牌+可能ならリーチ/ポン」の DOM ドライバと
-  // 同一戦略で走査して選定。同じ seed + 同じ操作列は完全再現するため局面到達は決定的):
+  // 同一戦略で走査して選定。同じ seed + 同じ操作列は完全再現するため局面到達は決定的)。
+  // ドライバ戦略の唯一の実装は `e2e/helpers/gameDriver.ts`(#260)で、本ファイルの seed は
+  // そこに明記された標準戦略(先頭牌打牌・スルー/ポン優先・次局送り)を前提とする:
   // - RIICHI: 自家(起家=東家)が序盤の自手番で門前テンパイし、数手でリーチ宣言できる半荘。
   // - MELD  : 自家が序盤の他家打牌をポンして副露が卓に出る半荘。
   // - RESULT: 素点移動のある和了で1局目が終わり、`role="alert"` と点差表示が出る半荘。
   //
   // 保守メモ: これらの seed と各ドライバの探索上限(60/400/800)は engine/AI の打牌ロジックに依存する。
-  // engine を変更して目的局面へ到達しなくなった場合は、同一 DOM 戦略のオフライン走査で seed を
-  // 再選定すること(到達失敗は末尾の toBeVisible/属性アサーションで顕在化し、誤 pass にはならない)。
+  // engine を変更して目的局面へ到達しなくなった場合は、gameDriver.ts 記載の手順どおり同一戦略の
+  // オフライン走査で seed を再選定すること(到達失敗は advanceUntil の明示エラーか末尾の
+  // toBeVisible/属性アサーションで顕在化し、誤 pass にはならない)。
   // SEED_MELD と SEED_RESULT が同一(1)なのは、ドライバ戦略が異なり別局面に至るため意図的。
   const SEED_RIICHI = 381;
   const SEED_MELD = 1;
@@ -320,27 +324,12 @@ test.describe("状態駆動 a11y 監査(リーチ/鳴き/和了アラート/ト�
     );
   }
 
-  /** 盤面ルートの進行状態(テスト用フック data-phase / data-pending)を読む。 */
-  async function boardState(
-    board: Locator,
-  ): Promise<{ phase: string | null; pending: string | null } | null> {
-    return board
-      .evaluate((el) => ({
-        phase: el.getAttribute("data-phase"),
-        pending: el.getAttribute("data-pending"),
-      }))
-      .catch(() => null);
-  }
-
   for (const theme of THEMES) {
     test(`リーチ宣言バッジが描画された状態で WCAG 2.1 A/AA 違反ゼロ [${theme}]`, async ({
       page,
     }) => {
       await openScreen(page, gameScreen, theme, `?seed=${SEED_RIICHI}`);
 
-      const board = page.locator("[data-phase]").first();
-      const handOptions = () =>
-        page.getByRole("listbox", { name: "自家の手牌" }).getByRole("option");
       // リーチ宣言バッジ(variant="riichi")は安定したテスト用アンカー(#162)で特定する。
       // 操作パネルの「リーチ」ボタンは testid を持たないため、表示テキスト部分一致に依存せず
       // バッジのみを一意に掴める(レイアウト変更に対して堅牢)。自家スロット(section)へ
@@ -349,43 +338,9 @@ test.describe("状態駆動 a11y 監査(リーチ/鳴き/和了アラート/ト�
         .getByRole("region", { name: /^あなた/ })
         .getByTestId("status-badge-riichi");
 
-      // 自家は先頭牌から打牌して進める。engine が「リーチ」ボタンを出した手番(門前テンパイ)で
-      // リーチ宣言する。seed 固定によりこの半荘は数手でリーチ可能局面へ決定的に到達する。
-      for (let turn = 0; turn < 60; turn++) {
-        if (await riichiBadge.count()) break;
-        const state = await boardState(board);
-        if (state === null) {
-          await page.waitForTimeout(20);
-          continue;
-        }
-        if (state.phase !== "playing") break; // 想定外(半荘/局が先に終わった)。
-        if (state.pending === "humanReact") {
-          // リーチは門前が条件のため鳴きは見送る(スルー)。
-          await page.getByRole("button", { name: "スルー" }).first().click();
-          continue;
-        }
-        if (state.pending !== "humanDiscard") {
-          await page.waitForTimeout(20);
-          continue;
-        }
-        const armButton = page.getByRole("button", {
-          name: "リーチ",
-          exact: true,
-        });
-        if (await armButton.count()) {
-          // リーチ宣言 = 「リーチ」で武装 → engine が合法とした「リーチ可」の牌を選ぶ。
-          // 合法性は aria-label にも公開されるため、無効牌の試行に依存せず決定的に操作できる。
-          await armButton.first().click();
-          await page
-            .getByRole("listbox", { name: "自家の手牌" })
-            .getByRole("option", { name: /リーチ可/ })
-            .first()
-            .click();
-          continue;
-        }
-        // まだリーチ不可の手番: 先頭牌を打って進める。
-        await handOptions().first().click();
-      }
+      // 標準戦略で進め、「リーチ」ボタンが出た手番で武装 →「リーチ可」の牌で宣言する。
+      // seed 固定によりこの半荘は数手でリーチ可能局面へ決定的に到達する。
+      await declareRiichi(page);
 
       // リーチ宣言バッジ(variant="riichi")が自家スロットに描画された状態を監査する。
       await expect(riichiBadge.first()).toBeVisible();
@@ -397,42 +352,15 @@ test.describe("状態駆動 a11y 監査(リーチ/鳴き/和了アラート/ト�
     }) => {
       await openScreen(page, gameScreen, theme, `?seed=${SEED_MELD}`);
 
-      const board = page.locator("[data-phase]").first();
       // 副露(ポン/カン)の卓表示は `Melds` の `<ul aria-label="副露">`(role=list)。
       const melds = page.getByRole("list", { name: "副露" });
 
       // 自家は先頭牌で進め、鳴ける場面ではポン/カンする。AIの自動鳴きも含め、最初に
       // 実対局経路で副露が現れた時点で停止して監査する(issue #169)。
-      for (let step = 0; step < 400; step++) {
-        if (await melds.count()) break;
-        const state = await boardState(board);
-        if (state === null) {
-          await page.waitForTimeout(20);
-          continue;
-        }
-        if (state.phase === "roundEnd") {
-          await page.getByRole("button", { name: "次の局へ" }).first().click();
-          continue;
-        }
-        if (state.pending === "humanReact") {
-          const pon = page.getByRole("button", { name: "ポン" });
-          const kan = page.getByRole("button", { name: "カン" });
-          if (await pon.count()) await pon.first().click();
-          else if (await kan.count()) await kan.first().click();
-          else
-            await page.getByRole("button", { name: "スルー" }).first().click();
-          continue;
-        }
-        if (state.pending === "humanDiscard") {
-          await page
-            .getByRole("listbox", { name: "自家の手牌" })
-            .getByRole("option")
-            .first()
-            .click();
-          continue;
-        }
-        await page.waitForTimeout(20);
-      }
+      await advanceUntil(page, async () => (await melds.count()) > 0, {
+        maxSteps: 400,
+        onHumanReact: "ponOrKan",
+      });
 
       // 副露が卓に描画された状態を監査する。
       await expect(melds.first()).toBeVisible();
@@ -447,33 +375,15 @@ test.describe("状態駆動 a11y 監査(リーチ/鳴き/和了アラート/ト�
       const board = page.locator("[data-phase]").first();
       // 自家は打牌(先頭牌)・ロン/鳴きは見送り(スルー)で進め、素点移動のある決着(マイナス点差)
       // を伴う局終了(roundEnd)まで到達させる。点差ゼロの流局が来たら次局へ進めて続行する。
-      for (let step = 0; step < 800; step++) {
-        const state = await boardState(board);
-        if (state === null) {
-          await page.waitForTimeout(20);
-          continue;
-        }
-        if (state.phase === "roundEnd") {
-          // 点差(マイナス表示 = --danger)が出ていれば監査対象の局。無ければ次局へ。
-          if (await page.getByText(/マイナス/).count()) break;
-          await page.getByRole("button", { name: "次の局へ" }).first().click();
-          continue;
-        }
-        if (state.phase === "gameEnd") break;
-        if (state.pending === "humanReact") {
-          await page.getByRole("button", { name: "スルー" }).first().click();
-          continue;
-        }
-        if (state.pending === "humanDiscard") {
-          await page
-            .getByRole("listbox", { name: "自家の手牌" })
-            .getByRole("option")
-            .first()
-            .click();
-          continue;
-        }
-        await page.waitForTimeout(20);
-      }
+      // 目的局面前に半荘が終わる想定外(gameEnd)も停止し、直後の roundEnd アサーションで顕在化させる。
+      await advanceUntil(
+        page,
+        async (state) =>
+          state?.phase === "gameEnd" ||
+          (state?.phase === "roundEnd" &&
+            (await page.getByText(/マイナス/).count()) > 0),
+        { maxSteps: 800 },
+      );
 
       // 局終了の決着通知が `role="alert"`(assertive ライブリージョン)へ入る。
       await expect(board).toHaveAttribute("data-phase", "roundEnd");

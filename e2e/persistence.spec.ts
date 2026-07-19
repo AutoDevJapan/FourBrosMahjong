@@ -1,5 +1,6 @@
 import { expect, test } from "@playwright/test";
 import { walkToGameEnd } from "@/components/game/finishedGameFixture";
+import { advanceUntil, declareRiichi } from "./helpers/gameDriver";
 
 const visibleHand = (page: import("@playwright/test").Page) =>
   page.getByRole("listbox", { name: "自家の手牌" }).filter({ visible: true });
@@ -46,25 +47,10 @@ test.describe("対局状態のsession復元(#190)", () => {
 
   test("リーチ宣言後reloadで宣言状態と手牌を復元する", async ({ page }) => {
     await page.goto("/game?seed=381");
-    const board = page.locator("[data-phase]").first();
     const hand = visibleHand(page);
 
-    for (let step = 0; step < 60; step++) {
-      const riichi = page.getByRole("button", { name: "リーチ", exact: true });
-      if (await riichi.count()) {
-        await riichi.first().click();
-        await hand
-          .getByRole("option", { name: /リーチ可/ })
-          .first()
-          .click();
-        break;
-      }
-      if ((await board.getAttribute("data-pending")) === "humanReact") {
-        await page.getByRole("button", { name: "スルー" }).first().click();
-      } else {
-        await hand.getByRole("option").first().click();
-      }
-    }
+    // 標準戦略で進めてリーチ可能手番に到達し、「リーチ可」の牌で宣言する。
+    await declareRiichi(page);
 
     const badge = page
       .getByRole("region", { name: /^あなた/ })
@@ -95,22 +81,15 @@ test.describe("対局状態のsession復元(#190)", () => {
     // 先にロビーを踏んでおき、終局の自動遷移(replace)後の「戻る」到達先を検証可能にする。
     await page.goto("/");
     await page.goto("/game?seed=1");
-    const board = page.locator("[data-phase]").first();
-    for (let step = 0; step < 2000; step++) {
-      const phase = await board.getAttribute("data-phase");
-      const pending = await board.getAttribute("data-pending");
-      if (phase === "gameEnd") break;
-      if (phase === "roundEnd") {
-        await page.getByRole("button", { name: "次の局へ" }).first().click();
-      } else if (pending === "humanReact") {
-        await page.getByRole("button", { name: "スルー" }).first().click();
-      } else if (pending === "humanDiscard") {
-        await visibleHand(page)
-          .locator('[role="option"]:not([aria-disabled="true"])')
-          .first()
-          .click();
-      }
-    }
+    // 半荘終了まで合法牌のみで完走する(seed=1 は約113手・9局で決定的に終局)。
+    // gameEnd 表示と /game/result への自動遷移(replace)は競合し得るため、どちらでも停止する。
+    await advanceUntil(
+      page,
+      (state) =>
+        state?.phase === "gameEnd" ||
+        new URL(page.url()).pathname === "/game/result",
+      { maxSteps: 2000, legalOnly: true },
+    );
     await expect(page).toHaveURL(/\/game\/result$/);
     await expect(page.getByRole("heading", { name: "最終順位" })).toBeVisible();
     await page.reload();
