@@ -19,8 +19,8 @@ import type { Page } from "@playwright/test";
  * - 他家打牌への反応(`humanReact`): `onHumanReact` に従いスルー / ポン優先 / ポン→カン優先 /
  *   ロン優先(`ronOrPass`: ロンできればロン、できなければスルー)。
  * - 局終了(`roundEnd`): `onRoundEnd` に従い「次の局へ」を押すか、そこで停止する。
- * - 半荘終了(`gameEnd`): 結果画面への自動遷移を待つ(停止条件は predicate 側で
- *   `state.phase` や `page.url()` を見て判定する)。
+ * - 半荘終了(`gameEnd`): 最終局の決着表示(#277)から `onGameEnd` に従い「結果を見る」を
+ *   押して結果画面へ進む("result")か、そこで停止する("stop")。自動遷移は無い。
  *
  * 到達失敗(step 上限まで predicate が真にならない)は明示エラーで顕在化する(誤 pass しない)。
  */
@@ -45,6 +45,8 @@ export interface AdvanceOptions {
   readonly legalOnly?: boolean;
   /** `roundEnd` 時に「次の局へ」を押す("next")か、そこで停止する("stop")か。既定 "next"。 */
   readonly onRoundEnd?: "next" | "stop";
+  /** `gameEnd` 時に「結果を見る」を押す("result")か、そこで停止する("stop")か。既定 "result"。 */
+  readonly onGameEnd?: "result" | "stop";
 }
 
 /**
@@ -128,6 +130,7 @@ export async function advanceUntil(
     onHumanReact = "pass",
     legalOnly = false,
     onRoundEnd = "next",
+    onGameEnd = "result",
   } = options;
 
   let lastState: BoardState | null = null;
@@ -141,8 +144,16 @@ export async function advanceUntil(
       continue;
     }
     if (state.phase === "gameEnd") {
-      // 結果画面への自動遷移待ち(predicate が URL / phase で停止を判定する)。
-      await page.waitForTimeout(50);
+      // 半荘終了は最終局の決着表示で停止する(#277: 自動遷移は無い)。既定は
+      // 「結果を見る」を押して結果画面へ進む(predicate が URL 側で停止を判定できる)。
+      if (onGameEnd === "stop") return;
+      await page.getByRole("button", { name: "結果を見る" }).first().click();
+      // push の完了を待ってから次ループへ(未完了のまま再クリックして履歴を重複させない)。
+      await page
+        .waitForURL((url) => url.pathname === "/game/result", {
+          timeout: 10_000,
+        })
+        .catch(() => {});
       continue;
     }
     if (state.phase === "roundEnd") {
