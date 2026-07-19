@@ -718,7 +718,40 @@ function chooseAiDiscard(
   return chooseDiscard({ tiles, opponentDiscards, doraKinds });
 }
 
-/** AIのリーチ宣言。合法な宣言牌のうち手牌効率AIが選んだ牌を切る。 */
+/**
+ * リーチ宣言牌の候補から、宣言後の待ちが自河と交わる(= 捨て牌フリテンになる)牌を
+ * 除いて返す(#295)。フリテンリーチはルール上合法(スペック2 2.4)だが、以後ロン不可の
+ * まま手を固定する明確な悪手であり、他家の当たり牌を「見逃す」ように見えるため、
+ * AI は非フリテンの待ちになる宣言牌のみを選ぶ。純関数・決定的。
+ */
+function nonFuritenRiichiTiles(
+  hand: HandState,
+  seat: SeatKey,
+  candidates: readonly Tile[],
+): Tile[] {
+  if (hand.drawn === null) return [];
+  const melds = meldInputsOf(hand.melds[seat]);
+  const pool = [...hand.hands[seat], hand.drawn];
+  const ownDiscardKeys = new Set(hand.discards[seat].map((t) => tileKey(t)));
+  return candidates.filter((candidate) => {
+    const index = pool.findIndex((t) => sameTile(t, candidate));
+    if (index < 0) return false;
+    const rest = [...pool.slice(0, index), ...pool.slice(index + 1)];
+    // 宣言牌自身も宣言と同時に自河へ載るため、待ちに含まれるならフリテン扱いにする
+    // (役なし完成形をリーチで曲げる場合など、待ちが宣言牌と同種になる形がある)。
+    const candidateKey = tileKey(candidate);
+    return waitingTiles(rest, melds).every((wait) => {
+      const key = tileKey(wait);
+      return key !== candidateKey && !ownDiscardKeys.has(key);
+    });
+  });
+}
+
+/**
+ * AIのリーチ宣言。合法な宣言牌のうち、宣言後の待ちがフリテンにならない牌に限って
+ * 宣言する(#295)。その中に手牌効率AIの選んだ牌があればそれを、なければ先頭を切る。
+ * 全候補がフリテンになる場合はリーチを見送り、呼び出し側の通常打牌(ダマ維持)に委ねる。
+ */
 function applyAiRiichi(state: EngineState, seat: SeatKey): EngineState {
   const hand = state.hand;
   if (hand === null || hand.drawn === null) return state;
@@ -734,10 +767,12 @@ function applyAiRiichi(state: EngineState, seat: SeatKey): EngineState {
   ) {
     return state;
   }
+  const declarable = nonFuritenRiichiTiles(hand, seat, candidates);
+  if (declarable.length === 0) return state;
   const selected = chooseAiDiscard(hand, seat, hand.drawn);
   const tile =
-    candidates.find((candidate) => sameTile(candidate, selected)) ??
-    candidates[0];
+    declarable.find((candidate) => sameTile(candidate, selected)) ??
+    declarable[0];
   hand.riichi[seat] = true;
   hand.doubleRiichi[seat] = hand.discards[seat].length === 0 && !hand.callsMade;
   hand.pendingRiichiSeat = seat;
