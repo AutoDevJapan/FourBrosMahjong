@@ -1,9 +1,6 @@
 import { expect, test } from "@playwright/test";
 import { walkToGameEnd } from "@/components/game/finishedGameFixture";
-import { advanceUntil, declareRiichi } from "./helpers/gameDriver";
-
-const visibleHand = (page: import("@playwright/test").Page) =>
-  page.getByRole("listbox", { name: "自家の手牌" }).filter({ visible: true });
+import { advanceUntil, declareRiichi, visibleHand } from "./helpers/gameDriver";
 
 test.describe("対局状態のsession復元(#190)", () => {
   test("打牌後reloadで同じ局面を復元し、別seedは新規開始する", async ({

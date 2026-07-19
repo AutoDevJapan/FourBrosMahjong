@@ -64,7 +64,7 @@ async function readBoardState(page: Page): Promise<BoardState | null> {
 }
 
 /** 可視の自家手牌 listbox(2レイアウト分 DOM にあるため可視側に限定)。 */
-function visibleHand(page: Page) {
+export function visibleHand(page: Page) {
   return page
     .getByRole("listbox", { name: "自家の手牌" })
     .filter({ visible: true })
@@ -118,8 +118,10 @@ export async function advanceUntil(
     onRoundEnd = "next",
   } = options;
 
+  let lastState: BoardState | null = null;
   for (let step = 0; step < maxSteps; step++) {
     const state = await readBoardState(page);
+    lastState = state;
     if (await until(state)) return;
     if (state === null) {
       // 遷移直後などで盤面が一時的に取れないときは少し待って再判定する。
@@ -148,7 +150,8 @@ export async function advanceUntil(
     await page.waitForTimeout(20);
   }
   throw new Error(
-    `advanceUntil: ${maxSteps} step 以内に目的局面へ到達しなかった`,
+    `advanceUntil: ${maxSteps} step 以内に目的局面へ到達しなかった` +
+      `(最終状態: phase=${lastState?.phase ?? "盤面なし"}, pending=${lastState?.pending ?? "-"})`,
   );
 }
 
@@ -169,6 +172,11 @@ export async function armRiichi(
     onRoundEnd: "stop",
     ...options,
   });
+  // onRoundEnd: "stop" の早期 return(局終了)をボタン click の不明瞭なタイムアウトに
+  // 化けさせず、seed 退行を明示エラーで診断できるようにする。
+  if (!(await riichiButton.count())) {
+    throw new Error("armRiichi: リーチ可能手番へ到達する前に局が終了した");
+  }
   await riichiButton.first().click();
 }
 
