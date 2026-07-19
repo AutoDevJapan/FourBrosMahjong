@@ -51,7 +51,7 @@ flowchart LR
 | 卓(中央) | `Table` | 卓情報・ドラ表示を内包するコンテナ |
 | 各家の手牌(自家/上家/対面/下家) | `PlayerArea` (4スロットぶん) | 自家のみ牌面を表向き表示、他家は伏せ牌(枚数のみ)。スート名+数字を`aria-label`に含める(スペック5 5.2.1) |
 | 河(捨て牌) | `Discards`(`PlayerArea` の子) | 着席3人分。抜け番スロットには表示しない |
-| ドラ表示 | `DoraIndicator` | 表ドラ表示牌(1〜3枚)。リーチ和了時のみ開示する裏ドラは結果確定時に表示 |
+| ドラ表示 | `DoraIndicator` | 表ドラ表示牌(1〜3枚)と裏ドラ表示牌を「表」「裏」の別グループ(各 `aria-label` 付き `<ul>`+可視ラベル・仕切り)で描き、並び順に依存せず判別できる(スペック5 5.2.1 / #261)。裏ドラは対局中は枚数ぶん伏せ、リーチ和了の結果確定時のみ開示 |
 | 点数表示 / ソシー(点棒)表示 | `ScoreDisplay`(`PlayerArea` の子) | 対局中は持ち点(素点)を表示。ソシー(素点+ウマ+祝儀)換算は `/game/result` の `SoshiiBreakdown` で表示 |
 | 抜け番(休みプレイヤー)表示 | `BenchArea` | 名前・固定された持ち点・「抜け番」アイコン+テキストラベル(色のみに依存しない、スペック5 5.2.1) |
 | 場風 / 局 / 本場 / 供託 | `TableInfo`(`Table` の子) | 卓中央に集約表示(場風・局数・本場・供託棒本数) |
@@ -99,7 +99,7 @@ src/app/
 | `/game/layout.tsx`(`GameProvider`) | Client | 対局状態をメモリ上に保持し `/game` ⇄ `/game/result` 間で共有するため |
 | `/game/page.tsx` | Server shell + Client island | ページ自体は Server とし、卓の操作領域を `<GameBoard>` として切り出し、その内部のみ `"use client"` |
 | `<GameBoard>` 配下(`PlayerArea`・`ActionPanel`・`LiveRegion` 等) | Client | 打牌選択・鳴き・リーチ宣言等のキーボード/ポインタ操作、`aria-live` によるライブ更新(スペック5 5.2.2, 5.2.3)にローカル状態が必要 |
-| `<Tile>`・`<ScoreDisplay>`・`<TableInfo>`・`<DoraIndicator>` 等の純表示コンポーネント | 値渡しのみなら Server Component として実装可能。ただし Client なコンポーネント(`GameBoard`等)の子として使われる場合、実質的にクライアントバンドルに含まれる点に留意 | props 経由で値を受け取り描画するだけの責務に留めることで、将来的な配置転換を容易にする |
+| `<Tile>`・`<ScoreDisplay>`・`<TableInfo>` 等の純表示コンポーネント(`<DoraIndicator>` は開示注記の `aria-describedby` 関連付けに `useId` を用いるため Client ツリー前提 / #261) | 値渡しのみなら Server Component として実装可能。ただし Client なコンポーネント(`GameBoard`等)の子として使われる場合、実質的にクライアントバンドルに含まれる点に留意 | props 経由で値を受け取り描画するだけの責務に留めることで、将来的な配置転換を容易にする |
 | `/game/result/page.tsx` | Client | `GameProvider` の状態(確定したソシー内訳)を `useContext` 等で読み取るため |
 
 ## 6.7 コンポーネント分割方針(`src/components/` 初期ディレクトリ構成案)
