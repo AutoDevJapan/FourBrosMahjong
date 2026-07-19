@@ -14,7 +14,10 @@ import type { Page } from "@playwright/test";
  *
  * - 自家の打牌: **表示手牌(ソート済み)の先頭牌**を切る。`legalOnly` 指定時は
  *   `aria-disabled` でない先頭牌(自家が鳴かない限り両者は同一)。
- * - 他家打牌への反応(`humanReact`): `onHumanReact` に従いスルー / ポン優先 / ポン→カン優先。
+ * - リーチ後の自手番(打牌ロック中): ツモ和了できれば「ツモ」、できなければ「ツモ切り」
+ *   (ロック中は手牌から打牌できないため。`declareRiichi` の後に進める場合のみ通る分岐)。
+ * - 他家打牌への反応(`humanReact`): `onHumanReact` に従いスルー / ポン優先 / ポン→カン優先 /
+ *   ロン優先(`ronOrPass`: ロンできればロン、できなければスルー)。
  * - 局終了(`roundEnd`): `onRoundEnd` に従い「次の局へ」を押すか、そこで停止する。
  * - 半荘終了(`gameEnd`): 結果画面への自動遷移を待つ(停止条件は predicate 側で
  *   `state.phase` や `page.url()` を見て判定する)。
@@ -31,7 +34,7 @@ export interface BoardState {
 }
 
 /** `humanReact`(他家打牌への反応)時の戦略。 */
-type ReactStrategy = "pass" | "pon" | "ponOrKan";
+type ReactStrategy = "pass" | "pon" | "ponOrKan" | "ronOrPass";
 
 export interface AdvanceOptions {
   /** 探索 step 上限(超過で明示エラー)。既定 1500。 */
@@ -80,8 +83,17 @@ async function discardFirstTile(page: Page, legalOnly: boolean): Promise<void> {
   await tile.click();
 }
 
-/** `humanReact` の反応: 戦略に応じてポン/カン/スルーのボタンを1つ押す。 */
+/** `humanReact` の反応: 戦略に応じてロン/ポン/カン/スルーのボタンを1つ押す。 */
 async function react(page: Page, strategy: ReactStrategy): Promise<void> {
+  if (strategy === "ronOrPass") {
+    const ron = page.getByRole("button", { name: "ロン" });
+    if (await ron.count()) {
+      await ron.first().click();
+      return;
+    }
+    await page.getByRole("button", { name: "スルー" }).first().click();
+    return;
+  }
   if (strategy !== "pass") {
     const pon = page.getByRole("button", { name: "ポン" });
     if (await pon.count()) {
@@ -143,6 +155,15 @@ export async function advanceUntil(
       continue;
     }
     if (state.pending === "humanDiscard") {
+      // リーチ後の自手番は打牌がロックされ、手牌クリックは no-op になる(「ツモ切り」ボタンは
+      // ロック中のみ描画される)。ツモ和了できれば「ツモ」、できなければ「ツモ切り」で進める。
+      const tsumogiri = page.getByRole("button", { name: "ツモ切り" });
+      if (await tsumogiri.count()) {
+        const tsumo = page.getByRole("button", { name: "ツモ", exact: true });
+        if (await tsumo.isEnabled()) await tsumo.click();
+        else await tsumogiri.first().click();
+        continue;
+      }
       await discardFirstTile(page, legalOnly);
       continue;
     }

@@ -64,6 +64,14 @@ function formatViolations(violations: AxeViolations): string {
     .join("\n");
 }
 
+/** ページ全体へ axe(WCAG 2.1 A/AA)を実行し違反ゼロを検証する(状態駆動監査で共用)。 */
+async function auditPage(page: Page): Promise<void> {
+  const results = await new AxeBuilder({ page })
+    .withTags([...WCAG_TAGS])
+    .analyze();
+  expect(results.violations, formatViolations(results.violations)).toEqual([]);
+}
+
 /**
  * 指定テーマで画面を開く。
  * - OSダーク: `prefers-color-scheme: dark` をエミュレート(未選択=OS 追従の経路)。
@@ -314,16 +322,6 @@ test.describe("状態駆動 a11y 監査(リーチ/鳴き/和了アラート/ト�
   const SEED_MELD = 1;
   const SEED_RESULT = 1;
 
-  /** ページ全体へ axe(WCAG 2.1 A/AA)を実行し違反ゼロを検証する。 */
-  async function auditPage(page: Page): Promise<void> {
-    const results = await new AxeBuilder({ page })
-      .withTags([...WCAG_TAGS])
-      .analyze();
-    expect(results.violations, formatViolations(results.violations)).toEqual(
-      [],
-    );
-  }
-
   for (const theme of THEMES) {
     test(`リーチ宣言バッジが描画された状態で WCAG 2.1 A/AA 違反ゼロ [${theme}]`, async ({
       page,
@@ -391,6 +389,73 @@ test.describe("状態駆動 a11y 監査(リーチ/鳴き/和了アラート/ト�
       // 点差の減少(`--danger`)が色のみに依存せず `sr-only` テキストで併記されている
       // (スペック5 5.2.1)。色付き数値自体は `aria-hidden` の装飾のため、意味はこのテキストが担う。
       await expect(page.getByText(/マイナス/).first()).toBeAttached();
+      await auditPage(page);
+    });
+  }
+});
+
+/**
+ * 状態駆動 a11y 監査(裏ドラ開示 / #261)。
+ *
+ * 裏ドラ表示牌は自家リーチ和了の局終了時にのみ開示され、#159 の各シナリオ(リーチ宣言・
+ * 副露・和了アラート)ではこの画面状態を走査できていなかった。ここでは決定的 seed で
+ * 「自家がリーチ宣言 → そのまま和了」する半荘を実プレイし、裏ドラが開示された局終了
+ * パネルを表示した状態で axe を回す。あわせて表ドラ/裏ドラが並び順ではなく**グループ名**
+ * (`表ドラ表示牌` / `裏ドラ表示牌`)で判別できることを DOM 構造で検証する(スペック5 5.2.1)。
+ *
+ * seed 選定: gameDriver.ts 記載の標準戦略に「リーチ後はツモ和了優先・不可ならツモ切り、
+ * 他家打牌へはロン優先(ronOrPass)」を加えた同一戦略で engine をオフライン走査して選定した。
+ * seed=180 は1局目の数手で自家リーチ→ツモ和了に決定的到達する。engine/AI 変更で到達しなく
+ * なった場合は同一戦略のオフライン走査で再選定すること(到達失敗は advanceUntil の明示エラー
+ * か末尾のアサーションで顕在化し、誤 pass にはならない)。
+ *
+ * 配色トークンのライト/ダーク双方を突くため、ライト・手動ダークの 2 テーマで実行する
+ * (#148 と同じ方針。OS ダークは手動ダークと同一トークンを共有するため省く)。
+ */
+test.describe("状態駆動 a11y 監査(裏ドラ開示 / #261)", () => {
+  const gameScreen = SCREENS.find((s) => s.path === "/game");
+  if (gameScreen === undefined) throw new Error("SCREENS に /game がない");
+
+  // 自家(起家)が1局目の序盤でリーチ宣言し、そのままツモ和了する半荘(オフライン走査で選定)。
+  const SEED_URA_WIN = 180;
+
+  for (const theme of ["ライト", "手動ダーク"] as const) {
+    test(`裏ドラ開示(自家リーチ和了)状態で表裏がグループ判別でき WCAG 2.1 A/AA 違反ゼロ [${theme}]`, async ({
+      page,
+    }) => {
+      await openScreen(page, gameScreen, theme, `?seed=${SEED_URA_WIN}`);
+
+      // 標準戦略で進めてリーチ宣言し、以降はドライバのリーチ後分岐(ツモ和了優先/ツモ切り)と
+      // ロン優先(ronOrPass)で局終了まで進める。seed=180 は自家リーチ→ツモ和了に決定的到達する。
+      await declareRiichi(page);
+      await advanceUntil(page, (state) => state?.phase === "roundEnd", {
+        maxSteps: 200,
+        onHumanReact: "ronOrPass",
+        onRoundEnd: "stop",
+      });
+
+      // 自家リーチ和了で局が終わり、裏ドラが開示されている。
+      const board = page.locator("[data-phase]").first();
+      await expect(board).toHaveAttribute("data-phase", "roundEnd");
+      await expect(board).toHaveAttribute("data-round-kind", "win");
+      await expect(page.getByText("裏ドラ開示").first()).toBeVisible();
+
+      // 表/裏が並び順ではなくグループ名で判別できる(スペック5 5.2.1 / #261)。
+      const omote = page
+        .getByRole("list", { name: "表ドラ表示牌" })
+        .filter({ visible: true })
+        .first();
+      const ura = page
+        .getByRole("list", { name: "裏ドラ表示牌" })
+        .filter({ visible: true })
+        .first();
+      await expect(omote).toBeVisible();
+      await expect(ura).toBeVisible();
+      // 開示済みの裏グループは伏せ牌ではなく実牌で構成される。
+      await expect(ura.getByRole("img").first()).toBeVisible();
+      await expect(ura.getByRole("img", { name: "伏せ牌" })).toHaveCount(0);
+
+      // 裏ドラ開示状態のページ全体を axe(WCAG 2.1 A/AA)で監査する。
       await auditPage(page);
     });
   }
