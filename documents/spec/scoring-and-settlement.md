@@ -359,6 +359,8 @@ SSOT(`docs/四兄弟麻雀ルール.md` §3「リーチ棒は供託扱い。ダ�
 
 **実装**: `src/domain/game/engine.ts` の `endGame` が精算(`applyUma`/`applyRawScore`)の**前段**で、残存供託(`state.riichiSticks × 1,000`)を `residualRiichiRecipient(state.order, points)` が返す帰属先(最高点=単独ならその1人、同点最高なら席順上位の1人)の `points` へ加算し `riichiSticks` を 0 にする。結線テストは `src/domain/game/engine.residual-riichi.test.ts`(残存供託ありで終局→単独1位が取得・zero-sum、同点最高2人/起家以外2人/3人/抜け番含む同点→席順上位が総取り・zero-sum)と `engine.melds-riichi.test.ts` で担保する。
 
+**決着表示との整合(#282)**: `gameEnd` の決着表示(スペック6 6.3 / #277)は「局開始持ち点 + 表示デルタ = 表示持ち点」「供託カウント 0 との整合」を検算できる必要がある。このため `endGame` は残存供託の加算を最終局サマリ `lastRound.deltas[帰属先]` へも**畳み込み**(和了決着で複数局分の供託回収 `stickPayout` が和了者のデルタに含まれるのと同じ扱い)、帰属の内訳を `RoundSummary.residualSticks`(`recipientId` / `recipientName` / `sticks` / `points`)として記録する。UI(`GameBoard`)は `gameEnd` の hint・読み上げに「残存供託N本(N,000点)は◯◯が取得。」を併記し、帰属先が抜け番でも点差(`pointsDelta`)を表示する(`BenchArea`)。最終持ち点・順位・精算(`result`)自体は従来と不変(表示サマリのみの拡張)。回帰テストは `engine.residual-riichi.test.ts`(デルタ畳み込み・帰属記録・三者一貫)、`gameView.test.ts`(抜け番への点差写像)、`GameBoard.test.tsx`(hint 併記と表示整合)。
+
 ### 流局テンパイ料(荒牌平局)のサンマ配分 【判断ポイント / #99】
 
 荒牌平局(山尽き=海底で誰も和了せず流局・2.1)時、**着席3人(東・南・西)**のテンパイ/ノーテンで点棒を授受する。**抜け番(北家)は対局外のため授受に含めない**(持ち点は局をまたいで不変=Q5・4.4)。実装 `src/domain/game/engine.ts`(`settleDraw` / #67, 定数 `NOTEN_POOL = 3000`)を SSOT とし、関西サンマ標準の**3,000点プール配分**を確定仕様とする。
