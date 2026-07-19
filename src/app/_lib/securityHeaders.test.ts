@@ -16,6 +16,9 @@ describe("contentSecurityPolicy", () => {
     expect(policy).not.toContain("script-src 'unsafe-inline'");
     expect(policy).toContain("frame-ancestors 'none'");
     expect(policy).toContain("connect-src 'self'");
+    // strict-dynamic 下では script-src の 'self' が SW 取得に適用されないため、
+    // /sw.js の登録には worker-src の明示が必要(issue #292)。
+    expect(policy).toContain("worker-src 'self'");
     expect(policy).toContain("object-src 'none'");
     expect(policy).toContain("upgrade-insecure-requests");
   });

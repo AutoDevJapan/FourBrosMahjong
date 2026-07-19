@@ -43,6 +43,9 @@ export function contentSecurityPolicy(nonce: string, development: boolean) {
     "font-src 'self' data:",
     "connect-src 'self'",
     "manifest-src 'self'",
+    // service worker(/sw.js)の登録許可。`strict-dynamic` があると script-src の
+    // 'self' はワーカー取得の許可として無視されるため、worker-src を明示する。
+    "worker-src 'self'",
     "object-src 'none'",
     "base-uri 'self'",
     "form-action 'self'",
