@@ -14,6 +14,8 @@ import { advanceUntil, declareRiichi } from "./helpers/gameDriver";
  * 各画面をライト・OS ダーク(`prefers-color-scheme: dark`)・手動ダーク
  * (`<html data-theme="dark">`)の 3 テーマで監査し、配色トークン(`globals.css`)の
  * ライト/ダーク双方が axe の `color-contrast`(WCAG 2.1 AA / 5.2.4)を満たすことを確認する。
+ * 実対局を進める状態駆動監査(#148/#159/#261)は `STATE_DRIVEN_THEMES` の 2 テーマに
+ * 統一する(方針の根拠は定数の doc コメントを参照 / #271)。
  *
  * axe のルールセットは WCAG 2.0/2.1 の A・AA タグに限定する(spec 5.2.4 の最低ライン)。
  * `disableRules` による全体無効化は行わない。現状は全画面・全ノードを無除外で監査している
@@ -48,6 +50,20 @@ const SCREENS: readonly Screen[] = [
 ];
 
 const THEMES: readonly Theme[] = ["ライト", "OSダーク", "手動ダーク"];
+
+/**
+ * 状態駆動監査(#148/#159/#261)で共用するテーマ集合(#271 で統一)。
+ *
+ * 実対局を進める状態駆動シナリオは1件あたりの実行コストが高いため、配色トークン
+ * (`globals.css`)のライト/ダーク双方を突く最小構成としてライト・手動ダークの
+ * 2 テーマに統一する。OS ダーク(`prefers-color-scheme: dark`)は手動ダークと同一の
+ * 配色トークンを共有するため配色検証としては重複であり、OS ダーク経路の適用確認
+ * 自体は静的な全画面監査(`THEMES` の 3 テーマ)が担保済みなので省く。
+ */
+const STATE_DRIVEN_THEMES = [
+  "ライト",
+  "手動ダーク",
+] as const satisfies readonly Theme[];
 
 /** `AxeBuilder.analyze()` が返す違反配列の型(失敗メッセージ整形の引数用)。 */
 type AxeViolations = Awaited<ReturnType<AxeBuilder["analyze"]>>["violations"];
@@ -154,8 +170,8 @@ test.describe("自動 a11y 監査(axe-core)", () => {
  * 既定の自動監査は初期局面・幅 1280px のみを走査するため、狭幅(卓の描画幅 < 360px)で現れる
  * 「自分手番フォーカス表示」のコンパクト帯レイアウトと、そこから開く全体盤面モーダル
  * (`role="dialog"`)の展開状態が未走査だった。ここでは狭幅ビューポートで /game を開き、
- * コンパクト帯そのものとモーダル展開状態を axe で監査する。配色トークンのライト/ダーク双方を
- * 突くため、ライト・手動ダークの 2 テーマで実行する。
+ * コンパクト帯そのものとモーダル展開状態を axe で監査する。テーマは状態駆動監査の
+ * 共通方針 `STATE_DRIVEN_THEMES`(ライト・手動ダークの 2 テーマ / #271)に従う。
  */
 test.describe("状態駆動 a11y 監査(狭幅・モーダル / #148)", () => {
   // 卓の描画幅 < 360px(段階②)を確実に踏むための狭幅ビューポート。
@@ -163,7 +179,7 @@ test.describe("状態駆動 a11y 監査(狭幅・モーダル / #148)", () => {
   const gameScreen = SCREENS.find((s) => s.path === "/game");
   if (gameScreen === undefined) throw new Error("SCREENS に /game がない");
 
-  for (const theme of ["ライト", "手動ダーク"] as const) {
+  for (const theme of STATE_DRIVEN_THEMES) {
     test(`/game 狭幅のコンパクト帯と全体盤面モーダルは WCAG 2.1 A/AA 違反ゼロ [${theme}]`, async ({
       page,
     }) => {
@@ -298,8 +314,8 @@ test.describe("状態駆動 a11y 監査(狭幅・モーダル / #148)", () => {
  * (状態を捏造せず本番の描画経路を通す)。seed は本番導線(クエリ無しの `/game`)では発火せず、
  * 盤面の牌列を固定するだけで席割り・進行規則・UI 分岐は一切変えない(本番挙動不変)。
  *
- * 配色トークンのライト/ダーク双方を突くため、各シナリオをライト・OSダーク・手動ダークの
- * 3 テーマで実行する(spec 5.4 / 5.5)。
+ * テーマは状態駆動監査の共通方針 `STATE_DRIVEN_THEMES`(ライト・手動ダークの 2 テーマ /
+ * #271)に従う(OS ダークの配色は手動ダークと同一トークンのため省く)。
  */
 test.describe("状態駆動 a11y 監査(リーチ/鳴き/和了アラート/トビ / #159)", () => {
   const gameScreen = SCREENS.find((s) => s.path === "/game");
@@ -322,7 +338,7 @@ test.describe("状態駆動 a11y 監査(リーチ/鳴き/和了アラート/ト�
   const SEED_MELD = 1;
   const SEED_RESULT = 1;
 
-  for (const theme of THEMES) {
+  for (const theme of STATE_DRIVEN_THEMES) {
     test(`リーチ宣言バッジが描画された状態で WCAG 2.1 A/AA 違反ゼロ [${theme}]`, async ({
       page,
     }) => {
@@ -409,8 +425,8 @@ test.describe("状態駆動 a11y 監査(リーチ/鳴き/和了アラート/ト�
  * なった場合は同一戦略のオフライン走査で再選定すること(到達失敗は advanceUntil の明示エラー
  * か末尾のアサーションで顕在化し、誤 pass にはならない)。
  *
- * 配色トークンのライト/ダーク双方を突くため、ライト・手動ダークの 2 テーマで実行する
- * (#148 と同じ方針。OS ダークは手動ダークと同一トークンを共有するため省く)。
+ * テーマは状態駆動監査の共通方針 `STATE_DRIVEN_THEMES`(ライト・手動ダークの 2 テーマ /
+ * #271)に従う。
  */
 test.describe("状態駆動 a11y 監査(裏ドラ開示 / #261)", () => {
   const gameScreen = SCREENS.find((s) => s.path === "/game");
@@ -419,7 +435,7 @@ test.describe("状態駆動 a11y 監査(裏ドラ開示 / #261)", () => {
   // 自家(起家)が1局目の序盤でリーチ宣言し、そのままツモ和了する半荘(オフライン走査で選定)。
   const SEED_URA_WIN = 180;
 
-  for (const theme of ["ライト", "手動ダーク"] as const) {
+  for (const theme of STATE_DRIVEN_THEMES) {
     test(`裏ドラ開示(自家リーチ和了)状態で表裏がグループ判別でき WCAG 2.1 A/AA 違反ゼロ [${theme}]`, async ({
       page,
     }) => {
