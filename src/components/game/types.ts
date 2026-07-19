@@ -89,6 +89,12 @@ export interface BenchPlayerView {
   readonly name: string;
   /** 抜け番中は変化しない持ち点(スペック4 不変条件)。 */
   readonly points: number;
+  /**
+   * 直近の点差(表示専用)。局中は抜け番の持ち点は変化しない(スペック4 不変条件)が、
+   * 半荘終了(gameEnd)時の残存供託の帰属(Q15/Q20)は抜け番にも及び得るため、
+   * 決着表示の検算可能性(#282)のために着席者と同様に表示する。
+   */
+  readonly pointsDelta?: number;
 }
 
 /**

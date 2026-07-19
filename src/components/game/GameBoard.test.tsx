@@ -1,10 +1,15 @@
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { createGame, type EngineState } from "@/domain/game/engine";
+import {
+  createGame,
+  type EngineState,
+  finishRound,
+  type RoundConclusion,
+} from "@/domain/game/engine";
 import { tileLabel } from "../common/tileLabel";
 import { walkToGameEnd } from "./finishedGameFixture";
-import GameBoard, { pulledKitaCount } from "./GameBoard";
+import GameBoard, { pulledKitaCount, residualSticksNote } from "./GameBoard";
 import { type GameAction, replayJournal } from "./gamePersistence";
 import { GameProvider } from "./GameProvider";
 
@@ -322,5 +327,74 @@ describe("GameBoard 終局後の出口(#206 / #207 / #277)", () => {
     ).toBeGreaterThan(0);
     // 新規半荘の開始(gameEnd → playing)でも自動遷移は発火しない。
     expect(routerMock.replace).not.toHaveBeenCalled();
+  });
+});
+
+describe("GameBoard 残存供託の帰属表示(#282)", () => {
+  /** 南4親流れ流局+供託2本残存で終局した状態(単独最高 p0 = あなた が取得)。 */
+  function drawEndedGameWithResidual(): EngineState {
+    const base = createGame({ seed: 130 });
+    const conclusion: RoundConclusion = {
+      outcome: "dealerPasses",
+      isDraw: true,
+      summary: {
+        kind: "draw",
+        label: "流局(テンパイ0人)",
+        deltas: { p0: 0, p1: 0, p2: 0, p3: 0 },
+      },
+    };
+    return finishRound(
+      {
+        ...base,
+        round: { ...base.round, wind: "south", roundNumber: 4 },
+        points: { p0: 52000, p1: 30000, p2: 31000, p3: 25000 },
+        riichiSticks: 2,
+      },
+      conclusion,
+    );
+  }
+
+  it("流局終了+供託残存の hint に残存供託の帰属を併記し、受取者のデルタ表示と整合する", () => {
+    const state = drawEndedGameWithResidual();
+    expect(state.phase).toBe("gameEnd");
+    render(
+      <GameProvider initialGame={state}>
+        <GameBoard />
+      </GameProvider>,
+    );
+
+    // hint(唯一の可視サマリ)に残存供託の帰属が明記される。
+    expect(
+      screen.getAllByText(/残存供託2本（2,000点）はあなたが取得。/).length,
+    ).toBeGreaterThan(0);
+    // 受取者のデルタ表示(+2,000)が持ち点(54,000)・供託カウント0と整合する。
+    expect(screen.getAllByText("+2,000").length).toBeGreaterThan(0);
+    expect(
+      screen.getAllByText(
+        (_, element) =>
+          element?.tagName === "SPAN" && element.textContent === "54,000点",
+      ).length,
+    ).toBeGreaterThan(0);
+    // 卓情報の供託カウントは 0(場から下りた供託がデルタ+持ち点に反映済み)。
+    const kyotakuValues = screen
+      .getAllByText("供託")
+      .map((dt) => dt.nextElementSibling?.textContent);
+    expect(kyotakuValues.length).toBeGreaterThan(0);
+    for (const value of kyotakuValues) expect(value).toBe("0");
+  });
+
+  it("residualSticksNote は残存供託が無ければ空文字を返す", () => {
+    expect(residualSticksNote(null)).toBe("");
+    expect(residualSticksNote({ residualSticks: undefined })).toBe("");
+    expect(
+      residualSticksNote({
+        residualSticks: {
+          recipientId: "p1",
+          recipientName: "一郎",
+          sticks: 1,
+          points: 1000,
+        },
+      }),
+    ).toBe("残存供託1本（1,000点）は一郎が取得。");
   });
 });
