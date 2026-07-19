@@ -110,7 +110,8 @@ test.describe("対局画面(/game)", () => {
     // engine を同一戦略で走査して選定。戦略の定義と再選定手順は e2e/helpers/gameDriver.ts)。
     await page.goto("/game?seed=106");
 
-    // 半荘終了で GameBoard が /game/result へ自動遷移する(スペック6 6.3)。
+    // 半荘終了(gameEnd)で最終局の決着が表示され、ドライバが「結果を見る」を押して
+    // /game/result へ進む(スペック6 6.3 / #277: 自動遷移は無い)。
     await advanceUntil(
       page,
       () => new URL(page.url()).pathname === "/game/result",
@@ -130,6 +131,44 @@ test.describe("対局画面(/game)", () => {
     await expect(
       page.getByRole("heading", { level: 1, name: "対局画面" }),
     ).toBeVisible();
+  });
+
+  test("半荘を終える局の決着(和了内訳・点数移動)を表示してからボタンで結果画面へ進める(issue #277)", async ({
+    page,
+  }) => {
+    test.setTimeout(60_000);
+    // seed=60 はドライバ標準戦略(先頭牌打牌・スルー・次局送り)で東3にトビ決着する:
+    // 二郎が自家から三倍満 36,000点をロン(自家 11,000 → −25,000 でトビ → 半荘即終了)。
+    await page.goto("/game?seed=60");
+
+    // gameEnd で停止(自動遷移が無いことの検証を兼ねる)。
+    await advanceUntil(page, (state) => state?.phase === "gameEnd", {
+      maxSteps: 400,
+      onGameEnd: "stop",
+    });
+    // 自動遷移せず /game(?seed=60)に留まる。
+    await expect(page).toHaveURL(/\/game(\?.*)?$/);
+
+    // 最終局の和了内訳(和了者・点数区分)が表示される(#259 の検算可能性を最終局にも)。
+    await expect(
+      page.getByRole("heading", { name: "和了内訳" }).first(),
+    ).toBeVisible();
+    await expect(page.getByText("三倍満").first()).toBeVisible();
+    // 各家の点数増減(±デルタ): 自家 −36,000(放銃)/ 二郎 +37,000(供託込み)。
+    await expect(page.getByText("−36,000").first()).toBeVisible();
+    await expect(page.getByText("+37,000").first()).toBeVisible();
+
+    // 最終局表示中のリロードでも journal 再生で同じ決着表示が復元される(#193)。
+    await page.reload();
+    await expect(
+      page.getByRole("heading", { name: "和了内訳" }).first(),
+    ).toBeVisible();
+    await expect(page.getByText("−36,000").first()).toBeVisible();
+
+    // ユーザー操作(ボタン)で結果画面へ進める。
+    await page.getByRole("button", { name: "結果を見る" }).first().click();
+    await expect(page).toHaveURL(/\/game\/result$/);
+    await expect(page.getByRole("heading", { name: "最終順位" })).toBeVisible();
   });
 
   test("seed 無しの乱数半荘でも冒頭数手が進行する(乱数経路のスモーク / #260)", async ({

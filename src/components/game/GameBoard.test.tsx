@@ -249,8 +249,8 @@ describe("GameBoard 打牌フェーズ外の自家手牌(#257)", () => {
   });
 });
 
-describe("GameBoard 終局後の出口(#206 / #207)", () => {
-  it("対局中に gameEnd へ遷移した瞬間だけ router.replace で結果画面へ自動遷移する", async () => {
+describe("GameBoard 終局後の出口(#206 / #207 / #277)", () => {
+  it("対局中に gameEnd へ遷移しても自動遷移せず、最終局の和了内訳・点数増減を表示してからボタンで結果画面へ進める(#277)", async () => {
     const user = userEvent.setup();
     const { state, lastAction } = gameBeforeEnd();
     render(
@@ -272,20 +272,25 @@ describe("GameBoard 終局後の出口(#206 / #207)", () => {
       throw new Error(`最終操作を UI から実行できない: ${lastAction.type}`);
     }
 
-    // 自動遷移は replace(履歴を汚さない)。push は使わない(#206)。
-    expect(routerMock.replace).toHaveBeenCalledWith("/game/result");
-    expect(routerMock.replace).toHaveBeenCalledTimes(1);
+    // 半荘を終える局は自動遷移しない(#277: 内訳表示をスキップさせない)。
+    expect(routerMock.replace).not.toHaveBeenCalled();
     expect(routerMock.push).not.toHaveBeenCalled();
-    // 自動遷移が予約されている間は出口パネルを描かず、遷移案内のみ表示する(明滅防止)。
+
+    // 最終局(seed=2024 は東4・三郎のロン 18,000点)の和了内訳が表示される。
     expect(
-      screen.queryByRole("button", { name: "新しい半荘を開始" }),
-    ).not.toBeInTheDocument();
-    expect(
-      screen.getAllByText("半荘終了。結果画面へ移動します。").length,
+      screen.getAllByRole("heading", { name: "和了内訳" }).length,
     ).toBeGreaterThan(0);
+    // 各家の点数増減(±デルタ)も表示される(自家 −18,300 / 三郎 +19,300)。
+    expect(screen.getAllByText("−18,300").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("+19,300").length).toBeGreaterThan(0);
+
+    // 出口はユーザー操作:「結果を見る」で結果画面へ(push。自動 replace はしない)。
+    await user.click(screen.getAllByRole("button", { name: "結果を見る" })[0]);
+    expect(routerMock.push).toHaveBeenCalledWith("/game/result");
+    expect(routerMock.replace).not.toHaveBeenCalled();
   });
 
-  it("終局済み状態でマウントされた場合は自動遷移せず、結果を見る/新しい半荘を開始の出口を提示する", async () => {
+  it("終局済み状態でマウントされた場合(リロード復元・ブラウザバック相当)も同じ決着表示と出口を提示する", async () => {
     const user = userEvent.setup();
     render(
       <GameProvider initialGame={finishedGame()}>
@@ -297,6 +302,12 @@ describe("GameBoard 終局後の出口(#206 / #207)", () => {
     // 強制リダイレクトしない(#207: ロビー「対局を開始」で /game に留まれる)。
     expect(routerMock.replace).not.toHaveBeenCalled();
     expect(routerMock.push).not.toHaveBeenCalled();
+
+    // リロード復元でも最終局の決着(和了内訳・点数増減)が同じく表示される(#277 / #193)。
+    expect(
+      screen.getAllByRole("heading", { name: "和了内訳" }).length,
+    ).toBeGreaterThan(0);
+    expect(screen.getAllByText("−18,300").length).toBeGreaterThan(0);
 
     // 「結果を見る」はユーザー操作としての push 遷移。
     await user.click(screen.getAllByRole("button", { name: "結果を見る" })[0]);

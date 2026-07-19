@@ -364,6 +364,67 @@ describe("engine 終了条件(spec 2.8 / #114)", () => {
     });
   });
 
+  describe("gameEnd でも最終局の決着サマリ(lastRound)を保持する(#277 回帰)", () => {
+    // 半荘を終える局は roundEnd を経由せず gameEnd へ直行するが、UI(GameBoard / gameView)は
+    // gameEnd でも `lastRound`(和了内訳スナップショット・点数デルタ)を読んで最終局の決着を
+    // 表示する(#277)。endGame がサマリを落とすと最終局の内訳が二度と確認できなくなる。
+
+    it("トビ終了(gameEnd)でも lastRound に決着サマリを保持する", () => {
+      const c = conclusion("dealerPasses", false);
+      const s = finishRound(
+        stateFor(roundAt("east", 3), {
+          p0: -25000,
+          p1: 59000,
+          p2: 79000,
+          p3: 27000,
+        }),
+        c,
+      );
+      expect(s.phase).toBe("gameEnd");
+      expect(s.lastRound).toBe(c.summary);
+      expect(s.result).not.toBeNull();
+    });
+
+    it("南4完了(gameEnd)でも lastRound を保持する", () => {
+      const c = conclusion("dealerPasses", true);
+      const s = finishRound(
+        stateFor(roundAt("south", 4), {
+          p0: 40000,
+          p1: 20000,
+          p2: 45000,
+          p3: 15000,
+        }),
+        c,
+      );
+      expect(s.phase).toBe("gameEnd");
+      expect(s.lastRound).toBe(c.summary);
+    });
+
+    it("親トップやめ(gameEnd)でも lastRound を保持する", () => {
+      const c = conclusion("dealerContinues", false);
+      const s = finishRound(
+        stateFor(roundAt("south", 4), {
+          p0: 30000,
+          p1: 30000,
+          p2: 30000,
+          p3: 40000,
+        }),
+        c,
+      );
+      expect(s.phase).toBe("gameEnd");
+      expect(s.lastRound).toBe(c.summary);
+    });
+
+    it("半荘継続(roundEnd)の遷移は従来どおり(lastRound 保持・次局遷移あり・結果未確定)", () => {
+      const c = conclusion("dealerPasses", false);
+      const s = finishRound(stateFor(roundAt("east", 1), even(35000)), c);
+      expect(s.phase).toBe("roundEnd");
+      expect(s.lastRound).toBe(c.summary);
+      expect(s.nextRoundState).not.toBeNull();
+      expect(s.result).toBeNull();
+    });
+  });
+
   describe("安全上限(SAFETY_ROUND_CAP)による強制終了(characterization)", () => {
     // 南4連荘の理論的無限ループ防止。spec 2.8 の3経路とは別枠の安全弁(通常は不発火)。
     it("roundsPlayed が上限直前なら、終了条件非該当でも gameEnd に落ちる", () => {

@@ -75,16 +75,15 @@ test.describe("対局状態のsession復元(#190)", () => {
 
   test("半荘結果をresult reload後も保持する", async ({ page }) => {
     test.setTimeout(120_000);
-    // 先にロビーを踏んでおき、終局の自動遷移(replace)後の「戻る」到達先を検証可能にする。
+    // 先にロビーを踏んでおき、終局後の「戻る」到達先を検証可能にする。
     await page.goto("/");
     await page.goto("/game?seed=1");
     // 半荘終了まで合法牌のみで完走する(seed=1 は約113手・9局で決定的に終局)。
-    // gameEnd 表示と /game/result への自動遷移(replace)は競合し得るため、どちらでも停止する。
+    // gameEnd では最終局の決着表示で停止し(#277: 自動遷移は無い)、ドライバが
+    // 「結果を見る」(push)で結果画面へ進む。
     await advanceUntil(
       page,
-      (state) =>
-        state?.phase === "gameEnd" ||
-        new URL(page.url()).pathname === "/game/result",
+      () => new URL(page.url()).pathname === "/game/result",
       { maxSteps: 2000, legalOnly: true },
     );
     await expect(page).toHaveURL(/\/game\/result$/);
@@ -92,8 +91,14 @@ test.describe("対局状態のsession復元(#190)", () => {
     await page.reload();
     await expect(page.getByRole("heading", { name: "最終順位" })).toBeVisible();
 
-    // 終局の自動遷移は replace で履歴を汚さないため、/game のエントリは残らず
-    // 「戻る」1回でロビーへ帰れる(#206: 戻るトラップの解消)。
+    // 「結果を見る」は push 遷移のため /game のエントリが残る。「戻る」で /game
+    // (最終局の決着表示・自動リダイレクトなし)→ もう一度「戻る」でロビーへ脱出できる
+    // (#206 の戻るトラップは再発しない: /game は gameEnd で自動遷移しないため)。
+    await page.goBack();
+    await expect(page).toHaveURL(/\/game(\?.*)?$/);
+    await expect(
+      page.getByRole("button", { name: "結果を見る" }).first(),
+    ).toBeVisible();
     await page.goBack();
     await expect(page).toHaveURL(/\/$/);
   });
