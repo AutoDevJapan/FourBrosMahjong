@@ -20,7 +20,7 @@ describe("SoshiiBreakdown (spec 6.7 / 6.8)", () => {
     expect(screen.getByText("祝儀")).toBeInTheDocument();
     expect(screen.getByText("ソシー合計")).toBeInTheDocument();
 
-    expect(screen.getByText("45,000")).toBeInTheDocument();
+    expect(screen.getByText("+45,000")).toBeInTheDocument();
     expect(screen.getByText("+10,000")).toBeInTheDocument();
     expect(screen.getByText("+56,000")).toBeInTheDocument();
   });
@@ -29,6 +29,20 @@ describe("SoshiiBreakdown (spec 6.7 / 6.8)", () => {
     render(<SoshiiBreakdown player={{ ...player, uma: -5000 }} />);
     expect(screen.getByText("−5,000")).toBeInTheDocument();
     expect(screen.getByText("マイナス5,000ソシー")).toBeInTheDocument();
+  });
+
+  it("renders a negative rawScore with U+2212 and a soshii sr-label (issue #278)", () => {
+    render(
+      <SoshiiBreakdown
+        player={{ ...player, rank: 4, rawScore: -65000, soshiiTotal: -75000 }}
+      />,
+    );
+    // 素点行もウマ・合計と同じ U+2212(−)符号付き表示に統一される。
+    const rawScoreDisplay = screen.getByText("−65,000");
+    expect(rawScoreDisplay).toBeInTheDocument();
+    expect(rawScoreDisplay.textContent?.charCodeAt(0)).toBe(0x2212);
+    expect(screen.getByText("マイナス65,000ソシー")).toBeInTheDocument();
+    expect(screen.getByText("−75,000")).toBeInTheDocument();
   });
 
   it("labels the section by the player name for assistive tech", () => {

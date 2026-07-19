@@ -1,12 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { formatSignedSoshii, formatSoshii } from "./soshiiFormat";
-
-describe("formatSoshii", () => {
-  it("groups digits without a forced sign", () => {
-    expect(formatSoshii(45000)).toBe("45,000");
-    expect(formatSoshii(0)).toBe("0");
-  });
-});
+import { formatSignedSoshii } from "./soshiiFormat";
 
 describe("formatSignedSoshii", () => {
   it("prefixes a plus and a positive screen-reader label for positive values", () => {
@@ -19,6 +12,7 @@ describe("formatSignedSoshii", () => {
   it("uses a minus sign (U+2212) and a negative label for negative values", () => {
     const r = formatSignedSoshii(-5000);
     expect(r.display).toBe("−5,000");
+    expect(r.display.charCodeAt(0)).toBe(0x2212); // ASCII ハイフン(U+002D)ではないことを明示検証
     expect(r.srLabel).toBe("マイナス5,000ソシー");
     expect(r.isPositive).toBe(false);
   });
