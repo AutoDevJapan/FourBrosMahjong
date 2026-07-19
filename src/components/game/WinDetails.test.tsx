@@ -102,6 +102,17 @@ describe("WinDetails", () => {
     expect(within(winningItem).getByText("和了")).toBeInTheDocument();
   });
 
+  it("名前付きリスト(和了形/成立役/支払い内訳)にrole=listを明示する(スペック5 5.2.5 / #270)", () => {
+    render(<WinDetails summary={winSummary} />);
+    // role クエリは暗黙ロールでも通るため、Safari/VoiceOver 対策の明示ロールは属性で回帰検証する。
+    for (const name of ["和了形", "成立役", "支払い内訳"]) {
+      expect(screen.getByRole("list", { name })).toHaveAttribute(
+        "role",
+        "list",
+      );
+    }
+  });
+
   it("役・ドラ4区分・合計翻・本場供託・支払いを表示する", () => {
     const summary: RoundSummary = {
       kind: "win",

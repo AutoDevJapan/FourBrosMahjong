@@ -17,6 +17,9 @@ describe("DoraIndicator", () => {
     render(<DoraIndicator dora={{ indicators, uraIndicatorCount: 2 }} />);
 
     const omote = screen.getByRole("list", { name: "表ドラ表示牌" });
+    // role クエリは暗黙ロールでも通るため、Safari/VoiceOver 対策の明示ロールは
+    // 属性で回帰検証する(スペック5 5.2.5 / #270)。
+    expect(omote).toHaveAttribute("role", "list");
     const omoteTiles = within(omote).getAllByRole("img");
     expect(omoteTiles.map((t) => t.getAttribute("aria-label"))).toEqual([
       "五筒(赤ドラ)",
@@ -24,6 +27,7 @@ describe("DoraIndicator", () => {
     ]);
 
     const ura = screen.getByRole("list", { name: "裏ドラ表示牌" });
+    expect(ura).toHaveAttribute("role", "list");
     const uraTiles = within(ura).getAllByRole("img", { name: "伏せ牌" });
     expect(uraTiles).toHaveLength(2);
 

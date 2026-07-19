@@ -206,6 +206,9 @@ describe("Hand (roving tabindex listbox, spec 5.2.2)", () => {
 
     const list = screen.getByRole("list", { name: "自家の手牌" });
     expect(list).toBeInTheDocument();
+    // role クエリは暗黙ロールでも通るため、Safari/VoiceOver 対策の明示ロールは
+    // 属性で回帰検証する(スペック5 5.2.5 / #270)。
+    expect(list).toHaveAttribute("role", "list");
     expect(screen.getAllByRole("listitem")).toHaveLength(tiles.length);
     expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
     expect(screen.queryByRole("option")).not.toBeInTheDocument();

@@ -119,8 +119,11 @@ export default function Hand({
   );
 
   if (readOnly) {
+    // role="list" は冗長だが明示する — Tailwind preflight の list-style 除去により Safari が
+    // list セマンティクスを落とし、VoiceOver がリスト名ごと読まなくなる既知挙動への対処
+    // (スペック5 5.2.5 / #270)。操作可能な listbox 側は別ロール明示済みのため対象外。
     return (
-      <ul aria-label={label} className="flex flex-wrap gap-1">
+      <ul role="list" aria-label={label} className="flex flex-wrap gap-1">
         {tiles.map((tile, index) => {
           const state = tileStates[index];
           const accessibleLabel = state?.indicator
