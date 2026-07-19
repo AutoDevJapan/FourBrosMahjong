@@ -373,8 +373,12 @@ export default function GameBoard() {
   }, [pending, tileFeedback.message]);
 
   const assertive = useMemo(() => {
-    if (phase === "roundEnd" || phase === "gameEnd") {
-      return roundSummary?.label ?? "";
+    if (phase === "roundEnd") return roundSummary?.label ?? "";
+    if (phase === "gameEnd") {
+      // 自動遷移を廃止した(#277)後は /game に留まるため、通常の局終了(「次の局へ」)と
+      // 半荘終了(「結果を見る」)を読み上げで区別できるよう「半荘終了」を明示する。
+      const label = roundSummary ? `${roundSummary.label}。` : "";
+      return `${label}半荘終了。`;
     }
     return "";
   }, [phase, roundSummary]);

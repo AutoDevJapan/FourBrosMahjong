@@ -53,7 +53,8 @@ export interface AdvanceOptions {
  * 盤面ルートの進行状態を即時 DOM 参照で読む(盤面が無ければ null)。
  *
  * `locator.evaluate` は対象が遷移で消えた場合も既定タイムアウトまで待つため、結果画面への
- * replace 中(盤面が先に外れる)でも止まらないよう `page.evaluate` の即時参照にしている。
+ * 遷移中(「結果を見る」push 直後に盤面が外れる / #277)でも止まらないよう `page.evaluate` の
+ * 即時参照にしている。
  */
 async function readBoardState(page: Page): Promise<BoardState | null> {
   return page.evaluate(() => {
@@ -74,6 +75,14 @@ export function visibleHand(page: Page) {
     .getByRole("listbox", { name: "自家の手牌" })
     .filter({ visible: true })
     .first();
+}
+
+/**
+ * 可視の操作パネルボタン(段階①/段階② の2レイアウト分 DOM にあるため可視側に限定)。
+ * 狭幅ビューポートで局終了/半荘終了に到達しても display:none 側を掴んで click タイムアウトしない。
+ */
+function visibleActionButton(page: Page, name: string) {
+  return page.getByRole("button", { name }).filter({ visible: true }).first();
 }
 
 /** 自家の打牌: 表示手牌の先頭牌(`legalOnly` 時は `aria-disabled` でない先頭牌)を切る。 */
@@ -146,19 +155,20 @@ export async function advanceUntil(
     if (state.phase === "gameEnd") {
       // 半荘終了は最終局の決着表示で停止する(#277: 自動遷移は無い)。既定は
       // 「結果を見る」を押して結果画面へ進む(predicate が URL 側で停止を判定できる)。
+      // predicate が phase="gameEnd" で真になる呼び出しでは、ループ冒頭の until 評価で先に
+      // 返るため本分岐には到達しない("stop" は predicate が gameEnd を含まない場合の保険)。
       if (onGameEnd === "stop") return;
-      await page.getByRole("button", { name: "結果を見る" }).first().click();
+      await visibleActionButton(page, "結果を見る").click();
       // push の完了を待ってから次ループへ(未完了のまま再クリックして履歴を重複させない)。
-      await page
-        .waitForURL((url) => url.pathname === "/game/result", {
-          timeout: 10_000,
-        })
-        .catch(() => {});
+      // 失敗は握り潰さず throw させ、advanceUntil の「到達失敗は明示エラー」保証を保つ。
+      await page.waitForURL((url) => url.pathname === "/game/result", {
+        timeout: 10_000,
+      });
       continue;
     }
     if (state.phase === "roundEnd") {
       if (onRoundEnd === "stop") return;
-      await page.getByRole("button", { name: "次の局へ" }).first().click();
+      await visibleActionButton(page, "次の局へ").click();
       continue;
     }
     if (state.pending === "humanReact") {
