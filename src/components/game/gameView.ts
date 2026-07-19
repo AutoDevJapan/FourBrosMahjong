@@ -47,7 +47,8 @@ const SUIT_ORDER: Record<Tile["suit"], number> = {
   sou: 2,
   honor: 3,
 };
-function sortTiles(tiles: readonly Tile[]): Tile[] {
+/** 自家手牌と和了形開示(`WinDetails` #259)で共用する表示ソート。 */
+export function sortTiles(tiles: readonly Tile[]): Tile[] {
   return [...tiles].sort(
     (a, b) =>
       SUIT_ORDER[a.suit] - SUIT_ORDER[b.suit] ||

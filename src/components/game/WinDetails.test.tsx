@@ -1,7 +1,29 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import type { RoundSummary } from "@/domain/game/engine";
 import WinDetails from "./WinDetails";
+
+/** 和了形スナップショットの既定値(#259)。単騎待ちの13枚+和了牌。 */
+const WIN_HAND = {
+  winnerName: "あなた",
+  winnerSeat: "south",
+  hand: [
+    { suit: "man", rank: 1, isRed: false },
+    { suit: "man", rank: 1, isRed: false },
+    { suit: "man", rank: 1, isRed: false },
+    { suit: "pin", rank: 2, isRed: false },
+    { suit: "pin", rank: 2, isRed: false },
+    { suit: "pin", rank: 2, isRed: false },
+    { suit: "sou", rank: 3, isRed: false },
+    { suit: "sou", rank: 3, isRed: false },
+    { suit: "sou", rank: 3, isRed: false },
+    { suit: "sou", rank: 5, isRed: true },
+    { suit: "sou", rank: 5, isRed: true },
+    { suit: "honor", rank: 2, isRed: false },
+    { suit: "honor", rank: 2, isRed: false },
+  ],
+  winningTile: { suit: "honor", rank: 2, isRed: false },
+} as const;
 
 const winSummary: RoundSummary = {
   kind: "win",
@@ -10,6 +32,7 @@ const winSummary: RoundSummary = {
   winDetails: {
     winType: "tsumo",
     dealer: false,
+    ...WIN_HAND,
     yaku: [{ name: "立直", han: 1, yakuman: 0 }],
     yakuHan: 1,
     dora: { omote: 0, ura: 0, aka: 0, gari: 0, total: 0 },
@@ -57,6 +80,28 @@ describe("WinDetails", () => {
     expect(container).toBeEmptyDOMElement();
   });
 
+  it("和了者名と席を和了内訳の冒頭に表示する(#259)", () => {
+    render(<WinDetails summary={winSummary} />);
+    expect(screen.getByText("あなた(南家)")).toBeInTheDocument();
+  });
+
+  it("和了形(手牌13枚+和了牌)を表向きで開示し、和了牌をaria-labelで区別する(#259)", () => {
+    render(<WinDetails summary={winSummary} />);
+    const list = screen.getByRole("list", { name: "和了形" });
+    expect(within(list).getAllByRole("listitem")).toHaveLength(14);
+    // 手牌13枚は Tile(role="img")として表向きに描かれる(南=2z は手牌に2枚)。
+    expect(within(list).getAllByRole("img", { name: "南" })).toHaveLength(2);
+    expect(
+      within(list).getAllByRole("img", { name: "五索(赤ドラ)" }),
+    ).toHaveLength(2);
+    // 和了牌は色に依存しない aria-label(和了牌)で区別する(スペック5 5.2.1)。
+    const winningItem = within(list).getByRole("listitem", {
+      name: "南(和了牌)",
+    });
+    expect(winningItem).toBeInTheDocument();
+    expect(within(winningItem).getByText("和了")).toBeInTheDocument();
+  });
+
   it("役・ドラ4区分・合計翻・本場供託・支払いを表示する", () => {
     const summary: RoundSummary = {
       kind: "win",
@@ -65,6 +110,7 @@ describe("WinDetails", () => {
       winDetails: {
         winType: "tsumo",
         dealer: false,
+        ...WIN_HAND,
         yaku: [
           { name: "立直", han: 1, yakuman: 0 },
           { name: "門前清自摸和", han: 1, yakuman: 0 },
@@ -112,6 +158,8 @@ describe("WinDetails", () => {
       winDetails: {
         winType: "tsumo",
         dealer: true,
+        ...WIN_HAND,
+        winnerSeat: "east",
         yaku: [
           { name: "天和", han: 0, yakuman: 1 },
           { name: "国士無双", han: 0, yakuman: 1 },

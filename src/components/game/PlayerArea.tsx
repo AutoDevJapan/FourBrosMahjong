@@ -15,7 +15,8 @@ import ScoreDisplay from "./ScoreDisplay";
 import StatusBadge from "./StatusBadge";
 import type { SeatedPlayerView, SeatWind, TileData } from "./types";
 
-const SEAT_WIND_LABEL: Record<SeatWind, string> = {
+/** 席風の日本語ラベル。和了者名の席表記(`WinDetails` #259)でも共用する。 */
+export const SEAT_WIND_LABEL: Record<SeatWind, string> = {
   east: "東家",
   south: "南家",
   west: "西家",

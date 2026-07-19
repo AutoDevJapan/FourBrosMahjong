@@ -1,5 +1,9 @@
 import { useId } from "react";
 import type { RoundSummary } from "@/domain/game/engine";
+import Tile from "../common/Tile";
+import { tileLabel } from "../common/tileLabel";
+import { sortTiles } from "./gameView";
+import { SEAT_WIND_LABEL } from "./PlayerArea";
 
 const CATEGORY: Record<string, string> = {
   normal: "通常",
@@ -26,10 +30,38 @@ export default function WinDetails({ summary }: { summary: RoundSummary }) {
         和了内訳
       </h2>
       <p>
-        {detail.dealer ? "親" : "子"}・
+        <span className="font-semibold">
+          {detail.winnerName}({SEAT_WIND_LABEL[detail.winnerSeat]})
+        </span>
+        ・{detail.dealer ? "親" : "子"}・
         {detail.winType === "tsumo" ? "ツモ" : "ロン"}・
         {CATEGORY[detail.category] ?? detail.category}
       </p>
+      {/*
+        和了形の開示(#259): 和了確定時に engine が固定した門前手牌+和了牌を表向きで示す。
+        副露・ガリは卓上の既存表示(Melds / KitaDisplay)が公開情報として担うため重複させない。
+        和了牌は色に依存せず「間隔+『和了』バッジ+aria-label」で区別する(スペック5 5.2.1)。
+      */}
+      <h3 className="mt-2 font-semibold">和了形</h3>
+      <ul aria-label="和了形" className="mt-1 flex flex-wrap items-start gap-1">
+        {sortTiles(detail.hand).map((tile, index) => (
+          <li key={`hand-${tile.suit}-${tile.rank}-${index}`}>
+            <Tile tile={tile} size="river" />
+          </li>
+        ))}
+        <li
+          className="ml-2 flex flex-col items-center gap-0.5"
+          aria-label={`${tileLabel(detail.winningTile)}(和了牌)`}
+        >
+          <Tile tile={detail.winningTile} decorative size="river" />
+          <span
+            aria-hidden="true"
+            className="rounded-sm border border-foreground/40 px-1 text-[0.625rem] font-bold leading-tight"
+          >
+            和了
+          </span>
+        </li>
+      </ul>
       <ul aria-label="成立役" className="mt-2 grid gap-1">
         {detail.yaku.map((yaku, index) => (
           <li
