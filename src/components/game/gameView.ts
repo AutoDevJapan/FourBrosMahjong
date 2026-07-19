@@ -172,9 +172,11 @@ export function selectView(engine: EngineState): GameViewState {
     doraCount: engine.hand?.doraSet.count ?? 0,
   };
 
-  // 裏ドラはリーチ和了の局終了時のみ開示する(スペック2 2.2)。
+  // 裏ドラはリーチ和了の局終了時のみ開示する(スペック2 2.2)。半荘を終える局は
+  // roundEnd を経由せず gameEnd へ直行する(engine spec 2.8 / #277)ため、最終局の
+  // リーチ和了でも開示できるよう両 phase を対象にする(#290)。
   const revealUra =
-    engine.phase === "roundEnd" &&
+    (engine.phase === "roundEnd" || engine.phase === "gameEnd") &&
     engine.lastRound?.riichiWin === true &&
     engine.hand !== null;
   const dora: DoraData = engine.hand
