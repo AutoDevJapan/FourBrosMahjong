@@ -1,6 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import type { DiscardContext } from "@/domain/game/ai";
 import { parseTile, parseTiles } from "@/domain/hand/notation";
 import { sameKind } from "@/domain/hand/tile-identity";
+import type { Tile } from "@/domain/tiles/tile";
 import {
   canCallMeldOnDiscard,
   createGame,
@@ -32,7 +34,9 @@ import {
  * の2点にある。前提が崩れた時(#304)に何を足すべきかは下の describe に記した。
  */
 
-const { chooseDiscardSpy } = vi.hoisted(() => ({ chooseDiscardSpy: vi.fn() }));
+const { chooseDiscardSpy } = vi.hoisted(() => ({
+  chooseDiscardSpy: vi.fn<(ctx: DiscardContext) => Tile>(),
+}));
 
 vi.mock("@/domain/game/ai", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/domain/game/ai")>();
@@ -85,6 +89,15 @@ function armAiPon(seed: number): EngineState {
   };
 }
 
+/** ポン直後打牌にあたる最初の `chooseDiscard` 呼び出しの引数。 */
+function firstCallContext(): DiscardContext {
+  const ctx = chooseDiscardSpy.mock.calls[0]?.[0];
+  if (ctx === undefined) {
+    throw new Error("chooseDiscard が一度も呼ばれていない(局面の組み立て不備)");
+  }
+  return ctx;
+}
+
 describe("engine: ポン直後打牌の手牌枚数(#319 / #303)", () => {
   beforeEach(() => {
     chooseDiscardSpy.mockClear();
@@ -92,7 +105,8 @@ describe("engine: ポン直後打牌の手牌枚数(#319 / #303)", () => {
 
   it("フィクスチャの前提: 南は白をポンする(スパイ検証が空振りしない)", () => {
     const after = discard(armAiPon(3190), parseTile(PON_TILE));
-    const melds = after.hand?.melds.south ?? [];
+    const melds = after.hand?.melds.south;
+    if (melds === undefined) throw new Error("ポン後も hand は存在するはず");
     expect(melds).toHaveLength(1);
     expect(melds[0].type).toBe("pon");
     expect(sameKind(melds[0].tiles[0], parseTile(PON_TILE))).toBe(true);
@@ -102,24 +116,21 @@ describe("engine: ポン直後打牌の手牌枚数(#319 / #303)", () => {
     discard(armAiPon(3191), parseTile(PON_TILE));
 
     // 最初の呼び出しがポン直後打牌(以降は後続 AI の通常打牌)。
-    const ctx = chooseDiscardSpy.mock.calls[0]?.[0];
-    expect(ctx).toBeDefined();
+    const ctx = firstCallContext();
     expect(ctx.meldCount).toBe(1);
     // 14 − 3×1 = 11 枚。禁止牌を手牌から削っていたら 10 枚になる(#303 の退行)。
-    expect(ctx.tiles).toHaveLength(14 - 3 * ctx.meldCount);
+    expect(ctx.tiles).toHaveLength(14 - 3 * (ctx.meldCount ?? 0));
   });
 
   it("ポン牌種は forbiddenDiscards で渡され、手牌からは削られない(喰い替え禁止 / #105)", () => {
     discard(armAiPon(3192), parseTile(PON_TILE));
 
-    const ctx = chooseDiscardSpy.mock.calls[0]?.[0];
-    expect(ctx).toBeDefined();
     const ponTile = parseTile(PON_TILE);
-    expect(
-      (ctx.forbiddenDiscards ?? []).some((t: typeof ponTile) =>
-        sameKind(t, ponTile),
-      ),
-    ).toBe(true);
+    const forbidden = firstCallContext().forbiddenDiscards;
+    expect(forbidden).toBeDefined();
+    expect(forbidden?.some((t) => sameKind(t, ponTile))).toBe(true);
+    // 禁止牌は手牌側にも残っている必要はない(ポンで2枚とも消費済み)が、
+    // 「候補から除くだけで tiles から削らない」契約は枚数テストで固定している。
   });
 });
 

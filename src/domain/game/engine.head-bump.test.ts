@@ -174,7 +174,7 @@ describe("engine: 通常打牌に対する頭ハネ(上家取り / spec 2.4・#3
     // ronOrder(east) = [south, west] → 上家取りで南(p1)のみ和了。
     expect(after.lastRound?.winnerId).toBe("p1");
     // ダブロンなし: 西(p2)は和了者に含まれず点も動かない。
-    expect(after.lastRound?.deltas.p2 ?? 0).toBe(0);
+    expect(after.lastRound?.deltas.p2).toBe(0);
     expect(after.points.p2).toBe(before.p2);
     // 放銃者(p0=東)が支払い、南が受け取る。
     expect(after.lastRound?.deltas.p1).toBeGreaterThan(0);
@@ -196,7 +196,7 @@ describe("engine: 通常打牌に対する頭ハネ(上家取り / spec 2.4・#3
     expect(after.lastRound?.kind).toBe("win");
     // ronOrder(south) = [west, east] → 西(p2)が上家取り。
     expect(after.lastRound?.winnerId).toBe("p2");
-    expect(after.lastRound?.deltas.p1 ?? 0).toBe(0); // 東は和了していない
+    expect(after.lastRound?.deltas.p1).toBe(0); // 東は和了していない
   });
 
   it("自家がロンをスルーすると残る下家が横取りする(通常打牌)", () => {
@@ -243,9 +243,9 @@ describe("engine: 通常打牌に対する頭ハネ(上家取り / spec 2.4・#3
     expect(after.lastRound?.kind).toBe("win");
     // 南(自家)はスルー済み → ronOrder(east) の次候補=西(p2)が横取りする。
     expect(after.lastRound?.winnerId).toBe("p2");
-    expect(after.lastRound?.deltas.p0 ?? 0).toBe(0); // 自家は和了していない
+    expect(after.lastRound?.deltas.p0).toBe(0); // 自家は和了していない
     // 見逃しは同巡内フリテン。
-    expect(after.hand?.tempMiss.south ?? true).toBe(true);
+    expect(after.hand?.tempMiss.south).toBe(true);
   });
 
   it("自家がポンをスルーすると同じ打牌を再提示せず進行する(passedRonSeats / 通常打牌)", () => {
