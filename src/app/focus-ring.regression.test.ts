@@ -48,6 +48,25 @@ const KNOWN_EXCEPTIONS: ReadonlyMap<string, ReadonlySet<string>> = new Map([
   ],
 ]);
 
+/**
+ * `focus-visible:outline…` を検出する。以下の合成形をすべて拾う:
+ *  - `dark:` `md:` `group-` `peer-` 等との合成(部分一致)
+ *  - `has-[:focus-visible]:outline…`
+ *  - 任意プロパティ記法 `focus-visible:[outline…:…]`
+ *
+ * `String.prototype.matchAll` は内部で正規表現を複製するため、`g` フラグ付きの
+ * 定数を使い回しても `lastIndex` は持ち越されない(共有しても安全)。
+ */
+const OUTLINE_UTILITY =
+  /(?:has-\[:)?focus-visible\]?:(?:outline[\w[\]/.-]*|\[outline[\w-]*:[^\]]*\])/g;
+
+/**
+ * `focus-visible:ring…` / `shadow…` を検出する。任意プロパティ記法の
+ * `focus-visible:[box-shadow:…]` も含める。
+ */
+const RING_UTILITY =
+  /(?:has-\[:)?focus-visible\]?:(?:(?:ring|shadow)[\w[\]/.-]*|\[box-shadow:[^\]]*\])/g;
+
 /** src 配下の .ts/.tsx を再帰列挙(テストファイル自身は除く)。 */
 function sourceFiles(dir: string, base = ""): string[] {
   const out: string[] = [];
@@ -97,13 +116,7 @@ describe("フォーカスリングの単一起点(#314)", () => {
     for (const rel of sourceFiles(SRC)) {
       const allowed = KNOWN_EXCEPTIONS.get(rel);
       const text = readFileSync(join(SRC, rel), "utf8");
-      // 検出する形:
-      //  - `focus-visible:outline…`(`dark:` `md:` `group-` 等との合成も部分一致で拾う)
-      //  - `has-[:focus-visible]:outline…`
-      //  - 任意プロパティ記法 `focus-visible:[outline…:…]`
-      for (const m of text.matchAll(
-        /(?:has-\[:)?focus-visible\]?:(?:outline[\w[\]/.-]*|\[outline[\w-]*:[^\]]*\])/g,
-      )) {
+      for (const m of text.matchAll(OUTLINE_UTILITY)) {
         if (allowed?.has(m[0])) continue;
         offenders.push(`${rel}: ${m[0]}`);
       }
@@ -124,9 +137,7 @@ describe("フォーカスリングの単一起点(#314)", () => {
     const offenders: string[] = [];
     for (const rel of sourceFiles(SRC)) {
       const text = readFileSync(join(SRC, rel), "utf8");
-      for (const m of text.matchAll(
-        /(?:has-\[:)?focus-visible\]?:(?:ring|shadow)[\w[\]/.-]*/g,
-      )) {
+      for (const m of text.matchAll(RING_UTILITY)) {
         offenders.push(`${rel}: ${m[0]}`);
       }
     }
@@ -140,15 +151,20 @@ describe("フォーカスリングの単一起点(#314)", () => {
 
   it("KNOWN_EXCEPTIONS が陳腐化していない(許可エントリは実在する)", () => {
     // #327 で ThemeToggle の例外が解消された際、許可エントリの削除漏れを検出する。
+    const files = sourceFiles(SRC);
     for (const [rel, classes] of KNOWN_EXCEPTIONS) {
-      const files = sourceFiles(SRC);
       expect(files, `許可エントリのファイルが存在しない: ${rel}`).toContain(
         rel,
       );
+      // 部分文字列一致(toContain)では `…:outline` が `…:outline-2` に含まれてしまい
+      // 独立に検証できない。offender 検出と同じ正規表現で完全一致の集合を作って突き合わせる。
       const text = readFileSync(join(SRC, rel), "utf8");
+      const present = new Set(
+        [...text.matchAll(OUTLINE_UTILITY)].map((m) => m[0]),
+      );
       for (const cls of classes) {
         expect(
-          text,
+          [...present].sort(),
           `許可エントリ "${cls}" が ${rel} に存在しません。例外が解消されたなら ` +
             `KNOWN_EXCEPTIONS から削除してください(#327)。`,
         ).toContain(cls);
