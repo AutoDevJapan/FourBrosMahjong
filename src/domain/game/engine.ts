@@ -450,7 +450,21 @@ function nameOf(state: EngineState, id: PlayerId): string {
   return state.players.find((p) => p.id === id)?.name ?? id;
 }
 
-/** ロン判定順(頭ハネ=上家取り): 放銃者の次席から巡目順に2席。 */
+/**
+ * ロン判定順(頭ハネ=上家取り): 放銃者の次席から巡目順に2席。
+ *
+ * SSOT: `docs/四兄弟麻雀ルール.md` §3「ダブロン等が発生した場合は上家取り」/
+ * `documents/spec/game-flow.md` 2.4。複数家が同時にロンできる場合、この順の
+ * **最初の1人だけ**が和了する(呼び出し側は先勝ちで抜ける)。供託・本場も同様に
+ * その1人が取得する。
+ *
+ * 席割りが確定(Q9・Q10)した現在、頭ハネは「席インデックスの環状距離」ではなく
+ * `NEXT_SEAT` の巡目順そのもので表せるため、本関数が唯一の実装である
+ * (かつて `src/domain/hand/head-bump.ts` に席未確定時の抽象版があったが、
+ * engine から未使用の死にコードだったため #311 で削除した)。
+ * 通常打牌・槍槓の両経路の検証は `engine.head-bump.test.ts` /
+ * `engine.chankan.test.ts` を参照。
+ */
 function ronOrder(discarder: SeatKey): [SeatKey, SeatKey] {
   const first = NEXT_SEAT[discarder];
   return [first, NEXT_SEAT[first]];
