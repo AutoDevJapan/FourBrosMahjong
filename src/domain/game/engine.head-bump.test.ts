@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { parseTile, parseTiles } from "@/domain/hand/notation";
 import type { Tile } from "@/domain/tiles/tile";
 import { type RoundNumber, seatingOf } from "@/domain/round/round";
-import type { Seating } from "@/domain/round/seat";
+import { SEATED_SEATS, type Seating } from "@/domain/round/seat";
 import {
   createGame,
   discard,
@@ -89,26 +89,24 @@ function seatingWithHumanAt(humanSeat: SeatKey): Seating<PlayerId> {
  * 存在しうる。ロン判定と頭ハネ順の検証専用であり、残り枚数に依存するテスト
  * (海底・受け入れ枚数など)へ流用しないこと。
  */
-function armDiscard(params: {
-  seed: number;
+function armDiscardWith(params: {
+  base: EngineState;
+  /** この局の `round`(席割りの導出元と一致させる責任は呼び出し側にある)。 */
+  round: EngineState["round"];
+  seating: Seating<PlayerId>;
+  /** 自家(p0)の席 = 打牌者。 */
   humanSeat: SeatKey;
   hands: Partial<Record<SeatKey, string>>;
-  /** 場に残っている供託リーチ棒の本数(既定 0)。 */
   riichiSticks?: number;
-  /** 本場(既定 0)。 */
-  honba?: number;
 }): EngineState {
-  const base = createGame({ seed: params.seed });
+  const { base, round, seating, humanSeat } = params;
   const hand = base.hand;
   if (hand === null)
     throw new Error("hand should exist right after createGame");
 
-  const seating = seatingWithHumanAt(params.humanSeat);
-  for (const seat of ["east", "south", "west"] as SeatKey[]) {
+  for (const seat of SEATED_SEATS) {
     const notation =
-      seat === params.humanSeat
-        ? DISCARDER_HAND
-        : (params.hands[seat] ?? NO_WAIT_3P);
+      seat === humanSeat ? DISCARDER_HAND : (params.hands[seat] ?? NO_WAIT_3P);
     hand.hands[seat] = expectConcealed13(notation);
     hand.melds[seat] = [];
     hand.discards[seat] = []; // フリテン回避
@@ -117,12 +115,12 @@ function armDiscard(params: {
     hand.tempMiss[seat] = false;
   }
   hand.drawn = parseTile(RON_TILE);
-  hand.turn = params.humanSeat;
+  hand.turn = humanSeat;
 
   return {
     ...base,
+    round,
     riichiSticks: params.riichiSticks ?? base.riichiSticks,
-    round: { ...base.round, honba: params.honba ?? base.round.honba },
     hand: { ...hand, seating },
     pending: {
       kind: "humanDiscard",
@@ -135,6 +133,26 @@ function armDiscard(params: {
       locked: false,
     },
   };
+}
+
+function armDiscard(params: {
+  seed: number;
+  humanSeat: SeatKey;
+  hands: Partial<Record<SeatKey, string>>;
+  /** 場に残っている供託リーチ棒の本数(既定 0)。 */
+  riichiSticks?: number;
+  /** 本場(既定 0)。 */
+  honba?: number;
+}): EngineState {
+  const base = createGame({ seed: params.seed });
+  return armDiscardWith({
+    base,
+    round: { ...base.round, honba: params.honba ?? base.round.honba },
+    seating: seatingWithHumanAt(params.humanSeat),
+    humanSeat: params.humanSeat,
+    hands: params.hands,
+    riichiSticks: params.riichiSticks,
+  });
 }
 
 /** `RON_TILE` を打って解決させる。 */
@@ -288,7 +306,7 @@ describe("engine: 通常打牌に対する頭ハネ(上家取り / spec 2.4・#3
     if (hand === null) throw new Error("hand should exist");
 
     const ronTile = parseTile(RON_TILE);
-    for (const seat of ["east", "south", "west"] as SeatKey[]) {
+    for (const seat of SEATED_SEATS) {
       hand.melds[seat] = [];
       hand.discards[seat] = [];
       hand.riichi[seat] = false;
@@ -339,7 +357,7 @@ describe("engine: 通常打牌に対する頭ハネ(上家取り / spec 2.4・#3
     // 白(三元牌)。ポンを見送るのは自家(南)であり AI の判断は関与しない
     // (西は 5z を持たないため競合しない)。
     const ponTile = parseTile("5z");
-    for (const seat of ["east", "south", "west"] as SeatKey[]) {
+    for (const seat of SEATED_SEATS) {
       hand.melds[seat] = [];
       hand.discards[seat] = [];
       hand.riichi[seat] = false;
@@ -392,17 +410,25 @@ describe("engine: 通常打牌に対する頭ハネ(上家取り / spec 2.4・#3
  * - `docs/四兄弟麻雀ルール.md` §3「ダブロン等が発生した場合は上家取り」
  *   → 親がロン可能でも上家取りで敗れれば**和了者ではない** = 親流れ。
  *
- * 連荘条件は「親のテンパイ/和了」であって「親がロン可能だったか」ではないため、
- * 上記2点は SSOT から一意に導ける(新規 Q の起票は不要)。
+ * ## 解釈の限界(Q31)
+ * 「親はテンパイで連荘」の**テンパイがどの局面を指すか**は SSOT が明示していない。
+ * 状態遷移図の `精算` ノードには和了・流局の双方から到達するため、字義どおりなら
+ * 「他家和了局でも親がテンパイなら連荘」とも読めてしまう(頭ハネで敗れた親は
+ * 和了者でないがテンパイではある)。本ファイルが固定するのは**標準慣行および現行実装**
+ * である「テンパイ連荘は流局経路に限る / 和了局は親が和了したかのみで決まる」の側で、
+ * これは SSOT からの一意導出ではない。論点は `質問リスト.md` Q31 に起票済み。
  *
  * ## フィクスチャ上の要点(なぜ専用の arm 関数を使うか)
  * 上の `armDiscard` は `hand.seating` を `seatingWithHumanAt` で**直接差し替える**が、
  * その席割りは席順3人だけを入れ替えて抜け番を p3 に固定するもので、**円環
  * (`round.order` + `roundNumber`)から導出できる席割りとは限らない**。
- * 一方 `finishRound` / `advanceRound` は `hand.seating` ではなく `round` を見て次局を
- * 決める(`isDealerWin` だけが `hand.seating` 由来)。よって席割りと `round` が食い違った
- * フィクスチャで局進行を検証すると、**実際には起こり得ない局面**を固定してしまう。
- * ここでは席割りを必ず `seatingOf(round)` から導出し、両者の一致を構造的に保証する。
+ * 一方 `finishRound` / `advanceRound` は `hand.seating` を見ずに `round` だけで次局を
+ * 決める(`settleWin` が `hand.seating` を使うのは `winnerId` を引く写像のみで、
+ * `isDealerWin` は `winnerSeat === "east"` の席キー比較)。
+ * つまり席割りと `round` が食い違っても局進行自体は壊れないが、**プレイヤーID で書いた
+ * アサーション(`seating.east` など)と次局席割りの回転検証が意味を失う** —
+ * 今局の `seating` と `seatingOf(nextRoundState)` が無関係な席割りになるため。
+ * ここでは席割りを必ず `seatingOf(round)` から導出し、両者の対応を構造的に保証する。
  */
 describe("engine: 頭ハネと親の連荘・親流れの交差(spec 2.5〜2.7・#326)", () => {
   /** 自家。`discard()` は自家の席の手番でしか通らないため、常に打牌者に据える。 */
@@ -420,8 +446,13 @@ describe("engine: 頭ハネと親の連荘・親流れの交差(spec 2.5〜2.7�
    * `roundNumber` から席割りを導出し、その局で**自家(p0)が打牌者**になる局面を組む。
    *
    * 席割りは `seatingOf(round)` 由来なので `round` と常に整合する(上記の要点を参照)。
-   * 東1..東3 で p0 の席は 東 → 南 → 西 と移り、これにより「親が上家取りで勝つ/負ける」
-   * 双方の配置を、円環として正当なまま作れる。
+   *
+   * ⚠️ 整合を保証するのは**席割りと `round` の対応だけ**である。`roundsPlayed` は
+   * `createGame` の初期値(0)、持ち点も配給原点のままなので、例えば「東4・2本場なのに
+   * まだ一局も終えていない」という状態量の食い違いは残る。本ファイルのアサーションは
+   * これらに依存しない(`roundsPlayed` は `SAFETY_ROUND_CAP` 判定にしか使われない)が、
+   * **終局条件(トビ・親トップやめ・安全上限)を見るテストへ流用しないこと**。
+   * `armDiscard` と同じく山からは牌を差し引かないため、残り枚数依存のテストにも不可。
    */
   function armDealerHeadBump(params: {
     seed: number;
@@ -430,55 +461,26 @@ describe("engine: 頭ハネと親の連荘・親流れの交差(spec 2.5〜2.7�
     honba?: number;
   }): { state: EngineState; seating: Seating<PlayerId>; humanSeat: SeatKey } {
     const base = createGame({ seed: params.seed });
-    const hand = base.hand;
-    if (hand === null)
-      throw new Error("hand should exist right after createGame");
-
     const round = {
       ...base.round,
       roundNumber: params.roundNumber,
       honba: params.honba ?? 0,
     };
     const seating = seatingOf(round);
-    const humanSeat = (["east", "south", "west"] as SeatKey[]).find(
-      (seat) => seating[seat] === HUMAN,
-    );
+    const humanSeat = SEATED_SEATS.find((seat) => seating[seat] === HUMAN);
     if (humanSeat === undefined)
       throw new Error(
         `自家(p0)が着席していない局を打牌者にできない: 東${params.roundNumber}`,
       );
 
-    for (const seat of ["east", "south", "west"] as SeatKey[]) {
-      const notation =
-        seat === humanSeat
-          ? DISCARDER_HAND
-          : (params.hands[seat] ?? NO_WAIT_3P);
-      hand.hands[seat] = expectConcealed13(notation);
-      hand.melds[seat] = [];
-      hand.discards[seat] = []; // フリテン回避
-      hand.riichi[seat] = false;
-      hand.riichiMiss[seat] = false;
-      hand.tempMiss[seat] = false;
-    }
-    hand.drawn = parseTile(RON_TILE);
-    hand.turn = humanSeat;
-
     return {
-      state: {
-        ...base,
+      state: armDiscardWith({
+        base,
         round,
-        hand: { ...hand, seating },
-        pending: {
-          kind: "humanDiscard",
-          canTsumo: false,
-          canRiichi: false,
-          riichiTiles: [],
-          ankanTiles: [],
-          kakanTiles: [],
-          forbiddenDiscards: [],
-          locked: false,
-        },
-      },
+        seating,
+        humanSeat,
+        hands: params.hands,
+      }),
       seating,
       humanSeat,
     };
@@ -500,8 +502,10 @@ describe("engine: 頭ハネと親の連荘・親流れの交差(spec 2.5〜2.7�
    */
   const ROUND_HUMAN_AT_SOUTH: RoundNumber = 4;
 
-  const SEED_WEST_DISCARDS = 3118;
-  const SEED_SOUTH_DISCARDS_DEALER = 3119;
+  /** 親(東)が上家取りで勝つ配置に使う seed。 */
+  const SEED_DEALER_WINS_HEAD_BUMP = 3118;
+  /** 親(東)がロン可能でも上家取りで敗れる配置に使う seed。 */
+  const SEED_DEALER_LOSES_HEAD_BUMP = 3119;
 
   describe("親が頭ハネで勝つ → 連荘(dealerContinues)", () => {
     // 打牌者=西 のとき ronOrder(west) = [east, south]。
@@ -511,7 +515,7 @@ describe("engine: 頭ハネと親の連荘・親流れの交差(spec 2.5〜2.7�
 
     it("前提: 南は単独ならこの牌で和了できる(頭ハネの敗者側が空振りでないこと)", () => {
       const { state, seating } = armDealerHeadBump({
-        seed: SEED_WEST_DISCARDS,
+        seed: SEED_DEALER_WINS_HEAD_BUMP,
         roundNumber: ROUND_HUMAN_AT_WEST,
         hands: { south: WAIT_3P_B },
         honba,
@@ -529,7 +533,7 @@ describe("engine: 頭ハネと親の連荘・親流れの交差(spec 2.5〜2.7�
 
     it("前提: 東(親)は単独ならこの牌で和了できる", () => {
       const { state, seating } = armDealerHeadBump({
-        seed: SEED_WEST_DISCARDS,
+        seed: SEED_DEALER_WINS_HEAD_BUMP,
         roundNumber: ROUND_HUMAN_AT_WEST,
         hands: { east: WAIT_3P_A },
         honba,
@@ -543,7 +547,7 @@ describe("engine: 頭ハネと親の連荘・親流れの交差(spec 2.5〜2.7�
 
     it("東(親)・南が同時ロン → 親が上家取りで和了し連荘(席・抜け番・局番号を据え置き本場+1)", () => {
       const { state, seating } = armDealerHeadBump({
-        seed: SEED_WEST_DISCARDS,
+        seed: SEED_DEALER_WINS_HEAD_BUMP,
         roundNumber: ROUND_HUMAN_AT_WEST,
         hands,
         honba,
@@ -569,8 +573,9 @@ describe("engine: 頭ハネと親の連荘・親流れの交差(spec 2.5〜2.7�
       expect(next.roundNumber).toBe(before.roundNumber);
       expect(next.honba).toBe(honba + 1);
       expect(next.order).toEqual(before.order);
-      // 席・抜け番の据え置きは、次局の席割りが今局と一致することで担保される。
-      expect(seatingOf(next)).toEqual(seating);
+      // 席・抜け番の据え置きは、`seatingOf` が (order, roundNumber) の純関数である以上
+      // 上の2つ(order 一致・roundNumber 一致)から従うため、別途アサートしない。
+      // 回転が起きないことの実質的な検証は、親流れ側の回転アサーションとの対比が担う。
     });
   });
 
@@ -581,7 +586,7 @@ describe("engine: 頭ハネと親の連荘・親流れの交差(spec 2.5〜2.7�
 
     it("前提: 東(親)は単独ならこの牌で和了できる(= 親はロンを主張できた)", () => {
       const { state, seating } = armDealerHeadBump({
-        seed: SEED_SOUTH_DISCARDS_DEALER,
+        seed: SEED_DEALER_LOSES_HEAD_BUMP,
         roundNumber: ROUND_HUMAN_AT_SOUTH,
         hands: { east: WAIT_3P_A },
         honba,
@@ -599,7 +604,7 @@ describe("engine: 頭ハネと親の連荘・親流れの交差(spec 2.5〜2.7�
 
     it("前提: 西は単独ならこの牌で和了できる", () => {
       const { state, seating } = armDealerHeadBump({
-        seed: SEED_SOUTH_DISCARDS_DEALER,
+        seed: SEED_DEALER_LOSES_HEAD_BUMP,
         roundNumber: ROUND_HUMAN_AT_SOUTH,
         hands: { west: WAIT_3P_B },
         honba,
@@ -613,7 +618,7 @@ describe("engine: 頭ハネと親の連荘・親流れの交差(spec 2.5〜2.7�
 
     it("西・東(親)が同時ロン → 西が上家取りし、親はロン可能でも親流れ(局が進み本場は0)", () => {
       const { state, seating } = armDealerHeadBump({
-        seed: SEED_SOUTH_DISCARDS_DEALER,
+        seed: SEED_DEALER_LOSES_HEAD_BUMP,
         roundNumber: ROUND_HUMAN_AT_SOUTH,
         hands: { west: WAIT_3P_B, east: WAIT_3P_A },
         honba,
