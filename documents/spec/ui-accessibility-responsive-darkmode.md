@@ -116,9 +116,12 @@ Tailwind v4 のデフォルトブレークポイントをそのまま採用し�
 | `--color-turn-highlight-ink` | 状態バッジ「手番」の文字色。felt 上のバッジは明色地 `--color-tile-face` を敷きその上に描くため、地に対しライト/ダーク双方で 4.5:1 以上(1.4.3)。`--color-turn-highlight` はダークで明色 #f59e0b へ振れ明色地上では文字比が割れるため、テキスト用に別トークンへ分離しテーマ非依存の濃い琥珀で固定する(#154) |
 | `--color-turn-highlight-strong` | 操作パネル(`ActionPanel`)主要ボタンの文字色。ボタン地は `--color-turn-highlight` を 10% 敷いたテーマ連動の淡地(ライト)/濃地(ダーク)のため、地の上でライト/ダーク双方 4.5:1 以上(1.4.3)。地がテーマ連動で反転する点が明色地固定の `--color-turn-highlight-ink` と異なり流用できないため、ライト=濃い琥珀・ダーク=明るい琥珀と地に応じて反転する専用トークンへ分離する(#159。以前は `--color-turn-highlight` を文字に流用しライトで 4.39:1 と不足していた) |
 | `--color-danger` / `--color-positive` | 点数減少/増加、トビ警告等 |
-| `--color-focus-ring` | フォーカスリング(隣接背景に対し3:1以上) |
+| `--color-focus-ring` | フォーカスリング(隣接背景に対し3:1以上)。全画面のフォーカスリングはこのトークン**のみ**を起点とし、`globals.css` の**レイヤー外(unlayered)**なグローバル `:focus-visible { outline: 2px solid var(--color-focus-ring); outline-offset: 2px }` が一元的に描画する(#314) |
 
 - 新規トークン追加時は、ライト/ダーク双方でコントラスト計算(5.5節のツール)を通してからマージする
+- **フォーカスリングはコンポーネント側で上書きしない**(#314)。`@import "tailwindcss"` により Tailwind のユーティリティは `@layer utilities` へ生成される一方、`globals.css` は `@layer` を使わないため上記グローバル規則は unlayered に置かれる。CSS カスケードでは通常宣言について **unlayered がすべてのレイヤーに優先する(詳細度の比較は行われない)** ため、コンポーネントに `focus-visible:outline-*` を書いても outline 系プロパティは一切上書きできず no-op になる。したがってリング色・太さ・オフセットの変更は `--focus-ring` の値そのものを変える形で行う。
+  - この不変条件は `src/app/focus-ring.regression.test.ts` が回帰テストとして固定する(グローバル規則の存在・`globals.css` が `@layer` を使わないこと・コンポーネントが `focus-visible:outline-*` を持たないこと)。リング色 × 背景の 3:1 はライト/手動ダーク/OS ダークの3スコープで `src/app/globals.contrast.test.ts` が検証する。
+  - 既知の例外は `src/components/layout/ThemeToggle.tsx` の `has-[:focus-visible]:outline-*` 1 箇所のみ。フォーカスを受けるのは内側の `<input type="radio">` だが outline が付くのは外側の `<label>` であり、`<label>` にはグローバル `:focus-visible` がマッチせず競合しないため実際に描画され、**input と label の二重リング**になっている(是正は見た目が変わるため #327 で別途扱う)。
 
 ## 5.5 アクセシビリティ検証手段
 

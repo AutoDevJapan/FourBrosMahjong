@@ -44,7 +44,7 @@ export default function SettingsPage() {
         <header className="flex flex-col gap-3">
           <Link
             href="/"
-            className="inline-flex w-fit items-center gap-1 rounded-md text-sm text-foreground/70 underline-offset-4 hover:underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-foreground"
+            className="inline-flex w-fit items-center gap-1 rounded-md text-sm text-foreground/70 underline-offset-4 hover:underline"
           >
             <span aria-hidden="true">←</span> ロビーへ戻る
           </Link>
@@ -86,7 +86,7 @@ export default function SettingsPage() {
           </p>
           <Link
             href="/history"
-            className="inline-flex w-fit items-center gap-1 rounded-full border border-foreground/25 px-4 py-2 text-sm hover:bg-foreground/5 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-foreground"
+            className="inline-flex w-fit items-center gap-1 rounded-full border border-foreground/25 px-4 py-2 text-sm hover:bg-foreground/5"
           >
             戦績を見る <span aria-hidden="true">→</span>
           </Link>

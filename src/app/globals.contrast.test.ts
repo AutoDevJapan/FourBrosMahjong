@@ -131,3 +131,29 @@ describe("牌枠 --tile-border の非テキストコントラスト(#148 項目2
     expect(contrast(darkBorder, darkBg)).toBeGreaterThanOrEqual(3);
   });
 });
+
+describe("フォーカスリング --focus-ring の非テキストコントラスト(#314 / WCAG 1.4.11)", () => {
+  // グローバル `:focus-visible` が全画面のフォーカスリングを描画する(下の regression テスト参照)。
+  // リングは非テキスト UI 部品なので、隣接するページ背景に対し 3:1(スペック5 5.2.4)が必要。
+  const lightBg = token(":root", "--background");
+
+  it("ライトテーマでページ背景に対し 3:1 以上", () => {
+    expect(
+      contrast(token(":root", "--focus-ring"), lightBg),
+    ).toBeGreaterThanOrEqual(3);
+  });
+
+  it('手動ダーク(data-theme="dark")でページ背景に対し 3:1 以上', () => {
+    const scope = ':root[data-theme="dark"]';
+    expect(
+      contrast(token(scope, "--focus-ring"), token(scope, "--background")),
+    ).toBeGreaterThanOrEqual(3);
+  });
+
+  it("OS ダーク追従(:root:not([data-theme]))でページ背景に対し 3:1 以上", () => {
+    const scope = ":root:not([data-theme])";
+    expect(
+      contrast(token(scope, "--focus-ring"), token(scope, "--background")),
+    ).toBeGreaterThanOrEqual(3);
+  });
+});

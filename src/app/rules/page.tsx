@@ -199,7 +199,7 @@ export default function RulesPage() {
         <nav aria-label="ページナビゲーション">
           <Link
             href="/"
-            className="inline-flex items-center gap-1 text-sm text-foreground/70 underline underline-offset-4 hover:text-foreground focus-visible:rounded-sm focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-foreground"
+            className="inline-flex items-center gap-1 text-sm text-foreground/70 underline underline-offset-4 hover:text-foreground focus-visible:rounded-sm"
           >
             <span aria-hidden>←</span> ロビーへ戻る
           </Link>
@@ -228,7 +228,7 @@ export default function RulesPage() {
               open={section.defaultOpen}
               className="rounded-lg border border-foreground/15"
             >
-              <summary className="cursor-pointer rounded-lg px-4 py-3 font-medium marker:text-foreground/60 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-foreground">
+              <summary className="cursor-pointer rounded-lg px-4 py-3 font-medium marker:text-foreground/60">
                 {section.heading}
               </summary>
               <ul className="flex flex-col gap-2 px-4 pb-4 text-sm/6">
@@ -255,7 +255,7 @@ export default function RulesPage() {
         <footer className="border-t border-foreground/15 pt-6">
           <Link
             href="/"
-            className="inline-flex items-center gap-1 text-sm text-foreground/70 underline underline-offset-4 hover:text-foreground focus-visible:rounded-sm focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-foreground"
+            className="inline-flex items-center gap-1 text-sm text-foreground/70 underline underline-offset-4 hover:text-foreground focus-visible:rounded-sm"
           >
             <span aria-hidden>←</span> ロビーへ戻る
           </Link>
