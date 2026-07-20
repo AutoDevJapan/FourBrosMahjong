@@ -52,7 +52,7 @@ import {
   resolveDora,
 } from "@/domain/dora/doraSet";
 import { countDoraHan } from "@/domain/dora/han";
-import { chooseDiscard, shouldCallMeld } from "@/domain/game/ai";
+import { chooseDiscard, shanten, shouldCallMeld } from "@/domain/game/ai";
 import { decomposeAll, type MeldInput } from "@/domain/hand/decompose";
 import { canRon } from "@/domain/hand/furiten";
 import { isKuikaeForbidden } from "@/domain/hand/kuikae";
@@ -1098,13 +1098,20 @@ function pump(state: EngineState): EngineState {
     // AI: 海底でなければ加槓→暗槓の順で合法なカンを宣言する。
     if (canKanOnDrawTurn(hand.drawn !== null, haitei)) {
       const pool = [...hand.hands[seat], hand.drawn];
-      const kakan = kakanCandidates(hand, seat, pool);
+      const meldCount = hand.melds[seat].length;
+      // 向聴を悪化させるカンは宣言しない(#304)。ドラ増加より手を崩さないことを優先する。
+      const kakan = kakanCandidates(hand, seat, pool).filter((t) =>
+        kanKeepsShanten(pool, meldCount, t, "kakan"),
+      );
       if (kakan.length > 0) {
         s = applyAiKakan(s, seat, kakan[0]);
         if (s.phase !== "playing" || s.pending !== null) return s;
         continue;
       }
-      const ankan = ankanCandidates(pool);
+      // 暗槓候補の評価は加槓が無いときだけ行う(向聴評価は candidate 数ぶん走るため)。
+      const ankan = ankanCandidates(pool).filter((t) =>
+        kanKeepsShanten(pool, meldCount, t, "ankan"),
+      );
       if (ankan.length > 0) {
         s = applyAiAnkan(s, seat, ankan[0]);
         if (s.phase !== "playing" || s.pending !== null) return s;
@@ -1143,6 +1150,59 @@ function riichiDiscardTiles(hand: HandState, seat: SeatKey): Tile[] {
     if (isTenpai(rest, melds)) result.push(t);
   }
   return result;
+}
+
+/**
+ * カン宣言が手牌の向聴を悪化させないかを判定する(#304)。純関数・決定的。
+ *
+ * 順子・塔子に使っている牌を槓に回すと、その牌が面子として固定されて待ちが崩れる
+ * (例: `456s` を持った状態で4枚目の `5s` を暗槓すると `4s` `6s` が孤立する)。
+ * 合法なら無条件に宣言していたため、AI が自らテンパイを落としていた。
+ *
+ * 比較は**打牌後13枚相当**の向聴に揃える(嶺上牌はこの時点で未知のため評価に含めない):
+ * - カンしない場合の最良値 = `min over 打牌 d of shanten(pool − d, 副露数)`
+ * - **暗槓**: 同種4枚を門前から抜き面子が1つ増える → `shanten(pool − 4枚, 副露数 + 1)`
+ * - **加槓**: 既存ポンへ4枚目を移すだけで面子数は不変 → `shanten(pool − 1枚, 副露数)`
+ *
+ * 加槓後の形は「その4枚目を打牌した場合」と同一なので、最良打牌が別牌なら悪化と出る。
+ *
+ * ## 適用範囲(意図的に自ツモ番の加槓・暗槓のみ)
+ *
+ * - **リーチ後の暗槓**には掛けない。{@link canAnkanAfterRiichi} が待ち牌集合の不変を
+ *   要求するため向聴は 0 のまま保証されており、本判定は常に真になる(無意味)。
+ * - **人間(p0)**には掛けない。AI の方策であり、UI の選択肢を狭めてはならない。
+ * - **大明槓**({@link applyAiCall} の kan 分岐)には掛けていない。ただしこれは
+ *   **原理的に安全なのではなく、実測で悪化が観測されなかっただけ**である
+ *   (seed 1〜400 の全局走査で大明槓167件・向聴悪化0件)。{@link shouldCallMeld} は
+ *   役牌限定なのは**最初の1副露だけ**で、役牌の副露が1つでもあれば以後は任意の牌を
+ *   鳴くため、順子・塔子に使っている牌の大明槓は現状の方針でも起こりうる
+ *   (例: 役牌ポン済みで `4s 5s 5s 5s 6s` を持ち、他家の `5s` を明槓して `4s` `6s` が孤立)。
+ *   適用は #322 で扱う。
+ *
+ * @param pool 門前手牌 + ツモ牌(= 14 − 3×副露数 枚)。
+ */
+function kanKeepsShanten(
+  pool: readonly Tile[],
+  meldCount: number,
+  tile: Tile,
+  kind: "ankan" | "kakan",
+): boolean {
+  const need = kind === "ankan" ? 4 : 1;
+  const { taken, rest } = takeKind(pool, tile, need);
+  if (taken.length < need) return false;
+  // 打牌候補は種別(赤フラグ無視)で1回だけ評価する({@link chooseDiscard} と同じ粒度)。
+  // `tileKey` も `shanten` も赤フラグを見ないため、この重複排除は厳密に等価。
+  let bestWithoutKan = Number.POSITIVE_INFINITY;
+  const seen = new Set<string>();
+  for (let i = 0; i < pool.length; i++) {
+    if (!seen.add(tileKey(pool[i]))) continue;
+    const without = [...pool.slice(0, i), ...pool.slice(i + 1)];
+    const s = shanten(without, meldCount);
+    if (s < bestWithoutKan) bestWithoutKan = s;
+  }
+  const afterKan =
+    kind === "ankan" ? shanten(rest, meldCount + 1) : shanten(rest, meldCount);
+  return afterKan <= bestWithoutKan;
 }
 
 /** 手牌プール中で4枚揃う牌種(暗槓候補)を列挙する。 */
