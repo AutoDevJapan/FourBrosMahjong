@@ -1,5 +1,6 @@
 import {
   createGame,
+  DEFAULT_NAMES,
   declareAnkan,
   declareKakan,
   declareKan,
@@ -12,15 +13,15 @@ import {
   passRon,
   proceedToNextRound,
   tsumogiri,
+  type PlayerNames,
 } from "@/domain/game/engine";
-import type { PlayerNames } from "@/domain/game/engine";
 import { MAX_PLAYER_NAME_LENGTH } from "@/components/settings/playerNames";
 import type { Tile } from "@/domain/tiles/tile";
 
 const GAME_SESSION_KEY = "four-bros-mahjong.game.v1";
 // v2 で `names`(対局者名 / issue #291)を追加。半荘の表示名は開始時に固定したいので
 // 設定側(`localStorage`)を再生時に読み直さず、ジャーナル自身に保存する。
-// v1 の記録は `parseJournal` が拒否し、呼び出し元が新規対局へフォールバックする。
+// v1 の記録は既定名を補って v2 として受け入れる(`namesOfVersion`)。
 const VERSION = 2;
 // engine は最大32局で終了し、完走fixtureも5,000遷移を安全ガードにしている。
 // これを超える履歴は正規の対局から生成されないものとして、再生前に拒否する。
@@ -125,16 +126,32 @@ function isNames(value: unknown): value is PlayerNames {
   );
 }
 
+/**
+ * 版ごとに許される key と対局者名を検証し、v2 の `names` へ正規化する。
+ *
+ * v1(`names` 無し)は既定名を補って受け入れる。デプロイをまたいで開いたままのタブが
+ * 進行中の半荘を失わないための移行措置(`names` は表示名だけを決めるので、既定名を
+ * 補っても Wall/RNG・操作列の再生結果は一切変わらない)。
+ */
+function namesOfVersion(value: Record<string, unknown>): PlayerNames | null {
+  if (value.version === 1) {
+    return hasOnlyKeys(value, ["version", "seed", "actions"])
+      ? DEFAULT_NAMES
+      : null;
+  }
+  if (value.version !== VERSION) return null;
+  if (!hasOnlyKeys(value, ["version", "seed", "names", "actions"])) return null;
+  return isNames(value.names) ? value.names : null;
+}
+
 export function parseJournal(raw: string): GameJournal | null {
   if (raw.length * 2 > MAX_JOURNAL_BYTES) return null;
   try {
     const value = JSON.parse(raw) as Record<string, unknown>;
+    if (!value || typeof value !== "object") return null;
+    const names = namesOfVersion(value);
     if (
-      !value ||
-      typeof value !== "object" ||
-      !hasOnlyKeys(value, ["version", "seed", "names", "actions"]) ||
-      !isNames(value.names) ||
-      value.version !== VERSION ||
+      names === null ||
       !Number.isSafeInteger(value.seed) ||
       Number(value.seed) < 0 ||
       Number(value.seed) > 0xffffffff ||
@@ -144,7 +161,12 @@ export function parseJournal(raw: string): GameJournal | null {
     ) {
       return null;
     }
-    return value as unknown as GameJournal;
+    return {
+      version: VERSION,
+      seed: value.seed as number,
+      names,
+      actions: value.actions as readonly GameAction[],
+    };
   } catch {
     return null;
   }

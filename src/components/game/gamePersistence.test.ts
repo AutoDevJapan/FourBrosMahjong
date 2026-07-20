@@ -323,8 +323,29 @@ describe("game persistence journal", () => {
     expect(parseJournal(JSON.stringify(journal))).toBeNull();
   });
 
+  it("v1の記録は既定名を補ってv2として受け入れる (#291)", () => {
+    const v1 = { version: 1, seed: 3, actions: [{ type: "tsumogiri" }] };
+
+    expect(parseJournal(JSON.stringify(v1))).toEqual({
+      version: 2,
+      seed: 3,
+      names: DEFAULT_NAMES,
+      actions: [{ type: "tsumogiri" }],
+    });
+  });
+
+  it("v1の記録に余剰キーがあれば拒否する (#291)", () => {
+    const v1 = {
+      version: 1,
+      seed: 3,
+      actions: [],
+      names: ["A", "B", "C", "D"],
+    };
+
+    expect(parseJournal(JSON.stringify(v1))).toBeNull();
+  });
+
   it.each([
-    { label: "namesキーが無い(v1の記録)", names: undefined, version: 1 },
     { label: "namesが配列でない", names: "粗品" },
     { label: "names要素数が3", names: ["A", "B", "C"] },
     { label: "names要素数が5", names: ["A", "B", "C", "D", "E"] },
@@ -334,11 +355,16 @@ describe("game persistence journal", () => {
       label: "names要素が上限文字数超過",
       names: ["あ".repeat(MAX_PLAYER_NAME_LENGTH + 1), "B", "C", "D"],
     },
-  ])("不正な対局者名の記録を拒否する: $label (#291)", ({ names, version }) => {
-    const journal = { version: version ?? 2, seed: 1, actions: [], names };
-    if (names === undefined) delete (journal as { names?: unknown }).names;
+  ])("不正な対局者名の記録を拒否する: $label (#291)", ({ names }) => {
+    const journal = { version: 2, seed: 1, actions: [], names };
 
     expect(parseJournal(JSON.stringify(journal))).toBeNull();
+  });
+
+  it("v2でnamesキーが無い記録は拒否する (#291)", () => {
+    expect(
+      parseJournal(JSON.stringify({ version: 2, seed: 1, actions: [] })),
+    ).toBeNull();
   });
 
   it("設定した対局者名を保持して読み戻す (#291)", () => {
