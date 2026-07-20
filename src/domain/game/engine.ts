@@ -1003,11 +1003,22 @@ function applyAiCall(
   // `forbiddenDiscards` として渡す。削ると `14 − 3×副露数` 枚に満たない手牌で
   // 向聴が評価される(#303)。
   //
-  // 現状この呼び出しに到達するのは「同種ちょうど2枚」の場合だけで、門前に4枚目は
-  // 残らない。`canPon`(need 2)と `canKan`(need 3)は同じガードを共有するため、
-  // 3枚以上あれば必ず `kan=true` で上の分岐へ抜けるからである。つまり現時点では
-  // 禁止牌の指定は防御的だが、`shouldCallMeld` にカン見送りの分岐が入るなどして
-  // 「3枚持ちでポン」が発生した瞬間に load-bearing になる。
+  // 禁止牌の指定は現状**防御的**(到達不能)である。理由は #322 の前後で変わった:
+  //
+  // - #322 以前: `canPon`(need 2)と `canKan`(need 3)は同じガードを共有するため、
+  //   3枚以上あれば必ず `kan=true` で上の分岐へ抜けた。つまり同種ちょうど2枚しか
+  //   到達せず、門前に4枚目が残らなかった。
+  // - #322 以降: 「向聴を悪化させる大明槓はポンへ落とす」判断により、同種3枚持ちの
+  //   ままポンへ到達する経路が実在する(4,000半荘で86件)。門前に4枚目が残るように
+  //   なったが、**その4枚目が打牌に選ばれることはない**。ポンへ落とすのは
+  //   {@link kanKeepsShanten} が「4枚目を切った形(= 大明槓後の形)より厳密に良い
+  //   打牌が存在する」と判定したときに限られ、{@link chooseDiscard} は向聴を最優先
+  //   するため、常にその厳密に良い牌を選ぶからである。
+  //
+  // したがって喰い替えは向聴評価の側で既に排除されており、本指定はその不変条件が
+  // 崩れた場合(打点優先の打牌方策など)への保険として残している。#325 の
+  // 「3枚持ちポンで喰い替えを禁じる」テストが依然として書けない(修正前コードでも
+  // 緑になる)のはこのため。
   //
   // なお AI は人間側の `hand.ponnedKind`(`discard()` の no-op ガード用)を立てない。
   // 鳴きから打牌までが本関数内で同期的に完結し、公開境界の `discard()` を通らないため。
@@ -1153,7 +1164,10 @@ function riichiDiscardTiles(hand: HandState, seat: SeatKey): Tile[] {
 }
 
 /**
- * カン宣言が手牌の向聴を悪化させないかを判定する(#304)。純関数・決定的。
+ * カン宣言が手牌の向聴を悪化させないかを判定する(#304 / 大明槓は #322)。純関数・決定的。
+ *
+ * 方策としての位置づけ・閾値を設けない根拠・定量検証の結果は
+ * [ADR-0002](../../../documents/adr/0002-ai-policy.md) を参照。
  *
  * 順子・塔子に使っている牌を槓に回すと、その牌が面子として固定されて待ちが崩れる
  * (例: `456s` を持った状態で4枚目の `5s` を暗槓すると `4s` `6s` が孤立する)。
@@ -1166,42 +1180,68 @@ function riichiDiscardTiles(hand: HandState, seat: SeatKey): Tile[] {
  *
  * 加槓後の形は「その4枚目を打牌した場合」と同一なので、最良打牌が別牌なら悪化と出る。
  *
- * ## 適用範囲(意図的に自ツモ番の加槓・暗槓のみ)
+ * ## 大明槓(#322)
+ *
+ * 他家の打牌を明槓する場合、「カンしない」の対案は**打牌しないこと**ではなく
+ * **同じ牌をポンすること**である({@link shouldCallMeld} が真の局面でのみ呼ばれるため、
+ * 鳴くこと自体は既に決まっている)。したがって基準値はポン後の最良打牌に取る:
+ *
+ * - 大明槓: 同種4枚(手牌3枚 + 鳴いた1枚)が抜けて面子が1つ増える → `shanten(pool − 4枚, 副露数 + 1)`
+ * - ポン: 同種3枚が抜けて面子が1つ増え、手牌に4枚目が残る
+ *   → `min over 打牌 d of shanten(pool − 3枚 − d, 副露数 + 1)`
+ *
+ * 基準値の打牌候補には**4枚目(鳴いた牌と同種)も含めてよい**。現物喰い替え禁止(#105)で
+ * その打牌は実際には選べないが、除外しても判定結果は変わらないため明示的な除外を置いて
+ * いない: 「ポンして4枚目を切った形」は大明槓後の形と牌姿が同一で `afterKan` に等しく、
+ * 基準値は最小値を取るので `afterKan <= min(bestPon, afterKan) ⟺ afterKan <= bestPon`
+ * が恒等的に成り立つ(除外の有無で分岐しない)。実際に除外コードを外すミューテーションを
+ * 掛けても本判定のテストは落ちない。
+ *
+ * 悪化する場合は**鳴きを見送るのではなくポンへ落とす**。役牌の役を確定させる目的
+ * ({@link shouldCallMeld})は達成しつつ、4枚目を手牌に残して面子・塔子として使える。
+ *
+ * ## 適用範囲
  *
  * - **リーチ後の暗槓**には掛けない。{@link canAnkanAfterRiichi} が待ち牌集合の不変を
  *   要求するため向聴は 0 のまま保証されており、本判定は常に真になる(無意味)。
  * - **人間(p0)**には掛けない。AI の方策であり、UI の選択肢を狭めてはならない。
- * - **大明槓**({@link applyAiCall} の kan 分岐)には掛けていない。ただしこれは
- *   **原理的に安全なのではなく、実測で悪化が観測されなかっただけ**である
- *   (seed 1〜400 の全局走査で大明槓167件・向聴悪化0件)。{@link shouldCallMeld} は
- *   役牌限定なのは**最初の1副露だけ**で、役牌の副露が1つでもあれば以後は任意の牌を
- *   鳴くため、順子・塔子に使っている牌の大明槓は現状の方針でも起こりうる
- *   (例: 役牌ポン済みで `4s 5s 5s 5s 6s` を持ち、他家の `5s` を明槓して `4s` `6s` が孤立)。
- *   適用は #322 で扱う。
  *
- * @param pool 門前手牌 + ツモ牌(= 14 − 3×副露数 枚)。
+ * @param pool 評価対象の14枚相当。自ツモ番は「門前手牌 + ツモ牌」、大明槓は
+ *   「門前手牌 + 鳴いた牌」(いずれも `14 − 3×副露数` 枚)。
  */
 function kanKeepsShanten(
   pool: readonly Tile[],
   meldCount: number,
   tile: Tile,
-  kind: "ankan" | "kakan",
+  kind: "ankan" | "kakan" | "daiminkan",
 ): boolean {
-  const need = kind === "ankan" ? 4 : 1;
+  const need = kind === "kakan" ? 1 : 4;
   const { taken, rest } = takeKind(pool, tile, need);
   if (taken.length < need) return false;
+
+  // 基準値(カンしない場合の最良の13枚相当)。自ツモ番は「打牌するだけ」、
+  // 大明槓は「ポンして打牌する」が対案なので、評価するプールと副露数が異なる。
+  let basePool = pool;
+  let baseMelds = meldCount;
+  if (kind === "daiminkan") {
+    const pon = takeKind(pool, tile, 3);
+    if (pon.taken.length < 3) return false;
+    basePool = pon.rest;
+    baseMelds = meldCount + 1;
+  }
+
   // 打牌候補は種別(赤フラグ無視)で1回だけ評価する({@link chooseDiscard} と同じ粒度)。
   // `tileKey` も `shanten` も赤フラグを見ないため、この重複排除は厳密に等価。
   let bestWithoutKan = Number.POSITIVE_INFINITY;
   const seen = new Set<string>();
-  for (let i = 0; i < pool.length; i++) {
-    if (!seen.add(tileKey(pool[i]))) continue;
-    const without = [...pool.slice(0, i), ...pool.slice(i + 1)];
-    const s = shanten(without, meldCount);
+  for (let i = 0; i < basePool.length; i++) {
+    if (!seen.add(tileKey(basePool[i]))) continue;
+    const without = [...basePool.slice(0, i), ...basePool.slice(i + 1)];
+    const s = shanten(without, baseMelds);
     if (s < bestWithoutKan) bestWithoutKan = s;
   }
   const afterKan =
-    kind === "ankan" ? shanten(rest, meldCount + 1) : shanten(rest, meldCount);
+    kind === "kakan" ? shanten(rest, meldCount) : shanten(rest, meldCount + 1);
   return afterKan <= bestWithoutKan;
 }
 
@@ -1502,7 +1542,18 @@ function resolveDiscard(state: EngineState): EngineState {
     ) {
       continue;
     }
-    return applyAiCall(resolvedState, candidate, discarder, tile, canKan);
+    // 向聴を悪化させる大明槓はポンへ落とす(#322)。対案は「鳴かない」ではなく
+    // 「ポンする」なので、4枚目を手牌に残せるぶんポンが優越しうる。
+    const useKan =
+      canKan &&
+      (!canPon ||
+        kanKeepsShanten(
+          [...hand.hands[candidate], tile],
+          hand.melds[candidate].length,
+          tile,
+          "daiminkan",
+        ));
+    return applyAiCall(resolvedState, candidate, discarder, tile, useKan);
   }
 
   // 3. ロン・鳴きなし → 手番送り。
