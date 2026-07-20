@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import { fireEvent, render, screen, within } from "@testing-library/react";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   appendHistory,
   MATCH_HISTORY_KEY,
@@ -41,6 +41,8 @@ const formatted = (finishedAt: number) =>
 
 afterEach(() => {
   window.localStorage.clear();
+  // スパイの復元をテスト本体末尾に置くと、手前の expect が落ちた際に次のテストへ漏れる。
+  vi.restoreAllMocks();
 });
 
 describe("MatchHistoryList (#293)", () => {
@@ -111,6 +113,64 @@ describe("MatchHistoryList (#293)", () => {
     expect(
       screen.getByText("保存されていた戦績をすべて削除しました。"),
     ).toBeInTheDocument();
+  });
+
+  it("破損データは空状態で描画し、次回以降のために削除する(#302)", async () => {
+    window.localStorage.setItem(
+      MATCH_HISTORY_KEY,
+      '{"version":1,"entries":[{}]}',
+    );
+
+    render(<MatchHistoryList />);
+
+    expect(
+      await screen.findByText(/保存された戦績はまだありません/),
+    ).toBeInTheDocument();
+    // 削除は描画中(getSnapshot)ではなく購読(効果)側で行われる。
+    expect(window.localStorage.getItem(MATCH_HISTORY_KEY)).toBeNull();
+  });
+
+  it("別タブでの保存変更を storage イベントで取り込む(#302)", async () => {
+    render(<MatchHistoryList />);
+    expect(
+      await screen.findByText(/保存された戦績はまだありません/),
+    ).toBeInTheDocument();
+
+    // 別タブが書き込んだ状況を再現する(jsdom は storage イベントを自動発火しない)。
+    appendHistory(window.localStorage, entry(9, 1_753_200_000_000, "二郎"));
+    fireEvent(window, new StorageEvent("storage", { key: MATCH_HISTORY_KEY }));
+
+    const list = screen.getByRole("list", { name: "保存された半荘結果" });
+    expect(list.querySelectorAll(":scope > li")).toHaveLength(1);
+    expect(list).toHaveTextContent("1位 二郎");
+  });
+
+  it("削除できなかった場合は成功と読み上げない(#302)", async () => {
+    appendHistory(window.localStorage, entry(1, 1_753_000_000_000));
+    vi.spyOn(Storage.prototype, "removeItem").mockImplementation(() => {
+      throw new Error("QuotaExceededError");
+    });
+
+    render(<MatchHistoryList />);
+    fireEvent.click(
+      await screen.findByRole("button", { name: "戦績をすべて削除" }),
+    );
+    const confirmButton = screen.getByRole("button", { name: "削除する" });
+    // 実ブラウザではクリック時にボタンへフォーカスが載る(jsdom は載せない)。
+    confirmButton.focus();
+    fireEvent.click(confirmButton);
+
+    // 一覧は残っているので「削除しました」と食い違う通知を出してはいけない。
+    expect(
+      screen.getByRole("list", { name: "保存された半荘結果" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(/この端末では戦績を削除できませんでした/),
+    ).toBeInTheDocument();
+    // 確認UIは畳まない。畳むと押したボタンが消え、フォーカスが body へ落ちる。
+    expect(confirmButton).toBeInTheDocument();
+    expect(confirmButton).toHaveFocus();
+    expect(document.body).not.toHaveFocus();
   });
 
   it("全件削除後はフォーカスを空状態へ移し、bodyへ落とさない", async () => {

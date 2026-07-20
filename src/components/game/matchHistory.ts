@@ -9,6 +9,7 @@
  * `sessionStorage` のジャーナル(`gamePersistence.ts`)と同様に、読み込み時は
  * 形状を厳密検証し、件数・容量に上限を設けて巨大入力や破損データから防御する。
  */
+import { localStorageOrNull } from "@/components/common/browserStorage";
 import { hasOnlyKeys } from "./gamePersistence";
 
 /** `localStorage` の保存キー。形式変更時は version を上げて別キーにする。 */
@@ -206,11 +207,120 @@ export function appendHistory(
   }
 }
 
-/** 保存済み戦績をすべて消去する。 */
-export function clearHistory(storage: Storage): void {
+/**
+ * 保存済み戦績をすべて消去する。消去できたかを返す(Storage 無効等では `false`)。
+ *
+ * 返り値で成否を伝えるのは `savePlayerNames` と同じ方針。呼び出し側は「削除しました」と
+ * いう通知を実態と食い違わせずに出し分けられる。
+ */
+export function clearHistory(storage: Storage): boolean {
   try {
     storage.removeItem(MATCH_HISTORY_KEY);
+    return true;
   } catch {
-    // 消去不可(Storage 無効等)は黙って無視する。
+    // 消去不可(Storage 無効等)でも画面表示は継続できるため、例外は投げない。
+    return false;
   }
+}
+
+// ---------------------------------------------------------------------------
+// 外部ストア購読(`useSyncExternalStore` 用) — issue #302
+//
+// `localStorage` は React の外にある可変ストアなので、描画中(`useMemo`)に読むのでは
+// なく `useSyncExternalStore` で購読する(`playerNames.ts` / `ThemeToggle` と同じ方式)。
+//
+// `getSnapshot` は React が「いつ・何度呼んでもよい」純粋関数でなければならないため、
+// **破損データの削除(`loadHistory` の `removeItem`)は行わない**。削除は描画後に走る
+// `subscribe`(= `useSyncExternalStore` の効果)側の責務とする。
+// ---------------------------------------------------------------------------
+
+const subscribers = new Set<() => void>();
+/** 空の結果は常に同一参照で返す(`getSnapshot` の参照安定性 = 無限再描画の防止)。 */
+const EMPTY_HISTORY: readonly MatchHistoryEntry[] = Object.freeze([]);
+/** 直近に解析した保存文字列と、その解析結果(同値なら同一参照を返すためのキャッシュ)。 */
+let cachedRaw: string | null = null;
+let cachedEntries: readonly MatchHistoryEntry[] = EMPTY_HISTORY;
+
+function onStorageEvent(event: StorageEvent): void {
+  // key === null は「別タブが clear() した」を意味する(全キーが対象)。
+  if (event.key === MATCH_HISTORY_KEY || event.key === null) {
+    notifyHistoryChanged();
+  }
+}
+
+/**
+ * 保存内容を変更したことを購読者へ知らせる。
+ *
+ * 永続化API(`appendHistory` / `clearHistory`)は `Storage` を引数に取る純粋な入出力に
+ * 留め、モジュールグローバルなストアへの通知はこの関数に分離している(責務の分離)。
+ *
+ * **描画中に呼んではならない。** 購読中のコンポーネントの再描画を要求するため、他コンポーネントの
+ * 描画フェーズから呼ぶと React の「描画中に別コンポーネントを更新した」警告になる。
+ * `GameProvider` が `useState` の遅延初期化(= 描画フェーズ)から `appendHistory` を
+ * 呼ぶため、追記経路ではこの関数を呼んでいない(issue #310)。`/history` はマウント時に
+ * `getHistorySnapshot` で読み直すので、現状の画面構成では取りこぼしは起きない。
+ */
+export function notifyHistoryChanged(): void {
+  for (const callback of subscribers) callback();
+}
+
+/**
+ * `localStorage` の変更(このタブの削除操作、別タブの `storage` イベント)を購読する。
+ *
+ * 購読のたびに `loadHistory` を通し、破損データが残っていれば次回以降のために削除する
+ * (描画中ではなく効果として実行される)。`loadHistory` は冪等なので重複実行は無害。
+ *
+ * 購読者は `Set` で保持するため、**同一の関数参照で2回購読することは非対応**
+ * (2回目が重複排除され、片方の解除で両方が通知を失う)。想定利用者である
+ * `useSyncExternalStore` は購読ごとに新しいクロージャを渡すため問題にならない。
+ */
+export function subscribeHistory(callback: () => void): () => void {
+  // `storage` リスナはモジュールで1本だけ張り、購読者数の 0↔1 の境界で着脱する。
+  // 購読者ごとに張ると、イベント1回で購読者数の二乗回だけ callback が走る。
+  if (subscribers.size === 0) {
+    window.addEventListener("storage", onStorageEvent);
+  }
+  subscribers.add(callback);
+  const storage = localStorageOrNull();
+  if (storage !== null) loadHistory(storage);
+  return () => {
+    subscribers.delete(callback);
+    if (subscribers.size === 0) {
+      window.removeEventListener("storage", onStorageEvent);
+    }
+  };
+}
+
+/**
+ * 現在の保存値(新しい順)。副作用を持たず、値が変わらない限り同一参照を返す。
+ * 未保存・破損・読み込み不可はいずれも空配列(破損データの削除は `subscribeHistory`)。
+ */
+export function getHistorySnapshot(): readonly MatchHistoryEntry[] {
+  let raw: string | null;
+  try {
+    raw = localStorageOrNull()?.getItem(MATCH_HISTORY_KEY) ?? null;
+  } catch {
+    raw = null;
+  }
+  if (raw === null) {
+    cachedRaw = null;
+    cachedEntries = EMPTY_HISTORY;
+    return EMPTY_HISTORY;
+  }
+  if (raw === cachedRaw) return cachedEntries;
+  cachedRaw = raw;
+  cachedEntries = parseHistory(raw) ?? EMPTY_HISTORY;
+  return cachedEntries;
+}
+
+/**
+ * サーバー描画・初回ハイドレーション時のスナップショット。
+ *
+ * `localStorage` はサーバーでは読めないため `null`(= 読み込み中)を返し、
+ * ハイドレーション後に実値へ切り替える(`ResultPageClient` と同じマウントゲート)。
+ */
+export function getServerHistorySnapshot():
+  | readonly MatchHistoryEntry[]
+  | null {
+  return null;
 }

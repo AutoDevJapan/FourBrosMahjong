@@ -13,21 +13,19 @@
  * - 順位・増減は色に依存せずテキスト+符号で伝える(既存の結果コンポーネントを再利用)。
  *
  * `localStorage` はクライアントでのみ読めるため、SSR/初回 hydration は読み込み中
- * 表示に揃え、マウント後に一覧へ切り替える(`ResultPageClient` のマウントゲートと同型)。
+ * 表示に揃え、マウント後に一覧へ切り替える。読み込みは `useSyncExternalStore` による
+ * ストア購読で行い、描画中に `localStorage` を読んだり書いたりしない(issue #302)。
  */
-import {
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-  useSyncExternalStore,
-} from "react";
+import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { localStorageOrNull } from "@/components/common/browserStorage";
 import {
   clearHistory,
-  loadHistory,
+  getHistorySnapshot,
+  getServerHistorySnapshot,
   type MatchHistoryEntry,
   MAX_HISTORY_ENTRIES,
+  notifyHistoryChanged,
+  subscribeHistory,
 } from "@/components/game/matchHistory";
 import RankingTable from "@/components/result/RankingTable";
 import SoshiiBreakdown from "@/components/result/SoshiiBreakdown";
@@ -93,24 +91,15 @@ function HistoryItem({ entry }: { entry: MatchHistoryEntry }) {
 }
 
 export default function MatchHistoryList() {
-  // localStorage はクライアントでのみ読める。SSR/初回 hydration は「読み込み中」を描き、
-  // マウント後に保存値へ切り替える(`ResultPageClient` と同じマウントゲート)。
-  const mounted = useSyncExternalStore(
-    () => () => {},
-    () => true,
-    () => false,
+  // localStorage は React の外にある可変ストアなので `useSyncExternalStore` で購読する
+  // (issue #302 / `playerNames.ts` と同じ方式)。サーバー描画・初回 hydration は
+  // `null`(= 読み込み中)で一致させ、マウント後に保存値へ切り替える。全件削除や
+  // 別タブでの変更は購読経由で反映されるため、描画中に localStorage は読まない。
+  const entries = useSyncExternalStore<readonly MatchHistoryEntry[] | null>(
+    subscribeHistory,
+    getHistorySnapshot,
+    getServerHistorySnapshot,
   );
-  // マウント後に1度だけ読む(loadHistory は破損時の削除まで含めて冪等)。
-  // 以後の更新(全件削除)は overridden で上書きする。
-  const loaded = useMemo<readonly MatchHistoryEntry[] | null>(() => {
-    if (!mounted) return null;
-    const storage = localStorageOrNull();
-    return storage === null ? [] : loadHistory(storage);
-  }, [mounted]);
-  const [overridden, setOverridden] = useState<
-    readonly MatchHistoryEntry[] | null
-  >(null);
-  const entries = overridden ?? loaded;
   const [confirmingClear, setConfirmingClear] = useState(false);
   const [statusMessage, setStatusMessage] = useState("");
   // 全件削除すると「削除する」ボタンごと一覧セクションが消えるため、フォーカスが
@@ -128,11 +117,22 @@ export default function MatchHistoryList() {
 
   const executeClear = () => {
     const storage = localStorageOrNull();
-    if (storage !== null) clearHistory(storage);
-    setOverridden([]);
-    setConfirmingClear(false);
-    setStatusMessage("保存されていた戦績をすべて削除しました。");
-    pendingFocusRef.current = true;
+    const cleared = storage !== null && clearHistory(storage);
+    if (cleared) {
+      // 永続化と購読者への通知は分離されているため、削除後に明示的に知らせる(#302)。
+      notifyHistoryChanged();
+      // 「削除する」ボタンごと一覧セクションが消えるので、空状態へフォーカスを移す。
+      setConfirmingClear(false);
+      pendingFocusRef.current = true;
+      setStatusMessage("保存されていた戦績をすべて削除しました。");
+      return;
+    }
+    // 削除できなかった場合は一覧が残る。「削除しました」と読み上げると実態と食い違う。
+    // 確認UIも畳まない ─ 畳むと押した「削除する」ボタンが消える一方で空状態も描かれず、
+    // フォーカスの行き先が無くなって body へ落ちるため(成功時と同じ a11y 契約を守る)。
+    setStatusMessage(
+      "この端末では戦績を削除できませんでした。ブラウザの設定を確認してください。",
+    );
   };
 
   if (entries === null) {
