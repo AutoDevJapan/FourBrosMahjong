@@ -567,3 +567,70 @@ test.describe("キーボードのみ操作(a11y 補強)", () => {
     await expect(activeOption).toBeFocused();
   });
 });
+
+/**
+ * 状態駆動 a11y 監査(戦績の展開状態 / #293)。
+ *
+ * `SCREENS` の静的監査は保存ゼロ件の `/history`(空状態)しか走査しない。戦績一覧は
+ * `<details>` で折りたたまれており、閉じたままの中身は axe の走査対象にならないため、
+ * 実際に見出しレベル飛び(h1 → h3)を作り込んでも静的監査では検知できなかった。
+ * ここでは戦績を1件仕込んだうえで、(1)一覧、(2)`<details>` 展開後の内訳、
+ * (3)全件削除の確認 UI をそれぞれ監査し、展開状態のカバレッジ欠落を埋める。
+ * テーマは状態駆動監査の共通方針 `STATE_DRIVEN_THEMES`(#271)に従う。
+ */
+test.describe("状態駆動 a11y 監査(戦績の展開状態 / #293)", () => {
+  const historyScreen = SCREENS.find((s) => s.path === "/history");
+  if (historyScreen === undefined)
+    throw new Error("SCREENS に /history がない");
+
+  /** 実 engine の確定結果と同形の妥当な戦績1件(保存形式 v1)。 */
+  const storedHistory = JSON.stringify({
+    version: 1,
+    entries: [
+      {
+        seed: 1,
+        finishedAt: 1_753_100_000_000,
+        players: ["一郎", "二郎", "三郎", "四郎"].map((name, i) => ({
+          name,
+          rank: i + 1,
+          rawScore: [23_000, 8_000, -11_000, -20_000][i],
+          uma: [10_000, 5_000, -5_000, -10_000][i],
+          bonus: 0,
+          soshiiTotal: [33_000, 13_000, -16_000, -30_000][i],
+        })),
+      },
+    ],
+  });
+
+  for (const theme of STATE_DRIVEN_THEMES) {
+    test(`/history の一覧・展開内訳・削除確認は WCAG 2.1 A/AA 違反ゼロ [${theme}]`, async ({
+      page,
+    }) => {
+      await page.addInitScript((raw) => {
+        try {
+          localStorage.setItem("four-bros-mahjong.history.v1", raw);
+        } catch {
+          // localStorage 不可環境では空状態のまま監査する。
+        }
+      }, storedHistory);
+      await openScreen(page, historyScreen, theme);
+
+      // (1) 保存済み1件の一覧(折りたたみ状態)。
+      const list = page.getByRole("list", { name: "保存された半荘結果" });
+      await expect(list.getByRole("listitem")).toHaveCount(1);
+      await auditPage(page);
+
+      // (2) <details> 展開後の内訳(最終順位テーブル + ソシー内訳の見出し階層)。
+      await list.locator("summary").first().click();
+      await expect(list.getByRole("table")).toBeVisible();
+      await auditPage(page);
+
+      // (3) 全件削除の2段階確認 UI。
+      await page.getByRole("button", { name: "戦績をすべて削除" }).click();
+      await expect(
+        page.getByRole("button", { name: "削除する" }),
+      ).toBeVisible();
+      await auditPage(page);
+    });
+  }
+});

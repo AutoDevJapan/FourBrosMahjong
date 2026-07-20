@@ -86,7 +86,7 @@ describe("match history persistence (#293)", () => {
     expect(entries.at(-1)?.seed).toBe(3);
   });
 
-  it("容量不足時は今回の1件のみで再試行し、最新結果の保存を優先する", () => {
+  it("容量不足時は収まる件数まで半減して再試行し、最新結果の保存を優先する", () => {
     const storage = new MemoryStorage();
     appendHistory(storage, entry(1, 100));
     appendHistory(storage, entry(2, 200));
@@ -122,6 +122,16 @@ describe("match history persistence (#293)", () => {
 
     // 最新を先頭に、収まる範囲の履歴が残る(1件だけへ切り詰めない)。
     expect(loadHistory(storage).map((e) => e.seed)).toEqual([5, 4]);
+  });
+
+  it("読み込み側が受理できない記録は書き込まず、既存の戦績を守る", () => {
+    const storage = new MemoryStorage();
+    appendHistory(storage, entry(1, 100));
+    // `?seed=` 経由では uint32 を超える seed の対局が成立し得る(非production)。
+    // これを書き込むと次回読み込みで全体が破損扱いになり、過去の記録ごと消える。
+    appendHistory(storage, entry(0x1_0000_0000, 200));
+
+    expect(loadHistory(storage).map((e) => e.seed)).toEqual([1]);
   });
 
   it("保存が完全に失敗しても例外を漏らさない", () => {
@@ -245,6 +255,41 @@ describe("match history persistence (#293)", () => {
                 ...p,
                 name: i === 0 ? "" : p.name,
               })),
+            },
+          ],
+        },
+      ],
+      [
+        // Number.isSafeInteger は通るが Date では Invalid Date になり、
+        // Intl.DateTimeFormat.format が RangeError を投げる値。
+        "finishedAtがDateの表現範囲を超える",
+        {
+          version: 1,
+          entries: [{ ...entry(1), finishedAt: Number.MAX_SAFE_INTEGER }],
+        },
+      ],
+      [
+        "プレイヤー名が重複する",
+        {
+          version: 1,
+          entries: [
+            {
+              ...entry(1),
+              players: entry(1).players.map((p) => ({ ...p, name: "一郎" })),
+            },
+          ],
+        },
+      ],
+      [
+        "ソシー合計が内訳の総和と一致しない",
+        {
+          version: 1,
+          entries: [
+            {
+              ...entry(1),
+              players: entry(1).players.map((p, i) =>
+                i === 0 ? { ...p, soshiiTotal: p.soshiiTotal + 1 } : p,
+              ),
             },
           ],
         },

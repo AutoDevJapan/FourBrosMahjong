@@ -15,7 +15,13 @@
  * `localStorage` はクライアントでのみ読めるため、SSR/初回 hydration は読み込み中
  * 表示に揃え、マウント後に一覧へ切り替える(`ResultPageClient` のマウントゲートと同型)。
  */
-import { useMemo, useState, useSyncExternalStore } from "react";
+import {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from "react";
 import {
   clearHistory,
   loadHistory,
@@ -106,6 +112,18 @@ export default function MatchHistoryList() {
   const entries = overridden ?? loaded;
   const [confirmingClear, setConfirmingClear] = useState(false);
   const [statusMessage, setStatusMessage] = useState("");
+  // 全件削除すると「削除する」ボタンごと一覧セクションが消えるため、フォーカスが
+  // body へ落ちてキーボード利用者が文脈を失う。削除直後だけ空状態へフォーカスを移す。
+  const emptyStateRef = useRef<HTMLDivElement>(null);
+  // 「削除直後の1回だけ」を表す一過性のフラグ。state にすると描画に影響しない値で
+  // 再描画が走るうえ、効果内での state 更新になるため ref で持つ。
+  const pendingFocusRef = useRef(false);
+
+  useEffect(() => {
+    if (!pendingFocusRef.current) return;
+    pendingFocusRef.current = false;
+    emptyStateRef.current?.focus();
+  });
 
   const executeClear = () => {
     const storage = localStorageOrNull();
@@ -113,6 +131,7 @@ export default function MatchHistoryList() {
     setOverridden([]);
     setConfirmingClear(false);
     setStatusMessage("保存されていた戦績をすべて削除しました。");
+    pendingFocusRef.current = true;
   };
 
   if (entries === null) {
@@ -134,7 +153,12 @@ export default function MatchHistoryList() {
       </p>
 
       {entries.length === 0 ? (
-        <div className="flex flex-col items-start gap-2 rounded-lg border border-foreground/15 p-6">
+        <div
+          ref={emptyStateRef}
+          // 削除直後にフォーカスを受け取るため、プログラム的にのみフォーカス可能にする。
+          tabIndex={-1}
+          className="flex flex-col items-start gap-2 rounded-lg border border-foreground/15 p-6 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-foreground"
+        >
           <p className="text-sm text-foreground/70">
             保存された戦績はまだありません。半荘を最後まで打つと、最終順位とソシー内訳がこの端末に自動で記録されます。
           </p>

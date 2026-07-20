@@ -56,6 +56,13 @@ export interface MatchHistoryEntry {
 const PLAYER_COUNT = 4;
 /** 想定外に長い名前(改竄・破損)を拒否する上限。既定名は2文字。 */
 const MAX_NAME_LENGTH = 32;
+/**
+ * `Date` が表現できる epoch ミリ秒の上限(±8.64e15)。
+ * `Number.isSafeInteger` だけでは 2^53-1 まで通ってしまい、`new Date()` が
+ * Invalid Date になって `Intl.DateTimeFormat.format` が `RangeError` を投げる。
+ * 壊れた1件で戦績ページ全体が描画不能になるため、読み込み時点で弾く。
+ */
+const MAX_TIMESTAMP = 8_640_000_000_000_000;
 
 function isPlayer(value: unknown): value is MatchHistoryPlayer {
   if (!value || typeof value !== "object") return false;
@@ -82,7 +89,7 @@ function isPlayer(value: unknown): value is MatchHistoryPlayer {
   );
 }
 
-function isEntry(value: unknown): value is MatchHistoryEntry {
+export function isEntry(value: unknown): value is MatchHistoryEntry {
   if (!value || typeof value !== "object") return false;
   const entry = value as Record<string, unknown>;
   if (
@@ -92,6 +99,7 @@ function isEntry(value: unknown): value is MatchHistoryEntry {
     Number(entry.seed) > 0xffffffff ||
     !Number.isSafeInteger(entry.finishedAt) ||
     Number(entry.finishedAt) < 0 ||
+    Number(entry.finishedAt) > MAX_TIMESTAMP ||
     !Array.isArray(entry.players) ||
     entry.players.length !== PLAYER_COUNT ||
     !entry.players.every(isPlayer)
@@ -100,7 +108,14 @@ function isEntry(value: unknown): value is MatchHistoryEntry {
   }
   // 順位は 1〜4 が重複なく揃う(engine の厳密順位決定 Q19/Q20 の不変条件)。
   const ranks = new Set(entry.players.map((p) => p.rank));
-  return ranks.size === PLAYER_COUNT;
+  if (ranks.size !== PLAYER_COUNT) return false;
+  // 4兄弟の名前も一意(表示側が name を React key に使う)。
+  const names = new Set(entry.players.map((p) => p.name));
+  if (names.size !== PLAYER_COUNT) return false;
+  // ソシー合計は内訳の総和と一致する(engine の不変条件: engine.test.ts)。
+  return entry.players.every(
+    (p) => p.rawScore + p.uma + p.bonus === p.soshiiTotal,
+  );
 }
 
 /** 保存文字列を検証付きで戦績配列(新しい順)へ復元する。破損時は null。 */
@@ -154,6 +169,9 @@ function save(storage: Storage, entries: readonly MatchHistoryEntry[]): void {
 /**
  * 半荘結果を戦績の先頭(最新)へ追記する。
  *
+ * - 保存前に読み込みと同じ検証をかけ、`parseHistory` が受理できない値は書き込まない。
+ *   書き込めてしまうと次回読み込みで全体が破損扱いになり、過去の記録ごと消える
+ *   (`?seed=` で uint32 超の seed を与えた非production対局などが実際に該当する)。
  * - 同一 seed の記録が既にあれば何もしない(終局済みジャーナルのリロード再生対策)。
  * - `MAX_HISTORY_ENTRIES` を超える分は最古から破棄する。
  * - 保存容量が不足した場合は件数を半減させながら再試行し、**保存できる範囲の履歴を
@@ -164,6 +182,7 @@ export function appendHistory(
   storage: Storage,
   entry: MatchHistoryEntry,
 ): void {
+  if (!isEntry(entry)) return;
   try {
     const entries = loadHistory(storage);
     if (entries.some((existing) => existing.seed === entry.seed)) return;

@@ -112,4 +112,21 @@ describe("MatchHistoryList (#293)", () => {
       screen.getByText("保存されていた戦績をすべて削除しました。"),
     ).toBeInTheDocument();
   });
+
+  it("全件削除後はフォーカスを空状態へ移し、bodyへ落とさない", async () => {
+    appendHistory(window.localStorage, entry(1, 1_753_000_000_000));
+
+    render(<MatchHistoryList />);
+    fireEvent.click(
+      await screen.findByRole("button", { name: "戦績をすべて削除" }),
+    );
+    // 押した「削除する」ボタンごとセクションが消えるため、フォーカスの行き先が要る。
+    fireEvent.click(screen.getByRole("button", { name: "削除する" }));
+
+    const emptyState = screen
+      .getByText(/保存された戦績はまだありません/)
+      .closest("div");
+    expect(emptyState).toHaveFocus();
+    expect(document.body).not.toHaveFocus();
+  });
 });
