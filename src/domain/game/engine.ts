@@ -339,20 +339,24 @@ export interface EngineState {
   readonly roundsPlayed: number;
 }
 
+/** 四人回しの4人の表示名(index 0 = 自家)。 */
+export type PlayerNames = readonly [string, string, string, string];
+
 /** `createGame` のオプション。 */
 export interface CreateGameOptions {
   /** 乱数 seed(既定は現在時刻)。テストでは固定値を渡す。 */
   readonly seed?: number;
   /** 4兄弟の表示名(index 0 = 自家)。 */
-  readonly names?: readonly [string, string, string, string];
+  readonly names?: PlayerNames;
 }
 
-const DEFAULT_NAMES: readonly [string, string, string, string] = [
-  "あなた",
-  "一郎",
-  "二郎",
-  "三郎",
-];
+/**
+ * 表示名の既定値(未設定時の後方互換値)。
+ *
+ * 実在人物名は含めない。本作は非公式ファンメイドであり、番組メンバー名を出荷物へ
+ * 同梱してよいかは未確定(`質問リスト.md` Q28)。実名は `/settings` からユーザーが入力する。
+ */
+export const DEFAULT_NAMES: PlayerNames = ["あなた", "一郎", "二郎", "三郎"];
 
 const ALL_IDS: PlayerRing<PlayerId> = ["p0", "p1", "p2", "p3"];
 

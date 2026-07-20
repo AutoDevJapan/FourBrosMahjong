@@ -19,11 +19,17 @@
 import { createContext, useContext, useMemo, useRef, useState } from "react";
 import {
   createGame,
+  DEFAULT_NAMES,
   type EngineState,
   type GamePhase,
   type Pending,
+  type PlayerNames,
   type RoundSummary,
 } from "@/domain/game/engine";
+import {
+  loadPlayerNames,
+  localStorageOrNull,
+} from "@/components/settings/playerNames";
 import type { Tile } from "@/domain/tiles/tile";
 import { selectView, toTile } from "./gameView";
 import {
@@ -124,6 +130,26 @@ function sessionStorageOrNull(): Storage | null {
   }
 }
 
+/**
+ * `/settings` で保存された対局者名を読む(issue #291)。未設定・保存不可時は engine の既定名。
+ *
+ * 半荘の開始時にだけ読み、以後はジャーナルの `names` が正となる。これにより対局中に設定を
+ * 変更しても進行中の半荘の表示名は変わらず、リロード後も同じ名前で復元される。
+ */
+function currentPlayerNames(): PlayerNames {
+  const storage = localStorageOrNull();
+  return storage === null ? DEFAULT_NAMES : loadPlayerNames(storage);
+}
+
+/** 新規半荘のジャーナルを作る(`null` = sessionStorage 不可でメモリ内対局)。 */
+function newJournal(
+  storage: Storage | null,
+  seed: number,
+  names: PlayerNames,
+): GameJournal | null {
+  return storage === null ? null : { version: 2, seed, names, actions: [] };
+}
+
 function initialSession(initialGame?: EngineState): {
   engine: EngineState;
   journal: GameJournal | null;
@@ -140,10 +166,10 @@ function initialSession(initialGame?: EngineState): {
     }
   }
   const seed = urlSeed ?? freshSeed();
-  const journal: GameJournal | null =
-    storage === null ? null : { version: 1, seed, actions: [] };
+  const names = currentPlayerNames();
+  const journal = newJournal(storage, seed, names);
   if (storage !== null && journal !== null) saveJournal(storage, journal);
-  return { engine: createGame({ seed }), journal };
+  return { engine: createGame({ seed, names }), journal };
 }
 
 export interface GameProviderProps {
@@ -210,10 +236,11 @@ export function GameProvider({ children, initialGame }: GameProviderProps) {
       newGame: () => {
         const seed = freshSeed();
         const storage = sessionStorageOrNull();
-        const nextJournal: GameJournal | null =
-          storage === null ? null : { version: 1, seed, actions: [] };
+        // 「もう一半荘」は新しい半荘の開始なので、設定で変更された名前をここで取り込む。
+        const names = currentPlayerNames();
+        const nextJournal = newJournal(storage, seed, names);
         const nextSession = {
-          engine: createGame({ seed }),
+          engine: createGame({ seed, names }),
           journal: nextJournal,
         };
         sessionRef.current = nextSession;
