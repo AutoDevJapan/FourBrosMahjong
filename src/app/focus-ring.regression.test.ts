@@ -25,28 +25,18 @@ import { describe, expect, it } from "vitest";
 const SRC = fileURLToPath(new URL("..", import.meta.url));
 
 /**
- * 既知の例外: ファイル単位ではなく**許可するクラス文字列そのもの**を固定する。
+ * 例外は 1 件も許可しない(#327 で最後の例外だった ThemeToggle を解消済み)。
  *
- * ThemeToggle はフォーカスを受けるのが内側の `<input type="radio">` である一方、
- * `has-[]` は外側の `<label>` ラッパへ outline を付ける。`<label>` にはグローバル
- * `:focus-visible` がマッチせず競合しないため、この 1 箇所だけは実際に描画される。
- * 結果として input(`--focus-ring` 色)と label(`--foreground` 色)の二重リングになる。
- * 見た目が変わる変更のため #314 では現状維持とし、#327 で扱う。
+ * #314 の時点では ThemeToggle の `has-[:focus-visible]:outline-*` を既知の例外として
+ * 許可していた。フォーカスを受けるのは内側の `<input type="radio">` だが `has-[]` は外側の
+ * `<label>` へ outline を付けるため、`<label>` にはグローバル `:focus-visible` がマッチせず
+ * 競合せず、input(`--focus-ring` 色)と label(`--foreground` 色)の**二重リング**として
+ * 実際に描画されていた。#327 で `has-[]` を削除し、リングを input 側のグローバル規則
+ * 一本へ統一したため、許可リストそのものを廃止する。
  *
- * ファイル単位で除外すると、同じファイルへ `has-` の付かない真の no-op を書き足しても
- * 検出できなくなる。そのため許可対象を完全一致の集合として列挙する。
+ * 許可リストを空の Map として残すと「例外を足してよい場所」に見え、同じ経緯を繰り返す。
+ * 新たな例外が必要になった場合は、例外を足す前に spec 5.4.2 の不変条件を見直すこと。
  */
-const KNOWN_EXCEPTIONS: ReadonlyMap<string, ReadonlySet<string>> = new Map([
-  [
-    "components/layout/ThemeToggle.tsx",
-    new Set([
-      "has-[:focus-visible]:outline",
-      "has-[:focus-visible]:outline-2",
-      "has-[:focus-visible]:outline-offset-2",
-      "has-[:focus-visible]:outline-foreground",
-    ]),
-  ],
-]);
 
 /**
  * `focus-visible:outline…` を検出する。以下の合成形をすべて拾う:
@@ -113,20 +103,45 @@ describe("フォーカスリングの単一起点(#314)", () => {
     expect(CSS).toMatch(/--color-focus-ring:\s*var\(--focus-ring\)/);
   });
 
-  it("コンポーネントは focus-visible:outline-* を指定しない(no-op のデッドコード)", () => {
-    const offenders: string[] = [];
+  /** src 配下を走査し、`has-[]` 由来かどうかで offender を仕分ける。 */
+  function scan(pattern: () => RegExp): {
+    direct: string[];
+    wrapper: string[];
+  } {
+    const direct: string[] = [];
+    const wrapper: string[] = [];
     for (const rel of sourceFiles(SRC)) {
-      const allowed = KNOWN_EXCEPTIONS.get(rel);
       const text = readFileSync(join(SRC, rel), "utf8");
-      for (const m of text.matchAll(outlineUtility())) {
-        if (allowed?.has(m[0])) continue;
-        offenders.push(`${rel}: ${m[0]}`);
+      for (const m of text.matchAll(pattern())) {
+        (m[0].startsWith("has-[") ? wrapper : direct).push(`${rel}: ${m[0]}`);
       }
     }
+    return { direct, wrapper };
+  }
+
+  it("コンポーネントは focus-visible:outline-* を指定しない(no-op のデッドコード)", () => {
+    const { direct } = scan(outlineUtility);
     expect(
-      offenders,
+      direct,
       `focus-visible:outline-* はカスケードレイヤーにより no-op です。` +
         `フォーカスリングは globals.css の :focus-visible / --focus-ring に一本化してください。\n` +
+        direct.join("\n"),
+    ).toEqual([]);
+  });
+
+  it("ラッパ要素に has-[] でリングを足さない(内側のフォーカス要素と二重リングになる / #327)", () => {
+    // `has-[:focus-visible]:outline-*` は上の no-op とは**別の失敗様態**である。
+    // outline を付ける先が「フォーカスを受ける要素」ではなくラッパのため、グローバル
+    // `:focus-visible` とセレクタが競合せず、上書きされずに**実際に描画される**。
+    // 結果、内側の control のリング(--focus-ring)とラッパのリングが入れ子で同時に出る。
+    // 上の no-op メッセージに混ぜると診断を誤らせる(「効かない」ではなく「効きすぎる」)ため分離する。
+    const outline = scan(outlineUtility).wrapper;
+    const ring = scan(ringUtility).wrapper;
+    const offenders = [...outline, ...ring];
+    expect(
+      offenders,
+      `has-[] バリアントのリングはラッパ要素に適用されるためグローバル規則と競合せず、` +
+        `内側のフォーカス要素のリングと二重に描画されます。リングは --focus-ring 一本に統一してください。\n` +
         offenders.join("\n"),
     ).toEqual([]);
   });
@@ -136,41 +151,37 @@ describe("フォーカスリングの単一起点(#314)", () => {
     // グローバル規則の `outline` と競合せず **実際に描画されてしまう**(no-op ではない)。
     // つまりこちらは「デッドコード」ではなく「二重リングによる単一起点の破壊」であり、
     // 上のテストの正規表現(outline 系のみ)では捕捉できないため別途禁止する。
-    const offenders: string[] = [];
-    for (const rel of sourceFiles(SRC)) {
-      const text = readFileSync(join(SRC, rel), "utf8");
-      for (const m of text.matchAll(ringUtility())) {
-        offenders.push(`${rel}: ${m[0]}`);
-      }
-    }
+    const { direct } = scan(ringUtility);
     expect(
-      offenders,
+      direct,
       `focus-visible:ring-* / shadow-* は box-shadow で描画されるためグローバルの ` +
         `outline リングと二重になります。リングは --focus-ring に一本化してください。\n` +
-        offenders.join("\n"),
+        direct.join("\n"),
     ).toEqual([]);
   });
 
-  it("KNOWN_EXCEPTIONS が陳腐化していない(許可エントリは実在する)", () => {
-    // #327 で ThemeToggle の例外が解消された際、許可エントリの削除漏れを検出する。
-    const files = sourceFiles(SRC);
-    for (const [rel, classes] of KNOWN_EXCEPTIONS) {
-      expect(files, `許可エントリのファイルが存在しない: ${rel}`).toContain(
-        rel,
-      );
-      // 部分文字列一致(toContain)では `…:outline` が `…:outline-2` に含まれてしまい
-      // 独立に検証できない。offender 検出と同じ正規表現で完全一致の集合を作って突き合わせる。
-      const text = readFileSync(join(SRC, rel), "utf8");
-      const present = new Set(
-        [...text.matchAll(outlineUtility())].map((m) => m[0]),
-      );
-      for (const cls of classes) {
-        expect(
-          [...present].sort(),
-          `許可エントリ "${cls}" が ${rel} に存在しません。例外が解消されたなら ` +
-            `KNOWN_EXCEPTIONS から削除してください(#327)。`,
-        ).toContain(cls);
-      }
-    }
+  it("検出用の正規表現が空振りしていない(ガード自身の健全性)", () => {
+    // 上の3テストは「0 件であること」を主張するため、正規表現が壊れて何もマッチ
+    // しなくなっても緑のままになる。#327 で実在した二重リングのクラス列を既知の
+    // 陽性サンプルとして固定し、検出器が生きていることを確認する。
+    const sample =
+      'className="rounded-lg has-[:focus-visible]:outline ' +
+      "has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-offset-2 " +
+      'has-[:focus-visible]:outline-foreground focus-visible:outline-foreground"';
+    const found = [...sample.matchAll(outlineUtility())].map((m) => m[0]);
+    expect(found).toEqual([
+      "has-[:focus-visible]:outline",
+      "has-[:focus-visible]:outline-2",
+      "has-[:focus-visible]:outline-offset-2",
+      "has-[:focus-visible]:outline-foreground",
+      "focus-visible:outline-foreground",
+    ]);
+    expect(
+      [
+        ...'className="focus-visible:ring-2 has-[:focus-visible]:shadow-md"'.matchAll(
+          ringUtility(),
+        ),
+      ].map((m) => m[0]),
+    ).toEqual(["focus-visible:ring-2", "has-[:focus-visible]:shadow-md"]);
   });
 });

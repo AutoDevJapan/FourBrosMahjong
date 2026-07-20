@@ -20,6 +20,15 @@
  * アクセシビリティ(スペック5 5.2): ネイティブ `<input type="radio">` の radiogroup で
  * キーボード操作(Tab 到達 + 矢印キー移動)・フォーカス可視・選択状態の aria 通知を
  * 標準機能で満たす。実効テーマは `aria-live` で色に依存しないテキストとして通知する。
+ *
+ * フォーカスリング(スペック5 5.4.2 / #327): ラッパ `<label>` 側でリングを描く `has-[]`
+ * バリアントの outline ユーティリティを **付けない**。フォーカスを受けるのは内側の
+ * `<input type="radio">` だが `has-[]` は外側の `<label>` へ outline を付けるため、
+ * `<label>` にはグローバルな `:focus-visible` がマッチせず競合せず、
+ * input(`--focus-ring` 色)と label(`--foreground` 色)の **二重リング** が
+ * 同時に描画されていた。リングは `globals.css` の unlayered な `:focus-visible` /
+ * `--focus-ring` 一本へ統一し、input のリングのみを残す。
+ * リング色・太さ・オフセットを変えたい場合は `--focus-ring` の値そのものを変更すること。
  */
 
 import { useCallback, useSyncExternalStore } from "react";
@@ -187,7 +196,7 @@ export function ThemeToggle() {
           return (
             <label
               key={option.value}
-              className="flex cursor-pointer items-center gap-3 rounded-lg border border-foreground/15 px-4 py-3 has-[:focus-visible]:outline has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-offset-2 has-[:focus-visible]:outline-foreground"
+              className="flex cursor-pointer items-center gap-3 rounded-lg border border-foreground/15 px-4 py-3"
             >
               <input
                 type="radio"
