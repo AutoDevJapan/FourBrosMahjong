@@ -519,7 +519,12 @@ test.describe("キーボードのみ操作(a11y 補強)", () => {
     await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
 
     // 実効テーマの通知が色非依存のテキストで届く(5.2.3 の polite ライブリージョン)。
-    await expect(page.locator('[aria-live="polite"]')).toContainText("ダーク");
+    // `/settings` には対局者名フォーム(#291)の polite 領域もあるため、テーマ側へ限定する。
+    await expect(
+      page
+        .getByRole("group", { name: "テーマ(表示モード)" })
+        .locator('[aria-live="polite"]'),
+    ).toContainText("ダーク");
   });
 
   test("/game の手牌はキーボードのみで到達・打牌でき、ロービングタブインデックスに従う(5.2.2)", async ({
