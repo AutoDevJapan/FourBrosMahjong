@@ -75,13 +75,16 @@ describe("game persistence journal", () => {
     const seen = new Set<GameJournal["actions"][number]["type"]>();
 
     // 公開 API が提示する合法手を優先して選ぶ。固定 seed 群なので、操作列も結果も決定的。
+    // seed は本戦略のオフライン走査で「target へ到達する」ことを確認して選定している。
+    // engine/AI の打牌ロジック変更で到達しなくなった場合は、同一戦略のオフライン走査で
+    // 再選定すること(#294 で riichi/ankan/ron の seed を 2/18/34 → 34/9/84 へ再選定)。
     const targets = new Map([
       [1, "kakan"],
-      [2, "riichi"],
+      [34, "riichi"],
       [3, "passRon"],
       [10, "kan"],
-      [18, "ankan"],
-      [34, "ron"],
+      [9, "ankan"],
+      [84, "ron"],
       [146, "tsumo"],
       [342, "tsumogiri"],
     ] as const);

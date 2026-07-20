@@ -705,7 +705,8 @@ function settleFourKanAbortiveDraw(state: EngineState): EngineState | null {
  * AI 手番の打牌を手牌効率(向聴・受け入れ)ベースで選ぶ(#98)。
  * 他家の河から現物(危険牌回避)、表ドラ+赤5から打点温存を加味する。
  * 和了牌の温存は考えない(和了は本関数の前段でツモ宣言済み)。
- * 副露後は門前牌だけを評価対象にし、既存の手牌効率ロジックで打牌を選ぶ。
+ * 副露後は門前牌だけを評価対象にし、副露数 `meldCount` を渡して向聴・受け入れを
+ * 副露込みで補正する(#294: 未補正だと副露手で向聴値が飽和し、AI が自らテンパイを崩す)。
  */
 function chooseAiDiscard(
   hand: HandState,
@@ -719,7 +720,12 @@ function chooseAiDiscard(
   const doraKinds = new Set(
     resolveDora(hand.doraSet).omote.map((t) => tileKey(t)),
   );
-  return chooseDiscard({ tiles, opponentDiscards, doraKinds });
+  return chooseDiscard({
+    tiles,
+    meldCount: hand.melds[seat].length,
+    opponentDiscards,
+    doraKinds,
+  });
 }
 
 /**
