@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { parseTiles } from "@/domain/hand/notation";
+import { sameKind } from "@/domain/hand/tile-identity";
 import type { Tile } from "@/domain/tiles/tile";
 import { chooseDiscard, shanten, ukeire } from "./ai";
 
@@ -131,6 +132,81 @@ describe("ai: 副露手の向聴補正(meldCount / #294)", () => {
         shanten(parseTiles("123m 456p 22z"), melds),
       ).toBeGreaterThanOrEqual(-1);
     }
+  });
+});
+
+describe("ai: 喰い替え禁止牌の除外(forbiddenDiscards / #303)", () => {
+  it("禁止された牌種は打牌候補にならない(喰い替え禁止 / #105)", () => {
+    // 1副露 + 門前11枚(= 14 − 3×1)。3s は孤立牌で、禁止が無ければ必ず選ばれる。
+    const tiles = parseTiles("123p 456p 78p 44m 3s");
+    const forbidden = parseTiles("3s");
+    expect(tiles).toHaveLength(11);
+    // 前提の固定: 禁止しなければ 3s が選ばれる(= このテストが空振りしない)。
+    expect(sameKind(chooseDiscard({ tiles, meldCount: 1 }), forbidden[0])).toBe(
+      true,
+    );
+
+    const chosen = chooseDiscard({
+      tiles,
+      meldCount: 1,
+      forbiddenDiscards: forbidden,
+    });
+    expect(sameKind(chosen, forbidden[0])).toBe(false);
+  });
+
+  it("禁止指定は赤フラグ非依存で効く(種別で比較する)", () => {
+    // 手牌の 5p は赤(parseTiles の不変条件)。禁止側を素の 5p で渡しても除外される。
+    // 1副露 + 門前11枚。赤5pは温存価値が最大だが、テンパイ維持が優先されて選ばれる。
+    const tiles = parseTiles("123m 456m 78m 99s 5p");
+    const plain5p: Tile = { suit: "pin", rank: 5, isRed: false };
+    expect(tiles).toHaveLength(11);
+    // 前提の固定: 禁止しなければ赤5pが選ばれる(赤敏感な比較へ退行すると落ちる)。
+    expect(sameKind(chooseDiscard({ tiles, meldCount: 1 }), plain5p)).toBe(
+      true,
+    );
+
+    const chosen = chooseDiscard({
+      tiles,
+      meldCount: 1,
+      forbiddenDiscards: [plain5p],
+    });
+    expect(sameKind(chosen, plain5p)).toBe(false);
+  });
+
+  it("禁止牌も手牌の一部として向聴評価される(手牌から削らない)", () => {
+    // 1副露 + 門前11枚(= 14 − 3×1)。3s は喰い替え禁止だが 345s の一部で、
+    // これを手牌から削除して評価すると 1p3p の嵌張が見えなくなり 1p を切ってしまう。
+    // 正しくは 6s を切って 2p 待ちのテンパイを維持する。
+    const tiles = parseTiles("13567p 3456s 44m");
+    const forbidden = parseTiles("3s");
+    expect(tiles).toHaveLength(11);
+
+    // テンパイを保てる打牌は 3s と 6s のみで、3s は禁止。よって 6s は「合法かつ
+    // テンパイ維持」の唯一解であり、この牌の固定はタイブレーク依存ではない。
+    const chosen = chooseDiscard({
+      tiles,
+      meldCount: 1,
+      forbiddenDiscards: forbidden,
+    });
+    expect(chosen.suit).toBe("sou");
+    expect(chosen.rank).toBe(6);
+    expect(shanten(afterChoice(tiles, chosen), 1)).toBe(0);
+
+    // 対照: 禁止牌を手牌から削除した旧実装はテンパイを落とす。
+    // 本質は「打牌後の向聴が 0 にならない」ことであり、具体的にどの牌を選ぶかは
+    // タイブレーク(打点温存・安全度・外側度)次第で変わりうるため固定しない。
+    const deleted = tiles.filter((t) => !sameKind(t, forbidden[0]));
+    const legacy = chooseDiscard({ tiles: deleted, meldCount: 1 });
+    expect(shanten(afterChoice(tiles, legacy), 1)).toBeGreaterThan(0);
+  });
+
+  it("全ての牌種が禁止された場合は例外(呼び出し側の不整合)", () => {
+    expect(() =>
+      chooseDiscard({
+        tiles: parseTiles("111m"),
+        forbiddenDiscards: parseTiles("1m"),
+      }),
+    ).toThrow(/打牌可能な候補が無い/);
   });
 });
 
