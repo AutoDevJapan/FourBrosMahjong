@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { parseTiles } from "@/domain/hand/notation";
+import { sameKind } from "@/domain/hand/tile-identity";
 import type { Tile } from "@/domain/tiles/tile";
 import { chooseDiscard, shanten, ukeire } from "./ai";
 
@@ -131,6 +132,66 @@ describe("ai: 副露手の向聴補正(meldCount / #294)", () => {
         shanten(parseTiles("123m 456p 22z"), melds),
       ).toBeGreaterThanOrEqual(-1);
     }
+  });
+});
+
+describe("ai: 喰い替え禁止牌の除外(forbiddenDiscards / #303)", () => {
+  it("禁止された牌種は打牌候補にならない(喰い替え禁止 / #105)", () => {
+    // 3s を切れば明らかに最善(浮き牌)だが、喰い替え禁止なら選んではならない。
+    const tiles = parseTiles("123p 456p 789p 44m 3s");
+    const forbidden = parseTiles("3s");
+    const chosen = chooseDiscard({
+      tiles,
+      meldCount: 0,
+      forbiddenDiscards: forbidden,
+    });
+    expect(sameKind(chosen, forbidden[0])).toBe(false);
+  });
+
+  it("禁止指定は赤フラグ非依存で効く(種別で比較する)", () => {
+    // 手牌の 5p は赤(parseTiles の不変条件)。禁止側を素の 5p で渡しても除外される。
+    const tiles = parseTiles("123p 456p 789p 44m 5p");
+    const plain5p: Tile = { suit: "pin", rank: 5, isRed: false };
+    const chosen = chooseDiscard({
+      tiles,
+      meldCount: 0,
+      forbiddenDiscards: [plain5p],
+    });
+    expect(sameKind(chosen, plain5p)).toBe(false);
+  });
+
+  it("禁止牌も手牌の一部として向聴評価される(手牌から削らない)", () => {
+    // 1副露 + 門前11枚(= 14 − 3×1)。3s は喰い替え禁止だが 345s の一部で、
+    // これを手牌から削除して評価すると 1p3p の嵌張が見えなくなり 1p を切ってしまう。
+    // 正しくは 6s を切って 2p 待ちのテンパイを維持する。
+    const tiles = parseTiles("13567p 3456s 44m");
+    const forbidden = parseTiles("3s");
+    expect(tiles).toHaveLength(11);
+
+    const chosen = chooseDiscard({
+      tiles,
+      meldCount: 1,
+      forbiddenDiscards: forbidden,
+    });
+    expect(chosen.suit).toBe("sou");
+    expect(chosen.rank).toBe(6);
+    expect(shanten(afterChoice(tiles, chosen), 1)).toBe(0);
+
+    // 対照: 禁止牌を手牌から削除した旧実装は 1p を切り、テンパイを落としていた。
+    const deleted = tiles.filter((t) => !sameKind(t, forbidden[0]));
+    const legacy = chooseDiscard({ tiles: deleted, meldCount: 1 });
+    expect(legacy.suit).toBe("pin");
+    expect(legacy.rank).toBe(1);
+    expect(shanten(afterChoice(tiles, legacy), 1)).toBe(1);
+  });
+
+  it("全ての牌種が禁止された場合は例外(呼び出し側の不整合)", () => {
+    expect(() =>
+      chooseDiscard({
+        tiles: parseTiles("111m"),
+        forbiddenDiscards: parseTiles("1m"),
+      }),
+    ).toThrow(/打牌可能な候補が無い/);
   });
 });
 

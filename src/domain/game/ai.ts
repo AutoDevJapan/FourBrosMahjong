@@ -447,6 +447,15 @@ export interface DiscardContext {
   readonly opponentDiscards?: readonly (readonly Tile[])[];
   /** ドラ実牌の種別キー集合(温存判断用)。赤5は `isRed` で常に価値扱い。省略可。 */
   readonly doraKinds?: ReadonlySet<string>;
+  /**
+   * 打牌が禁止された牌種(喰い替え禁止 / #105・#303)。赤フラグは無視して種別で比較する。
+   *
+   * **`tiles` からは取り除かないこと**。禁止牌も手牌の一部として向聴・受け入れの
+   * 評価に参加させ、打牌候補としてのみ除外する(#303: 手牌から削ると評価対象が
+   * `14 − 3×副露数` 枚より少なくなり、向聴が実際より悪く出て
+   * {@link UKEIRE_SHANTEN_GATE} の発火条件までずれる)。
+   */
+  readonly forbiddenDiscards?: readonly Tile[];
 }
 
 /** 打牌1候補の評価。優先度順に比較する。 */
@@ -516,12 +525,18 @@ export function chooseDiscard(ctx: DiscardContext): Tile {
     throw new Error("chooseDiscard: 空の手牌からは打牌できない");
   }
 
+  // 喰い替え禁止牌は候補から外すが `tiles` には残す(#303)。
+  const forbiddenKeys = new Set(
+    (ctx.forbiddenDiscards ?? []).map((t) => tileKey(t)),
+  );
+
   // 同一(suit,rank,isRed)の重複候補は1回だけ評価する。
   const seen = new Set<string>();
   const candidates: Candidate[] = [];
 
   for (let i = 0; i < tiles.length; i++) {
     const tile = tiles[i];
+    if (forbiddenKeys.has(tileKey(tile))) continue;
     const idKey = `${tile.suit}-${tile.rank}-${tile.isRed ? "r" : ""}`;
     if (seen.has(idKey)) continue;
     seen.add(idKey);
@@ -537,6 +552,14 @@ export function chooseDiscard(ctx: DiscardContext): Tile {
       safety: safetyOf(tile, opponentDiscards),
       outside: outsideness(tile),
     });
+  }
+
+  // 喰い替え禁止は1牌種のみ、かつポンで3枚は消費済みなので門前に残るのは最大1枚。
+  // 副露手でも門前は 10 枚以上あるため、全候補が禁止になることは構造上あり得ない。
+  // 到達した場合は呼び出し側の不整合(禁止牌を誤って渡した)なので、規則違反の打牌を
+  // 返すより明示的に失敗させる。
+  if (candidates.length === 0) {
+    throw new Error("chooseDiscard: 打牌可能な候補が無い(禁止牌の指定が不正)");
   }
 
   // 1. 向聴最小へ絞る。

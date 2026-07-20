@@ -712,6 +712,7 @@ function chooseAiDiscard(
   hand: HandState,
   seat: SeatKey,
   drawn: Tile | null,
+  forbiddenDiscards: readonly Tile[] = [],
 ): Tile {
   const tiles = [...hand.hands[seat], ...(drawn ? [drawn] : [])];
   const opponentDiscards = (["east", "south", "west"] as SeatKey[])
@@ -725,6 +726,7 @@ function chooseAiDiscard(
     meldCount: hand.melds[seat].length,
     opponentDiscards,
     doraKinds,
+    forbiddenDiscards,
   });
 }
 
@@ -983,15 +985,10 @@ function applyAiCall(
     drawKanReplacement(hand, caller);
     return state;
   }
-  // 現物喰い替えは禁止。ポンで同種牌は2枚消費済みなので、残る場合も候補から除く。
-  const legal = hand.hands[caller].filter(
-    (candidate) => !sameKind(candidate, tile),
-  );
-  const chosen = chooseAiDiscard(
-    { ...hand, hands: { ...hand.hands, [caller]: legal } },
-    caller,
-    null,
-  );
+  // 現物喰い替えは禁止(#105 / スペック1 1.4)。ポンで同種は2枚消費済みだが、4枚目が
+  // 門前に残る場合もあるため打牌候補から除く。手牌からは削らず禁止牌として渡すこと
+  // (#303: 削ると `14 − 3×副露数` 枚に満たない手牌で向聴が評価される)。
+  const chosen = chooseAiDiscard(hand, caller, null, [tile]);
   return applyDiscard(state, caller, chosen);
 }
 
