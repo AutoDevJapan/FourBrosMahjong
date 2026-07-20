@@ -207,14 +207,19 @@ export function appendHistory(
   }
 }
 
-/** 保存済み戦績をすべて消去する。 */
-export function clearHistory(storage: Storage): void {
+/**
+ * 保存済み戦績をすべて消去する。消去できたかを返す(Storage 無効等では `false`)。
+ *
+ * 返り値で成否を伝えるのは `savePlayerNames` と同じ方針。呼び出し側は「削除しました」と
+ * いう通知を実態と食い違わせずに出し分けられる。
+ */
+export function clearHistory(storage: Storage): boolean {
   try {
     storage.removeItem(MATCH_HISTORY_KEY);
+    return true;
   } catch {
-    // 消去不可(Storage 無効等)は黙って無視する。
-  } finally {
-    notifySubscribers();
+    // 消去不可(Storage 無効等)でも画面表示は継続できるため、例外は投げない。
+    return false;
   }
 }
 
@@ -236,29 +241,49 @@ const EMPTY_HISTORY: readonly MatchHistoryEntry[] = Object.freeze([]);
 let cachedRaw: string | null = null;
 let cachedEntries: readonly MatchHistoryEntry[] = EMPTY_HISTORY;
 
-function notifySubscribers(): void {
+function onStorageEvent(event: StorageEvent): void {
+  // key === null は「別タブが clear() した」を意味する(全キーが対象)。
+  if (event.key === MATCH_HISTORY_KEY || event.key === null) {
+    notifyHistoryChanged();
+  }
+}
+
+/**
+ * 保存内容を変更したことを購読者へ知らせる。
+ *
+ * 永続化API(`appendHistory` / `clearHistory`)は `Storage` を引数に取る純粋な入出力に
+ * 留め、モジュールグローバルなストアへの通知はこの関数に分離している(責務の分離)。
+ *
+ * **描画中に呼んではならない。** 購読中のコンポーネントの再描画を要求するため、他コンポーネントの
+ * 描画フェーズから呼ぶと React の「描画中に別コンポーネントを更新した」警告になる。
+ * `GameProvider` が `useState` の遅延初期化(= 描画フェーズ)から `appendHistory` を
+ * 呼ぶため、追記経路ではこの関数を呼んでいない(issue #310)。`/history` はマウント時に
+ * `getHistorySnapshot` で読み直すので、現状の画面構成では取りこぼしは起きない。
+ */
+export function notifyHistoryChanged(): void {
   for (const callback of subscribers) callback();
 }
 
 /**
- * `localStorage` の変更(このタブの保存・削除、別タブの `storage` イベント)を購読する。
+ * `localStorage` の変更(このタブの削除操作、別タブの `storage` イベント)を購読する。
  *
- * 購読開始時に一度だけ `loadHistory` を通し、破損データが残っていれば次回以降のために
- * 削除する(描画中ではなく効果として実行される)。
+ * 購読のたびに `loadHistory` を通し、破損データが残っていれば次回以降のために削除する
+ * (描画中ではなく効果として実行される)。`loadHistory` は冪等なので重複実行は無害。
  */
 export function subscribeHistory(callback: () => void): () => void {
+  // `storage` リスナはモジュールで1本だけ張り、購読者数の 0↔1 の境界で着脱する。
+  // 購読者ごとに張ると、イベント1回で購読者数の二乗回だけ callback が走る。
+  if (subscribers.size === 0) {
+    window.addEventListener("storage", onStorageEvent);
+  }
   subscribers.add(callback);
   const storage = localStorageOrNull();
   if (storage !== null) loadHistory(storage);
-  const onStorage = (event: StorageEvent) => {
-    if (event.key === MATCH_HISTORY_KEY || event.key === null) {
-      notifySubscribers();
-    }
-  };
-  window.addEventListener("storage", onStorage);
   return () => {
     subscribers.delete(callback);
-    window.removeEventListener("storage", onStorage);
+    if (subscribers.size === 0) {
+      window.removeEventListener("storage", onStorageEvent);
+    }
   };
 }
 
@@ -290,6 +315,8 @@ export function getHistorySnapshot(): readonly MatchHistoryEntry[] {
  * `localStorage` はサーバーでは読めないため `null`(= 読み込み中)を返し、
  * ハイドレーション後に実値へ切り替える(`ResultPageClient` と同じマウントゲート)。
  */
-export function getServerHistorySnapshot(): null {
+export function getServerHistorySnapshot():
+  | readonly MatchHistoryEntry[]
+  | null {
   return null;
 }

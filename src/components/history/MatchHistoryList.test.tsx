@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import { fireEvent, render, screen, within } from "@testing-library/react";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   appendHistory,
   MATCH_HISTORY_KEY,
@@ -141,6 +141,31 @@ describe("MatchHistoryList (#293)", () => {
     const list = screen.getByRole("list", { name: "保存された半荘結果" });
     expect(list.querySelectorAll(":scope > li")).toHaveLength(1);
     expect(list).toHaveTextContent("1位 二郎");
+  });
+
+  it("削除できなかった場合は成功と読み上げない(#302)", async () => {
+    appendHistory(window.localStorage, entry(1, 1_753_000_000_000));
+    const removeItem = vi
+      .spyOn(Storage.prototype, "removeItem")
+      .mockImplementation(() => {
+        throw new Error("QuotaExceededError");
+      });
+
+    render(<MatchHistoryList />);
+    fireEvent.click(
+      await screen.findByRole("button", { name: "戦績をすべて削除" }),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "削除する" }));
+
+    // 一覧は残っているので「削除しました」と食い違う通知を出してはいけない。
+    expect(
+      screen.getByRole("list", { name: "保存された半荘結果" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(/この端末では戦績を削除できませんでした/),
+    ).toBeInTheDocument();
+
+    removeItem.mockRestore();
   });
 
   it("全件削除後はフォーカスを空状態へ移し、bodyへ落とさない", async () => {

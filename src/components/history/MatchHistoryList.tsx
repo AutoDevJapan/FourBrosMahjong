@@ -24,6 +24,7 @@ import {
   getServerHistorySnapshot,
   type MatchHistoryEntry,
   MAX_HISTORY_ENTRIES,
+  notifyHistoryChanged,
   subscribeHistory,
 } from "@/components/game/matchHistory";
 import RankingTable from "@/components/result/RankingTable";
@@ -116,10 +117,17 @@ export default function MatchHistoryList() {
 
   const executeClear = () => {
     const storage = localStorageOrNull();
-    if (storage !== null) clearHistory(storage);
+    const cleared = storage !== null && clearHistory(storage);
+    // 永続化と購読者への通知は分離されているため、削除後に明示的に知らせる(#302)。
+    notifyHistoryChanged();
     setConfirmingClear(false);
-    setStatusMessage("保存されていた戦績をすべて削除しました。");
-    pendingFocusRef.current = true;
+    // 削除できなかった場合に「削除しました」と読み上げると、残った一覧と食い違う。
+    setStatusMessage(
+      cleared
+        ? "保存されていた戦績をすべて削除しました。"
+        : "この端末では戦績を削除できませんでした。ブラウザの設定を確認してください。",
+    );
+    pendingFocusRef.current = cleared;
   };
 
   if (entries === null) {
