@@ -308,3 +308,141 @@ describe("ranking — ソシー残高降順(同点は登録順)", () => {
     expect(l.ranking()).toEqual(["B", "C", "D", "A"]);
   });
 });
+
+/**
+ * `ranking()`(ソシー残高降順)と `applyUma`(最終持ち点降順)の**基準一致**を固定する。
+ *
+ * 2つの基準が併存するのは**仕様どおり**で、統合してはならない:
+ * - 最終順位・勝敗は「ソシー個人累計」で決定する(`documents/spec/setup-and-tiles.md` §、
+ *   `documents/spec/README.md`)。結果画面に出る `rank` はこちら(engine `endGame` は
+ *   `ledger.ranking()` から `rank` を作る)。
+ * - ②順位ウマは「4兄弟全員をその時点の**持ち点**で順位付け」して割り当てる
+ *   (`documents/spec/scoring-and-settlement.md` §3.3 ②/ Q13)。
+ *
+ * 両者が一致するのは偶然ではなく、**定数間のマージンが正**であることの帰結である。
+ * ソシー残高は `(持ち点 − 返し) + ウマ/オカ + 祝儀` なので、持ち点順で隣り合う2人の
+ * 残高差は最小でも「ウマ/オカの最小隣接差 − 祝儀の最大相対スイング」になる。
+ * 現行定数では 5,000 − 4,000 = 1,000 > 0 のため順位は必ず一致する。
+ *
+ * このマージンは `UMA` / `OKA` / `YAKUMAN_BONUS` を調整した瞬間に無言で破綻し、
+ * 「表示順位は2位なのにウマは1位分」という不整合を生む。以下のテストは定数から
+ * マージンを算出して符号を検証するため、定数を触れば必ず落ちる。
+ */
+describe("ranking と applyUma の基準一致(暗黙不変条件の固定)", () => {
+  /** 順位 r のプレイヤーが受け取るウマ+オカ。 */
+  const rankBonus = (rank: number): number =>
+    UMA[rank] + (rank === 0 ? OKA : 0);
+
+  /** 役満祝儀 1 件による2人間の最大相対スイング(和了者 +3B と支払者 −B の差)。 */
+  const MAX_BONUS_SWING = YAKUMAN_BONUS * 4;
+
+  it("ウマ/オカの隣接差が単調減少で、最小隣接差が祝儀スイングを上回る", () => {
+    const gaps = [0, 1, 2].map((r) => rankBonus(r) - rankBonus(r + 1));
+    // 上位ほど多く貰う(そもそも順位付けの体を成す)。
+    expect(gaps.every((g) => g > 0)).toBe(true);
+    const minGap = Math.min(...gaps);
+    const margin = minGap - MAX_BONUS_SWING;
+    expect(margin).toBeGreaterThan(0);
+  });
+
+  /** 決定的な線形合同法。テスト内で完結させ、外部 RNG に依存しない。 */
+  function lcg(seed: number): () => number {
+    let s = seed >>> 0;
+    return () => {
+      s = (Math.imul(s, 1664525) + 1013904223) >>> 0;
+      return s / 0x100000000;
+    };
+  }
+
+  /** 合計 140,000(35,000 × 4)を 100 点単位で4人へ分配する。 */
+  function randomFinalPoints(
+    rand: () => number,
+    ids: readonly string[],
+  ): PlayerPoints[] {
+    const TOTAL_UNITS = (STARTING_POINTS * 4) / 100;
+    const cuts = [0, 1, 2]
+      .map(() => Math.floor(rand() * (TOTAL_UNITS + 1)))
+      .sort((a, b) => a - b);
+    const units = [
+      cuts[0],
+      cuts[1] - cuts[0],
+      cuts[2] - cuts[1],
+      TOTAL_UNITS - cuts[2],
+    ];
+    const points = units.map((u) => u * 100);
+    expect(points.reduce((a, b) => a + b, 0)).toBe(STARTING_POINTS * 4);
+    return ids.map((playerId, i) => ({ playerId, points: points[i] }));
+  }
+
+  /** 祝儀の適用パターン: 無し / 各プレイヤーが役満を和了(他3人が支払い)。 */
+  const bonusCases: readonly (string | null)[] = [null, ...IDS];
+
+  function umaOrder(finalPoints: readonly PlayerPoints[]): string[] {
+    return finalPoints
+      .map((p, index) => ({ p, index }))
+      .sort((a, b) => b.p.points - a.p.points || a.index - b.index)
+      .map((x) => x.p.playerId);
+  }
+
+  function checkAgreement(finalPoints: readonly PlayerPoints[]): void {
+    for (const winner of bonusCases) {
+      const l = new SoshiiLedger(IDS);
+      if (winner !== null) {
+        l.applyBonus({
+          winnerId: winner,
+          loserIds: IDS.filter((id) => id !== winner),
+          score: { isTrueYakuman: true, isCountedYakuman: false },
+        });
+      }
+      const breakdown = l.applyUma(finalPoints);
+      l.applyRawScore(finalPoints);
+      const byUma = [...breakdown]
+        .sort((a, b) => a.rank - b.rank)
+        .map((b) => b.playerId);
+      expect(byUma).toEqual(umaOrder(finalPoints));
+      // 本丸: 表示順位(ソシー残高降順)がウマの順位付けと完全一致する。
+      expect(l.ranking()).toEqual(byUma);
+    }
+  }
+
+  it("境界ケース(全員同点・100点差・最大偏り)で順位が一致する", () => {
+    const edgeCases: PlayerPoints[][] = [
+      // 全員同点 — ウマは配列順で決まる。祝儀があっても表示順位はそれに従う。
+      IDS.map((playerId) => ({ playerId, points: STARTING_POINTS })),
+      // 最小刻み(100点)差が3組連続する最悪ケース。
+      [
+        { playerId: "A", points: 35100 },
+        { playerId: "B", points: 35000 },
+        { playerId: "C", points: 34900 },
+        { playerId: "D", points: 35000 },
+      ],
+      // 1人が総取りに近い最大偏り。
+      [
+        { playerId: "A", points: 140000 },
+        { playerId: "B", points: 0 },
+        { playerId: "C", points: 0 },
+        { playerId: "D", points: 0 },
+      ],
+      // 2人同点が2組。
+      [
+        { playerId: "A", points: 40000 },
+        { playerId: "B", points: 30000 },
+        { playerId: "C", points: 40000 },
+        { playerId: "D", points: 30000 },
+      ],
+    ];
+    for (const finalPoints of edgeCases) {
+      expect(finalPoints).toHaveLength(4);
+      checkAgreement(finalPoints);
+    }
+  });
+
+  it("ランダムな最終持ち点 2,000 通り × 祝儀5パターンで順位が一致する", () => {
+    const rand = lcg(20260721);
+    for (let i = 0; i < 2000; i++) {
+      // 配列順(席順)を入れ替えても、同点タイブレークの基準差が表面化しないことも併せて見る。
+      const ids = i % 2 === 0 ? IDS : [...IDS].reverse();
+      checkAgreement(randomFinalPoints(rand, ids));
+    }
+  });
+});

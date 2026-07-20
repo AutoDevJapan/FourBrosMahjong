@@ -223,7 +223,20 @@ export class SoshiiLedger {
     return v;
   }
 
-  /** ソシー残高の降順で並べたプレイヤーID(同点は初期登録順)。 */
+  /**
+   * ソシー残高の降順で並べたプレイヤーID(同点は初期登録順)。
+   *
+   * **最終順位・勝敗はソシー個人累計で決める**(スペック1 / `documents/spec/README.md`)ため、
+   * 結果画面の `rank`(engine `endGame`)はこちらを使う。一方 {@link applyUma} は
+   * 「4兄弟全員を**持ち点**で順位付け」する(スペック3 3.3 ② / Q13)。基準が2つ併存するのは
+   * 仕様どおりで、統合してはならない。
+   *
+   * 両者の順位が常に一致するのは**定数間のマージンが正**であることの帰結:
+   * ウマ/オカの最小隣接差(5,000)− 役満祝儀の最大相対スイング(和了者 +3,000 と
+   * 支払者 −1,000 の差 = 4,000)= 1,000 > 0。`UMA` / `OKA` / {@link YAKUMAN_BONUS} を
+   * 調整するとこの不変条件は無言で破れ、「表示は2位なのにウマは1位分」という不整合を生む。
+   * マージンは `settlement.test.ts`「ranking と applyUma の基準一致」で定数から算出・固定済み。
+   */
   ranking(): PlayerId[] {
     return [...this._balances.entries()]
       .map(([id, balance], index) => ({ id, balance, index }))
