@@ -182,28 +182,38 @@ function save(storage: Storage, entries: readonly MatchHistoryEntry[]): void {
  * - 保存容量が不足した場合は件数を半減させながら再試行し、**保存できる範囲の履歴を
  *   最大限残す**(最新結果を最優先しつつ、過去の記録を不必要に全消ししない)。
  *   1件でも保存できない環境では諦める(対局自体は継続できる)。
+ *
+ * 戦績を追記できたかを返す(`clearHistory` と同じ方針)。呼び出し側はこの返り値を見て
+ * `notifyHistoryChanged()` を呼び、購読者へ通知する(issue #310)。検証を通らない値・
+ * 重複 seed・保存失敗ではいずれも追記されないため `false` を返す。
+ *
+ * 保証は**片方向**である ─ `true` なら保存内容は必ず変化しているが、`false` は
+ * 「変化していない」を意味しない。破損データが残っていた場合、`loadHistory` が
+ * その削除を行った上で追記に失敗し得る。ただしこのとき購読者から見える値は前後とも
+ * 空配列(破損データは `getHistorySnapshot` でも空に落ちる)なので、通知の取りこぼしにはならない。
  */
 export function appendHistory(
   storage: Storage,
   entry: MatchHistoryEntry,
-): void {
-  if (!isEntry(entry)) return;
+): boolean {
+  if (!isEntry(entry)) return false;
   try {
     const entries = loadHistory(storage);
-    if (entries.some((existing) => existing.seed === entry.seed)) return;
+    if (entries.some((existing) => existing.seed === entry.seed)) return false;
     let next = [entry, ...entries].slice(0, MAX_HISTORY_ENTRIES);
     // 半減で切り詰めるため試行回数は log2(MAX_HISTORY_ENTRIES) 程度に収まる。
     for (;;) {
       try {
         save(storage, next);
-        return;
+        return true;
       } catch {
-        if (next.length <= 1) return;
+        if (next.length <= 1) return false;
         next = next.slice(0, Math.max(1, Math.floor(next.length / 2)));
       }
     }
   } catch {
     // 保存不可でも対局・画面表示は継続する。
+    return false;
   }
 }
 
@@ -254,11 +264,15 @@ function onStorageEvent(event: StorageEvent): void {
  * 永続化API(`appendHistory` / `clearHistory`)は `Storage` を引数に取る純粋な入出力に
  * 留め、モジュールグローバルなストアへの通知はこの関数に分離している(責務の分離)。
  *
+ * 追記(`appendHistory`)・削除(`clearHistory`)のどちらの経路でも、**保存内容を実際に
+ * 書き換えたとき(= 返り値が `true`)に呼ぶ**。通知経路を対称にしておくことで、戦績の
+ * 購読者と `GameProvider` が将来同じ画面に同居しても「保存したのに一覧が更新されない」
+ * 無音のバグにならない(issue #310)。
+ *
  * **描画中に呼んではならない。** 購読中のコンポーネントの再描画を要求するため、他コンポーネントの
  * 描画フェーズから呼ぶと React の「描画中に別コンポーネントを更新した」警告になる。
- * `GameProvider` が `useState` の遅延初期化(= 描画フェーズ)から `appendHistory` を
- * 呼ぶため、追記経路ではこの関数を呼んでいない(issue #310)。`/history` はマウント時に
- * `getHistorySnapshot` で読み直すので、現状の画面構成では取りこぼしは起きない。
+ * このため `GameProvider` は終局済みジャーナル復元時の追記を `useState` の遅延初期化
+ * (= 描画フェーズ)ではなくマウント後の効果から行う(issue #310)。
  */
 export function notifyHistoryChanged(): void {
   for (const callback of subscribers) callback();

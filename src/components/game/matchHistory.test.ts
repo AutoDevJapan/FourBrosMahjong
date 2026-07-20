@@ -141,6 +141,8 @@ describe("match history persistence (#293)", () => {
       }
     })();
     expect(() => appendHistory(broken, entry(1))).not.toThrow();
+    // 追記できていないので false = 購読者への通知は不要(#310)。
+    expect(appendHistory(broken, entry(1))).toBe(false);
   });
 
   it("clearHistoryで保存済み戦績をすべて消去する", () => {

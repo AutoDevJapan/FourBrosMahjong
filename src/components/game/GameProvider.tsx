@@ -16,7 +16,14 @@
  *
  * 永続範囲は同一タブのセッション内だけであり、バックエンド/複数デバイス同期は行わない。
  */
-import { createContext, useContext, useMemo, useRef, useState } from "react";
+import {
+  createContext,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import {
   createGame,
   DEFAULT_NAMES,
@@ -38,7 +45,7 @@ import {
   replayJournal,
   saveJournal,
 } from "./gamePersistence";
-import { appendHistory } from "./matchHistory";
+import { appendHistory, notifyHistoryChanged } from "./matchHistory";
 import type { GameViewState, TileData } from "./types";
 
 /** UI から呼べる対局操作。判定は engine 側が行う。 */
@@ -127,12 +134,16 @@ export function freshSeed(): number {
  * 終局の瞬間に保存へ失敗していても、リロード復元時に同じ seed で再追記されるため
  * 保存漏れを補完できる。ジャーナルが無い対局(テスト注入・Storage 無効環境)は
  * seed を持たないため保存対象外とする。
+ *
+ * 実際に追記できたときは購読者へ通知する(issue #310)。永続化と通知は
+ * `matchHistory.ts` 側で分離されているため、書き換えた側が明示的に知らせる。
+ * **描画フェーズから呼んではならない**(通知が他コンポーネントの再描画を要求するため)。
  */
 function recordFinishedGame(engine: EngineState, seed: number): void {
   if (engine.phase !== "gameEnd" || engine.result === null) return;
   const storage = localStorageOrNull();
   if (storage === null) return;
-  appendHistory(storage, {
+  const appended = appendHistory(storage, {
     seed,
     finishedAt: Date.now(),
     players: engine.result.map((r) => ({
@@ -144,6 +155,7 @@ function recordFinishedGame(engine: EngineState, seed: number): void {
       soshiiTotal: r.soshiiTotal,
     })),
   });
+  if (appended) notifyHistoryChanged();
 }
 
 /** Storage の getter 自体が SecurityError を投げる環境ではメモリ内対局へ退避する。 */
@@ -187,9 +199,7 @@ function initialSession(initialGame?: EngineState): {
   if (stored && (urlSeed === null || stored.seed === urlSeed)) {
     try {
       const engine = replayJournal(stored);
-      // 終局済み記録の復元時にも戦績への追記を試み、終局時の保存失敗を補完する
-      // (同一 seed は appendHistory 側で重複排除される)。
-      recordFinishedGame(engine, stored.seed);
+      // 復元時の戦績追記(終局時の保存失敗の補完)はマウント効果側で行う(#310)。
       return { engine, journal: stored };
     } catch {
       // 現在版engineで再生できない記録は新規対局へ安全にフォールバックする。
@@ -219,6 +229,24 @@ export function GameProvider({ children, initialGame }: GameProviderProps) {
   // session をクロージャから再利用するとライブ状態だけが二重に進み、journal と分岐する。
   const sessionRef = useRef(session);
   const { engine } = session;
+
+  // 終局済みジャーナルを復元したときの戦績追記(終局時の保存失敗の補完)は、
+  // 描画フェーズではなくマウント後の効果で行う(#310)。追記に伴う
+  // `notifyHistoryChanged` は購読者の再描画を要求するため、`useState` の遅延初期化から
+  // 呼ぶと「描画中に別コンポーネントを更新した」形になり、購読者の実装次第で React の
+  // 警告や表示のずれ(tearing)を招く。描画は純粋に保ち、書き込みは効果側へ寄せる。
+  // 初期 session だけを見たいので、以降の遷移で変わる `sessionRef` ではなく専用 ref を使う。
+  const initialSessionRef = useRef<typeof session | null>(session);
+  useEffect(() => {
+    const initial = initialSessionRef.current;
+    // 初回だけ使う参照なので、使い終えたら手放す。これにより最初の遷移後は初期半荘の
+    // Wall/RNG が残らず、Strict Mode の効果2回実行でも2回目は早期 return になる
+    // (重複追記は `appendHistory` の seed 重複排除でも防がれるため二重保存はしない)。
+    initialSessionRef.current = null;
+    if (initial === null || initial.journal === null) return;
+    // 新規半荘は phase が gameEnd でないため `recordFinishedGame` 側で no-op になる。
+    recordFinishedGame(initial.engine, initial.journal.seed);
+  }, []);
 
   // engine の遷移は内部で `Wall` 等を可変更新するため、React Strict Mode で再実行され得る
   // 関数型 updater の中では実行しない。同期 ref 上で1度だけ遷移し、その確定値を state へ渡す。

@@ -171,7 +171,14 @@ export default function MatchHistoryList() {
             {MAX_HISTORY_ENTRIES}
             件まで保存され、超えた分は古い記録から削除されます)。
           </p>
-          <ol aria-label="保存された半荘結果" className="flex flex-col gap-3">
+          {/* role="list" は冗長だが明示する — Tailwind preflight の list-style 除去により Safari が
+              list セマンティクスを落とし、VoiceOver がリスト名ごと読まなくなる既知挙動への対処
+              (スペック5 5.2.5 / #313)。 */}
+          <ol
+            role="list"
+            aria-label="保存された半荘結果"
+            className="flex flex-col gap-3"
+          >
             {entries.map((entry) => (
               <li key={`${entry.seed}-${entry.finishedAt}`}>
                 <HistoryItem entry={entry} />
