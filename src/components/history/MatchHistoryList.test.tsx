@@ -41,6 +41,8 @@ const formatted = (finishedAt: number) =>
 
 afterEach(() => {
   window.localStorage.clear();
+  // スパイの復元をテスト本体末尾に置くと、手前の expect が落ちた際に次のテストへ漏れる。
+  vi.restoreAllMocks();
 });
 
 describe("MatchHistoryList (#293)", () => {
@@ -145,17 +147,18 @@ describe("MatchHistoryList (#293)", () => {
 
   it("削除できなかった場合は成功と読み上げない(#302)", async () => {
     appendHistory(window.localStorage, entry(1, 1_753_000_000_000));
-    const removeItem = vi
-      .spyOn(Storage.prototype, "removeItem")
-      .mockImplementation(() => {
-        throw new Error("QuotaExceededError");
-      });
+    vi.spyOn(Storage.prototype, "removeItem").mockImplementation(() => {
+      throw new Error("QuotaExceededError");
+    });
 
     render(<MatchHistoryList />);
     fireEvent.click(
       await screen.findByRole("button", { name: "戦績をすべて削除" }),
     );
-    fireEvent.click(screen.getByRole("button", { name: "削除する" }));
+    const confirmButton = screen.getByRole("button", { name: "削除する" });
+    // 実ブラウザではクリック時にボタンへフォーカスが載る(jsdom は載せない)。
+    confirmButton.focus();
+    fireEvent.click(confirmButton);
 
     // 一覧は残っているので「削除しました」と食い違う通知を出してはいけない。
     expect(
@@ -164,8 +167,10 @@ describe("MatchHistoryList (#293)", () => {
     expect(
       screen.getByText(/この端末では戦績を削除できませんでした/),
     ).toBeInTheDocument();
-
-    removeItem.mockRestore();
+    // 確認UIは畳まない。畳むと押したボタンが消え、フォーカスが body へ落ちる。
+    expect(confirmButton).toBeInTheDocument();
+    expect(confirmButton).toHaveFocus();
+    expect(document.body).not.toHaveFocus();
   });
 
   it("全件削除後はフォーカスを空状態へ移し、bodyへ落とさない", async () => {

@@ -7,6 +7,9 @@
  * 実行していても同じ表示になってしまい回帰を検出できない。ここでは React を介さず
  * 「`getSnapshot` の純粋性・参照安定性」「破損データ削除が購読側の責務であること」
  * 「購読解除の対称性」を直接検証する。
+ *
+ * 検証対象が `window`(`storage` イベント)と `localStorage` に触れるため、`.ts`
+ * (既定は node 環境)でありながら冒頭の docblock で jsdom を指定している。
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
@@ -36,7 +39,20 @@ function entry(seed: number) {
   };
 }
 
+/**
+ * 各テストが張った購読。テストが途中で throw しても購読者が残らないよう、
+ * `afterEach` で必ず解除する(残留するとイベント通知回数のアサートが静かに壊れる)。
+ */
+const activeSubscriptions: (() => void)[] = [];
+
+function subscribe(callback: () => void): () => void {
+  const unsubscribe = subscribeHistory(callback);
+  activeSubscriptions.push(unsubscribe);
+  return unsubscribe;
+}
+
 afterEach(() => {
+  while (activeSubscriptions.length > 0) activeSubscriptions.pop()?.();
   window.localStorage.clear();
 });
 
@@ -78,14 +94,14 @@ describe("match history store (#302)", () => {
   it("subscribeHistory が破損データを削除する(描画中ではなく効果側)", () => {
     window.localStorage.setItem(MATCH_HISTORY_KEY, CORRUPTED);
 
-    const unsubscribe = subscribeHistory(() => {});
+    const unsubscribe = subscribe(() => {});
     expect(window.localStorage.getItem(MATCH_HISTORY_KEY)).toBeNull();
     unsubscribe();
   });
 
   it("購読解除後は通知されない(購読の対称性)", () => {
     const callback = vi.fn();
-    const unsubscribe = subscribeHistory(callback);
+    const unsubscribe = subscribe(callback);
 
     notifyHistoryChanged();
     expect(callback).toHaveBeenCalledTimes(1);
@@ -98,8 +114,8 @@ describe("match history store (#302)", () => {
   it("storage イベントは購読者1人につき1回だけ通知する", () => {
     const first = vi.fn();
     const second = vi.fn();
-    const unsubscribeFirst = subscribeHistory(first);
-    const unsubscribeSecond = subscribeHistory(second);
+    const unsubscribeFirst = subscribe(first);
+    const unsubscribeSecond = subscribe(second);
 
     window.dispatchEvent(
       new StorageEvent("storage", { key: MATCH_HISTORY_KEY }),
@@ -121,7 +137,7 @@ describe("match history store (#302)", () => {
 
   it("無関係なキーの storage イベントでは通知しない", () => {
     const callback = vi.fn();
-    const unsubscribe = subscribeHistory(callback);
+    const unsubscribe = subscribe(callback);
 
     window.dispatchEvent(new StorageEvent("storage", { key: "other.key" }));
     expect(callback).not.toHaveBeenCalled();

@@ -118,16 +118,21 @@ export default function MatchHistoryList() {
   const executeClear = () => {
     const storage = localStorageOrNull();
     const cleared = storage !== null && clearHistory(storage);
-    // 永続化と購読者への通知は分離されているため、削除後に明示的に知らせる(#302)。
-    notifyHistoryChanged();
-    setConfirmingClear(false);
-    // 削除できなかった場合に「削除しました」と読み上げると、残った一覧と食い違う。
+    if (cleared) {
+      // 永続化と購読者への通知は分離されているため、削除後に明示的に知らせる(#302)。
+      notifyHistoryChanged();
+      // 「削除する」ボタンごと一覧セクションが消えるので、空状態へフォーカスを移す。
+      setConfirmingClear(false);
+      pendingFocusRef.current = true;
+      setStatusMessage("保存されていた戦績をすべて削除しました。");
+      return;
+    }
+    // 削除できなかった場合は一覧が残る。「削除しました」と読み上げると実態と食い違う。
+    // 確認UIも畳まない ─ 畳むと押した「削除する」ボタンが消える一方で空状態も描かれず、
+    // フォーカスの行き先が無くなって body へ落ちるため(成功時と同じ a11y 契約を守る)。
     setStatusMessage(
-      cleared
-        ? "保存されていた戦績をすべて削除しました。"
-        : "この端末では戦績を削除できませんでした。ブラウザの設定を確認してください。",
+      "この端末では戦績を削除できませんでした。ブラウザの設定を確認してください。",
     );
-    pendingFocusRef.current = cleared;
   };
 
   if (entries === null) {

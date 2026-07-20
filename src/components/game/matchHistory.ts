@@ -269,6 +269,10 @@ export function notifyHistoryChanged(): void {
  *
  * 購読のたびに `loadHistory` を通し、破損データが残っていれば次回以降のために削除する
  * (描画中ではなく効果として実行される)。`loadHistory` は冪等なので重複実行は無害。
+ *
+ * 購読者は `Set` で保持するため、**同一の関数参照で2回購読することは非対応**
+ * (2回目が重複排除され、片方の解除で両方が通知を失う)。想定利用者である
+ * `useSyncExternalStore` は購読ごとに新しいクロージャを渡すため問題にならない。
  */
 export function subscribeHistory(callback: () => void): () => void {
   // `storage` リスナはモジュールで1本だけ張り、購読者数の 0↔1 の境界で着脱する。
