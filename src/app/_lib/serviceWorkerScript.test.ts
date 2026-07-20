@@ -177,6 +177,7 @@ describe("buildServiceWorkerScript", () => {
       "/",
       "/rules",
       "/settings",
+      "/history",
       "/game",
       "/game/result",
     ]);
