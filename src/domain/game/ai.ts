@@ -241,8 +241,12 @@ function paretoPrune(list: readonly SuitDecomp[]): SuitDecomp[] {
  * 標準形(4面子1雀頭)の向聴数。スートは面子を跨がないためスート独立に分解でき
  * (それぞれメモ済み・パレート枝刈り済みで小さい)、その積を合成して面子/塔子/対子の
  * 合計に対し {@link leafShanten} を最小化する。
+ *
+ * `meldCount` は副露(ポン/カン)済みの確定面子数。面子数へそのまま加算する
+ * (#294: 副露手は門前牌が 13 − 3×副露数 枚しかないため、加算しないと向聴値が飽和して
+ * テンパイ維持打牌と崩し打牌が同点になる)。
  */
-function standardShanten(counts: Counts): number {
+function standardShanten(counts: Counts, meldCount: number): number {
   const man = suitFrontier(counts.man, true);
   const pin = suitFrontier(counts.pin, true);
   const sou = suitFrontier(counts.sou, true);
@@ -253,7 +257,7 @@ function standardShanten(counts: Counts): number {
     for (const dp of pin) {
       for (const ds of sou) {
         for (const dh of honor) {
-          const m = dm[0] + dp[0] + ds[0] + dh[0];
+          const m = meldCount + dm[0] + dp[0] + ds[0] + dh[0];
           const t = dm[1] + dp[1] + ds[1] + dh[1];
           const p = dm[2] + dp[2] + ds[2] + dh[2];
           const s = leafShanten(m, t, p);
@@ -298,6 +302,11 @@ function kokushiShanten(tiles: readonly Tile[]): number {
  * 手牌の向聴数(標準/七対子/国士の最小)。和了= -1、テンパイ= 0。
  * 13枚でも14枚でも計算できる(受け入れ判定では14枚を評価する)。
  *
+ * `meldCount` は副露(ポン/カン)済みの面子数(既定 0 = 門前)。副露手では門前牌が
+ * 13 − 3×副露数 枚しかないため、副露を確定面子として加算しないと向聴値が飽和し、
+ * テンパイ維持打牌と崩し打牌が同点になってしまう(#294)。`meldCount > 0` のときは
+ * 七対子・国士無双が門前専用役のため標準形のみを評価する。
+ *
  * **牌残量を見ない理想化(意図的な設計 / #143)**:
  * 本関数は標準向聴式に基づき、待ち牌の**山残量を考慮しない**。ある牌の**4枚全てが
  * 手牌にある**「デッドウォール待ち」(例: `444p 8888p 789s 東東東` の 8p 単騎)は、
@@ -316,17 +325,23 @@ function kokushiShanten(tiles: readonly Tile[]): number {
  * - **検証整合**: クロス検証オラクル(`__oracle__/shanten-oracle.ts`)も同じ理想化を
  *   共有し、参照ライブラリとはオフラインで別途アンカー済み。ここだけ補正すると両者が乖離する。
  */
-export function shanten(tiles: readonly Tile[]): number {
+export function shanten(tiles: readonly Tile[], meldCount = 0): number {
+  // 呼び出し側の異常値(負数・小数・5以上)へ静かに壊れないよう 0..4 の整数へ正規化する。
+  const melds = Math.max(0, Math.min(4, Math.trunc(meldCount)));
   const counts = toCounts(tiles);
-  const key = countsSignature(counts);
+  const key = `${melds}:${countsSignature(counts)}`;
   const cached = shantenMemo.get(key);
   if (cached !== undefined) return cached;
 
-  const s = Math.min(
-    standardShanten(counts),
-    chiitoitsuShanten(counts),
-    kokushiShanten(tiles),
-  );
+  // 七対子・国士無双は門前専用役のため、副露手(meldCount > 0)では標準形のみ評価する。
+  const s =
+    melds > 0
+      ? standardShanten(counts, melds)
+      : Math.min(
+          standardShanten(counts, 0),
+          chiitoitsuShanten(counts),
+          kokushiShanten(tiles),
+        );
 
   if (shantenMemo.size >= SHANTEN_MEMO_CAP) shantenMemo.clear();
   shantenMemo.set(key, s);
@@ -373,11 +388,17 @@ export interface Ukeire {
 }
 
 /**
- * 13枚の手牌の受け入れを数える。
+ * 13枚(副露手では 13 − 3×副露数 枚)の手牌の受け入れを数える。
  * 「引くと向聴数が下がる」牌種を有効牌とみなし、その延べ残り枚数を合算する。
+ * `meldCount` は副露済み面子数(既定 0 = 門前)。向聴と同じ補正で比較する(#294)。
+ *
+ * **残り枚数の理想化(#143 と同じ方針)**: 残り枚数は門前牌からのみ差し引くため、
+ * 副露牌・河・ドラ表示牌にある同種牌は控除されない(副露手ではやや多めに出る)。
+ * 受け入れは向聴同点の候補同士のタイブレークにしか使われず、順序への影響は小さいため
+ * ここでは補正しない。
  */
-export function ukeire(tiles13: readonly Tile[]): Ukeire {
-  const base = shanten(tiles13);
+export function ukeire(tiles13: readonly Tile[], meldCount = 0): Ukeire {
+  const base = shanten(tiles13, meldCount);
   const candidateKeys = ukeireCandidateKeys(tiles13);
   let kinds = 0;
   let copies = 0;
@@ -387,7 +408,7 @@ export function ukeire(tiles13: readonly Tile[]): Ukeire {
     const remaining = remainingCopies(tiles13, key);
     if (remaining <= 0) continue;
     const drawn = makeTile(kind.suit, kind.rank);
-    if (shanten([...tiles13, drawn]) < base) {
+    if (shanten([...tiles13, drawn], meldCount) < base) {
       kinds += 1;
       copies += remaining;
     }
@@ -409,8 +430,14 @@ const UKEIRE_SHANTEN_GATE = 1;
 
 /** 打牌選択に渡す状況(自家=AI 手番の視点)。 */
 export interface DiscardContext {
-  /** 手番の全牌(門前手牌13枚 + ツモ牌1枚 = 14枚)。 */
+  /** 手番の全牌(門前手牌 + ツモ牌。副露手では 13 − 3×副露数 + 1 枚)。 */
   readonly tiles: readonly Tile[];
+  /**
+   * 副露(ポン/カン)済みの面子数(既定 0 = 門前)。
+   * 向聴・受け入れ評価を副露込みで補正する(#294: 未補正だと副露手で向聴値が飽和し、
+   * テンパイ維持打牌と崩し打牌が同点になってタイブレークがテンパイを壊す)。
+   */
+  readonly meldCount?: number;
   /** 他家の河(捨て牌の列)。危険牌回避(現物優先)の判断に使う。省略可。 */
   readonly opponentDiscards?: readonly (readonly Tile[])[];
   /** ドラ実牌の種別キー集合(温存判断用)。赤5は `isRed` で常に価値扱い。省略可。 */
@@ -479,6 +506,7 @@ function safetyOf(
  */
 export function chooseDiscard(ctx: DiscardContext): Tile {
   const { tiles, opponentDiscards, doraKinds } = ctx;
+  const meldCount = ctx.meldCount ?? 0;
   if (tiles.length === 0) {
     throw new Error("chooseDiscard: 空の手牌からは打牌できない");
   }
@@ -497,7 +525,7 @@ export function chooseDiscard(ctx: DiscardContext): Tile {
     candidates.push({
       tile,
       remaining13,
-      shantenAfter: shanten(remaining13),
+      shantenAfter: shanten(remaining13, meldCount),
       // 受け入れは後段(向聴最小の候補)でのみ算出する(計算量削減)。
       ukeireCopies: -1,
       value: valueOf(tile, doraKinds),
@@ -515,7 +543,8 @@ export function chooseDiscard(ctx: DiscardContext): Tile {
   //    比較になり打牌選択にほぼ影響しない一方で計算量が跳ね上がるため、そこでは省く
   //    (省略時は打点温存・危険牌回避・外側度で決める)。
   if (best.length > 1 && minShanten <= UKEIRE_SHANTEN_GATE) {
-    for (const c of best) c.ukeireCopies = ukeire(c.remaining13).copies;
+    for (const c of best)
+      c.ukeireCopies = ukeire(c.remaining13, meldCount).copies;
   }
 
   best.sort((a, b) => {

@@ -53,6 +53,75 @@ describe("ai: 向聴数(shanten)", () => {
   });
 });
 
+describe("ai: 副露手の向聴補正(meldCount / #294)", () => {
+  it("副露数を面子として加算する(3副露のテンパイと1向聴を区別する)", () => {
+    // 3副露 + 門前 1p1p 4s6s = 嵌5s待ちテンパイ(0)。1p 4s 6s 3p は1向聴。
+    // 未補正では両者とも 6 で同点になっていた(issue #294 の最小数値例)。
+    expect(shanten(parseTiles("11p 46s"), 3)).toBe(0);
+    expect(shanten(parseTiles("1p 46s 3p"), 3)).toBe(1);
+    // 未補正(meldCount 省略)では同点に飽和する(バグの前提条件の固定化)。
+    expect(shanten(parseTiles("11p 46s"))).toBe(
+      shanten(parseTiles("1p 46s 3p")),
+    );
+  });
+
+  it("副露手では七対子を評価しない(門前専用役)", () => {
+    // 1副露 + 門前 1122p 334455s は標準形でテンパイ(1p/2p シャンポン待ち)。
+    // 門前扱い(未補正)では標準形が飽和して 2 向聴になる。
+    expect(shanten(parseTiles("1122p 334455s"), 1)).toBe(0);
+    expect(shanten(parseTiles("1122p 334455s"))).toBe(2);
+  });
+
+  it("副露手では国士無双を評価しない(門前専用役)", () => {
+    // 么九バラ10種は門前なら国士3向聴だが、1副露では標準形のみ(=6向聴)。
+    const tiles = parseTiles("19m 19p 19s 1234z");
+    expect(shanten(tiles)).toBe(3);
+    expect(shanten(tiles, 1)).toBe(6);
+  });
+
+  it("受け入れも副露補正で数える: 3副露テンパイ(嵌5s待ち)は1種4枚", () => {
+    const r = ukeire(parseTiles("11p 46s"), 3);
+    expect(r.kinds).toBe(1);
+    expect(r.copies).toBe(4);
+  });
+
+  it("seed196 再現局面: 嶺上3pツモ後、雀頭1pではなく3pを切ってテンパイを維持する", () => {
+    // pon[發]+pon[2s]+暗槓[南] の3副露、門前 1p1p 4s6s + 嶺上ツモ 3p(待ち5s)。
+    // 未補正では向聴が同点になり、現物(他家が1pを捨て済み)タイブレークで
+    // 雀頭の1pを切ってノーテン化していた(issue #294 の決定的再現)。
+    const tiles = parseTiles("11p 46s 3p");
+    const chosen = chooseDiscard({
+      tiles,
+      meldCount: 3,
+      opponentDiscards: [parseTiles("1p"), []],
+    });
+    expect(chosen.suit).toBe("pin");
+    expect(chosen.rank).toBe(3);
+    expect(shanten(afterChoice(tiles, chosen), 3)).toBe(0);
+  });
+
+  it("副露手でもテンパイ維持打牌があればテンパイを崩さない(近傍ケース)", () => {
+    const cases: ReadonlyArray<{ notation: string; meldCount: number }> = [
+      { notation: "11p 46s 3p", meldCount: 3 }, // 嵌張テンパイ + 浮き牌
+      { notation: "11p 45s 9m", meldCount: 3 }, // 両面テンパイ + 浮き牌
+      { notation: "123p 44s 67s 9m", meldCount: 2 }, // 2副露テンパイ + 浮き牌
+      { notation: "123p 456s 44p 68s 9m", meldCount: 1 }, // 1副露テンパイ + 浮き牌
+    ];
+    for (const { notation, meldCount } of cases) {
+      const tiles = parseTiles(notation);
+      const chosen = chooseDiscard({ tiles, meldCount });
+      expect(shanten(afterChoice(tiles, chosen), meldCount)).toBe(0);
+    }
+  });
+
+  it("meldCount の異常値は 0..4 に正規化される(負数・小数・過大値)", () => {
+    const tenpai = parseTiles("11p 46s");
+    expect(shanten(tenpai, 3.9)).toBe(shanten(tenpai, 3));
+    expect(shanten(tenpai, -1)).toBe(shanten(tenpai, 0));
+    expect(shanten(parseTiles("9m"), 99)).toBe(shanten(parseTiles("9m"), 4));
+  });
+});
+
 describe("ai: 受け入れ(ukeire)", () => {
   it("両面テンパイは 2種8枚を受け入れる", () => {
     // 34s の両面 → 2s(4枚)+ 5s(4枚)= 8枚。

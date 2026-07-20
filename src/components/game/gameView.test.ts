@@ -12,7 +12,7 @@ import { selectView } from "./gameView";
 
 describe("selectView pointsDelta projection(#277)", () => {
   it("半荘を終える局(gameEnd 直行)でも最終局の点数増減を写像する", () => {
-    // seed=2024 の最終局は 東4・三郎(p3)のロン 18,000点(自家 p0 が放銃)。
+    // seed=2024 の最終局は 東4・一郎(p1)のロン 7,700点(自家 p0 が放銃 / #294 の AI 変更後に再確認)。
     const { state } = walkToGameEnd(2024);
     expect(state.phase).toBe("gameEnd");
     expect(state.lastRound).not.toBeNull();

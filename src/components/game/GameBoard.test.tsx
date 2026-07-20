@@ -289,13 +289,13 @@ describe("GameBoard 終局後の出口(#206 / #207 / #277)", () => {
     expect(routerMock.replace).not.toHaveBeenCalled();
     expect(routerMock.push).not.toHaveBeenCalled();
 
-    // 最終局(seed=2024 は東4・三郎のロン 18,000点)の和了内訳が表示される。
+    // 最終局(seed=2024 は東4・一郎のロン 7,700点 / #294 の AI 変更後に再確認)の和了内訳が表示される。
     expect(
       screen.getAllByRole("heading", { name: "和了内訳" }).length,
     ).toBeGreaterThan(0);
-    // 各家の点数増減(±デルタ)も表示される(自家 −18,300 / 三郎 +19,300)。
-    expect(screen.getAllByText("−18,300").length).toBeGreaterThan(0);
-    expect(screen.getAllByText("+19,300").length).toBeGreaterThan(0);
+    // 各家の点数増減(±デルタ)も表示される(自家 −7,700 / 一郎 +8,700 = 7,700 + 供託1,000)。
+    expect(screen.getAllByText("−7,700").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("+8,700").length).toBeGreaterThan(0);
 
     // 出口はユーザー操作:「結果を見る」で結果画面へ(push。自動 replace はしない)。
     await user.click(screen.getAllByRole("button", { name: "結果を見る" })[0]);
@@ -320,7 +320,7 @@ describe("GameBoard 終局後の出口(#206 / #207 / #277)", () => {
     expect(
       screen.getAllByRole("heading", { name: "和了内訳" }).length,
     ).toBeGreaterThan(0);
-    expect(screen.getAllByText("−18,300").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("−7,700").length).toBeGreaterThan(0);
 
     // 「結果を見る」はユーザー操作としての push 遷移。
     await user.click(screen.getAllByRole("button", { name: "結果を見る" })[0]);

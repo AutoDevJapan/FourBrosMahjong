@@ -539,7 +539,9 @@ test.describe("対局画面(/game)", () => {
     page,
   }) => {
     test.setTimeout(120_000);
-    await page.goto("/game?seed=12");
+    // seed はドライバ戦略(ポン優先・合法牌のみ)のオフライン走査で「ポン直後の打牌待ちに
+    // 喰い替え禁止牌が手牌に実在する」ことを確認して選定(#294 の AI 変更で 12 → 2 へ再選定)。
+    await page.goto("/game?seed=2");
     const hand = page.getByRole("listbox", { name: "自家の手牌" }).first();
     const forbidden = hand.getByRole("option", { name: /喰い替え禁止/ });
 
