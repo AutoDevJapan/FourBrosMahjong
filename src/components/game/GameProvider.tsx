@@ -199,8 +199,7 @@ function initialSession(initialGame?: EngineState): {
   if (stored && (urlSeed === null || stored.seed === urlSeed)) {
     try {
       const engine = replayJournal(stored);
-      // 終局済み記録の復元時も戦績へ追記して終局時の保存失敗を補完するが、ここは
-      // `useState` の遅延初期化(= 描画フェーズ)なので追記はマウント効果へ委ねる(#310)。
+      // 復元時の戦績追記(終局時の保存失敗の補完)はマウント効果側で行う(#310)。
       return { engine, journal: stored };
     } catch {
       // 現在版engineで再生できない記録は新規対局へ安全にフォールバックする。
@@ -237,12 +236,16 @@ export function GameProvider({ children, initialGame }: GameProviderProps) {
   // 呼ぶと「描画中に別コンポーネントを更新した」形になり、購読者の実装次第で React の
   // 警告や表示のずれ(tearing)を招く。描画は純粋に保ち、書き込みは効果側へ寄せる。
   // 初期 session だけを見たいので、以降の遷移で変わる `sessionRef` ではなく専用 ref を使う。
-  const initialSessionRef = useRef(session);
+  const initialSessionRef = useRef<typeof session | null>(session);
   useEffect(() => {
-    const { engine, journal } = initialSessionRef.current;
+    const initial = initialSessionRef.current;
+    // 初回だけ使う参照なので、使い終えたら手放す。初期半荘の Wall/RNG を抱え続けずに済み、
+    // Strict Mode の効果2回実行でも2回目は早期 return になる(重複追記は
+    // `appendHistory` の seed 重複排除でも防がれるため、いずれにせよ二重保存はしない)。
+    initialSessionRef.current = null;
+    if (initial === null || initial.journal === null) return;
     // 新規半荘は phase が gameEnd でないため `recordFinishedGame` 側で no-op になる。
-    // Strict Mode の効果2回実行や再マウントも、同一 seed が重複排除されるため無害。
-    if (journal !== null) recordFinishedGame(engine, journal.seed);
+    recordFinishedGame(initial.engine, initial.journal.seed);
   }, []);
 
   // engine の遷移は内部で `Wall` 等を可変更新するため、React Strict Mode で再実行され得る

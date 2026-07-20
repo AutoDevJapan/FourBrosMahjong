@@ -183,10 +183,14 @@ function save(storage: Storage, entries: readonly MatchHistoryEntry[]): void {
  *   最大限残す**(最新結果を最優先しつつ、過去の記録を不必要に全消ししない)。
  *   1件でも保存できない環境では諦める(対局自体は継続できる)。
  *
- * 保存内容を実際に書き換えたかを返す(`clearHistory` と同じ方針)。呼び出し側はこの
- * 返り値を見て `notifyHistoryChanged()` を呼び、購読者へ通知する(issue #310)。
- * 検証を通らない値・重複 seed・保存失敗はいずれも `false` = ストアは不変であり、
- * 通知が空振りすることがない。
+ * 戦績を追記できたかを返す(`clearHistory` と同じ方針)。呼び出し側はこの返り値を見て
+ * `notifyHistoryChanged()` を呼び、購読者へ通知する(issue #310)。検証を通らない値・
+ * 重複 seed・保存失敗ではいずれも追記されないため `false` を返す。
+ *
+ * 保証は**片方向**である ─ `true` なら保存内容は必ず変化しているが、`false` は
+ * 「変化していない」を意味しない。破損データが残っていた場合、`loadHistory` が
+ * その削除を行った上で追記に失敗し得る。ただしこのとき購読者から見える値は前後とも
+ * 空配列(破損データは `getHistorySnapshot` でも空に落ちる)なので、通知の取りこぼしにはならない。
  */
 export function appendHistory(
   storage: Storage,

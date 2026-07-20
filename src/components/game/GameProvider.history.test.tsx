@@ -101,9 +101,9 @@ function HistorySubscriberProbe() {
 /**
  * 描画フェーズの戦績スナップショットを記録する観測子(#310)。
  *
- * `GameProvider` の**後ろ**に置くことで、`GameProvider` の描画が終わった直後・効果が
- * 走る前の保存状態を同一描画パス内で観測できる。描画フェーズで追記していると 1 に、
- * マウント効果へ寄せていれば 0 になる。描画中の記録は検証用の副作用に限る。
+ * `GameProvider` の**子**として置くことで、親の描画関数(= `useState` の遅延初期化)が
+ * 終わった後・効果が走る前の保存状態を観測できる。描画フェーズで追記していると 1 に、
+ * マウント効果へ寄せていれば 0 になる。描画中の記録は検証用のこの副作用に限る。
  */
 function RenderPhaseWitness({ log }: { log: number[] }) {
   log.push(getHistorySnapshot().length);
@@ -234,14 +234,14 @@ describe("GameProvider match history recording (#293)", () => {
         <HistorySubscriberProbe />
         <GameProvider>
           <output data-testid="probe" />
+          <RenderPhaseWitness log={observed} />
         </GameProvider>
-        <RenderPhaseWitness log={observed} />
       </>,
     );
 
     // GameProvider の**描画直後**(効果が走る前)の観測値。ここが 1 になるのは
     // `useState` の遅延初期化から追記した場合 = 描画フェーズの副作用(#310 の回帰)。
-    expect(observed[0]).toBe(0);
+    expect(observed).toEqual([0]);
     // 復元経路の追記はマウント効果で行われ、購読者へも届く。
     expect(screen.getByTestId("subscribed-count")).toHaveTextContent("1");
     expect(loadHistory(window.localStorage)).toHaveLength(1);
