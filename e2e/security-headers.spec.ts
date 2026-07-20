@@ -1,6 +1,13 @@
 import { expect, test } from "@playwright/test";
 
-const HTML_ROUTES = ["/", "/game", "/game/result", "/rules", "/settings"];
+const HTML_ROUTES = [
+  "/",
+  "/game",
+  "/game/result",
+  "/rules",
+  "/settings",
+  "/history",
+];
 
 test.describe("browser security headers", () => {
   for (const route of HTML_ROUTES) {

@@ -37,6 +37,12 @@ const menuItems: MenuItem[] = [
     ready: true,
   },
   {
+    title: "戦績",
+    description: "この端末に保存された半荘結果(順位・ソシー内訳)の一覧",
+    href: "/history",
+    ready: true,
+  },
+  {
     title: "設定",
     description: "ダークモード切替などの表示設定",
     href: "/settings",

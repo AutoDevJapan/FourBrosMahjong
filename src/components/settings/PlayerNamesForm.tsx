@@ -22,11 +22,11 @@
  */
 
 import { useId, useState, useSyncExternalStore } from "react";
+import { localStorageOrNull } from "@/components/common/browserStorage";
 import {
   DEFAULT_NAMES,
   getPlayerNamesSnapshot,
   getServerPlayerNamesSnapshot,
-  localStorageOrNull,
   MAX_PLAYER_NAME_LENGTH,
   PLAYER_NAME_LABELS,
   type PlayerNames,

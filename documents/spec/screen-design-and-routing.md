@@ -18,7 +18,8 @@
 | ルール説明 | `/rules` | `docs/四兄弟麻雀ルール.md` に基づくルール要約を表示する(閲覧専用) | Server |
 | 対局画面 | `/game` | 四人回しサンマの対局本体。卓・各家の手牌/河/得点・ドラ・卓情報・操作パネルを表示する | Server shell + Client island |
 | 結果画面 | `/game/result` | 半荘終了時の最終順位・ソシー内訳(素点+ウマ+祝儀)を表示する | Client |
-| 設定 | `/settings` | ダークモード手動切替(スペック5 5.4.1)と対局者名の設定(6.2.1) | Server shell + Client island |
+| 戦績 | `/history` | `localStorage` に保存された半荘結果(最終順位・ソシー内訳・終了日時)を新しい順に一覧・閲覧し、全件削除できる(issue #293)。保存は半荘終了時に `GameProvider` が自動で行い、直近20件を上限に最古から破棄する | Server shell + Client island |
+| 設定 | `/settings` | ダークモード手動切替(スペック5 5.4.1)と対局者名の設定(6.2.1)、戦績ページへの導線 | Server shell + Client island |
 
 ### 6.2.1 対局者名の設定(issue #291)
 
@@ -31,6 +32,7 @@
 - **半荘中の変更**: 進行中の半荘の表示名は変わらない。名前は開始時に対局ジャーナル(`sessionStorage`、v2 で `names` を追加)へ固定され、リロード復元時もその名前で再生される。設定変更は**次に開始する半荘**から反映される。
 - **ジャーナルの版移行**: v1(`names` 無し)の記録は既定名を補って v2 として受け入れる。`names` は表示名だけを決めるので、既定名を補っても Wall/RNG・操作列の再生結果は変わらない。これによりデプロイをまたいでタブを開いたままのユーザーが進行中の半荘を失わない。v2 で `names` が欠落・型不一致・空文字・12文字超のものは従来どおり拒否し、新規対局へフォールバックする。
 - **実在人物名**: 既定値にもプレースホルダにも埋め込まない。本作は非公式ファンメイドであり、番組メンバー名を出荷物へ同梱してよいかは未確定(`質問リスト.md` Q28)。実名の入力はユーザーに委ねる。
+- **名前の重複**: 4人に同じ名前を付けることを禁止しない(ユーザーの自由)。したがって戦績(6.9 / issue #293)の保存レコードも名前の一意性を前提にしてはならず、表示側の React key には名前ではなく順位を使う。
 
 ## 6.3 画面遷移
 
@@ -44,6 +46,10 @@ flowchart LR
     Game -->|半荘終了 → 最終局の決着表示 → 「結果を見る」| Result["/game/result (結果画面)"]
     Result -->|ロビーへ戻る| Lobby
     Result -->|もう一半荘| Game
+    Lobby -->|戦績| History["/history (戦績)"]
+    Result -->|戦績を見る| History
+    Settings -->|戦績を見る| History
+    History -->|ロビーへ戻る| Lobby
 ```
 
 - **半荘終了時の遷移はユーザー操作(ボタン)で行い、自動遷移しない**(#277)。半荘を終える局(トビ / 南4完了 / 親トップやめ)は engine が `roundEnd` を経由せず `gameEnd` へ直行する(スペック2 2.8)ため、`/game` は `gameEnd` でも最終局の決着(和了内訳 `WinDetails`・流局サマリ・各家の点数増減)を表示し、主要ボタン「結果を見る」(push)で `/game/result` へ進む。`/game` は `gameEnd` で自動リダイレクトしないため、結果画面から「戻る」→ `/game`(最終局の決着表示)→「戻る」→ ロビーと履歴トラップなく脱出できる。終局済み journal のリロード復元・ブラウザバックでも同じ決着表示に合流する。**流局で半荘が終わり供託が残存**した場合は、engine が残存供託を最終局デルタへ畳み込み(スペック3 3.4 / #282)、hint・読み上げに「残存供託N本(N,000点)は◯◯が取得。」を併記して持ち点・点数増減・供託カウント0の三者を検算可能に保つ。
@@ -90,6 +96,8 @@ src/app/
 │   └── page.tsx                 # `/rules`   ルール説明 (Server)
 ├── settings/
 │   └── page.tsx                 # `/settings` 設定 (Client)
+├── history/
+│   └── page.tsx                 # `/history`  戦績 (Server shell + Client island) … issue #293
 └── game/
     ├── layout.tsx                # `/game` 配下の共有レイアウト (Client: GameProvider)
     ├── page.tsx                  # `/game`         対局画面
@@ -115,6 +123,7 @@ src/app/
 | `<GameBoard>` 配下(`PlayerArea`・`ActionPanel`・`LiveRegion` 等) | Client | 打牌選択・鳴き・リーチ宣言等のキーボード/ポインタ操作、`aria-live` によるライブ更新(スペック5 5.2.2, 5.2.3)にローカル状態が必要 |
 | `<Tile>`・`<ScoreDisplay>`・`<TableInfo>` 等の純表示コンポーネント(`<DoraIndicator>` は開示注記の `aria-describedby` 関連付けに `useId` を用いるため Client ツリー前提 / #261) | 値渡しのみなら Server Component として実装可能。ただし Client なコンポーネント(`GameBoard`等)の子として使われる場合、実質的にクライアントバンドルに含まれる点に留意 | props 経由で値を受け取り描画するだけの責務に留めることで、将来的な配置転換を容易にする |
 | `/game/result/page.tsx` | Client | `GameProvider` の状態(確定したソシー内訳)を `useContext` 等で読み取るため |
+| `/history/page.tsx` | Server shell + Client island | ページ自体は Server(metadata・見出し・戻る導線)とし、`localStorage` の戦績を読み書きする一覧・削除部分のみ `MatchHistoryList` として `"use client"` に分離する(issue #293) |
 
 ## 6.7 コンポーネント分割方針(`src/components/` 初期ディレクトリ構成案)
 
@@ -162,6 +171,7 @@ Q9〜Q13 は**すべて解決済み**(`質問リスト.md`)。UI は引き続き
 
 ## 6.9 対局中の状態管理に関する前提
 
+- 半荘終了時の確定結果(最終順位・ソシー内訳・終了日時)は、`GameProvider` が `localStorage`(キー `four-bros-mahjong.history.v1`)へ**戦績**として追記保存し、`/history` で閲覧・全件削除できる(issue #293)。保存件数は直近20件を上限とし、超過時は最古から破棄する。進行中の半荘のジャーナル(`sessionStorage`)と同様に読み込み時の厳密検証と容量上限で防御する。保存はこの端末のブラウザ内で完結し、以下のバックエンド不在の前提を変えない。
 - 現時点でバックエンド/永続化層・認証・複数デバイス間同期の設計は存在しない。本スペックは、四兄弟麻雀の実演形式(1台のデバイス/画面を囲んで進行する想定)に合わせ、**単一デバイス上のクライアントサイド状態(`GameProvider` の React state)** で対局を進行させることを前提とする。
 - この前提はドメイン層(スペック4)の設計とは独立しており、将来的にサーバー同期やマルチデバイス対応が必要になった場合は改めて設計を見直す(本スペックの対象外)。
 - **オフライン動作(PWA / issue #292)**: 対局がクライアント内で完結する上記前提を活かし、service worker(`/sw.js`、`src/app/sw.js/route.ts` がビルド毎バージョン付きで生成)が App シェル 5 ルート(`/`・`/rules`・`/settings`・`/game`・`/game/result`)と静的アセット(牌 SVG・アイコン・manifest)をキャッシュする。ナビゲーションは network-first(オンライン時は常に最新シェル、オフライン時のみキャッシュ応答)、ハッシュ付き `/_next/static/` と牌素材は cache-first。デプロイでバージョンが変わると activate 時に旧 `fbm-*` キャッシュを全破棄する。登録は production のみ(dev / E2E の dev サーバーではキャッシュ汚染防止のため無効)。オフライン時も `sessionStorage` ジャーナルによる対局復元(#190)とそのまま両立する。

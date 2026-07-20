@@ -73,6 +73,24 @@ export default function SettingsPage() {
           </h2>
           <PlayerNamesForm />
         </section>
+
+        <section
+          aria-labelledby="history-heading"
+          className="flex flex-col gap-4"
+        >
+          <h2 id="history-heading" className="text-lg font-semibold">
+            戦績
+          </h2>
+          <p className="text-sm/6 text-foreground/70">
+            半荘ごとの結果(最終順位・ソシー内訳)はこの端末に自動保存されます。閲覧と削除は戦績ページから行えます。
+          </p>
+          <Link
+            href="/history"
+            className="inline-flex w-fit items-center gap-1 rounded-full border border-foreground/25 px-4 py-2 text-sm hover:bg-foreground/5 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-foreground"
+          >
+            戦績を見る <span aria-hidden="true">→</span>
+          </Link>
+        </section>
       </main>
     </div>
   );

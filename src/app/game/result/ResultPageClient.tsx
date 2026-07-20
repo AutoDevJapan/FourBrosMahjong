@@ -87,7 +87,8 @@ export default function ResultPageClient() {
             </h2>
             <div className="grid gap-3 sm:grid-cols-2">
               {orderedPlayers.map((player) => (
-                <SoshiiBreakdown key={player.name} player={player} />
+                // 名前は重複し得る(#291)ため、一意な rank を key にする。
+                <SoshiiBreakdown key={player.rank} player={player} />
               ))}
             </div>
           </section>
@@ -103,6 +104,13 @@ export default function ResultPageClient() {
             >
               もう一半荘
             </button>
+            {/* この半荘の結果は終局時に戦績(localStorage)へ保存済み(issue #293)。 */}
+            <Link
+              href="/history"
+              className="rounded-full border border-foreground/25 px-5 py-2 text-sm hover:bg-foreground/5"
+            >
+              戦績を見る
+            </Link>
             <Link
               href="/"
               className="rounded-full border border-foreground/25 px-5 py-2 text-sm hover:bg-foreground/5"

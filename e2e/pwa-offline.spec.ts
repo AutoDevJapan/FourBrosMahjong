@@ -39,7 +39,14 @@ test.describe("PWAオフライン動作(#292)", () => {
         (request) => new URL(request.url).pathname,
       );
     });
-    for (const route of ["/", "/rules", "/settings", "/game", "/game/result"]) {
+    for (const route of [
+      "/",
+      "/rules",
+      "/settings",
+      "/history",
+      "/game",
+      "/game/result",
+    ]) {
       expect(precached).toContain(route);
     }
     expect(precached).toContain("/tiles/Back.svg");

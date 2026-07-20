@@ -14,6 +14,7 @@
  * 「四人回しの4人を設定できる」という汎用文言に留め、実名の入力はユーザーに委ねる。
  */
 
+import { localStorageOrNull } from "@/components/common/browserStorage";
 import { DEFAULT_NAMES, type PlayerNames } from "@/domain/game/engine";
 
 export type { PlayerNames };
@@ -106,16 +107,6 @@ export function savePlayerNames(storage: Storage, names: PlayerNames): boolean {
     return true;
   } catch {
     return false;
-  }
-}
-
-/** `localStorage` 自体の取得が `SecurityError` を投げる環境では `null` を返す。 */
-export function localStorageOrNull(): Storage | null {
-  if (typeof window === "undefined") return null;
-  try {
-    return window.localStorage;
-  } catch {
-    return null;
   }
 }
 

@@ -7,6 +7,7 @@ const pages = [
   { path: "/", title: "四兄弟麻雀 - FourBrosMahjong" },
   { path: "/rules", title: "ルール説明 | 四兄弟麻雀" },
   { path: "/settings", title: "設定 | 四兄弟麻雀" },
+  { path: "/history", title: "戦績 | 四兄弟麻雀" },
   { path: "/game", title: "対局 | 四兄弟麻雀" },
   { path: "/game/result", title: "対局結果 | 四兄弟麻雀" },
 ] as const;

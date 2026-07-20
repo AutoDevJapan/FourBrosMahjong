@@ -83,7 +83,11 @@ function isTile(value: unknown): value is Tile {
   );
 }
 
-function hasOnlyKeys(
+/**
+ * 保存データ検証用: 期待キー**のみ**を持つオブジェクトか。
+ * ジャーナル(`sessionStorage`)と戦績(`matchHistory.ts` / `localStorage`)で共用する。
+ */
+export function hasOnlyKeys(
   value: Record<string, unknown>,
   expected: readonly string[],
 ): boolean {
