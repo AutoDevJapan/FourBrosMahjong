@@ -89,7 +89,7 @@ function isPlayer(value: unknown): value is MatchHistoryPlayer {
   );
 }
 
-export function isEntry(value: unknown): value is MatchHistoryEntry {
+function isEntry(value: unknown): value is MatchHistoryEntry {
   if (!value || typeof value !== "object") return false;
   const entry = value as Record<string, unknown>;
   if (
