@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { parseTile, parseTiles } from "@/domain/hand/notation";
+import type { Tile } from "@/domain/tiles/tile";
 import type { Seating } from "@/domain/round/seat";
 import {
   createGame,
@@ -41,6 +42,28 @@ const DISCARDER_HAND = "1p 1p 9p 9p 1m 1m 9m 9m 1s 1s 9s 9s 5m";
 const RON_TILE = "3p";
 
 /**
+ * 対照ケース(単独ロン)と本命ケース(同時ロン)で同じ seed を使う。
+ * 同一の壁牌・ドラのもとで「単独なら和了できる」ことを示して初めて、
+ * 同時ロンの勝者固定が頭ハネの検証になる。
+ */
+const SEED_EAST_DISCARDS = 3114;
+const SEED_SOUTH_DISCARDS = 3115;
+
+/**
+ * 門前手牌(13枚)としてパースする。枚数を誤ったフィクスチャは、engine が
+ * 例外を投げないまま「あり得ない局面」を検証してしまうため、ここで弾く。
+ */
+function expectConcealed13(notation: string): Tile[] {
+  const tiles = parseTiles(notation);
+  if (tiles.length !== 13) {
+    throw new Error(
+      `門前手牌は13枚である必要がある: "${notation}" は ${tiles.length} 枚`,
+    );
+  }
+  return tiles;
+}
+
+/**
  * `p0`(自家)を任意の席に据えた席割り。抜け番は常に p3。
  *
  * 残り2席へは席順(東→南→西)に p1・p2 を詰める。例えば自家=南なら
@@ -60,6 +83,10 @@ function seatingWithHumanAt(humanSeat: SeatKey): Seating<PlayerId> {
  * 自家(p0)が `humanSeat` に座り、`RON_TILE` を打とうとしている局面を組む。
  *
  * `hands` で各席の手牌を指定する。自家の席は打牌者なので `DISCARDER_HAND` 固定。
+ *
+ * ⚠️ 配牌を上書きするだけで**山からは差し引かない**ため、同一牌が場に4枚超
+ * 存在しうる。ロン判定と頭ハネ順の検証専用であり、残り枚数に依存するテスト
+ * (海底・受け入れ枚数など)へ流用しないこと。
  */
 function armDiscard(params: {
   seed: number;
@@ -81,7 +108,7 @@ function armDiscard(params: {
       seat === params.humanSeat
         ? DISCARDER_HAND
         : (params.hands[seat] ?? NO_WAIT_3P);
-    hand.hands[seat] = parseTiles(notation);
+    hand.hands[seat] = expectConcealed13(notation);
     hand.melds[seat] = [];
     hand.discards[seat] = []; // フリテン回避
     hand.riichi[seat] = false;
@@ -119,7 +146,7 @@ describe("engine: 通常打牌に対する頭ハネ(上家取り / spec 2.4・#3
     it("放銃者=東 のとき南は単独ロンできる", () => {
       const after = discardRonTile(
         armDiscard({
-          seed: 3110,
+          seed: SEED_EAST_DISCARDS,
           humanSeat: "east",
           hands: { south: WAIT_3P_A },
         }),
@@ -131,7 +158,7 @@ describe("engine: 通常打牌に対する頭ハネ(上家取り / spec 2.4・#3
     it("放銃者=東 のとき西は単独ロンできる", () => {
       const after = discardRonTile(
         armDiscard({
-          seed: 3111,
+          seed: SEED_EAST_DISCARDS,
           humanSeat: "east",
           hands: { west: WAIT_3P_B },
         }),
@@ -143,7 +170,7 @@ describe("engine: 通常打牌に対する頭ハネ(上家取り / spec 2.4・#3
     it("放銃者=南 のとき東は単独ロンできる", () => {
       const after = discardRonTile(
         armDiscard({
-          seed: 3112,
+          seed: SEED_SOUTH_DISCARDS,
           humanSeat: "south",
           hands: { east: WAIT_3P_A },
         }),
@@ -155,7 +182,7 @@ describe("engine: 通常打牌に対する頭ハネ(上家取り / spec 2.4・#3
     it("放銃者=南 のとき西は単独ロンできる", () => {
       const after = discardRonTile(
         armDiscard({
-          seed: 3113,
+          seed: SEED_SOUTH_DISCARDS,
           humanSeat: "south",
           hands: { west: WAIT_3P_B },
         }),
@@ -167,7 +194,7 @@ describe("engine: 通常打牌に対する頭ハネ(上家取り / spec 2.4・#3
 
   it("東の打牌に南・西が同時ロン → 下家(南)のみ和了し西は和了しない", () => {
     const armed = armDiscard({
-      seed: 3114,
+      seed: SEED_EAST_DISCARDS,
       humanSeat: "east",
       hands: { south: WAIT_3P_A, west: WAIT_3P_B },
     });
@@ -182,6 +209,8 @@ describe("engine: 通常打牌に対する頭ハネ(上家取り / spec 2.4・#3
     // ダブロンなし: 西(p2)は和了者に含まれず点も動かない。
     expect(after.lastRound?.deltas.p2).toBe(0);
     expect(after.points.p2).toBe(before.p2);
+    // 抜け番(p3)はロン精算に一切関与しない。
+    expect(after.lastRound?.deltas.p3).toBe(0);
     // 放銃者(p0=東)が支払い、南が受け取る。
     expect(after.lastRound?.deltas.p1).toBeGreaterThan(0);
     expect(after.lastRound?.deltas.p0).toBeLessThan(0);
@@ -191,7 +220,7 @@ describe("engine: 通常打牌に対する頭ハネ(上家取り / spec 2.4・#3
     // 放銃者を変えて回転方向を固定する。ronOrder が「上家(前の席)から」など
     // 逆回りに退行すると、ここで東(p1)が勝ってしまい落ちる。
     const armed = armDiscard({
-      seed: 3115,
+      seed: SEED_SOUTH_DISCARDS,
       humanSeat: "south",
       hands: { west: WAIT_3P_B, east: WAIT_3P_A },
     });
@@ -203,6 +232,7 @@ describe("engine: 通常打牌に対する頭ハネ(上家取り / spec 2.4・#3
     // ronOrder(south) = [west, east] → 西(p2)が上家取り。
     expect(after.lastRound?.winnerId).toBe("p2");
     expect(after.lastRound?.deltas.p1).toBe(0); // 東は和了していない
+    expect(after.lastRound?.deltas.p3).toBe(0); // 抜け番は関与しない
   });
 
   it("同時ロン時、供託リーチ棒と本場も上家(南)が総取りする", () => {
@@ -216,11 +246,11 @@ describe("engine: 通常打牌に対する頭ハネ(上家取り / spec 2.4・#3
     const hands = { south: WAIT_3P_A, west: WAIT_3P_B };
 
     const plain = discardRonTile(
-      armDiscard({ seed: 3118, humanSeat: "east", hands }),
+      armDiscard({ seed: SEED_EAST_DISCARDS, humanSeat: "east", hands }),
     );
     const withPot = discardRonTile(
       armDiscard({
-        seed: 3118,
+        seed: SEED_EAST_DISCARDS,
         humanSeat: "east",
         hands,
         riichiSticks: sticks,
@@ -264,9 +294,9 @@ describe("engine: 通常打牌に対する頭ハネ(上家取り / spec 2.4・#3
       hand.riichiMiss[seat] = false;
       hand.tempMiss[seat] = false;
     }
-    hand.hands.east = parseTiles(DISCARDER_HAND);
-    hand.hands.south = parseTiles(WAIT_3P_A);
-    hand.hands.west = parseTiles(WAIT_3P_B);
+    hand.hands.east = expectConcealed13(DISCARDER_HAND);
+    hand.hands.south = expectConcealed13(WAIT_3P_A);
+    hand.hands.west = expectConcealed13(WAIT_3P_B);
     hand.discards.east = [ronTile]; // 打牌済みの河
     hand.pendingDiscard = { seat: "east", tile: ronTile };
     hand.passedRonSeats = [];
@@ -305,7 +335,9 @@ describe("engine: 通常打牌に対する頭ハネ(上家取り / spec 2.4・#3
     const hand = base.hand;
     if (hand === null) throw new Error("hand should exist");
 
-    const ponTile = parseTile("5z"); // 白(三元牌)= AI の `shouldCallMeld` 対象でもある
+    // 白(三元牌)。ポンを見送るのは自家(南)であり AI の判断は関与しない
+    // (西は 5z を持たないため競合しない)。
+    const ponTile = parseTile("5z");
     for (const seat of ["east", "south", "west"] as SeatKey[]) {
       hand.melds[seat] = [];
       hand.discards[seat] = [];
@@ -313,10 +345,10 @@ describe("engine: 通常打牌に対する頭ハネ(上家取り / spec 2.4・#3
       hand.riichiMiss[seat] = false;
       hand.tempMiss[seat] = false;
     }
-    hand.hands.east = parseTiles(DISCARDER_HAND);
+    hand.hands.east = expectConcealed13(DISCARDER_HAND);
     // 自家(南)は 5z を2枚持ちでポン可能。3p 待ちではないのでロンは提示されない。
-    hand.hands.south = parseTiles("5z 5z 234m 678m 234s 66s 1p");
-    hand.hands.west = parseTiles(NO_WAIT_3P);
+    hand.hands.south = expectConcealed13("5z 5z 234m 678m 234s 66s");
+    hand.hands.west = expectConcealed13(NO_WAIT_3P);
     hand.discards.east = [ponTile];
     hand.pendingDiscard = { seat: "east", tile: ponTile };
     hand.passedRonSeats = [];

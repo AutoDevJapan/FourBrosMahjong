@@ -62,6 +62,8 @@ function armAiPon(seed: number): EngineState {
     hand.melds[seat] = [];
     hand.discards[seat] = [];
     hand.riichi[seat] = false;
+    hand.riichiMiss[seat] = false;
+    hand.tempMiss[seat] = false;
   }
   // 東(自家)は白を1枚ツモっており、それを打つ。
   hand.hands.east = parseTiles("123m 456m 789m 111s 9s");
@@ -119,7 +121,8 @@ describe("engine: ポン直後打牌の手牌枚数(#319 / #303)", () => {
     const ctx = firstCallContext();
     expect(ctx.meldCount).toBe(1);
     // 14 − 3×1 = 11 枚。禁止牌を手牌から削っていたら 10 枚になる(#303 の退行)。
-    expect(ctx.tiles).toHaveLength(14 - 3 * (ctx.meldCount ?? 0));
+    // 期待値は検証対象(`ctx.meldCount`)から計算せずリテラルで置く。
+    expect(ctx.tiles).toHaveLength(11);
   });
 
   it("ポン牌種は forbiddenDiscards で渡され、手牌からは削られない(喰い替え禁止 / #105)", () => {
