@@ -24,7 +24,8 @@ import { createGame, discard, type EngineState, type SeatKey } from "./engine";
  *
  * 大明槓 1,944件のうち **88件 (4.5%) が向聴悪化**、うち **66件はポンならテンパイを
  * 保てた**局面だった(seed 1〜800 では 377件中14件・うち6件)。ガード適用後は大明槓が
- * 1,944→1,858 と悪化件数ぶんだけ減り、ポンが +104 に増える。
+ * 1,944→1,858(−86)と概ね悪化件数ぶん減り、ポンが +104 に増える(before/after で局の
+ * 進行が変わるため seed 対応は取れず、悪化件数 88 とは厳密一致しない)。
  *
  * フィクスチャ方式は `engine.ai-kan-shanten.test.ts` と同じ(`createGame` の初期局面を
  * 上書きし、自家(東)の打牌で AI(南)に鳴かせる)。**牌保存則は成立しない**点も同じで、
@@ -62,7 +63,13 @@ function setSeatWithMelds(
   h.discards[seat] = [];
 }
 
-/** 自家(東)が `drawnTile` を打つ直前の局面を作る。 */
+/**
+ * 自家(東)が `drawnTile` を打つ直前の局面を作る。
+ *
+ * 西も散らばり手で固定する。ロン判定ループは鳴きループより**先に全席を走る**ため、
+ * 西が配牌のままだと打牌をロンできてしまい `settleWin` が先に返って、テストが
+ * 「鳴きに到達しなかった」という無関係の理由で落ちうる(seed 依存の暗黙前提)。
+ */
 function armEastDiscard(seed: number, drawnTile: string): EngineState {
   const s = createGame({ seed });
   const hand = s.hand;
@@ -70,6 +77,9 @@ function armEastDiscard(seed: number, drawnTile: string): EngineState {
   hand.hands.east = parseTiles(EAST_JUNK_13);
   hand.melds.east = [];
   hand.discards.east = [];
+  hand.hands.west = parseTiles(EAST_JUNK_13);
+  hand.melds.west = [];
+  hand.discards.west = [];
   hand.drawn = parseTile(drawnTile);
   hand.turn = "east";
   return {
@@ -112,29 +122,14 @@ describe("engine: 向聴を悪化させる大明槓はポンへ落とす(#322)",
     // ポン後の打牌まで完了し、テンパイを保っている(7枚 = 13 − 3×2)。
     expect(hand.hands.south).toHaveLength(7);
     expect(shanten(hand.hands.south, 2)).toBe(0);
-  });
-
-  it("ポンへ落とした局面で4枚目が門前に残る(#325 が扱う経路の実在)", () => {
-    // #322 で「同種3枚持ちのままポンへ到達する」経路が初めて実在するようになった
-    // (4,000半荘で86件)。その結果4枚目が門前に残る。
+    // 4枚目は門前に残っている(= ポンが3枚しか消費していない)。#322 で「同種3枚持ちの
+    // ままポンへ到達する」経路が初めて実在するようになったことを示す(#325 が扱う経路)。
     //
-    // ただし `applyAiCall` の `forbiddenDiscards` は**依然として到達不能**であり、
-    // #325 の「喰い替えを禁じる」テストは書けない(修正前コードでも緑になる):
-    // ポンへ落とすのは「4枚目を切った形より厳密に良い打牌が存在する」場合に限られ、
-    // `chooseDiscard` は向聴を最優先するので必ずその牌を選ぶため。実際
-    // `forbiddenDiscards` を空にするミューテーションを掛けても本テストは落ちない。
-    // ここで検証するのは喰い替え防止ではなく、**経路が実在すること**そのもの。
-    const state = armEastDiscard(1, "5s");
-    setSeatWithMelds(state, "south", "5s 5s 5s 4s 6s 1p 2p 3p 9m 1z", [
-      whitePon(),
-    ]);
-
-    const after = discard(state, parseTile("5s"));
-
-    const hand = after.hand;
-    if (hand === null) throw new Error("hand should exist");
-    expect(hand.melds.south[1].type).toBe("pon");
-    // 4枚目は門前に残っている(= ポンが3枚しか消費していない)。
+    // ただし `applyAiCall` の `forbiddenDiscards` は**依然として到達不能**で、#325 の
+    // 「喰い替えを禁じる」テストは書けない(修正前コードでも緑になる): ポンへ落とすのは
+    // 「4枚目を切った形より厳密に良い打牌が存在する」場合に限られ、`chooseDiscard` は
+    // 向聴を最優先するので必ずその牌を選ぶため。実際 `forbiddenDiscards` を空にする
+    // ミューテーションを掛けても本テストは落ちない。
     expect(
       hand.hands.south.filter((t) => sameKind(t, parseTile("5s"))),
     ).toHaveLength(1);

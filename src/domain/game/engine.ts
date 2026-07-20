@@ -1224,9 +1224,9 @@ function kanKeepsShanten(
   let basePool = pool;
   let baseMelds = meldCount;
   if (kind === "daiminkan") {
-    const pon = takeKind(pool, tile, 3);
-    if (pon.taken.length < 3) return false;
-    basePool = pon.rest;
+    // ポン後の手牌 = 4枚のうち3枚を面子へ送り、4枚目を手牌に残した形。
+    // `shanten` は赤フラグを見ないため、どの1枚を残すかは結果に影響しない。
+    basePool = [...rest, taken[3]];
     baseMelds = meldCount + 1;
   }
 
@@ -1546,6 +1546,10 @@ function resolveDiscard(state: EngineState): EngineState {
     // 「ポンする」なので、4枚目を手牌に残せるぶんポンが優越しうる。
     const useKan =
       canKan &&
+      // `!canPon` は防御的(到達不能)。`canCallMeldOnDiscard` は `need` 以外のガード
+      // (`isDiscarder` / `inRiichi` / `haitei`)が同一なので `canKan` ⇒ `canPon` が
+      // 恒真であり、「ポン不可でカン可」の局面は存在しない。落とし先が無いまま
+      // カンを見送る事故を防ぐために残している。
       (!canPon ||
         kanKeepsShanten(
           [...hand.hands[candidate], tile],
