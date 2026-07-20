@@ -59,7 +59,7 @@ Tailwind v4 preflight は `ul { list-style: none }` を全リストへ適用す�
 - コンポーネントテストでは `toHaveAttribute("role", "list")` で明示を回帰検証する。role クエリ(`getByRole("list")`)は暗黙ロールでも通るため、明示の欠落を検出できない
 - **新規リスト追加時の運用**: アクセシブル名を持つ `<ul>`/`<ol>` を新設したら、同じコミットで `role="list"` の明示と上記の回帰テストまでを揃える。`/history`(#293)は本規約の策定(#270)より後発だったため適用が漏れ、#313 で追補している
 
-適用済み: `DoraIndicator`(#261 / #269)、`Melds`・`Discards`・`Hand`(閲覧専用リスト)・`WinDetails`(和了形/成立役/支払い内訳)(#270)、`MatchHistoryList`(戦績一覧 / #313)。。
+適用済み: `DoraIndicator`(#261 / #269)、`Melds`・`Discards`・`Hand`(閲覧専用リスト)・`WinDetails`(和了形/成立役/支払い内訳)(#270)、`MatchHistoryList`(戦績一覧 / #313)。
 
 ## 5.3 レスポンシブ方針
 

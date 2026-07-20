@@ -11,7 +11,7 @@
  */
 import { fireEvent, render, screen } from "@testing-library/react";
 import { useSyncExternalStore } from "react";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { walkToGameEnd } from "./finishedGameFixture";
 import type { GameAction } from "./gamePersistence";
 import { GameProvider, useGame } from "./GameProvider";
@@ -136,8 +136,6 @@ afterEach(() => {
   }
   window.sessionStorage.clear();
   window.localStorage.clear();
-  // スパイの復元をテスト本体末尾に置くと、手前の expect が落ちた際に次のテストへ漏れる。
-  vi.restoreAllMocks();
 });
 
 describe("GameProvider match history recording (#293)", () => {
@@ -241,7 +239,10 @@ describe("GameProvider match history recording (#293)", () => {
 
     // GameProvider の**描画直後**(効果が走る前)の観測値。ここが 1 になるのは
     // `useState` の遅延初期化から追記した場合 = 描画フェーズの副作用(#310 の回帰)。
-    expect(observed).toEqual([0]);
+    // 検証したいのは「描画フェーズの観測値がすべて 0」であって描画回数ではないため、
+    // Strict Mode 等で描画が複数回になっても壊れない形で書く。
+    expect(observed.length).toBeGreaterThan(0);
+    expect(observed.every((count) => count === 0)).toBe(true);
     // 復元経路の追記はマウント効果で行われ、購読者へも届く。
     expect(screen.getByTestId("subscribed-count")).toHaveTextContent("1");
     expect(loadHistory(window.localStorage)).toHaveLength(1);

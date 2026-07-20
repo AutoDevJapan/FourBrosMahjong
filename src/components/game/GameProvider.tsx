@@ -239,9 +239,9 @@ export function GameProvider({ children, initialGame }: GameProviderProps) {
   const initialSessionRef = useRef<typeof session | null>(session);
   useEffect(() => {
     const initial = initialSessionRef.current;
-    // 初回だけ使う参照なので、使い終えたら手放す。初期半荘の Wall/RNG を抱え続けずに済み、
-    // Strict Mode の効果2回実行でも2回目は早期 return になる(重複追記は
-    // `appendHistory` の seed 重複排除でも防がれるため、いずれにせよ二重保存はしない)。
+    // 初回だけ使う参照なので、使い終えたら手放す。これにより最初の遷移後は初期半荘の
+    // Wall/RNG が残らず、Strict Mode の効果2回実行でも2回目は早期 return になる
+    // (重複追記は `appendHistory` の seed 重複排除でも防がれるため二重保存はしない)。
     initialSessionRef.current = null;
     if (initial === null || initial.journal === null) return;
     // 新規半荘は phase が gameEnd でないため `recordFinishedGame` 側で no-op になる。
