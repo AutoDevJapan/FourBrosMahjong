@@ -113,6 +113,36 @@ describe("MatchHistoryList (#293)", () => {
     ).toBeInTheDocument();
   });
 
+  it("破損データは空状態で描画し、次回以降のために削除する(#302)", async () => {
+    window.localStorage.setItem(
+      MATCH_HISTORY_KEY,
+      '{"version":1,"entries":[{}]}',
+    );
+
+    render(<MatchHistoryList />);
+
+    expect(
+      await screen.findByText(/保存された戦績はまだありません/),
+    ).toBeInTheDocument();
+    // 削除は描画中(getSnapshot)ではなく購読(効果)側で行われる。
+    expect(window.localStorage.getItem(MATCH_HISTORY_KEY)).toBeNull();
+  });
+
+  it("別タブでの保存変更を storage イベントで取り込む(#302)", async () => {
+    render(<MatchHistoryList />);
+    expect(
+      await screen.findByText(/保存された戦績はまだありません/),
+    ).toBeInTheDocument();
+
+    // 別タブが書き込んだ状況を再現する(jsdom は storage イベントを自動発火しない)。
+    appendHistory(window.localStorage, entry(9, 1_753_200_000_000, "二郎"));
+    fireEvent(window, new StorageEvent("storage", { key: MATCH_HISTORY_KEY }));
+
+    const list = screen.getByRole("list", { name: "保存された半荘結果" });
+    expect(list.querySelectorAll(":scope > li")).toHaveLength(1);
+    expect(list).toHaveTextContent("1位 二郎");
+  });
+
   it("全件削除後はフォーカスを空状態へ移し、bodyへ落とさない", async () => {
     appendHistory(window.localStorage, entry(1, 1_753_000_000_000));
 

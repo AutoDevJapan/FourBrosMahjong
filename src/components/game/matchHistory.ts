@@ -9,6 +9,7 @@
  * `sessionStorage` のジャーナル(`gamePersistence.ts`)と同様に、読み込み時は
  * 形状を厳密検証し、件数・容量に上限を設けて巨大入力や破損データから防御する。
  */
+import { localStorageOrNull } from "@/components/common/browserStorage";
 import { hasOnlyKeys } from "./gamePersistence";
 
 /** `localStorage` の保存キー。形式変更時は version を上げて別キーにする。 */
@@ -212,5 +213,83 @@ export function clearHistory(storage: Storage): void {
     storage.removeItem(MATCH_HISTORY_KEY);
   } catch {
     // 消去不可(Storage 無効等)は黙って無視する。
+  } finally {
+    notifySubscribers();
   }
+}
+
+// ---------------------------------------------------------------------------
+// 外部ストア購読(`useSyncExternalStore` 用) — issue #302
+//
+// `localStorage` は React の外にある可変ストアなので、描画中(`useMemo`)に読むのでは
+// なく `useSyncExternalStore` で購読する(`playerNames.ts` / `ThemeToggle` と同じ方式)。
+//
+// `getSnapshot` は React が「いつ・何度呼んでもよい」純粋関数でなければならないため、
+// **破損データの削除(`loadHistory` の `removeItem`)は行わない**。削除は描画後に走る
+// `subscribe`(= `useSyncExternalStore` の効果)側の責務とする。
+// ---------------------------------------------------------------------------
+
+const subscribers = new Set<() => void>();
+/** 空の結果は常に同一参照で返す(`getSnapshot` の参照安定性 = 無限再描画の防止)。 */
+const EMPTY_HISTORY: readonly MatchHistoryEntry[] = Object.freeze([]);
+/** 直近に解析した保存文字列と、その解析結果(同値なら同一参照を返すためのキャッシュ)。 */
+let cachedRaw: string | null = null;
+let cachedEntries: readonly MatchHistoryEntry[] = EMPTY_HISTORY;
+
+function notifySubscribers(): void {
+  for (const callback of subscribers) callback();
+}
+
+/**
+ * `localStorage` の変更(このタブの保存・削除、別タブの `storage` イベント)を購読する。
+ *
+ * 購読開始時に一度だけ `loadHistory` を通し、破損データが残っていれば次回以降のために
+ * 削除する(描画中ではなく効果として実行される)。
+ */
+export function subscribeHistory(callback: () => void): () => void {
+  subscribers.add(callback);
+  const storage = localStorageOrNull();
+  if (storage !== null) loadHistory(storage);
+  const onStorage = (event: StorageEvent) => {
+    if (event.key === MATCH_HISTORY_KEY || event.key === null) {
+      notifySubscribers();
+    }
+  };
+  window.addEventListener("storage", onStorage);
+  return () => {
+    subscribers.delete(callback);
+    window.removeEventListener("storage", onStorage);
+  };
+}
+
+/**
+ * 現在の保存値(新しい順)。副作用を持たず、値が変わらない限り同一参照を返す。
+ * 未保存・破損・読み込み不可はいずれも空配列(破損データの削除は `subscribeHistory`)。
+ */
+export function getHistorySnapshot(): readonly MatchHistoryEntry[] {
+  let raw: string | null;
+  try {
+    raw = localStorageOrNull()?.getItem(MATCH_HISTORY_KEY) ?? null;
+  } catch {
+    raw = null;
+  }
+  if (raw === null) {
+    cachedRaw = null;
+    cachedEntries = EMPTY_HISTORY;
+    return EMPTY_HISTORY;
+  }
+  if (raw === cachedRaw) return cachedEntries;
+  cachedRaw = raw;
+  cachedEntries = parseHistory(raw) ?? EMPTY_HISTORY;
+  return cachedEntries;
+}
+
+/**
+ * サーバー描画・初回ハイドレーション時のスナップショット。
+ *
+ * `localStorage` はサーバーでは読めないため `null`(= 読み込み中)を返し、
+ * ハイドレーション後に実値へ切り替える(`ResultPageClient` と同じマウントゲート)。
+ */
+export function getServerHistorySnapshot(): null {
+  return null;
 }
