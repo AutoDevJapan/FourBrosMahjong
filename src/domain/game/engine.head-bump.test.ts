@@ -65,6 +65,10 @@ function armDiscard(params: {
   seed: number;
   humanSeat: SeatKey;
   hands: Partial<Record<SeatKey, string>>;
+  /** 場に残っている供託リーチ棒の本数(既定 0)。 */
+  riichiSticks?: number;
+  /** 本場(既定 0)。 */
+  honba?: number;
 }): EngineState {
   const base = createGame({ seed: params.seed });
   const hand = base.hand;
@@ -89,6 +93,8 @@ function armDiscard(params: {
 
   return {
     ...base,
+    riichiSticks: params.riichiSticks ?? base.riichiSticks,
+    round: { ...base.round, honba: params.honba ?? base.round.honba },
     hand: { ...hand, seating },
     pending: {
       kind: "humanDiscard",
@@ -197,6 +203,49 @@ describe("engine: 通常打牌に対する頭ハネ(上家取り / spec 2.4・#3
     // ronOrder(south) = [west, east] → 西(p2)が上家取り。
     expect(after.lastRound?.winnerId).toBe("p2");
     expect(after.lastRound?.deltas.p1).toBe(0); // 東は和了していない
+  });
+
+  it("同時ロン時、供託リーチ棒と本場も上家(南)が総取りする", () => {
+    // SSOT: `documents/spec/game-flow.md` 2.4「供託・本場 | ダブロン相当時も上家が取得」。
+    // issue #311 が実害に挙げた「供託回収先」を固定する。
+    //
+    // 供託・本場の有無だけを変えた2局面の差分を取ることで、和了点そのものに
+    // 依存せず「増分が誰に乗るか」を直接見る(絶対値の決め打ちを避ける)。
+    const sticks = 2;
+    const honba = 1;
+    const hands = { south: WAIT_3P_A, west: WAIT_3P_B };
+
+    const plain = discardRonTile(
+      armDiscard({ seed: 3118, humanSeat: "east", hands }),
+    );
+    const withPot = discardRonTile(
+      armDiscard({
+        seed: 3118,
+        humanSeat: "east",
+        hands,
+        riichiSticks: sticks,
+        honba,
+      }),
+    );
+
+    // 前提: どちらも南(p1)の頭ハネ和了。
+    expect(plain.lastRound?.winnerId).toBe("p1");
+    expect(withPot.lastRound?.winnerId).toBe("p1");
+
+    const delta = (s: EngineState, id: "p0" | "p1" | "p2") =>
+      s.lastRound?.deltas[id] ?? 0;
+
+    // 供託 2本 = 2,000点 + 本場 1本 = 300点 を、上家取りした南が受け取る。
+    expect(delta(withPot, "p1") - delta(plain, "p1")).toBe(
+      sticks * 1000 + honba * 300,
+    );
+    // 本場分は放銃者(東)が追加で支払う。供託は場からの回収なので放銃者負担ではない。
+    expect(delta(withPot, "p0") - delta(plain, "p0")).toBe(-(honba * 300));
+    // 敗者側(西)には供託も本場も一切回らない。
+    expect(delta(withPot, "p2")).toBe(0);
+    expect(delta(plain, "p2")).toBe(0);
+    // 供託は和了者が回収済み → 場に残らない。
+    expect(withPot.riichiSticks).toBe(0);
   });
 
   it("自家がロンをスルーすると残る下家が横取りする(通常打牌)", () => {
