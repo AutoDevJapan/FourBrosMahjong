@@ -1,5 +1,6 @@
-import { readdirSync, readFileSync, statSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
 /**
@@ -19,28 +20,47 @@ import { describe, expect, it } from "vitest";
  * (light `rgb(29,78,216)` / dark `rgb(96,165,250)`)であることを確認済み。
  */
 
-const SRC = new URL("..", import.meta.url).pathname;
+// `new URL(...).pathname` はパーセントエンコーディングを解かないため、リポジトリパスに
+// 空白や非 ASCII を含むと壊れる。`vitest.config.ts` と同じく fileURLToPath を使う。
+const SRC = fileURLToPath(new URL("..", import.meta.url));
 
 /**
- * `has-[:focus-visible]:outline-*` の既知の例外。
+ * 既知の例外: ファイル単位ではなく**許可するクラス文字列そのもの**を固定する。
  *
  * ThemeToggle はフォーカスを受けるのが内側の `<input type="radio">` である一方、
  * `has-[]` は外側の `<label>` ラッパへ outline を付ける。`<label>` にはグローバル
  * `:focus-visible` がマッチせず競合しないため、この 1 箇所だけは実際に描画される。
  * 結果として input(`--focus-ring` 色)と label(`--foreground` 色)の二重リングになる。
  * 見た目が変わる変更のため #314 では現状維持とし、#327 で扱う。
+ *
+ * ファイル単位で除外すると、同じファイルへ `has-` の付かない真の no-op を書き足しても
+ * 検出できなくなる。そのため許可対象を完全一致の集合として列挙する。
  */
-const KNOWN_EXCEPTIONS = new Set(["components/layout/ThemeToggle.tsx"]);
+const KNOWN_EXCEPTIONS: ReadonlyMap<string, ReadonlySet<string>> = new Map([
+  [
+    "components/layout/ThemeToggle.tsx",
+    new Set([
+      "has-[:focus-visible]:outline",
+      "has-[:focus-visible]:outline-2",
+      "has-[:focus-visible]:outline-offset-2",
+      "has-[:focus-visible]:outline-foreground",
+    ]),
+  ],
+]);
 
 /** src 配下の .ts/.tsx を再帰列挙(テストファイル自身は除く)。 */
 function sourceFiles(dir: string, base = ""): string[] {
   const out: string[] = [];
-  for (const name of readdirSync(dir)) {
-    const abs = join(dir, name);
-    const rel = base ? `${base}/${name}` : name;
-    if (statSync(abs).isDirectory()) {
-      out.push(...sourceFiles(abs, rel));
-    } else if (/\.tsx?$/.test(name) && !/\.(test|spec)\.tsx?$/.test(name)) {
+  // withFileTypes はシンボリックリンクを追わないため、リンクループで無限再帰しない。
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    const rel = base ? `${base}/${entry.name}` : entry.name;
+    if (entry.isDirectory()) {
+      out.push(...sourceFiles(join(dir, entry.name), rel));
+    } else if (
+      entry.isFile() &&
+      /\.tsx?$/.test(entry.name) &&
+      !/\.(test|spec)\.tsx?$/.test(entry.name)
+    ) {
       out.push(rel);
     }
   }
@@ -75,12 +95,16 @@ describe("フォーカスリングの単一起点(#314)", () => {
   it("コンポーネントは focus-visible:outline-* を指定しない(no-op のデッドコード)", () => {
     const offenders: string[] = [];
     for (const rel of sourceFiles(SRC)) {
-      if (KNOWN_EXCEPTIONS.has(rel)) continue;
+      const allowed = KNOWN_EXCEPTIONS.get(rel);
       const text = readFileSync(join(SRC, rel), "utf8");
-      // `focus-visible:outline…` / `has-[:focus-visible]:outline…` の両形を検出する。
+      // 検出する形:
+      //  - `focus-visible:outline…`(`dark:` `md:` `group-` 等との合成も部分一致で拾う)
+      //  - `has-[:focus-visible]:outline…`
+      //  - 任意プロパティ記法 `focus-visible:[outline…:…]`
       for (const m of text.matchAll(
-        /(?:has-\[:)?focus-visible\]?:outline[\w[\]/.-]*/g,
+        /(?:has-\[:)?focus-visible\]?:(?:outline[\w[\]/.-]*|\[outline[\w-]*:[^\]]*\])/g,
       )) {
+        if (allowed?.has(m[0])) continue;
         offenders.push(`${rel}: ${m[0]}`);
       }
     }
