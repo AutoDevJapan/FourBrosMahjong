@@ -115,4 +115,44 @@ describe("フォーカスリングの単一起点(#314)", () => {
         offenders.join("\n"),
     ).toEqual([]);
   });
+
+  it("コンポーネントは focus-visible:ring-* / shadow-* でリングを足さない(二重リングになる)", () => {
+    // `outline-*` と違い `ring-*` / `shadow-*` は **box-shadow** で描画されるため、
+    // グローバル規則の `outline` と競合せず **実際に描画されてしまう**(no-op ではない)。
+    // つまりこちらは「デッドコード」ではなく「二重リングによる単一起点の破壊」であり、
+    // 上のテストの正規表現(outline 系のみ)では捕捉できないため別途禁止する。
+    const offenders: string[] = [];
+    for (const rel of sourceFiles(SRC)) {
+      const text = readFileSync(join(SRC, rel), "utf8");
+      for (const m of text.matchAll(
+        /(?:has-\[:)?focus-visible\]?:(?:ring|shadow)[\w[\]/.-]*/g,
+      )) {
+        offenders.push(`${rel}: ${m[0]}`);
+      }
+    }
+    expect(
+      offenders,
+      `focus-visible:ring-* / shadow-* は box-shadow で描画されるためグローバルの ` +
+        `outline リングと二重になります。リングは --focus-ring に一本化してください。\n` +
+        offenders.join("\n"),
+    ).toEqual([]);
+  });
+
+  it("KNOWN_EXCEPTIONS が陳腐化していない(許可エントリは実在する)", () => {
+    // #327 で ThemeToggle の例外が解消された際、許可エントリの削除漏れを検出する。
+    for (const [rel, classes] of KNOWN_EXCEPTIONS) {
+      const files = sourceFiles(SRC);
+      expect(files, `許可エントリのファイルが存在しない: ${rel}`).toContain(
+        rel,
+      );
+      const text = readFileSync(join(SRC, rel), "utf8");
+      for (const cls of classes) {
+        expect(
+          text,
+          `許可エントリ "${cls}" が ${rel} に存在しません。例外が解消されたなら ` +
+            `KNOWN_EXCEPTIONS から削除してください(#327)。`,
+        ).toContain(cls);
+      }
+    }
+  });
 });
