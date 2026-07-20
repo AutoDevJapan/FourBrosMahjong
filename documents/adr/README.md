@@ -9,6 +9,7 @@
 | # | タイトル | ステータス | 日付 |
 |---|---|---|---|
 | [0001](./0001-deploy-architecture-and-preview-policy.md) | prd デプロイ構成(Vercel フロントエンド + Railway バックエンド)と Vercel Preview 方針 | Accepted | 2026-07-17 |
+| [0002](./0002-ai-policy.md) | AI(他家)方策の管理場所と現行方策(打牌・鳴き・リーチ・カン) | Accepted | 2026-07-21 |
 
 ## 運用方針
 
