@@ -9,7 +9,8 @@
  * スコープ(過剰設計の回避):
  * - 打牌選択に加え、ナシナシで役無しを確定させないための最小限のポン/大明槓判断を扱う。
  *   リーチ判断は含めない。
- * - 向聴/受け入れは自家の見えている情報(自分の14枚)のみで算出する。相手の手牌は覗かない。
+ * - 向聴/受け入れは自家の見えている情報(自分の門前牌と副露数)のみで算出する。
+ *   相手の手牌は覗かない。
  * - サンマの実在牌種(萬子1・9のみ / 字牌 東南西北白發中)に閉じて受け入れを数える
  *   ({@link SANMA_TILE_KINDS})。
  *
@@ -122,10 +123,14 @@ const SHANTEN_MEMO_CAP = 200_000;
 function leafShanten(melds: number, taatsu: number, pairs: number): number {
   let best = Number.POSITIVE_INFINITY;
   const headOptions = pairs >= 1 ? [true, false] : [false];
+  // 標準形は4面子までしか使えない。牌数と副露数が不整合な呼び出し(public な `shanten` に
+  // 過大な `meldCount` を渡した場合など)で5面子以上が合成されても、向聴が -1(和了)を
+  // 下回る不正値にならないよう 4 で頭打ちにする。
+  const effectiveMelds = Math.min(4, melds);
   for (const hasHead of headOptions) {
     const poolForMelds = taatsu + pairs - (hasHead ? 1 : 0);
-    const useful = Math.min(poolForMelds, 4 - melds);
-    const s = 8 - 2 * melds - useful - (hasHead ? 1 : 0);
+    const useful = Math.min(poolForMelds, 4 - effectiveMelds);
+    const s = 8 - 2 * effectiveMelds - useful - (hasHead ? 1 : 0);
     if (s < best) best = s;
   }
   return best;
@@ -543,8 +548,9 @@ export function chooseDiscard(ctx: DiscardContext): Tile {
   //    比較になり打牌選択にほぼ影響しない一方で計算量が跳ね上がるため、そこでは省く
   //    (省略時は打点温存・危険牌回避・外側度で決める)。
   if (best.length > 1 && minShanten <= UKEIRE_SHANTEN_GATE) {
-    for (const c of best)
+    for (const c of best) {
       c.ukeireCopies = ukeire(c.remaining13, meldCount).copies;
+    }
   }
 
   best.sort((a, b) => {

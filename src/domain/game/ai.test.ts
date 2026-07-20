@@ -120,6 +120,18 @@ describe("ai: 副露手の向聴補正(meldCount / #294)", () => {
     expect(shanten(tenpai, -1)).toBe(shanten(tenpai, 0));
     expect(shanten(parseTiles("9m"), 99)).toBe(shanten(parseTiles("9m"), 4));
   });
+
+  it("牌数と副露数が不整合でも向聴は -1(和了)を下回らない", () => {
+    // `leafShanten` の `useful` に下限が無いと `4 − 面子数` が負になり、向聴が -2 以下の
+    // 不正値になる(門前で4面子1雀頭が揃った14枚へさらに副露数を加算した場合など)。
+    // engine 経由では牌数と副露数が常に整合するため到達しないが、public API の防御として固定する。
+    for (let melds = 0; melds <= 4; melds++) {
+      expect(shanten(parseTiles("123m 456p 789s 111z 22z"), melds)).toBe(-1);
+      expect(
+        shanten(parseTiles("123m 456p 22z"), melds),
+      ).toBeGreaterThanOrEqual(-1);
+    }
+  });
 });
 
 describe("ai: 受け入れ(ukeire)", () => {
