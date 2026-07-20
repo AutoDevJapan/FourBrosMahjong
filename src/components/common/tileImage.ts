@@ -84,6 +84,18 @@ const TILE_CATALOG: ReadonlySet<string> = new Set([
 ]);
 
 /**
+ * 同梱牌素材の公開 URL 一覧(伏せ牌用の `Back.svg` を含む)。
+ *
+ * service worker のプリキャッシュ(`src/app/_lib/serviceWorkerScript.ts`)が参照する。
+ * カタログ({@link TILE_CATALOG})を単一の情報源とすることで、素材の追加・削除時に
+ * プリキャッシュ一覧が自動で追随し、実在しないパスのプリキャッシュ(install 失敗要因)を防ぐ。
+ */
+export const TILE_ASSET_URLS: readonly string[] = [
+  ...[...TILE_CATALOG].map((name) => `${TILE_DIR}/${name}.svg`),
+  `${TILE_DIR}/Back.svg`,
+];
+
+/**
  * 赤ドラ素材(色付き `*-Dora`)が実在する牌か = **5筒・5索のみ**。
  *
  * ドメイン不変条件(スペック4 4.4「赤5は5筒・5索に限る」)に一致する唯一の判定。

@@ -22,6 +22,8 @@ test.describe("browser security headers", () => {
       expect(headers["content-security-policy"]).toMatch(
         /script-src 'self' 'nonce-[^']+' 'strict-dynamic'/,
       );
+      // service worker(/sw.js)登録の許可(issue #292)。
+      expect(headers["content-security-policy"]).toContain("worker-src 'self'");
       expect(headers["x-content-type-options"]).toBe("nosniff");
       expect(headers["referrer-policy"]).toBe(
         "strict-origin-when-cross-origin",

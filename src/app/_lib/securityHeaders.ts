@@ -43,6 +43,11 @@ export function contentSecurityPolicy(nonce: string, development: boolean) {
     "font-src 'self' data:",
     "connect-src 'self'",
     "manifest-src 'self'",
+    // service worker(/sw.js)の取得を明示的に許可する。worker-src を省くと
+    // child-src → default-src へフォールバックし、ブラウザによって挙動が変わる
+    // (script-src の 'strict-dynamic' が波及して取得が阻まれる実装もある)。
+    // 明示することで登録経路を CSP 上で確定させる。
+    "worker-src 'self'",
     "object-src 'none'",
     "base-uri 'self'",
     "form-action 'self'",
