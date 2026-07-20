@@ -42,6 +42,9 @@ const DISCARDER_HAND = "1p 1p 9p 9p 1m 1m 9m 9m 1s 1s 9s 9s 5m";
 
 const RON_TILE = "3p";
 
+/** 自家。`discard()` は自家の席の手番でしか通らないため、常に打牌者に据える。 */
+const HUMAN: PlayerId = "p0";
+
 /**
  * 対照ケース(単独ロン)と本命ケース(同時ロン)で同じ seed を使う。
  * 同一の壁牌・ドラのもとで「単独なら和了できる」ことを示して初めて、
@@ -81,7 +84,8 @@ function seatingWithHumanAt(humanSeat: SeatKey): Seating<PlayerId> {
 }
 
 /**
- * 自家(p0)が `humanSeat` に座り、`RON_TILE` を打とうとしている局面を組む。
+ * 与えられた席割り・`round` のもとで、自家(p0)が `humanSeat` から `RON_TILE` を
+ * 打とうとしている局面を組む(`armDiscard` / `armDealerHeadBump` の共通コア)。
  *
  * `hands` で各席の手牌を指定する。自家の席は打牌者なので `DISCARDER_HAND` 固定。
  *
@@ -94,7 +98,7 @@ function armDiscardWith(params: {
   /** この局の `round`(席割りの導出元と一致させる責任は呼び出し側にある)。 */
   round: EngineState["round"];
   seating: Seating<PlayerId>;
-  /** 自家(p0)の席 = 打牌者。 */
+  /** 自家(p0)の席 = 打牌者。`seating` と整合していることをここで検査する。 */
   humanSeat: SeatKey;
   hands: Partial<Record<SeatKey, string>>;
   riichiSticks?: number;
@@ -103,6 +107,12 @@ function armDiscardWith(params: {
   const hand = base.hand;
   if (hand === null)
     throw new Error("hand should exist right after createGame");
+  // `discard()` は自家の席の手番でしか通らない。ここが食い違うと打牌が no-op になり、
+  // 「和了しなかった」ことを頭ハネの検証と誤認しかねないため、フィクスチャ側で弾く。
+  if (seating[humanSeat] !== HUMAN)
+    throw new Error(
+      `打牌者の席には自家(${HUMAN})が座っている必要がある: ${humanSeat} = ${seating[humanSeat]}`,
+    );
 
   for (const seat of SEATED_SEATS) {
     const notation =
@@ -135,6 +145,16 @@ function armDiscardWith(params: {
   };
 }
 
+/**
+ * 自家(p0)が `humanSeat` に座り、`RON_TILE` を打とうとしている局面を組む。
+ *
+ * 席割りは `seatingWithHumanAt`(抜け番を p3 に固定した便宜的な割り当て)で与える。
+ * **円環から導出できる席割りとは限らない**ため、局進行(連荘・親流れ)を見るテストでは
+ * なく、ロン判定と頭ハネ順の検証にのみ使うこと(局進行は `armDealerHeadBump` を使う)。
+ *
+ * ⚠️ `armDiscardWith` と同じく**山からは牌を差し引かない**。残り枚数に依存するテスト
+ * (海底・受け入れ枚数など)へ流用しないこと。
+ */
 function armDiscard(params: {
   seed: number;
   humanSeat: SeatKey;
@@ -431,9 +451,6 @@ describe("engine: 通常打牌に対する頭ハネ(上家取り / spec 2.4・#3
  * ここでは席割りを必ず `seatingOf(round)` から導出し、両者の対応を構造的に保証する。
  */
 describe("engine: 頭ハネと親の連荘・親流れの交差(spec 2.5〜2.7・#326)", () => {
-  /** 自家。`discard()` は自家の席の手番でしか通らないため、常に打牌者に据える。 */
-  const HUMAN: PlayerId = "p0";
-
   /** `nextRoundState` を非 null として取り出す(半荘継続を前提とするケース専用)。 */
   function expectNextRound(state: EngineState) {
     const next = state.nextRoundState;
