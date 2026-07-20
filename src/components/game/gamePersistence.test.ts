@@ -8,6 +8,7 @@ import {
   declareRiichi,
   declareRon,
   declareTsumo,
+  DEFAULT_NAMES,
   discard,
   passRon,
   proceedToNextRound,
@@ -25,6 +26,7 @@ import {
   replayJournal,
   saveJournal,
 } from "./gamePersistence";
+import { MAX_PLAYER_NAME_LENGTH } from "@/components/settings/playerNames";
 import { selectView } from "./gameView";
 
 class MemoryStorage implements Storage {
@@ -51,7 +53,12 @@ class MemoryStorage implements Storage {
 
 describe("game persistence journal", () => {
   it("seedと操作列からWall/RNGを含む同一局面を復元する", () => {
-    const start: GameJournal = { version: 1, seed: 0, actions: [] };
+    const start: GameJournal = {
+      version: 2,
+      seed: 0,
+      names: DEFAULT_NAMES,
+      actions: [],
+    };
     const initial = replayJournal(start);
     if (initial.hand?.drawn === null || initial.hand?.drawn === undefined) {
       throw new Error("drawn tile missing");
@@ -151,7 +158,9 @@ describe("game persistence journal", () => {
         `seed=${seed}: ${target} に到達`,
       ).toBe(true);
       expect(
-        selectView(replayJournal({ version: 1, seed, actions })),
+        selectView(
+          replayJournal({ version: 2, seed, names: DEFAULT_NAMES, actions }),
+        ),
         `seed=${seed}`,
       ).toEqual(selectView(direct));
     }
@@ -175,7 +184,12 @@ describe("game persistence journal", () => {
 
   it("保存して読み戻せる", () => {
     const storage = new MemoryStorage();
-    const journal: GameJournal = { version: 1, seed: 42, actions: [] };
+    const journal: GameJournal = {
+      version: 2,
+      seed: 42,
+      names: DEFAULT_NAMES,
+      actions: [],
+    };
     saveJournal(storage, journal);
     expect(loadJournal(storage)).toEqual(journal);
   });
@@ -191,8 +205,9 @@ describe("game persistence journal", () => {
     { label: "playing中の次局開始", action: { type: "nextRound" } },
   ] as const)("局面上不正な操作を破損として拒否する: $label", ({ action }) => {
     const journal: GameJournal = {
-      version: 1,
+      version: 2,
       seed: 0,
+      names: DEFAULT_NAMES,
       actions: [action],
     };
 
@@ -204,8 +219,13 @@ describe("game persistence journal", () => {
   it.each([
     "not-json",
     JSON.stringify({ version: 0, seed: 1, actions: [] }),
-    JSON.stringify({ version: 1, seed: -1, actions: [] }),
-    JSON.stringify({ version: 1, seed: 1, actions: [{ type: "discard" }] }),
+    JSON.stringify({ version: 2, seed: -1, names: DEFAULT_NAMES, actions: [] }),
+    JSON.stringify({
+      version: 2,
+      seed: 1,
+      names: DEFAULT_NAMES,
+      actions: [{ type: "discard" }],
+    }),
   ])("破損・旧versionを拒否する: %s", (raw) => {
     expect(parseJournal(raw)).toBeNull();
   });
@@ -224,8 +244,9 @@ describe("game persistence journal", () => {
     expect(
       parseJournal(
         JSON.stringify({
-          version: 1,
+          version: 2,
           seed: 1,
+          names: DEFAULT_NAMES,
           actions: Array(MAX_JOURNAL_ACTIONS).fill(action),
         }),
       ),
@@ -233,8 +254,9 @@ describe("game persistence journal", () => {
     expect(
       parseJournal(
         JSON.stringify({
-          version: 1,
+          version: 2,
           seed: 1,
+          names: DEFAULT_NAMES,
           actions: Array(MAX_JOURNAL_ACTIONS + 1).fill(action),
         }),
       ),
@@ -250,16 +272,24 @@ describe("game persistence journal", () => {
   });
 
   it.each([
-    { version: 1, seed: 0x1_0000_0000, actions: [] },
-    { version: 1, seed: 1, actions: [], extra: "payload" },
+    { version: 2, seed: 0x1_0000_0000, names: DEFAULT_NAMES, actions: [] },
     {
-      version: 1,
+      version: 2,
       seed: 1,
+      names: DEFAULT_NAMES,
+      actions: [],
+      extra: "payload",
+    },
+    {
+      version: 2,
+      seed: 1,
+      names: DEFAULT_NAMES,
       actions: [{ type: "tsumogiri", extra: "payload" }],
     },
     {
-      version: 1,
+      version: 2,
       seed: 1,
+      names: DEFAULT_NAMES,
       actions: [
         {
           type: "discard",
@@ -268,8 +298,9 @@ describe("game persistence journal", () => {
       ],
     },
     {
-      version: 1,
+      version: 2,
       seed: 1,
+      names: DEFAULT_NAMES,
       actions: [
         {
           type: "discard",
@@ -278,8 +309,9 @@ describe("game persistence journal", () => {
       ],
     },
     {
-      version: 1,
+      version: 2,
       seed: 1,
+      names: DEFAULT_NAMES,
       actions: [
         {
           type: "discard",
@@ -289,6 +321,34 @@ describe("game persistence journal", () => {
     },
   ])("domain外または余剰payloadを拒否する: %#", (journal) => {
     expect(parseJournal(JSON.stringify(journal))).toBeNull();
+  });
+
+  it.each([
+    { label: "namesキーが無い(v1の記録)", names: undefined, version: 1 },
+    { label: "namesが配列でない", names: "粗品" },
+    { label: "names要素数が3", names: ["A", "B", "C"] },
+    { label: "names要素数が5", names: ["A", "B", "C", "D", "E"] },
+    { label: "names要素が文字列でない", names: ["A", 1, "C", "D"] },
+    { label: "names要素が空文字", names: ["", "B", "C", "D"] },
+    {
+      label: "names要素が上限文字数超過",
+      names: ["あ".repeat(MAX_PLAYER_NAME_LENGTH + 1), "B", "C", "D"],
+    },
+  ])("不正な対局者名の記録を拒否する: $label (#291)", ({ names, version }) => {
+    const journal = { version: version ?? 2, seed: 1, actions: [], names };
+    if (names === undefined) delete (journal as { names?: unknown }).names;
+
+    expect(parseJournal(JSON.stringify(journal))).toBeNull();
+  });
+
+  it("設定した対局者名を保持して読み戻す (#291)", () => {
+    const names = ["自分", "龍二", "下ちゃん", "翔生"] as const;
+    const journal: GameJournal = { version: 2, seed: 7, names, actions: [] };
+
+    expect(parseJournal(JSON.stringify(journal))).toEqual(journal);
+    expect(replayJournal(journal).players.map((p) => p.name)).toEqual([
+      ...names,
+    ]);
   });
 
   it("破損記録はload時に削除する", () => {

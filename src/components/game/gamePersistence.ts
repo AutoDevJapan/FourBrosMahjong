@@ -13,10 +13,15 @@ import {
   proceedToNextRound,
   tsumogiri,
 } from "@/domain/game/engine";
+import type { PlayerNames } from "@/domain/game/engine";
+import { MAX_PLAYER_NAME_LENGTH } from "@/components/settings/playerNames";
 import type { Tile } from "@/domain/tiles/tile";
 
 const GAME_SESSION_KEY = "four-bros-mahjong.game.v1";
-const VERSION = 1;
+// v2 で `names`(対局者名 / issue #291)を追加。半荘の表示名は開始時に固定したいので
+// 設定側(`localStorage`)を再生時に読み直さず、ジャーナル自身に保存する。
+// v1 の記録は `parseJournal` が拒否し、呼び出し元が新規対局へフォールバックする。
+const VERSION = 2;
 // engine は最大32局で終了し、完走fixtureも5,000遷移を安全ガードにしている。
 // これを超える履歴は正規の対局から生成されないものとして、再生前に拒否する。
 export const MAX_JOURNAL_ACTIONS = 5_000;
@@ -38,8 +43,10 @@ export type GameAction =
   | { readonly type: "nextRound" };
 
 export interface GameJournal {
-  readonly version: 1;
+  readonly version: 2;
   readonly seed: number;
+  /** この半荘の対局者名(index 0 = 自家)。開始時に固定し、以後の設定変更では変わらない。 */
+  readonly names: PlayerNames;
   readonly actions: readonly GameAction[];
 }
 
@@ -98,6 +105,26 @@ function isAction(value: unknown): value is GameAction {
   );
 }
 
+/**
+ * 保存された対局者名の妥当性を検証する。
+ *
+ * 表示名は盤面・結果画面・読み上げへそのまま描画されるため、`sessionStorage` を手で書き換えた
+ * 巨大文字列や型不一致を再生前に拒否する(React は文字列を自動エスケープするので XSS ではなく、
+ * レイアウト破壊と描画コストの防止が目的)。
+ */
+function isNames(value: unknown): value is PlayerNames {
+  return (
+    Array.isArray(value) &&
+    value.length === 4 &&
+    value.every(
+      (name) =>
+        typeof name === "string" &&
+        name.length > 0 &&
+        name.length <= MAX_PLAYER_NAME_LENGTH,
+    )
+  );
+}
+
 export function parseJournal(raw: string): GameJournal | null {
   if (raw.length * 2 > MAX_JOURNAL_BYTES) return null;
   try {
@@ -105,7 +132,8 @@ export function parseJournal(raw: string): GameJournal | null {
     if (
       !value ||
       typeof value !== "object" ||
-      !hasOnlyKeys(value, ["version", "seed", "actions"]) ||
+      !hasOnlyKeys(value, ["version", "seed", "names", "actions"]) ||
+      !isNames(value.names) ||
       value.version !== VERSION ||
       !Number.isSafeInteger(value.seed) ||
       Number(value.seed) < 0 ||
@@ -153,7 +181,7 @@ export function applyGameAction(
 }
 
 export function replayJournal(journal: GameJournal): EngineState {
-  let state = createGame({ seed: journal.seed });
+  let state = createGame({ seed: journal.seed, names: journal.names });
   for (const [index, action] of journal.actions.entries()) {
     const next = applyGameAction(state, action);
     // engine の公開操作は不正な局面・牌を例外ではなく同一 state の no-op で拒否する。
