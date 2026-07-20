@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { computeScore } from "./points";
 import {
   OKA,
+  type PlayerId,
   type PlayerPoints,
   RETURN_POINTS,
   SoshiiLedger,
@@ -313,7 +314,7 @@ describe("ranking — ソシー残高降順(同点は登録順)", () => {
  * `ranking()`(ソシー残高降順)と `applyUma`(最終持ち点降順)の**基準一致**を固定する。
  *
  * 2つの基準が併存するのは**仕様どおり**で、統合してはならない:
- * - 最終順位・勝敗は「ソシー個人累計」で決定する(`documents/spec/setup-and-tiles.md` §、
+ * - 最終順位・勝敗は「ソシー個人累計」で決定する(`documents/spec/setup-and-tiles.md` §1.1、
  *   `documents/spec/README.md`)。結果画面に出る `rank` はこちら(engine `endGame` は
  *   `ledger.ranking()` から `rank` を作る)。
  * - ②順位ウマは「4兄弟全員をその時点の**持ち点**で順位付け」して割り当てる
@@ -324,22 +325,37 @@ describe("ranking — ソシー残高降順(同点は登録順)", () => {
  * 残高差は最小でも「ウマ/オカの最小隣接差 − 祝儀の最大相対スイング」になる。
  * 現行定数では 5,000 − 4,000 = 1,000 > 0 のため順位は必ず一致する。
  *
- * このマージンは `UMA` / `OKA` / `YAKUMAN_BONUS` を調整した瞬間に無言で破綻し、
+ * このマージンは `UMA` / {@link YAKUMAN_BONUS} を調整した瞬間に無言で破綻し、
  * 「表示順位は2位なのにウマは1位分」という不整合を生む。以下のテストは定数から
  * マージンを算出して符号を検証するため、定数を触れば必ず落ちる。
+ *
+ * 前提: 一致が言えるのは **`applyRawScore` と `applyUma` を両方適用した後**(半荘終了時)
+ * の残高についてであり、祝儀だけ反映された局中の `ranking()` はこの限りではない。
+ * また `applyBonus` に渡す `loserIds` が「和了者以外の3兄弟・重複なし」であること
+ * (engine `settleWin` が保証)も前提に含む。
  */
 describe("ranking と applyUma の基準一致(暗黙不変条件の固定)", () => {
+  // 他の applyBonus 系 describe と同じく、実際の点数計算から役満区分を得る。
+  const trueYakuman = computeScore({ han: 0, yakumanMultiplier: 1 }, false);
+
   /** 順位 r のプレイヤーが受け取るウマ+オカ。 */
   const rankBonus = (rank: number): number =>
     UMA[rank] + (rank === 0 ? OKA : 0);
 
-  /** 役満祝儀 1 件による2人間の最大相対スイング(和了者 +3B と支払者 −B の差)。 */
-  const MAX_BONUS_SWING = YAKUMAN_BONUS * 4;
+  /**
+   * 役満祝儀 1 件による2人間の最大相対スイング。
+   * 和了者 `+B × (人数−1)` と支払者 `−B` の差 = `B × 人数`。係数は人数由来であり
+   * 固定値ではないため、人数(`IDS.length`)から導出する。
+   */
+  const MAX_BONUS_SWING = YAKUMAN_BONUS * IDS.length;
 
   it("ウマ/オカの隣接差が単調減少で、最小隣接差が祝儀スイングを上回る", () => {
     const gaps = [0, 1, 2].map((r) => rankBonus(r) - rankBonus(r + 1));
     // 上位ほど多く貰う(そもそも順位付けの体を成す)。
     expect(gaps.every((g) => g > 0)).toBe(true);
+    // オカが1位へ偏る構造上、隣接差は上位ほど大きい(単調減少)。
+    expect(gaps[0]).toBeGreaterThan(gaps[1]);
+    expect(gaps[1]).toBeGreaterThan(gaps[2]);
     const minGap = Math.min(...gaps);
     const margin = minGap - MAX_BONUS_SWING;
     expect(margin).toBeGreaterThan(0);
@@ -354,12 +370,17 @@ describe("ranking と applyUma の基準一致(暗黙不変条件の固定)", ()
     };
   }
 
-  /** 合計 140,000(35,000 × 4)を 100 点単位で4人へ分配する。 */
+  /**
+   * 合計 140,000(35,000 × 4)を 100 点単位で4人へ分配する。
+   *
+   * 生成器の自己検査は SUT の検証ではないため `expect` ではなく `throw` にする
+   * (テスト失敗時に「settlement が壊れた」と誤読させない)。
+   */
   function randomFinalPoints(
     rand: () => number,
-    ids: readonly string[],
+    ids: readonly PlayerId[],
   ): PlayerPoints[] {
-    const TOTAL_UNITS = (STARTING_POINTS * 4) / 100;
+    const TOTAL_UNITS = (STARTING_POINTS * IDS.length) / 100;
     const cuts = [0, 1, 2]
       .map(() => Math.floor(rand() * (TOTAL_UNITS + 1)))
       .sort((a, b) => a - b);
@@ -370,14 +391,27 @@ describe("ranking と applyUma の基準一致(暗黙不変条件の固定)", ()
       TOTAL_UNITS - cuts[2],
     ];
     const points = units.map((u) => u * 100);
-    expect(points.reduce((a, b) => a + b, 0)).toBe(STARTING_POINTS * 4);
+    const total = points.reduce((a, b) => a + b, 0);
+    if (
+      points.length !== IDS.length ||
+      total !== STARTING_POINTS * IDS.length
+    ) {
+      throw new Error(
+        `generator bug: ${points.length} players summing to ${total}`,
+      );
+    }
     return ids.map((playerId, i) => ({ playerId, points: points[i] }));
   }
 
   /** 祝儀の適用パターン: 無し / 各プレイヤーが役満を和了(他3人が支払い)。 */
-  const bonusCases: readonly (string | null)[] = [null, ...IDS];
+  const bonusCases: readonly (PlayerId | null)[] = [null, ...IDS];
 
-  function umaOrder(finalPoints: readonly PlayerPoints[]): string[] {
+  /**
+   * 期待する順位基準「持ち点降順・同点は `finalPoints` の配列順」を、実装とは独立に
+   * テスト側で組み立てる。`applyUma` の実装をなぞる形になるが、これは**基準そのもの**
+   * (スペック3 3.3 ②)を固定するためのオラクルで、実装が基準を変えたら落ちる。
+   */
+  function expectedUmaOrder(finalPoints: readonly PlayerPoints[]): PlayerId[] {
     return finalPoints
       .map((p, index) => ({ p, index }))
       .sort((a, b) => b.p.points - a.p.points || a.index - b.index)
@@ -386,12 +420,16 @@ describe("ranking と applyUma の基準一致(暗黙不変条件の固定)", ()
 
   function checkAgreement(finalPoints: readonly PlayerPoints[]): void {
     for (const winner of bonusCases) {
+      // 失敗時にどの持ち点・どの祝儀パターンで落ちたか特定できるようにする。
+      const label = `points=${finalPoints
+        .map((p) => `${p.playerId}:${p.points}`)
+        .join(",")} bonusWinner=${winner ?? "なし"}`;
       const l = new SoshiiLedger(IDS);
       if (winner !== null) {
         l.applyBonus({
           winnerId: winner,
           loserIds: IDS.filter((id) => id !== winner),
-          score: { isTrueYakuman: true, isCountedYakuman: false },
+          score: trueYakuman,
         });
       }
       const breakdown = l.applyUma(finalPoints);
@@ -399,9 +437,9 @@ describe("ranking と applyUma の基準一致(暗黙不変条件の固定)", ()
       const byUma = [...breakdown]
         .sort((a, b) => a.rank - b.rank)
         .map((b) => b.playerId);
-      expect(byUma).toEqual(umaOrder(finalPoints));
+      expect(byUma, label).toEqual(expectedUmaOrder(finalPoints));
       // 本丸: 表示順位(ソシー残高降順)がウマの順位付けと完全一致する。
-      expect(l.ranking()).toEqual(byUma);
+      expect(l.ranking(), label).toEqual(byUma);
     }
   }
 
@@ -432,7 +470,6 @@ describe("ranking と applyUma の基準一致(暗黙不変条件の固定)", ()
       ],
     ];
     for (const finalPoints of edgeCases) {
-      expect(finalPoints).toHaveLength(4);
       checkAgreement(finalPoints);
     }
   });
