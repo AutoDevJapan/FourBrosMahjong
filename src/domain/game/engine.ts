@@ -985,9 +985,18 @@ function applyAiCall(
     drawKanReplacement(hand, caller);
     return state;
   }
-  // 現物喰い替えは禁止(#105 / スペック1 1.4)。ポンで同種は2枚消費済みだが、4枚目が
-  // 門前に残る場合もあるため打牌候補から除く。手牌からは削らず禁止牌として渡すこと
-  // (#303: 削ると `14 − 3×副露数` 枚に満たない手牌で向聴が評価される)。
+  // 現物喰い替えは禁止(#105 / スペック1 1.4)。禁止牌は手牌から削らず
+  // `forbiddenDiscards` として渡す。削ると `14 − 3×副露数` 枚に満たない手牌で
+  // 向聴が評価される(#303)。
+  //
+  // 現状この呼び出しに到達するのは「同種ちょうど2枚」の場合だけで、門前に4枚目は
+  // 残らない。`canPon`(need 2)と `canKan`(need 3)は同じガードを共有するため、
+  // 3枚以上あれば必ず `kan=true` で上の分岐へ抜けるからである。つまり現時点では
+  // 禁止牌の指定は防御的だが、`shouldCallMeld` にカン見送りの分岐が入るなどして
+  // 「3枚持ちでポン」が発生した瞬間に load-bearing になる。
+  //
+  // なお AI は人間側の `hand.ponnedKind`(`discard()` の no-op ガード用)を立てない。
+  // 鳴きから打牌までが本関数内で同期的に完結し、公開境界の `discard()` を通らないため。
   const chosen = chooseAiDiscard(hand, caller, null, [tile]);
   return applyDiscard(state, caller, chosen);
 }
