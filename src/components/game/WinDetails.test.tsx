@@ -1,5 +1,5 @@
 import { render, screen, within } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { RoundSummary } from "@/domain/game/engine";
 import WinDetails from "./WinDetails";
 
@@ -159,6 +159,46 @@ describe("WinDetails", () => {
       "8翻",
     );
     expect(screen.getByText("一郎: 7,500点")).toBeInTheDocument();
+  });
+
+  it("同名の支払者2名でもkeyが衝突せず金額が支払者ごとに対応する(スペック6 6.2.1 / #312)", () => {
+    // /settings は対局者名の重複を禁止しない(sanitizePlayerName に重複排除は無い)。
+    // ツモ和了は支払者が2名以上になるため、同名設定の衝突が顕在化する経路。
+    const summary: RoundSummary = {
+      kind: "win",
+      label: "あなたのツモ 12,000点",
+      deltas: { p0: 13000, p1: -7500, p2: -4500, p3: 0 },
+      winDetails: {
+        winType: "tsumo",
+        dealer: false,
+        ...WIN_HAND,
+        yaku: [{ name: "立直", han: 1, yakuman: 0 }],
+        yakuHan: 1,
+        dora: { omote: 0, ura: 0, aka: 0, gari: 0, total: 0 },
+        totalHan: 1,
+        yakuman: 0,
+        category: "normal",
+        honba: 0,
+        riichiSticks: 0,
+        payments: [
+          { name: "太郎", amount: 7500 },
+          { name: "太郎", amount: 4500 },
+        ],
+        stickPayout: 0,
+      },
+    };
+    const warn = vi.spyOn(console, "error").mockImplementation(() => {});
+    render(<WinDetails summary={summary} />);
+
+    const list = screen.getByRole("list", { name: "支払い内訳" });
+    const items = within(list).getAllByRole("listitem");
+    // 同名でも2件が独立して描画され、金額は名前ではなく支払者(位置)ごとに対応する。
+    expect(items).toHaveLength(2);
+    expect(items[0]).toHaveTextContent("太郎: 7,500点");
+    expect(items[1]).toHaveTextContent("太郎: 4,500点");
+    // React の key 重複警告(console.error)が出ないことをもって key の一意性を回帰検証する。
+    expect(warn).not.toHaveBeenCalled();
+    warn.mockRestore();
   });
 
   it("天和+国士無双と合計2倍役満を和了内訳に表示する", () => {
