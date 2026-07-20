@@ -91,6 +91,21 @@ describe("match history store (#302)", () => {
     expect(second.map((e) => e.seed)).toEqual([2, 1]);
   });
 
+  it("appendHistory は保存内容を書き換えたかを返す(通知要否の判定 / #310)", () => {
+    // 追記できた場合だけ true。呼び出し側はこれを見て notifyHistoryChanged する。
+    expect(appendHistory(window.localStorage, entry(1))).toBe(true);
+    // 同一 seed は重複排除されるため保存内容は変わらない = 通知不要。
+    expect(appendHistory(window.localStorage, entry(1))).toBe(false);
+    // 検証を通らない値は書き込まれないため、こちらも通知不要。
+    expect(
+      appendHistory(window.localStorage, {
+        ...entry(2),
+        seed: Number.MAX_SAFE_INTEGER,
+      }),
+    ).toBe(false);
+    expect(getHistorySnapshot().map((e) => e.seed)).toEqual([1]);
+  });
+
   it("subscribeHistory が破損データを削除する(描画中ではなく効果側)", () => {
     window.localStorage.setItem(MATCH_HISTORY_KEY, CORRUPTED);
 
