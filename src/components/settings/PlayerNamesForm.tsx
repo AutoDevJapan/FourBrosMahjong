@@ -108,7 +108,7 @@ export function PlayerNamesForm() {
                   autoComplete="off"
                   aria-describedby={hintId}
                   onChange={(event) => updateAt(index, event.target.value)}
-                  className="w-full rounded-lg border border-foreground/25 bg-transparent px-3 py-2 text-base focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-foreground"
+                  className="w-full rounded-lg border border-foreground/25 bg-transparent px-3 py-2 text-base"
                 />
               </div>
             );
@@ -119,14 +119,14 @@ export function PlayerNamesForm() {
       <div className="flex flex-wrap gap-3">
         <button
           type="submit"
-          className="rounded-lg border border-foreground/25 px-4 py-2 text-sm font-semibold hover:bg-foreground/5 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-foreground"
+          className="rounded-lg border border-foreground/25 px-4 py-2 text-sm font-semibold hover:bg-foreground/5"
         >
           名前を保存
         </button>
         <button
           type="button"
           onClick={handleReset}
-          className="rounded-lg border border-foreground/25 px-4 py-2 text-sm text-foreground/80 hover:bg-foreground/5 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-foreground"
+          className="rounded-lg border border-foreground/25 px-4 py-2 text-sm text-foreground/80 hover:bg-foreground/5"
         >
           既定名に戻す
         </button>

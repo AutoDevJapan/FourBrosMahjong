@@ -32,7 +32,7 @@ export default function HistoryPage() {
       <header className="flex flex-col gap-3">
         <Link
           href="/"
-          className="inline-flex w-fit items-center gap-1 rounded-md text-sm text-foreground/70 underline-offset-4 hover:underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-foreground"
+          className="inline-flex w-fit items-center gap-1 rounded-md text-sm text-foreground/70 underline-offset-4 hover:underline"
         >
           <span aria-hidden="true">←</span> ロビーへ戻る
         </Link>

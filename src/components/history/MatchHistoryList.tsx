@@ -50,7 +50,7 @@ function HistoryItem({ entry }: { entry: MatchHistoryEntry }) {
 
   return (
     <details className="group rounded-lg border border-foreground/15">
-      <summary className="flex cursor-pointer flex-wrap items-baseline gap-x-3 gap-y-1 rounded-lg p-4 text-sm hover:bg-foreground/5 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-foreground">
+      <summary className="flex cursor-pointer flex-wrap items-baseline gap-x-3 gap-y-1 rounded-lg p-4 text-sm hover:bg-foreground/5">
         <span className="font-medium">{finishedAt}</span>
         <span className="text-foreground/70">
           1位 {top.name}(<span aria-hidden="true">{topTotal.display}</span>
@@ -158,7 +158,7 @@ export default function MatchHistoryList() {
           ref={emptyStateRef}
           // 削除直後にフォーカスを受け取るため、プログラム的にのみフォーカス可能にする。
           tabIndex={-1}
-          className="flex flex-col items-start gap-2 rounded-lg border border-foreground/15 p-6 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-foreground"
+          className="flex flex-col items-start gap-2 rounded-lg border border-foreground/15 p-6"
         >
           <p className="text-sm text-foreground/70">
             保存された戦績はまだありません。半荘を最後まで打つと、最終順位とソシー内訳がこの端末に自動で記録されます。
@@ -203,14 +203,14 @@ export default function MatchHistoryList() {
                   <button
                     type="button"
                     onClick={executeClear}
-                    className="rounded-full border border-danger px-4 py-2 text-sm font-medium text-danger hover:bg-danger/10 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-foreground"
+                    className="rounded-full border border-danger px-4 py-2 text-sm font-medium text-danger hover:bg-danger/10"
                   >
                     削除する
                   </button>
                   <button
                     type="button"
                     onClick={() => setConfirmingClear(false)}
-                    className="rounded-full border border-foreground/25 px-4 py-2 text-sm hover:bg-foreground/5 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-foreground"
+                    className="rounded-full border border-foreground/25 px-4 py-2 text-sm hover:bg-foreground/5"
                   >
                     キャンセル
                   </button>
@@ -223,7 +223,7 @@ export default function MatchHistoryList() {
                   setStatusMessage("");
                   setConfirmingClear(true);
                 }}
-                className="rounded-full border border-foreground/25 px-4 py-2 text-sm hover:bg-foreground/5 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-foreground"
+                className="rounded-full border border-foreground/25 px-4 py-2 text-sm hover:bg-foreground/5"
               >
                 戦績をすべて削除
               </button>
