@@ -187,8 +187,12 @@ describe("WinDetails", () => {
         stickPayout: 0,
       },
     };
-    const warn = vi.spyOn(console, "error").mockImplementation(() => {});
+    // vitest.config.ts は restoreMocks を設定していないため、assertion が投げても
+    // スパイが後続テストへ漏れないよう、記録を取り出した直後に必ず復元する。
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
     render(<WinDetails summary={summary} />);
+    const errorCalls = errorSpy.mock.calls.map((args) => String(args[0]));
+    errorSpy.mockRestore();
 
     const list = screen.getByRole("list", { name: "支払い内訳" });
     const items = within(list).getAllByRole("listitem");
@@ -196,9 +200,11 @@ describe("WinDetails", () => {
     expect(items).toHaveLength(2);
     expect(items[0]).toHaveTextContent("太郎: 7,500点");
     expect(items[1]).toHaveTextContent("太郎: 4,500点");
-    // React の key 重複警告(console.error)が出ないことをもって key の一意性を回帰検証する。
-    expect(warn).not.toHaveBeenCalled();
-    warn.mockRestore();
+    // React の key 重複警告が出ないことをもって key の一意性を回帰検証する。無関係な
+    // console.error まで拾って過検知しないよう、警告文面を限定して照合する。
+    expect(
+      errorCalls.filter((message) => message.includes("same key")),
+    ).toEqual([]);
   });
 
   it("天和+国士無双と合計2倍役満を和了内訳に表示する", () => {
