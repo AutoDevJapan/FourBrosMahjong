@@ -138,10 +138,12 @@ function observeAiActions(
 }
 
 describe("engine: AIのリーチ・鳴き・カン(#169)", () => {
-  it("seed=22でAIがリーチ・役あり大明槓・暗槓し、GUI viewへ状態が投影される", () => {
-    // seed は observeAiActions と同一ドライバのオフライン走査で選定(#294 で 1 → 22 へ再選定。
-    // 副露向聴補正により AI の打牌が変わり、旧 seed=1 では3アクションが揃わなくなったため)。
-    observeAiActions(22, ["riichi", "daiminkan", "ankan"]);
+  it("seed=27でAIがリーチ・役あり大明槓・暗槓し、GUI viewへ状態が投影される", () => {
+    // seed は observeAiActions と同一ドライバのオフライン走査で選定
+    // (#294 で 1 → 22、#304 で 22 → 27 へ再選定)。#304 で「向聴を悪化させるカンは
+    // 宣言しない」ガードが入り、seed=22 では暗槓が発火しなくなったため。
+    // seed=27 は修正前後どちらの実装でも3アクションが揃うことを走査で確認済み。
+    observeAiActions(27, ["riichi", "daiminkan", "ankan"]);
   });
 
   it("seed=7でAIが役ありポン・加槓し、牌保存則を維持する", () => {

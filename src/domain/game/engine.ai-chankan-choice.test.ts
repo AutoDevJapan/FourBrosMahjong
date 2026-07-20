@@ -189,7 +189,9 @@ describe("engine: AI加槓への槍槓ロン選択(#208)", () => {
 
   it("頭ハネ順で先の他家(AI)がロン可能なら従来どおり即和了し、自家に選択は生じない", () => {
     // 南が加槓 → ronOrder(south) = [west, east]。西(AI)が先にロン可能なため即精算。
-    const armed = armHumanTurn(3, JUNK_13, "1z");
+    // seed 3 は南のツモ牌が 3p と接続し、加槓が向聴を悪化させるため #304 のガードで
+    // 加槓が発火しなくなった。seed 5 は修正前後どちらでも加槓が成立する。
+    const armed = armHumanTurn(5, JUNK_13, "1z");
     setSeat(armed.state, "south", KAKAN_HOLDER_10, [pon3p()]);
     setSeat(armed.state, "west", CHANKAN_WAIT_3P);
 
@@ -238,8 +240,14 @@ describe("engine: AI加槓への槍槓ロン選択(#208)", () => {
 
 /** 国士無双の13面待ち(13種の么九牌を各1枚)。任意の么九牌でロン可。 */
 const KOKUSHI_13_WAIT = "19m 19p 19s 1234567z";
-/** 暗槓者(AI)の門前13枚(1m ×4 + 散らばり9枚。和了・リーチ不能)。 */
-const ANKAN_HOLDER_13 = "1m 1m 1m 1m 4m 7m 2s 5s 8s 9p 2z 3z 5z";
+/**
+ * 暗槓者(AI)の門前13枚(1m ×4 + 塔子2つ + 孤立牌。和了・テンパイ・リーチ不能)。
+ *
+ * 塔子(23s / 56s)を持たせて標準形を4向聴にしてある。散らばり9枚だと標準形が
+ * 6向聴・七対子が5向聴となり、暗槓(七対子が消えて標準形のみ)が向聴を悪化させる
+ * ため、#304 の「向聴を悪化させるカンは宣言しない」ガードで暗槓が発火しなくなる。
+ */
+const ANKAN_HOLDER_13 = "1m 1m 1m 1m 2s 3s 5s 6s 9p 2z 3z 5z 7z";
 
 /** 「南(AI)が 1m を暗槓 → 自家(東)が国士で槍槓ロン可能」の局面を組む。 */
 function armAiAnkanVsKokushi(seed: number): {
