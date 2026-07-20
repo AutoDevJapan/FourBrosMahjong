@@ -58,7 +58,9 @@ Tailwind v4 preflight は `ul { list-style: none }` を全リストへ適用す�
 - アクセシブル名を持たないレイアウト用リストへの明示は必須としない(名前付きグループとして伝える意図がないため)
 - コンポーネントテストでは `toHaveAttribute("role", "list")` で明示を回帰検証する。role クエリ(`getByRole("list")`)は暗黙ロールでも通るため、明示の欠落を検出できない
 
-適用済み: `DoraIndicator`(#261 / #269)、`Melds`・`Discards`・`Hand`(閲覧専用リスト)・`WinDetails`(和了形/成立役/支払い内訳)(#270)。
+適用済み: `DoraIndicator`(#261 / #269)、`Melds`・`Discards`・`Hand`(閲覧専用リスト)・`WinDetails`(和了形/成立役/支払い内訳)(#270)、`MatchHistoryList`(戦績一覧 / #313)。
+
+- **新規リスト追加時の運用**: アクセシブル名を持つ `<ul>`/`<ol>` を新設したら、同じコミットで `role="list"` の明示と `toHaveAttribute("role", "list")` の回帰テストまでを揃える。`/history`(#293)は後発だったため本規約の適用が漏れ、#313 で追補している。
 
 ## 5.3 レスポンシブ方針
 

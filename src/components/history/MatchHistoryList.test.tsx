@@ -63,6 +63,9 @@ describe("MatchHistoryList (#293)", () => {
     const list = await screen.findByRole("list", {
       name: "保存された半荘結果",
     });
+    // role クエリは暗黙ロールでも通るため、Safari/VoiceOver 対策の明示ロールは
+    // 属性で回帰検証する(スペック5 5.2.5 / #313)。
+    expect(list).toHaveAttribute("role", "list");
     const items = Array.from(list.querySelectorAll(":scope > li"));
     expect(items).toHaveLength(2);
     // 新しい半荘(seed=2)が先頭に来る。
