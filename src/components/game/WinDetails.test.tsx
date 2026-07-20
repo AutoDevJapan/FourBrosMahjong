@@ -191,8 +191,8 @@ describe("WinDetails", () => {
     // #312 の回帰を実際に検知できるのは React の key 一意性警告であり、下の
     // errorCalls 検証がこのテストの本命 assertion。金額の assertion は期待表示の
     // ドキュメントとして併置し、rerender で reconciliation 経路も通しておく。
-    // vitest.config.ts は restoreMocks を設定していないため、assertion が投げても
-    // スパイが後続テストへ漏れないよう、記録を取り出した直後に必ず復元する。
+    // vitest.config.ts は restoreMocks を設定していないため、スパイが後続テストへ
+    // 漏れないよう、記録を取り出した時点(assertion より前)で復元しておく。
     const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
     const { rerender } = render(
       <WinDetails
