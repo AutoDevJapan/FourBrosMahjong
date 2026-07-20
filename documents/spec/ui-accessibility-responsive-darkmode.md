@@ -119,10 +119,12 @@ Tailwind v4 のデフォルトブレークポイントをそのまま採用し�
 | `--color-focus-ring` | フォーカスリング(隣接背景に対し3:1以上)。全画面のフォーカスリングはこのトークン**のみ**を起点とし、`globals.css` の**レイヤー外(unlayered)**なグローバル `:focus-visible { outline: 2px solid var(--color-focus-ring); outline-offset: 2px }` が一元的に描画する(#314) |
 
 - 新規トークン追加時は、ライト/ダーク双方でコントラスト計算(5.5節のツール)を通してからマージする
+- **コンテンツ走査の除外**(#329): Tailwind v4 は `.gitignore` を尊重しつつプロジェクト配下を広範に走査し、**文中のクラス名リテラルもクラス候補として拾う**。そのため「使っていないクラスを説明する文章」自体がそのクラスを CSS に残し続ける循環が起きる(#314 では未使用ユーティリティを 50 個除去したのに生成 CSS がバイト単位で同一だった)。実害はバンドルの数 KB だが、**バンドル差分を変更の正しさの根拠にできなくなる**点が問題。`src/app/globals.css` の `@source not` で、実行時に描画されないファイル(Markdown 全般 / `*.{test,spec}.{ts,tsx}` / `e2e/`)を走査対象から除外している。逆に `.ts` / `.tsx`(テストを除く)は実行時のクラス供給源なので**除外してはならない**。除外を追加した際は、ビルド成果物のクラス集合を比較し「意図した未使用クラスだけが消え、実使用クラスが残る」ことを実測すること。
 - **フォーカスリングはコンポーネント側で上書きしない**(#314)。`@import "tailwindcss"` により Tailwind のユーティリティは `@layer utilities` へ生成される一方、`globals.css` は `@layer` を使わないため上記グローバル規則は unlayered に置かれる。CSS カスケードでは通常宣言について **unlayered がすべてのレイヤーに優先する(詳細度の比較は行われない)** ため、コンポーネントに `focus-visible:outline-*` を書いても outline 系プロパティは一切上書きできず no-op になる。したがってリング色・太さ・オフセットの変更は `--focus-ring` の値そのものを変える形で行う。
   - **`focus-visible:ring-*` / `shadow-*` も使わない**。これらは `outline` ではなく **`box-shadow`** で描画されるためグローバル規則とプロパティが競合せず、**no-op にならず実際に二重リングとして描画される**。リングの太さ・色を変えたい場合も `--focus-ring` の値で行う。
   - この不変条件は `src/app/focus-ring.regression.test.ts` が回帰テストとして固定する(グローバル規則の存在・`globals.css` が `@layer` を使わないこと・コンポーネントが `focus-visible:outline-*` を持たないこと・`focus-visible:ring-*` / `shadow-*` を持たないこと)。リング色 × 背景の 3:1 はライト/手動ダーク/OS ダークの3スコープで `src/app/globals.contrast.test.ts` が検証する。
-  - 既知の例外は `src/components/layout/ThemeToggle.tsx` の `has-[:focus-visible]:outline-*` 1 箇所のみ。フォーカスを受けるのは内側の `<input type="radio">` だが outline が付くのは外側の `<label>` であり、`<label>` にはグローバル `:focus-visible` がマッチせず競合しないため実際に描画され、**input と label の二重リング**になっている(是正は見た目が変わるため #327 で別途扱う)。
+  - **`has-[]` バリアントでラッパ要素にリングを付けない**(#327)。`has-[:focus-visible]:outline-*` は上記 no-op とは**別の失敗様態**である。outline の適用先が「フォーカスを受ける要素」ではなくラッパのため、グローバル `:focus-visible` とセレクタが競合せず**上書きされずに実際に描画される**。結果、内側の control のリング(`--focus-ring`)とラッパのリングが入れ子で同時に出る。
+  - 例外は現在 **0 件**。`src/components/layout/ThemeToggle.tsx` が唯一の例外だったが(input=`--focus-ring` 色 / label=`--foreground` 色の二重リング)、#327 で `has-[]` を削除しリングを input 側のグローバル規則一本へ統一した。実測: `/settings` の ThemeToggle でラッパ `<label>` の `outline-style` が `solid` → `none` になり、input は `2px solid`(light `rgb(29,78,216)` / dark `rgb(96,165,250)`)を維持。他 4 画面 × ライト/ダークの計算済みスタイルは差分ゼロ。
 
 ## 5.5 アクセシビリティ検証手段
 
