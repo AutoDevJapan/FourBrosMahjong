@@ -156,8 +156,9 @@ function save(storage: Storage, entries: readonly MatchHistoryEntry[]): void {
  *
  * - 同一 seed の記録が既にあれば何もしない(終局済みジャーナルのリロード再生対策)。
  * - `MAX_HISTORY_ENTRIES` を超える分は最古から破棄する。
- * - 保存容量が不足した場合は今回の1件のみで再試行し、最新結果の保存を優先する。
- *   それでも保存できない環境では諦める(対局自体は継続できる)。
+ * - 保存容量が不足した場合は件数を半減させながら再試行し、**保存できる範囲の履歴を
+ *   最大限残す**(最新結果を最優先しつつ、過去の記録を不必要に全消ししない)。
+ *   1件でも保存できない環境では諦める(対局自体は継続できる)。
  */
 export function appendHistory(
   storage: Storage,
@@ -166,11 +167,16 @@ export function appendHistory(
   try {
     const entries = loadHistory(storage);
     if (entries.some((existing) => existing.seed === entry.seed)) return;
-    const next = [entry, ...entries].slice(0, MAX_HISTORY_ENTRIES);
-    try {
-      save(storage, next);
-    } catch {
-      save(storage, [entry]);
+    let next = [entry, ...entries].slice(0, MAX_HISTORY_ENTRIES);
+    // 半減で切り詰めるため試行回数は log2(MAX_HISTORY_ENTRIES) 程度に収まる。
+    for (;;) {
+      try {
+        save(storage, next);
+        return;
+      } catch {
+        if (next.length <= 1) return;
+        next = next.slice(0, Math.max(1, Math.floor(next.length / 2)));
+      }
     }
   } catch {
     // 保存不可でも対局・画面表示は継続する。

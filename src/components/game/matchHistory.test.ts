@@ -105,6 +105,25 @@ describe("match history persistence (#293)", () => {
     expect(loadHistory(storage).map((e) => e.seed)).toEqual([3]);
   });
 
+  it("容量不足でも収まる件数まで切り詰め、過去の記録を全消ししない", () => {
+    const storage = new MemoryStorage();
+    for (const seed of [1, 2, 3, 4]) appendHistory(storage, entry(seed, seed));
+    // 3件以上の保存だけ容量不足で失敗させる(2件までは収まる環境)。
+    const limited: Storage = Object.assign(Object.create(storage), {
+      setItem: (key: string, value: string) => {
+        const count = (JSON.parse(value) as { entries: unknown[] }).entries
+          .length;
+        if (count > 2) throw new DOMException("quota", "QuotaExceededError");
+        storage.setItem(key, value);
+      },
+    });
+
+    appendHistory(limited, entry(5, 5));
+
+    // 最新を先頭に、収まる範囲の履歴が残る(1件だけへ切り詰めない)。
+    expect(loadHistory(storage).map((e) => e.seed)).toEqual([5, 4]);
+  });
+
   it("保存が完全に失敗しても例外を漏らさない", () => {
     const broken: Storage = new (class extends MemoryStorage {
       override setItem(): void {

@@ -60,18 +60,20 @@ function HistoryItem({ entry }: { entry: MatchHistoryEntry }) {
         </span>
       </summary>
       <div className="flex flex-col gap-4 border-t border-foreground/10 p-4">
+        {/* 見出しは h1(ページ)→ h2(本節)→ h3(SoshiiBreakdown 内の選手名)の順で
+            レベルを飛ばさない(axe heading-order / スペック5)。 */}
         <section
           aria-label={`${finishedAt}の最終順位`}
           className="flex flex-col gap-2"
         >
-          <h3 className="text-sm font-semibold">最終順位</h3>
+          <h2 className="text-sm font-semibold">最終順位</h2>
           <RankingTable players={ordered} />
         </section>
         <section
           aria-label={`${finishedAt}のソシー内訳`}
           className="flex flex-col gap-2"
         >
-          <h3 className="text-sm font-semibold">ソシー内訳(素点+ウマ+祝儀)</h3>
+          <h2 className="text-sm font-semibold">ソシー内訳(素点+ウマ+祝儀)</h2>
           <div className="grid gap-3 sm:grid-cols-2">
             {ordered.map((player) => (
               <SoshiiBreakdown key={player.name} player={player} />
