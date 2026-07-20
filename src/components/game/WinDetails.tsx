@@ -109,9 +109,17 @@ export default function WinDetails({ summary }: { summary: RoundSummary }) {
         </dd>
       </dl>
       <h3 className="mt-3 font-semibold">支払い</h3>
+      {/*
+        対局者名は重複を許す自由入力なので React key に使ってはならない(スペック6 6.2.1 /
+        #312)。同名2名のツモ支払いでは key が衝突し、React の key 一意性契約に違反する。
+        RankingTable が名前ではなく順位という安定値を key にするのと同じ趣旨だが、payments には
+        順位に相当する安定値が無いため位置(index)を用いる。各 li は内部 state も DOM 状態も
+        持たない純テキストで、内容は毎レンダリング payments から全て描き直されるため、index
+        キーでも表示が取り違えられることはない。要素に state を持たせる場合は再検討が必要。
+      */}
       <ul role="list" aria-label="支払い内訳">
-        {detail.payments.map((payment) => (
-          <li key={payment.name}>
+        {detail.payments.map((payment, index) => (
+          <li key={`payment-${index}`}>
             {payment.name}: {payment.amount.toLocaleString("ja-JP")}点
           </li>
         ))}
