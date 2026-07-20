@@ -112,8 +112,9 @@ export default function WinDetails({ summary }: { summary: RoundSummary }) {
       {/*
         対局者名は重複を許す自由入力なので React key に使ってはならない(スペック6 6.2.1 /
         #312)。同名2名のツモ支払いで key が衝突し、金額の対応が入れ替わり得る。
-        payments は summary 単位で固定された不変配列で、並べ替え・挿入・削除が起きないため
-        位置(index)が安定した一意キーになる(RankingTable の rank キーと同じ位置ベース)。
+        RankingTable が名前ではなく順位という安定値を key にするのと同じ趣旨だが、payments には
+        順位に相当する安定値が無い。summary 単位で固定された不変配列で並べ替え・挿入・削除が
+        起きないため、ここでは位置(index)が安定した一意キーとして機能する。
       */}
       <ul role="list" aria-label="支払い内訳">
         {detail.payments.map((payment, index) => (

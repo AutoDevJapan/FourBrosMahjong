@@ -164,7 +164,9 @@ describe("WinDetails", () => {
   it("同名の支払者2名でもkeyが衝突せず金額が支払者ごとに対応する(スペック6 6.2.1 / #312)", () => {
     // /settings は対局者名の重複を禁止しない(sanitizePlayerName に重複排除は無い)。
     // ツモ和了は支払者が2名以上になるため、同名設定の衝突が顕在化する経路。
-    const summary: RoundSummary = {
+    const withPayments = (
+      payments: readonly { name: string; amount: number }[],
+    ): RoundSummary => ({
       kind: "win",
       label: "あなたのツモ 12,000点",
       deltas: { p0: 13000, p1: -7500, p2: -4500, p3: 0 },
@@ -180,28 +182,45 @@ describe("WinDetails", () => {
         category: "normal",
         honba: 0,
         riichiSticks: 0,
-        payments: [
-          { name: "太郎", amount: 7500 },
-          { name: "太郎", amount: 4500 },
-        ],
+        payments,
         stickPayout: 0,
       },
-    };
+    });
+    // この <li> は内部 state を持たない純テキストのため、key が重複していても DOM の
+    // 出力自体は(初回マウントでも再レンダリング後でも)正しいままになる。したがって
+    // #312 の回帰を実際に検知できるのは React の key 一意性警告であり、下の
+    // errorCalls 検証がこのテストの本命 assertion。金額の assertion は期待表示の
+    // ドキュメントとして併置し、rerender で reconciliation 経路も通しておく。
     // vitest.config.ts は restoreMocks を設定していないため、assertion が投げても
     // スパイが後続テストへ漏れないよう、記録を取り出した直後に必ず復元する。
     const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
-    render(<WinDetails summary={summary} />);
+    const { rerender } = render(
+      <WinDetails
+        summary={withPayments([
+          { name: "太郎", amount: 7500 },
+          { name: "太郎", amount: 4500 },
+        ])}
+      />,
+    );
+    rerender(
+      <WinDetails
+        summary={withPayments([
+          { name: "太郎", amount: 1000 },
+          { name: "太郎", amount: 2000 },
+        ])}
+      />,
+    );
     const errorCalls = errorSpy.mock.calls.map((args) => String(args[0]));
     errorSpy.mockRestore();
 
     const list = screen.getByRole("list", { name: "支払い内訳" });
     const items = within(list).getAllByRole("listitem");
-    // 同名でも2件が独立して描画され、金額は名前ではなく支払者(位置)ごとに対応する。
+    // 同名でも2件が独立して描画され、更新後の金額が支払者(位置)ごとに正しく対応する。
     expect(items).toHaveLength(2);
-    expect(items[0]).toHaveTextContent("太郎: 7,500点");
-    expect(items[1]).toHaveTextContent("太郎: 4,500点");
-    // React の key 重複警告が出ないことをもって key の一意性を回帰検証する。無関係な
-    // console.error まで拾って過検知しないよう、警告文面を限定して照合する。
+    expect(items[0]).toHaveTextContent("太郎: 1,000点");
+    expect(items[1]).toHaveTextContent("太郎: 2,000点");
+    // 本命: key 重複警告が出ないこと。無関係な console.error まで拾って過検知しない
+    // よう警告文面を限定し、失敗時にどの警告が出たか分かるよう配列ごと比較する。
     expect(
       errorCalls.filter((message) => message.includes("same key")),
     ).toEqual([]);
