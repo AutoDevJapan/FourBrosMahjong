@@ -1103,15 +1103,15 @@ function pump(state: EngineState): EngineState {
       const kakan = kakanCandidates(hand, seat, pool).filter((t) =>
         kanKeepsShanten(pool, meldCount, t, "kakan"),
       );
-      const ankan0 = ankanCandidates(pool).filter((t) =>
-        kanKeepsShanten(pool, meldCount, t, "ankan"),
-      );
       if (kakan.length > 0) {
         s = applyAiKakan(s, seat, kakan[0]);
         if (s.phase !== "playing" || s.pending !== null) return s;
         continue;
       }
-      const ankan = ankan0;
+      // 暗槓候補の評価は加槓が無いときだけ行う(向聴評価は candidate 数ぶん走るため)。
+      const ankan = ankanCandidates(pool).filter((t) =>
+        kanKeepsShanten(pool, meldCount, t, "ankan"),
+      );
       if (ankan.length > 0) {
         s = applyAiAnkan(s, seat, ankan[0]);
         if (s.phase !== "playing" || s.pending !== null) return s;
@@ -1166,6 +1166,19 @@ function riichiDiscardTiles(hand: HandState, seat: SeatKey): Tile[] {
  *
  * 加槓後の形は「その4枚目を打牌した場合」と同一なので、最良打牌が別牌なら悪化と出る。
  *
+ * ## 適用範囲(意図的に自ツモ番の加槓・暗槓のみ)
+ *
+ * - **リーチ後の暗槓**には掛けない。{@link canAnkanAfterRiichi} が待ち牌集合の不変を
+ *   要求するため向聴は 0 のまま保証されており、本判定は常に真になる(無意味)。
+ * - **人間(p0)**には掛けない。AI の方策であり、UI の選択肢を狭めてはならない。
+ * - **大明槓**({@link applyAiCall} の kan 分岐)には掛けていない。ただしこれは
+ *   **原理的に安全なのではなく、実測で悪化が観測されなかっただけ**である
+ *   (seed 1〜400 の全局走査で大明槓167件・向聴悪化0件)。{@link shouldCallMeld} は
+ *   役牌限定なのは**最初の1副露だけ**で、役牌の副露が1つでもあれば以後は任意の牌を
+ *   鳴くため、順子・塔子に使っている牌の大明槓は現状の方針でも起こりうる
+ *   (例: 役牌ポン済みで `4s 5s 5s 5s 6s` を持ち、他家の `5s` を明槓して `4s` `6s` が孤立)。
+ *   適用は #322 で扱う。
+ *
  * @param pool 門前手牌 + ツモ牌(= 14 − 3×副露数 枚)。
  */
 function kanKeepsShanten(
@@ -1174,14 +1187,19 @@ function kanKeepsShanten(
   tile: Tile,
   kind: "ankan" | "kakan",
 ): boolean {
+  const need = kind === "ankan" ? 4 : 1;
+  const { taken, rest } = takeKind(pool, tile, need);
+  if (taken.length < need) return false;
+  // 打牌候補は種別(赤フラグ無視)で1回だけ評価する({@link chooseDiscard} と同じ粒度)。
+  // `tileKey` も `shanten` も赤フラグを見ないため、この重複排除は厳密に等価。
   let bestWithoutKan = Number.POSITIVE_INFINITY;
+  const seen = new Set<string>();
   for (let i = 0; i < pool.length; i++) {
-    const rest = [...pool.slice(0, i), ...pool.slice(i + 1)];
-    const s = shanten(rest, meldCount);
+    if (!seen.add(tileKey(pool[i]))) continue;
+    const without = [...pool.slice(0, i), ...pool.slice(i + 1)];
+    const s = shanten(without, meldCount);
     if (s < bestWithoutKan) bestWithoutKan = s;
   }
-  const { taken, rest } = takeKind(pool, tile, kind === "ankan" ? 4 : 1);
-  if (taken.length < (kind === "ankan" ? 4 : 1)) return false;
   const afterKan =
     kind === "ankan" ? shanten(rest, meldCount + 1) : shanten(rest, meldCount);
   return afterKan <= bestWithoutKan;

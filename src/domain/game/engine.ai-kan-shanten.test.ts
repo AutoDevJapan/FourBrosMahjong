@@ -17,16 +17,29 @@ import { createGame, discard, type EngineState, type SeatKey } from "./engine";
  * フィクスチャは `engine.ai-chankan-choice.test.ts` と同じ方式で、`createGame` の
  * 初期局面の可変フィールドを上書きし、自家(東)の打牌で AI(南)の手番へ渡す。
  * 嶺上・ツモ牌の不確定性を排除するため、南が引く牌は `stackNextDraw` で固定する。
+ *
+ * **牌保存則は成立しない**: `setSeat` は上書きした牌を山から取り除かないため、盤面全体の
+ * 多重集合は108枚にならない(実測106枚・`5s` が8枚など)。本テストのアサーションは
+ * 南の手牌と副露にローカルな性質だけを見るため結論に影響しないが、牌保存則を検証したい
+ * 場合は `engine.ai-actions.test.ts` の `expectTileConservation`(実対局進行)を使うこと。
  */
 
 /** 自家(東)用の散らばり13枚(和了・テンパイ・国士いずれも不成立)。 */
 const EAST_JUNK_13 = "1m 9m 2p 5p 8p 3s 6s 9s 1z 2z 3z 5z 6z";
 
-/** 席の手牌・副露・河を上書きする。 */
+/**
+ * 席の門前手牌を上書きする(副露なし = 13枚固定)。
+ *
+ * 枚数を明示的に検証する。12枚などの不正な手牌を仕込むと、ツモ後の pool が
+ * `14 − 3×副露数` を満たさず `kanKeepsShanten` が誤った向聴で評価されるため、
+ * テストが意図しない理由で通ってしまう(#303 と同じクラスの取り違え)。
+ */
 function setSeat(state: EngineState, seat: SeatKey, hand: string): void {
   const h = state.hand;
   if (h === null) throw new Error("no hand");
-  h.hands[seat] = parseTiles(hand);
+  const tiles = parseTiles(hand);
+  expect(tiles).toHaveLength(13);
+  h.hands[seat] = tiles;
   h.melds[seat] = [];
   h.discards[seat] = [];
 }
@@ -34,6 +47,13 @@ function setSeat(state: EngineState, seat: SeatKey, hand: string): void {
 /**
  * 次に引かれる牌を固定する。ライブ壁から該当種別を先頭へ移動するだけなので、
  * 山の多重集合は変化しない(牌を増減させない)。
+ *
+ * `Wall` の内部実装に2点依存している(いずれも `src/domain/wall/wall.ts`):
+ *  ① `liveWall` getter が内部配列を**コピーせずそのまま返す**(コピーを返す実装に
+ *     変わると本関数は黙って no-op になり、テストが偽陽性で通る)。
+ *  ② `draw()` が先頭(`shift`)から引く。
+ * `readonly` 契約を型アサーションで破っているのはこのため。山の順序を注入できる
+ * seam が `Wall` / `createGame` に入ったら、そちらへ移行すること。
  */
 function stackNextDraw(state: EngineState, notation: string): void {
   const h = state.hand;
@@ -92,11 +112,11 @@ describe("engine: 向聴を悪化させるカンは宣言しない(#304)", () =>
   });
 
   it("向聴を悪化させない暗槓は従来どおり宣言する(過剰抑制しない)", () => {
-    // 南: 1m×4 + 塔子2つ(23s / 56s)+ 孤立牌。1m は独立した暗刻+浮き牌なので、
-    // 暗槓しても標準形の向聴は変わらない(4向聴のまま)。
+    // 南: 1m×4 + 塔子2つ(23s / 56s)+ 孤立牌 の門前13枚。1m は独立した暗刻+浮き牌
+    // なので、暗槓しても標準形の向聴は変わらない(カン前後とも4向聴)。
     const state = armEastTurn(1, "1z");
-    setSeat(state, "south", "1m 1m 1m 1m 2s 3s 5s 6s 9p 2z 3z 5z");
-    stackNextDraw(state, "7z");
+    setSeat(state, "south", "1m 1m 1m 1m 2s 3s 5s 6s 9p 2z 3z 5z 7z");
+    stackNextDraw(state, "9m");
 
     const after = discard(state, parseTile("1z"));
 
