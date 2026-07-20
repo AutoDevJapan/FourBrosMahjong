@@ -54,17 +54,19 @@ const KNOWN_EXCEPTIONS: ReadonlyMap<string, ReadonlySet<string>> = new Map([
  *  - `has-[:focus-visible]:outline…`
  *  - 任意プロパティ記法 `focus-visible:[outline…:…]`
  *
- * `String.prototype.matchAll` は内部で正規表現を複製するため、`g` フラグ付きの
- * 定数を使い回しても `lastIndex` は持ち越されない(共有しても安全)。
+ * `g` フラグ付き正規表現を定数で共有すると、`matchAll` は `lastIndex` を書き換えない
+ * ものの**読み取りはする**ため、将来誰かが同じ定数へ `.test()` / `.exec()` を使うと
+ * 以降の検出が静かに取りこぼす(このテストの存在意義そのものが壊れる)。
+ * 毎回新しいインスタンスを返す関数にして、その事故を構造的に排除する。
  */
-const OUTLINE_UTILITY =
+const outlineUtility = () =>
   /(?:has-\[:)?focus-visible\]?:(?:outline[\w[\]/.-]*|\[outline[\w-]*:[^\]]*\])/g;
 
 /**
  * `focus-visible:ring…` / `shadow…` を検出する。任意プロパティ記法の
- * `focus-visible:[box-shadow:…]` も含める。
+ * `focus-visible:[box-shadow:…]` も含める。共有しない理由は上と同じ。
  */
-const RING_UTILITY =
+const ringUtility = () =>
   /(?:has-\[:)?focus-visible\]?:(?:(?:ring|shadow)[\w[\]/.-]*|\[box-shadow:[^\]]*\])/g;
 
 /** src 配下の .ts/.tsx を再帰列挙(テストファイル自身は除く)。 */
@@ -116,7 +118,7 @@ describe("フォーカスリングの単一起点(#314)", () => {
     for (const rel of sourceFiles(SRC)) {
       const allowed = KNOWN_EXCEPTIONS.get(rel);
       const text = readFileSync(join(SRC, rel), "utf8");
-      for (const m of text.matchAll(OUTLINE_UTILITY)) {
+      for (const m of text.matchAll(outlineUtility())) {
         if (allowed?.has(m[0])) continue;
         offenders.push(`${rel}: ${m[0]}`);
       }
@@ -137,7 +139,7 @@ describe("フォーカスリングの単一起点(#314)", () => {
     const offenders: string[] = [];
     for (const rel of sourceFiles(SRC)) {
       const text = readFileSync(join(SRC, rel), "utf8");
-      for (const m of text.matchAll(RING_UTILITY)) {
+      for (const m of text.matchAll(ringUtility())) {
         offenders.push(`${rel}: ${m[0]}`);
       }
     }
@@ -160,7 +162,7 @@ describe("フォーカスリングの単一起点(#314)", () => {
       // 独立に検証できない。offender 検出と同じ正規表現で完全一致の集合を作って突き合わせる。
       const text = readFileSync(join(SRC, rel), "utf8");
       const present = new Set(
-        [...text.matchAll(OUTLINE_UTILITY)].map((m) => m[0]),
+        [...text.matchAll(outlineUtility())].map((m) => m[0]),
       );
       for (const cls of classes) {
         expect(
