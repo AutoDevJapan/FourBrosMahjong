@@ -87,7 +87,8 @@ export default function ResultPageClient() {
             </h2>
             <div className="grid gap-3 sm:grid-cols-2">
               {orderedPlayers.map((player) => (
-                <SoshiiBreakdown key={player.name} player={player} />
+                // 名前は重複し得る(#291)ため、一意な rank を key にする。
+                <SoshiiBreakdown key={player.rank} player={player} />
               ))}
             </div>
           </section>

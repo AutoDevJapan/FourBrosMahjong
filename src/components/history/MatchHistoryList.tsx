@@ -22,10 +22,10 @@ import {
   useState,
   useSyncExternalStore,
 } from "react";
+import { localStorageOrNull } from "@/components/common/browserStorage";
 import {
   clearHistory,
   loadHistory,
-  localStorageOrNull,
   type MatchHistoryEntry,
   MAX_HISTORY_ENTRIES,
 } from "@/components/game/matchHistory";
@@ -82,7 +82,8 @@ function HistoryItem({ entry }: { entry: MatchHistoryEntry }) {
           <h2 className="text-sm font-semibold">ソシー内訳(素点+ウマ+祝儀)</h2>
           <div className="grid gap-3 sm:grid-cols-2">
             {ordered.map((player) => (
-              <SoshiiBreakdown key={player.name} player={player} />
+              // 名前は重複し得る(#291)ため、一意な rank を key にする。
+              <SoshiiBreakdown key={player.rank} player={player} />
             ))}
           </div>
         </section>

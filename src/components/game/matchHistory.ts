@@ -54,7 +54,11 @@ export interface MatchHistoryEntry {
 
 /** 4兄弟の人数(保存レコードの `players` 長の不変条件)。 */
 const PLAYER_COUNT = 4;
-/** 想定外に長い名前(改竄・破損)を拒否する上限。既定名は2文字。 */
+/**
+ * 想定外に長い名前(改竄・破損)を拒否する上限。
+ * ユーザー設定の上限は12文字(`MAX_PLAYER_NAME_LENGTH` / #291)なので、
+ * 正規の名前は必ず収まる。ここは防御用に余裕を持たせた値。
+ */
 const MAX_NAME_LENGTH = 32;
 /**
  * `Date` が表現できる epoch ミリ秒の上限(±8.64e15)。
@@ -109,9 +113,9 @@ function isEntry(value: unknown): value is MatchHistoryEntry {
   // 順位は 1〜4 が重複なく揃う(engine の厳密順位決定 Q19/Q20 の不変条件)。
   const ranks = new Set(entry.players.map((p) => p.rank));
   if (ranks.size !== PLAYER_COUNT) return false;
-  // 4兄弟の名前も一意(表示側が name を React key に使う)。
-  const names = new Set(entry.players.map((p) => p.name));
-  if (names.size !== PLAYER_COUNT) return false;
+  // 名前の一意性は**検証しない**。対局者名はユーザーが自由に設定でき(issue #291 /
+  // スペック6 6.2.1)、4人に同じ名前を付けることを禁止していないため。表示側の
+  // React key には名前ではなく一意性を検証済みの rank を使う。
   // ソシー合計は内訳の総和と一致する(engine の不変条件: engine.test.ts)。
   return entry.players.every(
     (p) => p.rawScore + p.uma + p.bonus === p.soshiiTotal,
@@ -208,18 +212,5 @@ export function clearHistory(storage: Storage): void {
     storage.removeItem(MATCH_HISTORY_KEY);
   } catch {
     // 消去不可(Storage 無効等)は黙って無視する。
-  }
-}
-
-/**
- * `localStorage` を安全に取得する。SSR・Storage 無効環境(SecurityError)では null。
- * 戦績はプログレッシブエンハンスメント: 保存できない環境でも対局は成立する。
- */
-export function localStorageOrNull(): Storage | null {
-  if (typeof window === "undefined") return null;
-  try {
-    return window.localStorage;
-  } catch {
-    return null;
   }
 }

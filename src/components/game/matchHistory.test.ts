@@ -176,6 +176,20 @@ describe("match history persistence (#293)", () => {
       expect(parseHistory(JSON.stringify(valid()))).toEqual([entry(1)]);
     });
 
+    it("4人が同名でも受理する(対局者名はユーザー設定で重複可 / #291)", () => {
+      const sameNames = {
+        version: 1,
+        entries: [
+          {
+            ...entry(1),
+            players: entry(1).players.map((p) => ({ ...p, name: "一郎" })),
+          },
+        ],
+      };
+
+      expect(parseHistory(JSON.stringify(sameNames))).not.toBeNull();
+    });
+
     it.each<[string, unknown]>([
       ["JSONでない", "not-json"],
       ["versionが異なる", { ...valid(), version: 2 }],
@@ -266,18 +280,6 @@ describe("match history persistence (#293)", () => {
         {
           version: 1,
           entries: [{ ...entry(1), finishedAt: Number.MAX_SAFE_INTEGER }],
-        },
-      ],
-      [
-        "プレイヤー名が重複する",
-        {
-          version: 1,
-          entries: [
-            {
-              ...entry(1),
-              players: entry(1).players.map((p) => ({ ...p, name: "一郎" })),
-            },
-          ],
         },
       ],
       [
