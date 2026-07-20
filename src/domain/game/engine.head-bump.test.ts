@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { parseTile, parseTiles } from "@/domain/hand/notation";
 import type { Tile } from "@/domain/tiles/tile";
+import { type RoundNumber, seatingOf } from "@/domain/round/round";
 import type { Seating } from "@/domain/round/seat";
 import {
   createGame,
@@ -375,5 +376,275 @@ describe("engine: 通常打牌に対する頭ハネ(上家取り / spec 2.4・#3
     expect(after.pending?.kind).toBe("humanDiscard");
     expect(after.hand?.turn).toBe("south");
     expect(after.hand?.melds.south).toHaveLength(0); // ポンは成立していない
+  });
+});
+
+/**
+ * 頭ハネ(上家取り)と**親の連荘・親流れ**の交差(issue #326)。
+ *
+ * ## SSOT から導いた期待挙動
+ * - `documents/spec/game-flow.md` 2.7「東場・南場ともに親はテンパイで連荘(**親和了でも連荘**)」
+ *   → 親が頭ハネで勝てば `dealerContinues`。
+ * - 同 2.7「**連荘時は席・抜け番・局番号を据え置く**(2.5 の回転を行わない)。本場のみ +1」
+ *   → 次局は `wind`/`roundNumber`/`order` 据え置き・`honba` +1。
+ * - 同 2.5 / 2.6「**親流れ(非連荘)時のみ**反時計回りに全員が1席回転」「連荘時は局番号を
+ *   進めない」、`advanceRound` の規定より親流れは `honba` を 0 に戻して次局へ。
+ * - `docs/四兄弟麻雀ルール.md` §3「ダブロン等が発生した場合は上家取り」
+ *   → 親がロン可能でも上家取りで敗れれば**和了者ではない** = 親流れ。
+ *
+ * 連荘条件は「親のテンパイ/和了」であって「親がロン可能だったか」ではないため、
+ * 上記2点は SSOT から一意に導ける(新規 Q の起票は不要)。
+ *
+ * ## フィクスチャ上の要点(なぜ専用の arm 関数を使うか)
+ * 上の `armDiscard` は `hand.seating` を `seatingWithHumanAt` で**直接差し替える**が、
+ * その席割りは席順3人だけを入れ替えて抜け番を p3 に固定するもので、**円環
+ * (`round.order` + `roundNumber`)から導出できる席割りとは限らない**。
+ * 一方 `finishRound` / `advanceRound` は `hand.seating` ではなく `round` を見て次局を
+ * 決める(`isDealerWin` だけが `hand.seating` 由来)。よって席割りと `round` が食い違った
+ * フィクスチャで局進行を検証すると、**実際には起こり得ない局面**を固定してしまう。
+ * ここでは席割りを必ず `seatingOf(round)` から導出し、両者の一致を構造的に保証する。
+ */
+describe("engine: 頭ハネと親の連荘・親流れの交差(spec 2.5〜2.7・#326)", () => {
+  /** 自家。`discard()` は自家の席の手番でしか通らないため、常に打牌者に据える。 */
+  const HUMAN: PlayerId = "p0";
+
+  /** `nextRoundState` を非 null として取り出す(半荘継続を前提とするケース専用)。 */
+  function expectNextRound(state: EngineState) {
+    const next = state.nextRoundState;
+    if (next === null)
+      throw new Error("半荘継続を前提としたケースで次局が存在しない");
+    return next;
+  }
+
+  /**
+   * `roundNumber` から席割りを導出し、その局で**自家(p0)が打牌者**になる局面を組む。
+   *
+   * 席割りは `seatingOf(round)` 由来なので `round` と常に整合する(上記の要点を参照)。
+   * 東1..東3 で p0 の席は 東 → 南 → 西 と移り、これにより「親が上家取りで勝つ/負ける」
+   * 双方の配置を、円環として正当なまま作れる。
+   */
+  function armDealerHeadBump(params: {
+    seed: number;
+    roundNumber: RoundNumber;
+    hands: Partial<Record<SeatKey, string>>;
+    honba?: number;
+  }): { state: EngineState; seating: Seating<PlayerId>; humanSeat: SeatKey } {
+    const base = createGame({ seed: params.seed });
+    const hand = base.hand;
+    if (hand === null)
+      throw new Error("hand should exist right after createGame");
+
+    const round = {
+      ...base.round,
+      roundNumber: params.roundNumber,
+      honba: params.honba ?? 0,
+    };
+    const seating = seatingOf(round);
+    const humanSeat = (["east", "south", "west"] as SeatKey[]).find(
+      (seat) => seating[seat] === HUMAN,
+    );
+    if (humanSeat === undefined)
+      throw new Error(
+        `自家(p0)が着席していない局を打牌者にできない: 東${params.roundNumber}`,
+      );
+
+    for (const seat of ["east", "south", "west"] as SeatKey[]) {
+      const notation =
+        seat === humanSeat
+          ? DISCARDER_HAND
+          : (params.hands[seat] ?? NO_WAIT_3P);
+      hand.hands[seat] = expectConcealed13(notation);
+      hand.melds[seat] = [];
+      hand.discards[seat] = []; // フリテン回避
+      hand.riichi[seat] = false;
+      hand.riichiMiss[seat] = false;
+      hand.tempMiss[seat] = false;
+    }
+    hand.drawn = parseTile(RON_TILE);
+    hand.turn = humanSeat;
+
+    return {
+      state: {
+        ...base,
+        round,
+        hand: { ...hand, seating },
+        pending: {
+          kind: "humanDiscard",
+          canTsumo: false,
+          canRiichi: false,
+          riichiTiles: [],
+          ankanTiles: [],
+          kakanTiles: [],
+          forbiddenDiscards: [],
+          locked: false,
+        },
+      },
+      seating,
+      humanSeat,
+    };
+  }
+
+  // `order` は createGame と同じ [p0, p1, p2, p3]、親位置は `roundNumber - 1`。
+  // したがって自家(p0)の席は局番号で決まる:
+  //   東1 → 東(親) / 東2 → 抜け番 / 東3 → 西 / 東4 → 南
+  // 自家を打牌者に据える必要があるため、使えるのは東3(西から打つ)と東4(南から打つ)。
+
+  /** 東3: 席割りは 東=p2(親)/ 南=p3 / 西=p0(自家=打牌者)/ 抜け番=p1。 */
+  const ROUND_HUMAN_AT_WEST: RoundNumber = 3;
+  /**
+   * 東4: 席割りは 東=p3(親)/ 南=p0(自家=打牌者)/ 西=p1 / 抜け番=p2。
+   *
+   * 自家が南に座るのは各場の第4局だけなので、この配置の親流れは必然的に
+   * **場替わり(東4 → 南1)**を伴う(`advanceRound` の局番号 = 4 の分岐)。
+   * オーラス(南4)ではないため半荘は継続する。
+   */
+  const ROUND_HUMAN_AT_SOUTH: RoundNumber = 4;
+
+  const SEED_WEST_DISCARDS = 3118;
+  const SEED_SOUTH_DISCARDS_DEALER = 3119;
+
+  describe("親が頭ハネで勝つ → 連荘(dealerContinues)", () => {
+    // 打牌者=西 のとき ronOrder(west) = [east, south]。
+    // 東(親)が上家取りで南を頭ハネする配置。
+    const hands = { east: WAIT_3P_A, south: WAIT_3P_B };
+    const honba = 2;
+
+    it("前提: 南は単独ならこの牌で和了できる(頭ハネの敗者側が空振りでないこと)", () => {
+      const { state, seating } = armDealerHeadBump({
+        seed: SEED_WEST_DISCARDS,
+        roundNumber: ROUND_HUMAN_AT_WEST,
+        hands: { south: WAIT_3P_B },
+        honba,
+      });
+
+      const after = discardRonTile(state);
+
+      expect(after.lastRound?.kind).toBe("win");
+      expect(after.lastRound?.winnerId).toBe(seating.south);
+      // 子の和了なので親流れ = 対照として「連荘は南の和了では起きない」ことも示す。
+      expect(after.lastRound?.winDetails?.dealer).toBe(false);
+      expect(after.nextRoundState?.roundNumber).toBe(ROUND_HUMAN_AT_WEST + 1);
+      expect(after.nextRoundState?.honba).toBe(0);
+    });
+
+    it("前提: 東(親)は単独ならこの牌で和了できる", () => {
+      const { state, seating } = armDealerHeadBump({
+        seed: SEED_WEST_DISCARDS,
+        roundNumber: ROUND_HUMAN_AT_WEST,
+        hands: { east: WAIT_3P_A },
+        honba,
+      });
+
+      const after = discardRonTile(state);
+
+      expect(after.lastRound?.kind).toBe("win");
+      expect(after.lastRound?.winnerId).toBe(seating.east);
+    });
+
+    it("東(親)・南が同時ロン → 親が上家取りで和了し連荘(席・抜け番・局番号を据え置き本場+1)", () => {
+      const { state, seating } = armDealerHeadBump({
+        seed: SEED_WEST_DISCARDS,
+        roundNumber: ROUND_HUMAN_AT_WEST,
+        hands,
+        honba,
+      });
+      const before = state.round;
+
+      const after = discardRonTile(state);
+
+      expect(after.phase).toBe("roundEnd");
+      expect(after.lastRound?.kind).toBe("win");
+      // ronOrder(west) = [east, south] → 親(東)が上家取り。
+      expect(after.lastRound?.winnerId).toBe(seating.east);
+      expect(after.lastRound?.winDetails?.winnerSeat).toBe("east");
+      expect(after.lastRound?.winDetails?.dealer).toBe(true);
+      // ダブロンなし: 頭ハネされた南は点が動かない。
+      expect(after.lastRound?.deltas[seating.south]).toBe(0);
+      // 抜け番はロン精算に関与しない。
+      expect(after.lastRound?.deltas[seating.benchWarmer]).toBe(0);
+
+      // 連荘: 局番号・場・席順(円環)据え置き、本場のみ +1。
+      const next = expectNextRound(after);
+      expect(next.wind).toBe(before.wind);
+      expect(next.roundNumber).toBe(before.roundNumber);
+      expect(next.honba).toBe(honba + 1);
+      expect(next.order).toEqual(before.order);
+      // 席・抜け番の据え置きは、次局の席割りが今局と一致することで担保される。
+      expect(seatingOf(next)).toEqual(seating);
+    });
+  });
+
+  describe("親がロン可能でも頭ハネで負ける → 親流れ(dealerPasses)", () => {
+    // 打牌者=南 のとき ronOrder(south) = [west, east]。
+    // 西が先順のため、**東(親)もロン可能なのに**和了者になれない = #326 の中核。
+    const honba = 2;
+
+    it("前提: 東(親)は単独ならこの牌で和了できる(= 親はロンを主張できた)", () => {
+      const { state, seating } = armDealerHeadBump({
+        seed: SEED_SOUTH_DISCARDS_DEALER,
+        roundNumber: ROUND_HUMAN_AT_SOUTH,
+        hands: { east: WAIT_3P_A },
+        honba,
+      });
+
+      const after = discardRonTile(state);
+
+      expect(after.lastRound?.kind).toBe("win");
+      expect(after.lastRound?.winnerId).toBe(seating.east);
+      expect(after.lastRound?.winDetails?.dealer).toBe(true);
+      // 親が和了できていれば連荘していた(次のテストとの対照)。
+      expect(after.nextRoundState?.roundNumber).toBe(ROUND_HUMAN_AT_SOUTH);
+      expect(after.nextRoundState?.honba).toBe(honba + 1);
+    });
+
+    it("前提: 西は単独ならこの牌で和了できる", () => {
+      const { state, seating } = armDealerHeadBump({
+        seed: SEED_SOUTH_DISCARDS_DEALER,
+        roundNumber: ROUND_HUMAN_AT_SOUTH,
+        hands: { west: WAIT_3P_B },
+        honba,
+      });
+
+      const after = discardRonTile(state);
+
+      expect(after.lastRound?.kind).toBe("win");
+      expect(after.lastRound?.winnerId).toBe(seating.west);
+    });
+
+    it("西・東(親)が同時ロン → 西が上家取りし、親はロン可能でも親流れ(局が進み本場は0)", () => {
+      const { state, seating } = armDealerHeadBump({
+        seed: SEED_SOUTH_DISCARDS_DEALER,
+        roundNumber: ROUND_HUMAN_AT_SOUTH,
+        hands: { west: WAIT_3P_B, east: WAIT_3P_A },
+        honba,
+      });
+      const before = state.round;
+
+      const after = discardRonTile(state);
+
+      expect(after.phase).toBe("roundEnd");
+      expect(after.lastRound?.kind).toBe("win");
+      // ronOrder(south) = [west, east] → 西が上家取り。親は和了者にならない。
+      expect(after.lastRound?.winnerId).toBe(seating.west);
+      expect(after.lastRound?.winDetails?.winnerSeat).toBe("west");
+      expect(after.lastRound?.winDetails?.dealer).toBe(false);
+      // 親は「ロンできたのに」和了者でないため点が動かない(ダブロンなし)。
+      expect(after.lastRound?.deltas[seating.east]).toBe(0);
+      expect(after.lastRound?.deltas[seating.benchWarmer]).toBe(0);
+
+      // 親流れ: 次局へ進み、本場は 0 に戻る(連荘の +1 とは逆向き)。
+      // この配置は東4なので、次局は場替わりして南1(`advanceRound` の局番号=4 分岐)。
+      expect(before.wind).toBe("east");
+      const next = expectNextRound(after);
+      expect(next.wind).toBe("south");
+      expect(next.roundNumber).toBe(1);
+      expect(next.honba).toBe(0);
+      // 1席回転: 旧親(東)が抜け番へ回り、旧南が新しい親になる。
+      const nextSeating = seatingOf(next);
+      expect(nextSeating.benchWarmer).toBe(seating.east);
+      expect(nextSeating.east).toBe(seating.south);
+      expect(nextSeating.south).toBe(seating.west);
+      expect(nextSeating.west).toBe(seating.benchWarmer);
+    });
   });
 });
