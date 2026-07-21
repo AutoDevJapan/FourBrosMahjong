@@ -223,7 +223,26 @@ export class SoshiiLedger {
     return v;
   }
 
-  /** ソシー残高の降順で並べたプレイヤーID(同点は初期登録順)。 */
+  /**
+   * ソシー残高の降順で並べたプレイヤーID(同点は初期登録順)。
+   *
+   * **最終順位・勝敗はソシー個人累計で決める**(スペック1 / `documents/spec/README.md`)ため、
+   * 結果画面の `rank`(engine `endGame`)はこちらを使う。一方 {@link applyUma} は
+   * 「4兄弟全員を**持ち点**で順位付け」する(スペック3 3.3 ② / Q13)。基準が2つ併存するのは
+   * 仕様どおりで、統合してはならない。
+   *
+   * **半荘終了時**({@link applyRawScore} と {@link applyUma} を両方適用した後)の残高では、
+   * 両者の順位は必ず一致する。これは**定数間のマージンが正**であることの帰結:
+   * ウマ/オカの最小隣接差(`UMA[2] − UMA[3]` = 5,000)− 役満祝儀の最大相対スイング
+   * (和了者 +3,000 と支払者 −1,000 の差 = 4,000)= 1,000 > 0。`UMA` または
+   * {@link YAKUMAN_BONUS} を調整するとこの不変条件は無言で破れ、「表示は2位なのに
+   * ウマは1位分」という不整合を生む。マージンは `settlement.test.ts`
+   * 「ranking と applyUma の基準一致」で定数から算出・固定済み。
+   *
+   * 前提: {@link applyBonus} に渡す `loserIds` が「和了者以外の3兄弟・重複なし」であること
+   * (engine `settleWin` が保証)。重複した支払者を渡すとスイングが 4,000 を超え得る。
+   * また局中(素点・ウマ未適用)の呼び出しはこの一致の対象外。
+   */
   ranking(): PlayerId[] {
     return [...this._balances.entries()]
       .map(([id, balance], index) => ({ id, balance, index }))
