@@ -498,7 +498,7 @@ function applyNashiNashi(raw: readonly RawYaku[]): Yaku[] {
   if (raw.length === 0) return [];
 
   const hasYakuman = raw.some((y) => y.yakuman > 0);
-  if (hasYakuman) return raw.map(strip);
+  if (hasYakuman) return raw.filter((y) => y.yakuman > 0).map(strip);
 
   const nonAtozuke = raw.filter((y) => !(y.isYakuhai && y.agariCompleted));
   if (nonAtozuke.length === 0) return []; // 後付け → 和了不可
