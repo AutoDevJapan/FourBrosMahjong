@@ -313,6 +313,31 @@ describe("declareAnkan: リーチ後暗槓の結線(Q18 / #116)", () => {
     ).toBe((s2.lastRound?.deltas.p0 ?? 0) - (detail?.stickPayout ?? 0));
   });
 
+  it("最終ライブ牌直前の暗槓でも嶺上開花と海底摸月を重複しない(#352)", () => {
+    const setup = setupRinshanWin();
+    expect(setup).not.toBeNull();
+    if (setup === null) return;
+    const { state, ankanTile } = setup;
+    const hand = state.hand;
+    if (hand === null) return;
+
+    // 残り1枚から暗槓すると、王牌補充の結果ライブ牌は0になる。しかし和了牌は
+    // 通常ツモの最終牌ではなく嶺上牌なので、海底摸月は成立しない。
+    while (hand.wall.remainingLiveTiles > 1) hand.wall.draw();
+    const afterKan = declareAnkan(state, ankanTile);
+    expect(afterKan.hand?.wall.remainingLiveTiles).toBe(0);
+    expect(afterKan.hand?.fromKan).toBe(true);
+    expect(afterKan.pending?.kind).toBe("humanDiscard");
+    if (afterKan.pending?.kind !== "humanDiscard") return;
+    expect(afterKan.pending.canTsumo).toBe(true);
+
+    const won = declareTsumo(afterKan);
+    const yakuNames =
+      won.lastRound?.winDetails?.yaku.map((yaku) => yaku.name) ?? [];
+    expect(yakuNames).toContain("嶺上開花");
+    expect(yakuNames).not.toContain("海底摸月");
+  });
+
   it("送り槓(合法暗槓でない牌)の暗槓要求は no-op で拒否する", () => {
     // pump は合法暗槓が無ければ ankanTiles を空で提示する。その状態で
     // 任意の牌の暗槓を要求しても非合法手として拒否される。
