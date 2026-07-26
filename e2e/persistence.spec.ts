@@ -105,6 +105,48 @@ test.describe("対局状態のsession復元(#190)", () => {
 });
 
 test.describe("終局後の /game の出口(#206 / #207)", () => {
+  test("「もう一半荘」後の戻る操作で復元不能な結果画面へ戻らない(issue #353)", async ({
+    page,
+  }) => {
+    await page.addInitScript(
+      (raw) => {
+        sessionStorage.setItem("four-bros-mahjong.game.v1", raw);
+      },
+      JSON.stringify(walkToGameEnd(1).journal),
+    );
+
+    // ロビーを履歴の起点にし、終局画面から結果画面へ進む。
+    await page.goto("/");
+    await page.getByRole("link", { name: /対局を開始/ }).click();
+    await page.getByRole("button", { name: "結果を見る" }).first().click();
+    await expect(page).toHaveURL(/\/game\/result$/);
+    await expect(page.getByRole("heading", { name: "最終順位" })).toBeVisible();
+
+    // 新規半荘は確定結果を上書きするため、結果URLを履歴に残さず /game へ replace する。
+    await page.getByRole("button", { name: "もう一半荘" }).click();
+    await expect(page).toHaveURL(/\/game$/);
+    await expect(page.locator("[data-phase]").first()).toHaveAttribute(
+      "data-phase",
+      "playing",
+    );
+
+    // 戻っても、既に復元不能な /game/result の未確定フォールバックへは入らない。
+    await page.goBack();
+    await expect(page).toHaveURL(/\/game$/);
+    await expect(
+      page.getByText("まだ半荘の結果が確定していません"),
+    ).toHaveCount(0);
+    await expect(page.locator("[data-phase]").first()).toHaveAttribute(
+      "data-phase",
+      "playing",
+    );
+    await page.goBack();
+    await expect(page).toHaveURL(/\/$/);
+    await expect(
+      page.getByRole("heading", { level: 1, name: "四兄弟麻雀" }),
+    ).toBeVisible();
+  });
+
   test("終局journal残存時もロビー「対局を開始」で /game に留まり、戻る・新規半荘開始が機能する", async ({
     page,
   }) => {
