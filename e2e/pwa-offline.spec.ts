@@ -124,4 +124,40 @@ test.describe("PWAオフライン動作(#292)", () => {
     ).toBeVisible();
     await context.setOffline(false);
   });
+
+  test("RSC取得後もHTML cacheを汚染せず、オフラインで/gameを再読込できる(#355)", async ({
+    page,
+    context,
+  }) => {
+    await page.goto("/game");
+    await page.waitForFunction(
+      async () => (await navigator.serviceWorker?.ready) != null,
+    );
+    await page.reload();
+    await page.waitForFunction(
+      () => navigator.serviceWorker?.controller != null,
+    );
+
+    const rscContentType = await page.evaluate(async () => {
+      const response = await fetch("/game?_rsc=cache-integrity-repro", {
+        headers: { RSC: "1" },
+      });
+      return response.headers.get("content-type");
+    });
+    expect(rscContentType).toContain("text/x-component");
+
+    const cachedDocumentType = await page.evaluate(async () => {
+      const keys = await caches.keys();
+      const runtimeName = keys.find((key) => key.startsWith("fbm-runtime-"));
+      if (!runtimeName) return null;
+      const cached = await (await caches.open(runtimeName)).match("/game");
+      return cached?.headers.get("content-type") ?? null;
+    });
+    expect(cachedDocumentType).toContain("text/html");
+
+    await context.setOffline(true);
+    await page.reload();
+    await expect(page.getByRole("heading", { name: "対局" })).toBeVisible();
+    await context.setOffline(false);
+  });
 });
