@@ -99,7 +99,7 @@ export default function Home() {
                   {item.ready ? (
                     <Link
                       href={item.href}
-                      className="flex items-center justify-between gap-4 rounded-lg p-4 transition-colors hover:bg-foreground/5"
+                      className="flex items-center justify-between gap-4 rounded-lg p-4 transition-colors motion-reduce:transition-none hover:bg-foreground/5"
                     >
                       {content}
                     </Link>

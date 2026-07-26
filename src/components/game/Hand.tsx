@@ -200,7 +200,7 @@ export default function Hand({
               setActiveIndex(index);
               onSelect?.(index, tile);
             }}
-            className={`relative rounded-md transition-transform ${
+            className={`relative rounded-md transition-transform motion-reduce:transition-none ${
               disabled
                 ? "cursor-not-allowed opacity-45 grayscale"
                 : "cursor-pointer hover:-translate-y-0.5"

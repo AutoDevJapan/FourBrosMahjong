@@ -292,6 +292,38 @@ test.describe("状態駆動 a11y 監査(狭幅・モーダル / #148)", () => {
       [],
     );
   });
+
+  test("reduced-motionでは対局操作のトランジションを無効化する(#364)", async ({
+    page,
+  }) => {
+    await page.emulateMedia({ reducedMotion: "reduce" });
+    await openScreen(page, gameScreen, "ライト", "?seed=1");
+
+    const handTile = page.getByRole("option").first();
+    const action = page.getByRole("button", { name: "ツモ" }).first();
+    await expect(handTile).toBeVisible();
+    await expect(action).toBeVisible();
+
+    for (const target of [handTile, action]) {
+      await expect
+        .poll(() =>
+          target.evaluate((element) =>
+            getComputedStyle(element)
+              .transitionDuration.split(",")
+              .map((duration) => duration.trim()),
+          ),
+        )
+        .toEqual(["0s"]);
+    }
+
+    // 動きを止めても、キーボードの現在位置は専用アウトラインで判別できる。
+    await handTile.focus();
+    expect(
+      await handTile.evaluate(
+        (element) => getComputedStyle(element).outlineStyle,
+      ),
+    ).not.toBe("none");
+  });
 });
 
 /**
@@ -631,6 +663,32 @@ test.describe("状態駆動 a11y 監査(戦績の展開状態 / #293)", () => {
         })),
       },
     ],
+  });
+
+  test("reduced-motionでは戦績の開閉矢印を即時に切り替える(#364)", async ({
+    page,
+  }) => {
+    await page.emulateMedia({ reducedMotion: "reduce" });
+    await page.addInitScript((raw) => {
+      localStorage.setItem("four-bros-mahjong.history.v1", raw);
+    }, storedHistory);
+    await openScreen(page, historyScreen, "ライト");
+
+    const details = page.locator("details").first();
+    const arrow = details.locator("summary [aria-hidden='true']").first();
+    await expect(arrow).toBeVisible();
+    await expect
+      .poll(() =>
+        arrow.evaluate((element) =>
+          getComputedStyle(element)
+            .transitionDuration.split(",")
+            .map((duration) => duration.trim()),
+        ),
+      )
+      .toEqual(["0s"]);
+
+    await details.locator("summary").click();
+    await expect(details).toHaveAttribute("open", "");
   });
 
   for (const theme of STATE_DRIVEN_THEMES) {
