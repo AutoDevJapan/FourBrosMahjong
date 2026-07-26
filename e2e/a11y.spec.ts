@@ -507,6 +507,32 @@ test.describe("キーボードのみ操作(a11y 補強)", () => {
     await expect(systemRadio).toBeFocused();
     await expect(systemRadio).toBeChecked();
 
+    // #327: フォーカスを受ける radio だけにグローバルリングを描画し、
+    // 外側 label には outline を追加しない。両方に描画すると二重リングが再発する。
+    await expect
+      .poll(async () =>
+        systemRadio.evaluate((radio) => {
+          const radioStyle = getComputedStyle(radio);
+          const labelStyle = getComputedStyle(radio.closest("label")!);
+          return {
+            radioOutlineStyle: radioStyle.outlineStyle,
+            radioOutlineWidth: radioStyle.outlineWidth,
+            radioOutlineColor: radioStyle.outlineColor,
+            focusRingColor: getComputedStyle(document.documentElement)
+              .getPropertyValue("--focus-ring")
+              .trim(),
+            labelOutlineStyle: labelStyle.outlineStyle,
+          };
+        }),
+      )
+      .toEqual({
+        radioOutlineStyle: "solid",
+        radioOutlineWidth: "2px",
+        radioOutlineColor: "rgb(29, 78, 216)",
+        focusRingColor: "#1d4ed8",
+        labelOutlineStyle: "none",
+      });
+
     // 矢印キー移動でネイティブ radiogroup の選択が移り、選択が即 DOM に反映される(マウス不使用)。
     await page.keyboard.press("ArrowDown");
     const lightRadio = page.getByRole("radio", { name: "ライト" });

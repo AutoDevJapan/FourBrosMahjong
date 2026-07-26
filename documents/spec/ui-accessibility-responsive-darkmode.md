@@ -126,7 +126,7 @@ Tailwind v4 のデフォルトブレークポイントをそのまま採用し�
 - **フォーカスリングはコンポーネント側で上書きしない**(#314)。`@import "tailwindcss"` により Tailwind のユーティリティは `@layer utilities` へ生成される一方、`globals.css` は `@layer` を使わないため上記グローバル規則は unlayered に置かれる。CSS カスケードでは通常宣言について **unlayered がすべてのレイヤーに優先する(詳細度の比較は行われない)** ため、コンポーネントに `focus-visible:outline-*` を書いても outline 系プロパティは一切上書きできず no-op になる。したがってリング色・太さ・オフセットの変更は `--focus-ring` の値そのものを変える形で行う。
   - **`focus-visible:ring-*` / `shadow-*` も使わない**。これらは `outline` ではなく **`box-shadow`** で描画されるためグローバル規則とプロパティが競合せず、**no-op にならず実際に二重リングとして描画される**。リングの太さ・色を変えたい場合も `--focus-ring` の値で行う。
   - この不変条件は `src/app/focus-ring.regression.test.ts` が回帰テストとして固定する(グローバル規則の存在・`globals.css` が `@layer` を使わないこと・コンポーネントが `focus-visible:outline-*` を持たないこと・`focus-visible:ring-*` / `shadow-*` を持たないこと)。リング色 × 背景の 3:1 はライト/手動ダーク/OS ダークの3スコープで `src/app/globals.contrast.test.ts` が検証する。
-  - 既知の例外は `src/components/layout/ThemeToggle.tsx` の `has-[:focus-visible]:outline-*` 1 箇所のみ。フォーカスを受けるのは内側の `<input type="radio">` だが outline が付くのは外側の `<label>` であり、`<label>` にはグローバル `:focus-visible` がマッチせず競合しないため実際に描画され、**input と label の二重リング**になっている(是正は見た目が変わるため #327 で別途扱う)。
+  - 既知の例外だった `src/components/layout/ThemeToggle.tsx` の `has-[:focus-visible]:outline-*` 1 箇所は #327 で削除し、全コンポーネントで例外なくグローバル `:focus-visible` に一本化された。
 
 ## 5.5 アクセシビリティ検証手段
 

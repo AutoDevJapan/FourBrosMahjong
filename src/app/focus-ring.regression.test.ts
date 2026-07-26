@@ -25,30 +25,6 @@ import { describe, expect, it } from "vitest";
 const SRC = fileURLToPath(new URL("..", import.meta.url));
 
 /**
- * 既知の例外: ファイル単位ではなく**許可するクラス文字列そのもの**を固定する。
- *
- * ThemeToggle はフォーカスを受けるのが内側の `<input type="radio">` である一方、
- * `has-[]` は外側の `<label>` ラッパへ outline を付ける。`<label>` にはグローバル
- * `:focus-visible` がマッチせず競合しないため、この 1 箇所だけは実際に描画される。
- * 結果として input(`--focus-ring` 色)と label(`--foreground` 色)の二重リングになる。
- * 見た目が変わる変更のため #314 では現状維持とし、#327 で扱う。
- *
- * ファイル単位で除外すると、同じファイルへ `has-` の付かない真の no-op を書き足しても
- * 検出できなくなる。そのため許可対象を完全一致の集合として列挙する。
- */
-const KNOWN_EXCEPTIONS: ReadonlyMap<string, ReadonlySet<string>> = new Map([
-  [
-    "components/layout/ThemeToggle.tsx",
-    new Set([
-      "has-[:focus-visible]:outline",
-      "has-[:focus-visible]:outline-2",
-      "has-[:focus-visible]:outline-offset-2",
-      "has-[:focus-visible]:outline-foreground",
-    ]),
-  ],
-]);
-
-/**
  * `focus-visible:outline…` を検出する。以下の合成形をすべて拾う:
  *  - `dark:` `md:` `group-` `peer-` 等との合成(部分一致)
  *  - `has-[:focus-visible]:outline…`
@@ -116,10 +92,8 @@ describe("フォーカスリングの単一起点(#314)", () => {
   it("コンポーネントは focus-visible:outline-* を指定しない(no-op のデッドコード)", () => {
     const offenders: string[] = [];
     for (const rel of sourceFiles(SRC)) {
-      const allowed = KNOWN_EXCEPTIONS.get(rel);
       const text = readFileSync(join(SRC, rel), "utf8");
       for (const m of text.matchAll(outlineUtility())) {
-        if (allowed?.has(m[0])) continue;
         offenders.push(`${rel}: ${m[0]}`);
       }
     }
@@ -149,28 +123,5 @@ describe("フォーカスリングの単一起点(#314)", () => {
         `outline リングと二重になります。リングは --focus-ring に一本化してください。\n` +
         offenders.join("\n"),
     ).toEqual([]);
-  });
-
-  it("KNOWN_EXCEPTIONS が陳腐化していない(許可エントリは実在する)", () => {
-    // #327 で ThemeToggle の例外が解消された際、許可エントリの削除漏れを検出する。
-    const files = sourceFiles(SRC);
-    for (const [rel, classes] of KNOWN_EXCEPTIONS) {
-      expect(files, `許可エントリのファイルが存在しない: ${rel}`).toContain(
-        rel,
-      );
-      // 部分文字列一致(toContain)では `…:outline` が `…:outline-2` に含まれてしまい
-      // 独立に検証できない。offender 検出と同じ正規表現で完全一致の集合を作って突き合わせる。
-      const text = readFileSync(join(SRC, rel), "utf8");
-      const present = new Set(
-        [...text.matchAll(outlineUtility())].map((m) => m[0]),
-      );
-      for (const cls of classes) {
-        expect(
-          [...present].sort(),
-          `許可エントリ "${cls}" が ${rel} に存在しません。例外が解消されたなら ` +
-            `KNOWN_EXCEPTIONS から削除してください(#327)。`,
-        ).toContain(cls);
-      }
-    }
   });
 });
