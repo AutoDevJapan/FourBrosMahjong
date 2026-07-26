@@ -22,7 +22,15 @@ test.describe("PWAオフライン動作(#292)", () => {
   }) => {
     await page.goto("/game?seed=0");
 
-    // clients.claim() により初回ロード中に SW がページを制御下に置く。
+    // #349: 初回登録ページは未制御のまま。更新 SW が旧タブを途中から
+    // 奪わない標準ライフサイクルを守り、activate 完了後の再読込で制御下へ入る。
+    await page.waitForFunction(
+      async () => (await navigator.serviceWorker?.ready) != null,
+    );
+    expect(
+      await page.evaluate(() => navigator.serviceWorker?.controller),
+    ).toBeNull();
+    await page.reload();
     await page.waitForFunction(
       () => navigator.serviceWorker?.controller != null,
     );
@@ -51,11 +59,8 @@ test.describe("PWAオフライン動作(#292)", () => {
     }
     expect(precached).toContain("/tiles/Back.svg");
 
-    // 初回ロードのサブリソースは SW 制御前に取得された可能性があるため、
-    // 一度オンラインで再読込して全アセットを SW 経由(runtime cache)にする。
-    await page.reload();
+    // 上の再読込でサブリソースも SW 経由(runtime cache)になる。
     const hand = visibleHand(page);
-    const initial = await hand.getByRole("option").allTextContents();
 
     // 1 打して局面を進める(sessionStorage ジャーナルに記録される)。
     await hand
@@ -63,15 +68,30 @@ test.describe("PWAオフライン動作(#292)", () => {
       .first()
       .click();
     await expect
-      .poll(() => hand.getByRole("option").allTextContents())
-      .not.toEqual(initial);
-    const progressed = await hand.getByRole("option").allTextContents();
+      .poll(() =>
+        page.evaluate(() => {
+          const raw = sessionStorage.getItem("four-bros-mahjong.game.v1");
+          return raw === null ? 0 : (JSON.parse(raw).actions?.length ?? 0);
+        }),
+      )
+      .toBeGreaterThan(0);
+    const progressed = await hand
+      .getByRole("option")
+      .evaluateAll((options) =>
+        options.map((option) => option.getAttribute("aria-label")),
+      );
 
     // 機内モードで再読込: ERR_INTERNET_DISCONNECTED にならず、同じ局面を復元できる。
     await context.setOffline(true);
     await page.reload();
     await expect
-      .poll(() => visibleHand(page).getByRole("option").allTextContents())
+      .poll(() =>
+        visibleHand(page)
+          .getByRole("option")
+          .evaluateAll((options) =>
+            options.map((option) => option.getAttribute("aria-label")),
+          ),
+      )
       .toEqual(progressed);
 
     await context.setOffline(false);
@@ -90,9 +110,12 @@ test.describe("PWAオフライン動作(#292)", () => {
 
     await page.goto("/");
     await page.waitForFunction(
-      () => navigator.serviceWorker?.controller != null,
+      async () => (await navigator.serviceWorker?.ready) != null,
     );
     await page.reload();
+    await page.waitForFunction(
+      () => navigator.serviceWorker?.controller != null,
+    );
 
     await context.setOffline(true);
     await page.reload();

@@ -6,8 +6,9 @@
  * ここでは外部ライブラリ(Workbox 等)に依存せず、必要最小限の自前 SW を文字列として生成する。
  *
  * 配信は `src/app/sw.js/route.ts`(`force-static`)が担い、ビルドごとに一意の `version` を
- * 埋め込む。version が変わると install → activate で旧 `fbm-*` キャッシュが全て破棄されるため、
- * デプロイ後に古いシェルが残らない(issue #292 受け入れ条件)。
+ * 埋め込む。更新版は旧 SW のクライアントが無くなるまで waiting に留まり、
+ * activate してから旧 `fbm-*` cache を破棄する。`skipWaiting` / `clients.claim`
+ * で旧ページを途中から奪うと、必要な旧ハッシュ chunk も削除されるため使わない(#349)。
  *
  * キャッシュ戦略:
  * - ナビゲーション(HTML): network-first。オンライン時は常に最新シェルを取得し、
@@ -124,11 +125,7 @@ async function cacheFirst(request) {
 
 self.addEventListener("install", (event) => {
   event.waitUntil(
-    self.caches
-      .open(PRECACHE)
-      .then((cache) => cache.addAll(PRECACHE_URLS))
-      // 旧 SW の待機をスキップし、新バージョンを即時有効化する(古いシェル残留の防止)。
-      .then(() => self.skipWaiting()),
+    self.caches.open(PRECACHE).then((cache) => cache.addAll(PRECACHE_URLS)),
   );
 });
 
@@ -147,9 +144,7 @@ self.addEventListener("activate", (event) => {
             )
             .map((key) => self.caches.delete(key)),
         ),
-      )
-      // 初回登録時からページを制御下に置き、リロード無しで fetch を仲介する。
-      .then(() => self.clients.claim()),
+      ),
   );
 });
 
