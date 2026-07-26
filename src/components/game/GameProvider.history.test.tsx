@@ -41,7 +41,7 @@ function blockLocalStorage() {
 
 /** ジャーナル末尾の操作1つを UI 経由(controls)で実行するプローブ。 */
 function LastActionProbe({ action }: { action: GameAction }) {
-  const { controls, phase } = useGame();
+  const { controls, phase, historySaveStatus } = useGame();
   const run = () => {
     switch (action.type) {
       case "discard":
@@ -74,6 +74,7 @@ function LastActionProbe({ action }: { action: GameAction }) {
         最終操作
       </button>
       <output data-testid="phase">{phase}</output>
+      <output data-testid="history-save-status">{historySaveStatus}</output>
     </>
   );
 }
@@ -160,6 +161,9 @@ describe("GameProvider match history recording (#293)", () => {
     fireEvent.click(screen.getByRole("button", { name: "最終操作" }));
 
     expect(screen.getByTestId("phase")).toHaveTextContent("gameEnd");
+    expect(screen.getByTestId("history-save-status")).toHaveTextContent(
+      "saved",
+    );
     const entries = loadHistory(window.localStorage);
     expect(entries).toHaveLength(1);
     expect(entries[0].seed).toBe(fixture.journal.seed);
@@ -258,10 +262,60 @@ describe("GameProvider match history recording (#293)", () => {
     expect(() =>
       render(
         <GameProvider>
-          <output data-testid="probe" />
+          <HistorySaveStatusProbe />
         </GameProvider>,
       ),
     ).not.toThrow();
-    expect(screen.getByTestId("probe")).toBeInTheDocument();
+    expect(screen.getByTestId("history-save-status")).toHaveTextContent(
+      "failed",
+    );
+  });
+
+  it("localStorage書き込みが容量不足でも終局結果を保ち、保存失敗を公開する", () => {
+    const lastAction = fixture.journal.actions.at(-1);
+    if (!lastAction) throw new Error("ジャーナルが空");
+    window.sessionStorage.setItem(
+      GAME_SESSION_KEY,
+      JSON.stringify({
+        ...fixture.journal,
+        actions: fixture.journal.actions.slice(0, -1),
+      }),
+    );
+    const storage = window.localStorage;
+    Object.defineProperty(window, "localStorage", {
+      configurable: true,
+      value: {
+        get length() {
+          return storage.length;
+        },
+        clear: () => storage.clear(),
+        getItem: (key: string) => storage.getItem(key),
+        key: (index: number) => storage.key(index),
+        removeItem: (key: string) => storage.removeItem(key),
+        setItem: () => {
+          throw new DOMException(
+            "Storage quota exceeded",
+            "QuotaExceededError",
+          );
+        },
+      } satisfies Storage,
+    });
+
+    render(
+      <GameProvider>
+        <LastActionProbe action={lastAction} />
+      </GameProvider>,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "最終操作" }));
+
+    expect(screen.getByTestId("phase")).toHaveTextContent("gameEnd");
+    expect(screen.getByTestId("history-save-status")).toHaveTextContent(
+      "failed",
+    );
   });
 });
+
+function HistorySaveStatusProbe() {
+  const { historySaveStatus } = useGame();
+  return <output data-testid="history-save-status">{historySaveStatus}</output>;
+}

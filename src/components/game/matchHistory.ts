@@ -192,29 +192,45 @@ function save(storage: Storage, entries: readonly MatchHistoryEntry[]): void {
  * その削除を行った上で追記に失敗し得る。ただしこのとき購読者から見える値は前後とも
  * 空配列(破損データは `getHistorySnapshot` でも空に落ちる)なので、通知の取りこぼしにはならない。
  */
-export function appendHistory(
+export type HistoryPersistenceResult = "appended" | "already-exists" | "failed";
+
+/**
+ * 戦績追記の詳細結果。GameProvider は「既に保存済み」と「保存失敗」を区別して
+ * 結果画面へ正しい状態を渡す必要があるため、boolean 版とは別に公開する(#358)。
+ */
+export function persistHistory(
   storage: Storage,
   entry: MatchHistoryEntry,
-): boolean {
-  if (!isEntry(entry)) return false;
+): HistoryPersistenceResult {
+  if (!isEntry(entry)) return "failed";
   try {
     const entries = loadHistory(storage);
-    if (entries.some((existing) => existing.seed === entry.seed)) return false;
+    if (entries.some((existing) => existing.seed === entry.seed)) {
+      return "already-exists";
+    }
     let next = [entry, ...entries].slice(0, MAX_HISTORY_ENTRIES);
     // 半減で切り詰めるため試行回数は log2(MAX_HISTORY_ENTRIES) 程度に収まる。
     for (;;) {
       try {
         save(storage, next);
-        return true;
+        return "appended";
       } catch {
-        if (next.length <= 1) return false;
+        if (next.length <= 1) return "failed";
         next = next.slice(0, Math.max(1, Math.floor(next.length / 2)));
       }
     }
   } catch {
     // 保存不可でも対局・画面表示は継続する。
-    return false;
+    return "failed";
   }
+}
+
+/** 保存内容を実際に追記した場合だけ true を返す従来API。 */
+export function appendHistory(
+  storage: Storage,
+  entry: MatchHistoryEntry,
+): boolean {
+  return persistHistory(storage, entry) === "appended";
 }
 
 /**

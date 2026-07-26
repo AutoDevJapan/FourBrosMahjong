@@ -4,6 +4,69 @@ import { walkToGameEnd } from "@/components/game/finishedGameFixture";
 const HISTORY_KEY = "four-bros-mahjong.history.v1";
 
 test.describe("戦績のローカル保存・閲覧(#293)", () => {
+  for (const failure of ["SecurityError", "QuotaExceededError"] as const) {
+    test(`戦績保存が${failure}でも結果を表示し、保存失敗を通知する(issue #358)`, async ({
+      page,
+    }) => {
+      await page.addInitScript(
+        ({ raw, failure }) => {
+          sessionStorage.setItem("four-bros-mahjong.game.v1", raw);
+          if (failure === "SecurityError") {
+            Object.defineProperty(window, "localStorage", {
+              configurable: true,
+              get() {
+                throw new DOMException("Storage is disabled", "SecurityError");
+              },
+            });
+            return;
+          }
+          const storage = window.localStorage;
+          Object.defineProperty(window, "localStorage", {
+            configurable: true,
+            value: {
+              get length() {
+                return storage.length;
+              },
+              clear: () => storage.clear(),
+              getItem: (key: string) => storage.getItem(key),
+              key: (index: number) => storage.key(index),
+              removeItem: (key: string) => storage.removeItem(key),
+              setItem() {
+                throw new DOMException(
+                  "Storage quota exceeded",
+                  "QuotaExceededError",
+                );
+              },
+            },
+          });
+        },
+        { raw: JSON.stringify(walkToGameEnd(1).journal), failure },
+      );
+
+      await page.goto("/game");
+      await page.getByRole("button", { name: "結果を見る" }).first().click();
+
+      await expect(page).toHaveURL(/\/game\/result$/);
+      await expect(
+        page.getByRole("heading", { name: "最終順位" }),
+      ).toBeVisible();
+      await expect(
+        page.getByRole("status").filter({
+          hasText: "この端末に今回の戦績を保存できませんでした。",
+        }),
+      ).toBeVisible();
+      await expect(
+        page.getByRole("button", { name: "もう一半荘" }),
+      ).toBeVisible();
+
+      await page.getByRole("link", { name: "戦績を見る" }).click();
+      await expect(
+        page.getByText(/この端末のストレージが利用できる場合/),
+      ).toBeVisible();
+      await expect(page.getByText(/自動で記録されます/)).toBeVisible();
+    });
+  }
+
   test("終局した半荘が戦績へ保存され、/history で閲覧・削除できる", async ({
     page,
   }) => {
@@ -34,6 +97,9 @@ test.describe("戦績のローカル保存・閲覧(#293)", () => {
     // 結果画面 → 「戦績を見る」導線で /history へ。
     await page.getByRole("button", { name: "結果を見る" }).first().click();
     await expect(page).toHaveURL(/\/game\/result$/);
+    await expect(
+      page.getByText("この端末に今回の戦績を保存できませんでした。"),
+    ).toHaveCount(0);
     await page.getByRole("link", { name: "戦績を見る" }).click();
     await expect(page).toHaveURL(/\/history$/);
     await expect(
