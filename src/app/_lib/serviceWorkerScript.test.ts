@@ -164,6 +164,10 @@ function bootServiceWorker({ version = "v1" } = {}) {
 const OFFLINE: typeof fetch = () =>
   Promise.reject(new TypeError("net::ERR_INTERNET_DISCONNECTED"));
 
+function htmlResponse(body: string): Response {
+  return new Response(body, { headers: { "Content-Type": "text/html" } });
+}
+
 describe("resolveServiceWorkerVersion", () => {
   it("VercelビルドではコミットSHA先頭12桁を使う", () => {
     expect(
@@ -237,7 +241,7 @@ describe("buildServiceWorkerScript", () => {
 
   it("ナビゲーションはnetwork-first: オンライン時は最新を返しつつキャッシュへ退避する", async () => {
     const sw = bootServiceWorker();
-    sw.setFetchImpl(vi.fn(async () => new Response("fresh-shell")));
+    sw.setFetchImpl(vi.fn(async () => htmlResponse("fresh-shell")));
 
     const event = await sw.dispatchFetch(
       request("/game", { mode: "navigate" }),
@@ -251,7 +255,7 @@ describe("buildServiceWorkerScript", () => {
 
   it("query違いの同一routeをcanonical keyへ畳み込みruntime cacheを増やさない", async () => {
     const sw = bootServiceWorker();
-    sw.setFetchImpl(vi.fn(async () => new Response("fresh-shell")));
+    sw.setFetchImpl(vi.fn(async () => htmlResponse("fresh-shell")));
 
     for (let i = 0; i < MAX_RUNTIME_ENTRIES + 20; i++) {
       await sw.dispatchFetch(
@@ -296,7 +300,7 @@ describe("buildServiceWorkerScript", () => {
 
   it("cache.putが失敗しても取得済みオンラインresponseを返す", async () => {
     const sw = bootServiceWorker();
-    const online = new Response("online-success");
+    const online = htmlResponse("online-success");
     sw.setFetchImpl(vi.fn(async () => online.clone()));
     const runtime = await sw.cacheStorage.open("fbm-runtime-v1");
     runtime.putError = new DOMException("quota exceeded", "QuotaExceededError");
@@ -314,12 +318,58 @@ describe("buildServiceWorkerScript", () => {
     const sw = bootServiceWorker();
 
     const api = await sw.dispatchFetch(request("/api/data?request=1"));
+    const rsc = await sw.dispatchFetch(request("/game?_rsc=repro"));
     const unknown = await sw.dispatchFetch(
       request("/unknown?query=1", { mode: "navigate" }),
     );
 
     expect(api.respondWith).not.toHaveBeenCalled();
+    expect(rsc.respondWith).not.toHaveBeenCalled();
     expect(unknown.respondWith).toHaveBeenCalledOnce();
+    expect(sw.cacheStorage.caches.has("fbm-runtime-v1")).toBe(false);
+  });
+
+  it("既知routeのRSC取得後もcanonical HTML cacheを維持してoffline navigationへ返す(#355)", async () => {
+    const sw = bootServiceWorker();
+    sw.setFetchImpl(vi.fn(async () => new Response("precached-html")));
+    await sw.dispatchLifecycle("install");
+
+    sw.setFetchImpl(vi.fn(async () => htmlResponse("fresh-html")));
+    await sw.dispatchFetch(request("/game", { mode: "navigate" }));
+
+    const runtime = sw.cacheStorage.caches.get("fbm-runtime-v1");
+
+    // Next.js client navigation/prefetch は同じ pathname への非navigation RSC GET。
+    // HTML と同じ canonical key へ保存すると異なる表現が同居し、cache integrity が壊れる。
+    const rsc = await sw.dispatchFetch(request("/game?_rsc=repro"));
+    expect(rsc.respondWith).not.toHaveBeenCalled();
+    expect(await (await runtime?.match("/game"))?.text()).toBe("fresh-html");
+
+    sw.setFetchImpl(OFFLINE);
+    const offline = await sw.dispatchFetch(
+      request("/game", { mode: "navigate" }),
+    );
+    const response: Response = await offline.respondWith.mock.calls[0][0];
+    expect(await response.text()).toBe("precached-html");
+  });
+
+  it("navigationが非HTMLを返してもcanonical route keyへ保存しない", async () => {
+    const sw = bootServiceWorker();
+    sw.setFetchImpl(
+      vi.fn(
+        async () =>
+          new Response("RSC_PAYLOAD", {
+            headers: { "Content-Type": "text/x-component" },
+          }),
+      ),
+    );
+
+    const event = await sw.dispatchFetch(
+      request("/game", { mode: "navigate" }),
+    );
+    const response: Response = await event.respondWith.mock.calls[0][0];
+
+    expect(await response.text()).toBe("RSC_PAYLOAD");
     expect(sw.cacheStorage.caches.has("fbm-runtime-v1")).toBe(false);
   });
 

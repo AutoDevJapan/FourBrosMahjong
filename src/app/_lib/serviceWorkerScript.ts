@@ -80,7 +80,8 @@ const OWNED_CACHE_PREFIX = "fbm-";
 const PRECACHE = OWNED_CACHE_PREFIX + "precache-" + VERSION;
 const RUNTIME = OWNED_CACHE_PREFIX + "runtime-" + VERSION;
 const PRECACHE_URLS = ${JSON.stringify(precacheUrls)};
-const CACHEABLE_PATHS = new Set(PRECACHE_URLS);
+const CACHEABLE_ROUTE_PATHS = new Set(${JSON.stringify(PRECACHE_ROUTES)});
+const CACHEABLE_ASSET_PATHS = new Set(${JSON.stringify(PRECACHE_ASSETS)});
 const MAX_RUNTIME_ENTRIES = ${MAX_RUNTIME_ENTRIES};
 const NAVIGATION_FALLBACK_URL = "/";
 
@@ -107,9 +108,13 @@ function canonicalCacheKey(request) {
   return url.href;
 }
 
-function isCacheableRequest(url) {
+function isCacheableNavigation(url) {
+  return CACHEABLE_ROUTE_PATHS.has(url.pathname);
+}
+
+function isCacheableAsset(url) {
   return (
-    CACHEABLE_PATHS.has(url.pathname) ||
+    CACHEABLE_ASSET_PATHS.has(url.pathname) ||
     url.pathname.startsWith("/_next/static/")
   );
 }
@@ -130,10 +135,15 @@ function putRuntimeCache(cacheKey, response) {
 }
 
 /** network-first: 成功したらキャッシュへ退避し、失敗(オフライン)時はキャッシュで応答する。 */
-async function networkFirst(request, cacheKey, fallbackUrl) {
+async function networkFirst(
+  request,
+  cacheKey,
+  fallbackUrl,
+  isCacheableResponse = () => true,
+) {
   try {
     const response = await self.fetch(request);
-    if (response.ok && cacheKey) {
+    if (response.ok && cacheKey && isCacheableResponse(response)) {
       // Cache Storage は progressive enhancement。quota/権限エラーでも、既に取得できた
       // オンラインレスポンスは必ず利用者へ返す。
       await putRuntimeCache(cacheKey, response.clone()).catch(() => {});
@@ -152,6 +162,12 @@ async function networkFirst(request, cacheKey, fallbackUrl) {
     }
     throw error;
   }
+}
+
+/** canonical route key へ保存できるのはHTML documentだけ。 */
+function isHtmlDocument(response) {
+  const contentType = response.headers.get("Content-Type");
+  return contentType?.split(";", 1)[0].trim().toLowerCase() === "text/html";
 }
 
 /** cache-first: 不変アセット用。キャッシュ済みなら network に一切出ない。 */
@@ -201,21 +217,21 @@ self.addEventListener("fetch", (event) => {
   if (url.origin !== self.location.origin) {
     return;
   }
-  const cacheable = isCacheableRequest(url);
   if (request.mode === "navigate") {
     // 未知URLもオフライン時は / へ戻すが、そのレスポンス自体は保存しない。
     event.respondWith(
       networkFirst(
         request,
-        cacheable ? canonicalCacheKey(request) : null,
+        isCacheableNavigation(url) ? canonicalCacheKey(request) : null,
         NAVIGATION_FALLBACK_URL,
+        isHtmlDocument,
       ),
     );
     return;
   }
   // オフライン契約に含まれる画面・素材と、ビルド固有 chunk だけを保存する。
   // API/RSC等の一時的な GET はブラウザへ任せ、runtime cache を汚染しない。
-  if (!cacheable) {
+  if (!isCacheableAsset(url)) {
     return;
   }
   const cacheKey = canonicalCacheKey(request);
