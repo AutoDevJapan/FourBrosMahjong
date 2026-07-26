@@ -69,6 +69,38 @@ describe("天和/地和と特殊形の複合役満(#184)", () => {
   });
 });
 
+describe("役満成立時の通常役吸収(#339)", () => {
+  it("大三元の内訳から役牌・対々和等の通常役を除外する", () => {
+    const analysis = analyzeWin({
+      concealedTiles: parseTiles("555z 666z 777z 99p"),
+      melds: [pon("111p")],
+      winningTile: parseTile("9p"),
+      winType: "tsumo",
+    });
+
+    expect(analysis?.yaku.map((y) => y.id)).toEqual(["daisangen"]);
+    expect(analysis?.han).toBe(0);
+    expect(analysis?.yakuman).toBe(1);
+  });
+
+  it("天和+大三元の複合役満は両方を保持し、通常役だけを除外する", () => {
+    const analysis = analyzeWin({
+      concealedTiles: parseTiles("555z 666z 777z 111p 99p"),
+      winningTile: parseTile("9p"),
+      winType: "tsumo",
+      blessing: "heaven",
+    });
+
+    expect(analysis?.yaku.map((y) => y.id).sort()).toEqual([
+      "daisangen",
+      "suuankou",
+      "tenhou",
+    ]);
+    expect(analysis?.han).toBe(0);
+    expect(analysis?.yakuman).toBe(3);
+  });
+});
+
 // ---------------------------------------------------------------------------
 // 北(ガリ)役牌除外の明示ガード(spec 3.0 #83-3)
 // ---------------------------------------------------------------------------
@@ -78,8 +110,8 @@ describe("北刻子の役牌除外(spec 3.0 #83-3・明示ガード)", () => {
     // 444z(北)刻子 + 筒子刻子3つ → 混一色 + 対々和。北は役牌にならない。
     const ctx: WinContext = {
       concealedTiles: parseTiles("444z 111p 222p 333p 99p"),
-      winningTile: parseTile("9p"),
-      winType: "tsumo",
+      winningTile: parseTile("3p"),
+      winType: "ron",
     };
     const got = ids(ctx);
     expect(got).toContain("toitoi");
@@ -93,8 +125,8 @@ describe("北刻子の役牌除外(spec 3.0 #83-3・明示ガード)", () => {
     // 明示ガードが無ければ北刻子に役牌2翻(場風+自風)が付く潜在バグ。ガードで除外する。
     const ctx: WinContext = {
       concealedTiles: parseTiles("444z 111p 222p 333p 99p"),
-      winningTile: parseTile("9p"),
-      winType: "tsumo",
+      winningTile: parseTile("3p"),
+      winType: "ron",
       roundWind: HONOR.NORTH,
       seatWind: HONOR.NORTH,
     };
@@ -366,8 +398,8 @@ describe("通常役の成立(spec 3.0 役表)", () => {
     // 東南西の刻子 + 9p刻子 + 9m雀頭 → 全么九・字牌混在 → 混老頭 + 対々和。
     const got = ids({
       concealedTiles: parseTiles("111z 222z 333z 999p 99m"),
-      winningTile: parseTile("9m"),
-      winType: "tsumo",
+      winningTile: parseTile("9p"),
+      winType: "ron",
     });
     expect(got).toContain("honroutou");
     expect(got).toContain("toitoi");
