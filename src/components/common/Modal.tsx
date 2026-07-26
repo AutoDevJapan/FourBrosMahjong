@@ -12,7 +12,14 @@
  * 卓UIの「全体盤面」等をスタッキング順の影響を受けずに最前面へ出すため `document.body` へ
  * ポータルする。表示制御(開閉状態)は呼び出し元が持ち、本コンポーネントは開いている間だけ描画する。
  */
-import { useCallback, useEffect, useEffectEvent, useId, useRef } from "react";
+import {
+  type RefObject,
+  useCallback,
+  useEffect,
+  useEffectEvent,
+  useId,
+  useRef,
+} from "react";
 import { createPortal } from "react-dom";
 
 export interface ModalProps {
@@ -20,6 +27,8 @@ export interface ModalProps {
   title: string;
   /** 閉じる要求(`Escape`・オーバーレイクリック・閉じるボタン)。 */
   onClose: () => void;
+  /** ポインター起動時も含め、閉じた後に戻す呼び出し元。省略時は開く前の activeElement。 */
+  returnFocusRef?: RefObject<HTMLElement | null>;
   children: React.ReactNode;
 }
 
@@ -35,7 +44,17 @@ function focusableElements(root: HTMLElement): HTMLElement[] {
   return Array.from(nodes).filter((el) => !el.hidden);
 }
 
-export default function Modal({ title, onClose, children }: ModalProps) {
+function restoreFocus(element: HTMLElement) {
+  if (!element.isConnected) return;
+  element.focus({ preventScroll: true });
+}
+
+export default function Modal({
+  title,
+  onClose,
+  returnFocusRef,
+  children,
+}: ModalProps) {
   const overlayRef = useRef<HTMLDivElement>(null);
   const dialogRef = useRef<HTMLDivElement>(null);
   const requestClose = useEffectEvent(onClose);
@@ -45,7 +64,8 @@ export default function Modal({ title, onClose, children }: ModalProps) {
   // inert にすると、GameBoard の兄弟（ページヘッダー等）が操作可能なまま残るため、
   // body 直下に portal された overlay 以外を対象にする。既存属性は閉じる際に正確に戻す。
   useEffect(() => {
-    const previouslyFocused = document.activeElement as HTMLElement | null;
+    const previouslyFocused =
+      returnFocusRef?.current ?? (document.activeElement as HTMLElement | null);
     const overlay = overlayRef.current;
     const dialog = dialogRef.current;
     if (!overlay || !dialog) return;
@@ -95,9 +115,9 @@ export default function Modal({ title, onClose, children }: ModalProps) {
         if (ariaHidden === null) element.removeAttribute("aria-hidden");
         else element.setAttribute("aria-hidden", ariaHidden);
       }
-      if (previouslyFocused?.isConnected) previouslyFocused.focus();
+      if (previouslyFocused) restoreFocus(previouslyFocused);
     };
-  }, []);
+  }, [returnFocusRef]);
 
   const handleKeyDown = useCallback(
     (event: React.KeyboardEvent<HTMLDivElement>) => {

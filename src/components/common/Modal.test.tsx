@@ -1,6 +1,6 @@
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { describe, expect, it, vi } from "vitest";
 import Modal from "./Modal";
 
@@ -87,6 +87,37 @@ describe("Modal (spec 5.2.2 dialog / focus trap / Escape)", () => {
     opener.focus();
     await user.click(opener);
     // 開いた後、閉じるとトリガーへフォーカスが戻る。
+    await user.keyboard("{Escape}");
+    expect(opener).toHaveFocus();
+  });
+
+  it("起動元がactiveElementでなくても明示した呼び出し元へ戻す", async () => {
+    const user = userEvent.setup();
+    function Harness() {
+      const [open, setOpen] = useState(false);
+      const openerRef = useRef<HTMLButtonElement>(null);
+      return (
+        <div>
+          <button ref={openerRef} type="button" onClick={() => setOpen(true)}>
+            開く
+          </button>
+          {open ? (
+            <Modal
+              title="全体盤面"
+              onClose={() => setOpen(false)}
+              returnFocusRef={openerRef}
+            >
+              <p>本文</p>
+            </Modal>
+          ) : null}
+        </div>
+      );
+    }
+    render(<Harness />);
+    const opener = screen.getByRole("button", { name: "開く" });
+
+    await user.click(opener);
+    document.body.focus();
     await user.keyboard("{Escape}");
     expect(opener).toHaveFocus();
   });

@@ -123,11 +123,11 @@ jobs:
       # Ubuntu ランナーで --with-deps が apt-get 経由で依存パッケージを更新する際、needrestart が
       # 対話的な再起動確認プロンプトを出して非対話環境でハングすることがあるため、
       # 環境変数で明示的に自動応答させる。
-      - name: Install Playwright browsers (chromium + OS deps)
+      - name: Install Playwright browsers (chromium / webkit + OS deps)
         env:
           DEBIAN_FRONTEND: noninteractive
           NEEDRESTART_MODE: a
-        run: pnpm exec playwright install --with-deps chromium
+        run: pnpm exec playwright install --with-deps chromium webkit
 
       - name: Test (playwright e2e)
         run: pnpm test:e2e
