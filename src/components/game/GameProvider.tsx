@@ -45,7 +45,7 @@ import {
   replayJournal,
   saveJournal,
 } from "./gamePersistence";
-import { notifyHistoryChanged, persistHistory } from "./matchHistory";
+import { notifyHistoryChanged, persistHistoryAcrossTabs } from "./matchHistory";
 import type { GameViewState, TileData } from "./types";
 
 /** UI から呼べる対局操作。判定は engine 側が行う。 */
@@ -141,14 +141,14 @@ export function freshSeed(): number {
  * `matchHistory.ts` 側で分離されているため、書き換えた側が明示的に知らせる。
  * **描画フェーズから呼んではならない**(通知が他コンポーネントの再描画を要求するため)。
  */
-function recordFinishedGame(
+async function recordFinishedGame(
   engine: EngineState,
   seed: number,
-): "saved" | "failed" {
+): Promise<"saved" | "failed"> {
   if (engine.phase !== "gameEnd" || engine.result === null) return "failed";
   const storage = localStorageOrNull();
   if (storage === null) return "failed";
-  const persisted = persistHistory(storage, {
+  const persisted = await persistHistoryAcrossTabs(storage, {
     seed,
     finishedAt: Date.now(),
     players: engine.result.map((r) => ({
@@ -263,13 +263,15 @@ export function GameProvider({ children, initialGame }: GameProviderProps) {
     if (initial === null || initial.journal === null) return;
     // 新規半荘は phase が gameEnd でないため `recordFinishedGame` 側で no-op になる。
     if (initial.engine.phase !== "gameEnd") return;
-    const historySaveStatus = recordFinishedGame(
-      initial.engine,
-      initial.journal.seed,
+    void recordFinishedGame(initial.engine, initial.journal.seed).then(
+      (historySaveStatus) => {
+        // 効果の完了前に「もう一半荘」へ進んだ場合、新しい session を旧結果で汚さない。
+        if (sessionRef.current.journal !== initial.journal) return;
+        const nextSession = { ...sessionRef.current, historySaveStatus };
+        sessionRef.current = nextSession;
+        setSession(nextSession);
+      },
     );
-    const nextSession = { ...sessionRef.current, historySaveStatus };
-    sessionRef.current = nextSession;
-    setSession(nextSession);
   }, []);
 
   // engine の遷移は内部で `Wall` 等を可変更新するため、React Strict Mode で再実行され得る
@@ -287,7 +289,7 @@ export function GameProvider({ children, initialGame }: GameProviderProps) {
         nextEngine.phase === "gameEnd"
           ? journal === null
             ? "failed"
-            : recordFinishedGame(nextEngine, journal.seed)
+            : "pending"
           : sessionRef.current.historySaveStatus;
       if (journal === null) {
         const nextSession = {
@@ -313,6 +315,19 @@ export function GameProvider({ children, initialGame }: GameProviderProps) {
       const storage = sessionStorageOrNull();
       if (storage !== null) saveJournal(storage, nextJournal);
       setSession(nextSession);
+      if (nextEngine.phase === "gameEnd" && journal !== null) {
+        void recordFinishedGame(nextEngine, journal.seed).then(
+          (completedStatus) => {
+            if (sessionRef.current.journal !== nextJournal) return;
+            const completed = {
+              ...sessionRef.current,
+              historySaveStatus: completedStatus,
+            };
+            sessionRef.current = completed;
+            setSession(completed);
+          },
+        );
+      }
     };
     const tileAction = (
       type: "discard" | "riichi" | "ankan" | "kakan",

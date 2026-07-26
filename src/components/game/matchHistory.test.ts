@@ -9,6 +9,8 @@ import {
   MAX_HISTORY_ENTRIES,
   parseHistory,
   persistHistory,
+  persistHistoryAcrossTabs,
+  type HistoryLockManager,
 } from "./matchHistory";
 
 class MemoryStorage implements Storage {
@@ -30,6 +32,20 @@ class MemoryStorage implements Storage {
   }
   setItem(key: string, value: string) {
     this.values.set(key, value);
+  }
+}
+
+/** Web Locks の排他実行を決定的に再現する FIFO lock manager。 */
+class SerialLockManager implements HistoryLockManager {
+  private tail: Promise<void> = Promise.resolve();
+
+  request<T>(_name: string, callback: () => T | PromiseLike<T>): Promise<T> {
+    const result = this.tail.then(callback);
+    this.tail = result.then(
+      () => undefined,
+      () => undefined,
+    );
+    return result;
   }
 }
 
@@ -72,6 +88,54 @@ describe("match history persistence (#293)", () => {
     const entries = loadHistory(storage);
     expect(entries).toHaveLength(1);
     expect(entries[0].finishedAt).toBe(100);
+  });
+
+  it("2 writerが同じ旧値から同時追記してもWeb Locks内で再読込し両方を残す(#363)", async () => {
+    const storage = new MemoryStorage();
+    appendHistory(storage, entry(1, 1));
+    const locks = new SerialLockManager();
+
+    const [a, b] = await Promise.all([
+      persistHistoryAcrossTabs(storage, entry(2, 2), locks),
+      persistHistoryAcrossTabs(storage, entry(3, 3), locks),
+    ]);
+
+    expect([a, b]).toEqual(["appended", "appended"]);
+    expect(loadHistory(storage).map((item) => item.seed)).toEqual([3, 2, 1]);
+  });
+
+  it("writerの到着順が逆でも両方を残し、同一seedは重複排除する(#363)", async () => {
+    const storage = new MemoryStorage();
+    const locks = new SerialLockManager();
+
+    const [first, duplicate, second] = await Promise.all([
+      persistHistoryAcrossTabs(storage, entry(3, 3), locks),
+      persistHistoryAcrossTabs(storage, entry(3, 999), locks),
+      persistHistoryAcrossTabs(storage, entry(2, 2), locks),
+    ]);
+
+    expect([first, duplicate, second]).toEqual([
+      "appended",
+      "already-exists",
+      "appended",
+    ]);
+    expect(loadHistory(storage).map((item) => item.seed)).toEqual([2, 3]);
+  });
+
+  it("Web Locksが利用不能または失敗する場合は書き込まずfailedを返す(#363)", async () => {
+    const storage = new MemoryStorage();
+    expect(await persistHistoryAcrossTabs(storage, entry(1), null)).toBe(
+      "failed",
+    );
+    expect(loadHistory(storage)).toEqual([]);
+
+    const broken: HistoryLockManager = {
+      request: () => Promise.reject(new Error("locks unavailable")),
+    };
+    expect(await persistHistoryAcrossTabs(storage, entry(2), broken)).toBe(
+      "failed",
+    );
+    expect(loadHistory(storage)).toEqual([]);
   });
 
   it("上限を超えると最古の記録から破棄する", () => {
