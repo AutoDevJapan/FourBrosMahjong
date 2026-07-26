@@ -32,6 +32,7 @@ import {
   tileKey,
 } from "@/domain/hand/tile-identity";
 import { HONOR, type Suit, type Tile } from "@/domain/tiles/tile";
+import { BoundedMemo } from "./boundedMemo";
 
 const RED_FIVE_SUITS: ReadonlySet<Suit> = new Set(["pin", "sou"]);
 
@@ -116,9 +117,12 @@ function countsSignature(counts: Counts): string {
 // 向聴数(シャンテン数): 標準形 / 七対子 / 国士 の最小
 // ---------------------------------------------------------------------------
 
-/** 向聴計算のメモ(同一手牌の再計算を避ける)。上限超過でクリア。 */
-const shantenMemo = new Map<string, number>();
-const SHANTEN_MEMO_CAP = 200_000;
+/**
+ * 向聴計算のメモ。古い局面を1件ずつ退避し、半荘を跨ぐheapを固定容量に保つ。
+ * 25,000件は60半荘probeで上限維持と30秒以内の完走を両立した値(#362)。
+ */
+export const SHANTEN_MEMO_CAP = 25_000;
+const shantenMemo = new BoundedMemo<string, number>(SHANTEN_MEMO_CAP);
 
 /**
  * 分解結果 (面子 melds / 塔子 taatsu / 対子 pairs) から標準形の向聴数を求める。
@@ -143,8 +147,31 @@ function leafShanten(melds: number, taatsu: number, pairs: number): number {
 /** 1スートの分解1通り = [面子数, 塔子数, 対子数]。 */
 type SuitDecomp = readonly [number, number, number];
 
-/** スート別分解のメモ(牌種は限られるので、ウォームアップ後はほぼヒットする)。 */
-const suitMemo = new Map<string, SuitDecomp[]>();
+/**
+ * スート別分解のメモ。長時間利用でもmodule-global cacheを固定容量に保つ。
+ * 向聴memoよりvalueが配列で重いため、保持件数を10,000へ抑える。
+ */
+export const SUIT_MEMO_CAP = 10_000;
+const suitMemo = new BoundedMemo<string, SuitDecomp[]>(SUIT_MEMO_CAP);
+
+/** 長時間回帰テスト専用。production UIからは使用しない。 */
+function assertTestEnvironment(): void {
+  if (process.env.NODE_ENV !== "test") {
+    throw new Error("AI memo diagnostics are only available in tests");
+  }
+}
+
+export const aiMemoDiagnosticsForTests = Object.freeze({
+  sizes: () => {
+    assertTestEnvironment();
+    return { shanten: shantenMemo.size, suit: suitMemo.size };
+  },
+  clear: () => {
+    assertTestEnvironment();
+    shantenMemo.clear();
+    suitMemo.clear();
+  },
+});
 
 /**
  * 1スートのカウント配列を面子/塔子/対子へ分解する全通り(パレート最適のみ)。
@@ -352,7 +379,6 @@ export function shanten(tiles: readonly Tile[], meldCount = 0): number {
           kokushiShanten(tiles),
         );
 
-  if (shantenMemo.size >= SHANTEN_MEMO_CAP) shantenMemo.clear();
   shantenMemo.set(key, s);
   return s;
 }
