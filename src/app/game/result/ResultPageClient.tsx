@@ -27,7 +27,10 @@ export default function ResultPageClient() {
 
   const startNewGame = () => {
     controls.newGame();
-    router.push("/game");
+    // newGame は確定結果と journal を新しい半荘で不可逆に置き換える。push すると
+    // 復元できなくなった /game/result が履歴に残り、ブラウザバックで「結果未確定」の
+    // 空画面へ戻ってしまうため、現在の結果エントリごと対局画面へ置換する(#353)。
+    router.replace("/game");
   };
 
   return (
