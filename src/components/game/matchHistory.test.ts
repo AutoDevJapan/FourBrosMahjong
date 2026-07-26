@@ -8,6 +8,7 @@ import {
   MAX_HISTORY_BYTES,
   MAX_HISTORY_ENTRIES,
   parseHistory,
+  persistHistory,
 } from "./matchHistory";
 
 class MemoryStorage implements Storage {
@@ -65,8 +66,8 @@ describe("match history persistence (#293)", () => {
 
   it("同一seedの半荘は二重保存しない(終局済みジャーナルのリロード再生)", () => {
     const storage = new MemoryStorage();
-    appendHistory(storage, entry(7, 100));
-    appendHistory(storage, entry(7, 999));
+    expect(persistHistory(storage, entry(7, 100))).toBe("appended");
+    expect(persistHistory(storage, entry(7, 999))).toBe("already-exists");
 
     const entries = loadHistory(storage);
     expect(entries).toHaveLength(1);
@@ -143,6 +144,7 @@ describe("match history persistence (#293)", () => {
     expect(() => appendHistory(broken, entry(1))).not.toThrow();
     // 追記できていないので false = 購読者への通知は不要(#310)。
     expect(appendHistory(broken, entry(1))).toBe(false);
+    expect(persistHistory(broken, entry(1))).toBe("failed");
   });
 
   it("clearHistoryで保存済み戦績をすべて消去する", () => {

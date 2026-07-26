@@ -9,7 +9,7 @@ import SoshiiBreakdown from "@/components/result/SoshiiBreakdown";
 
 /** `GameProvider` の確定結果を読み、結果表示と対局後の操作を提供する Client Component。 */
 export default function ResultPageClient() {
-  const { view, controls } = useGame();
+  const { view, controls, historySaveStatus } = useGame();
   const router = useRouter();
   // sessionStorage はクライアントでのみ復元される。SSR は未確定状態を描くため、初回
   // hydration も同じ形に揃え、マウント後に確定結果へ切り替える。
@@ -96,6 +96,20 @@ export default function ResultPageClient() {
             </div>
           </section>
 
+          {historySaveStatus === "failed" ? (
+            <div
+              role="status"
+              className="rounded-lg border border-danger bg-danger/5 p-4 text-sm"
+            >
+              <p className="font-semibold">
+                この端末に今回の戦績を保存できませんでした。
+              </p>
+              <p className="mt-1 text-foreground/70">
+                この画面を閉じる前に結果を確認し、ブラウザのストレージ設定や空き容量を確認してください。対局結果の表示と対局の継続には影響ありません。
+              </p>
+            </div>
+          ) : null}
+
           <nav
             aria-label="対局後の導線"
             className="mt-2 flex flex-wrap gap-3 border-t border-foreground/15 pt-6"
@@ -107,7 +121,6 @@ export default function ResultPageClient() {
             >
               もう一半荘
             </button>
-            {/* この半荘の結果は終局時に戦績(localStorage)へ保存済み(issue #293)。 */}
             <Link
               href="/history"
               className="rounded-full border border-foreground/25 px-5 py-2 text-sm hover:bg-foreground/5"

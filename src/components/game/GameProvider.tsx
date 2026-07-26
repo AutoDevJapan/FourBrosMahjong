@@ -45,7 +45,7 @@ import {
   replayJournal,
   saveJournal,
 } from "./gamePersistence";
-import { appendHistory, notifyHistoryChanged } from "./matchHistory";
+import { notifyHistoryChanged, persistHistory } from "./matchHistory";
 import type { GameViewState, TileData } from "./types";
 
 /** UI から呼べる対局操作。判定は engine 側が行う。 */
@@ -85,6 +85,8 @@ export interface GameContextValue {
   readonly pending: Pending;
   /** 直前局の決着サマリ(未決着時は null)。 */
   readonly roundSummary: RoundSummary | null;
+  /** 現在の半荘結果をこの端末の戦績へ保存した状態。 */
+  readonly historySaveStatus: "idle" | "pending" | "saved" | "failed";
   /** 対局操作。 */
   readonly controls: GameControls;
 }
@@ -139,11 +141,14 @@ export function freshSeed(): number {
  * `matchHistory.ts` 側で分離されているため、書き換えた側が明示的に知らせる。
  * **描画フェーズから呼んではならない**(通知が他コンポーネントの再描画を要求するため)。
  */
-function recordFinishedGame(engine: EngineState, seed: number): void {
-  if (engine.phase !== "gameEnd" || engine.result === null) return;
+function recordFinishedGame(
+  engine: EngineState,
+  seed: number,
+): "saved" | "failed" {
+  if (engine.phase !== "gameEnd" || engine.result === null) return "failed";
   const storage = localStorageOrNull();
-  if (storage === null) return;
-  const appended = appendHistory(storage, {
+  if (storage === null) return "failed";
+  const persisted = persistHistory(storage, {
     seed,
     finishedAt: Date.now(),
     players: engine.result.map((r) => ({
@@ -155,7 +160,8 @@ function recordFinishedGame(engine: EngineState, seed: number): void {
       soshiiTotal: r.soshiiTotal,
     })),
   });
-  if (appended) notifyHistoryChanged();
+  if (persisted === "appended") notifyHistoryChanged();
+  return persisted === "failed" ? "failed" : "saved";
 }
 
 /** Storage の getter 自体が SecurityError を投げる環境ではメモリ内対局へ退避する。 */
@@ -191,8 +197,11 @@ function newJournal(
 function initialSession(initialGame?: EngineState): {
   engine: EngineState;
   journal: GameJournal | null;
+  historySaveStatus: GameContextValue["historySaveStatus"];
 } {
-  if (initialGame) return { engine: initialGame, journal: null };
+  if (initialGame) {
+    return { engine: initialGame, journal: null, historySaveStatus: "idle" };
+  }
   const urlSeed = seedFromLocation();
   const storage = sessionStorageOrNull();
   const stored = storage === null ? null : loadJournal(storage);
@@ -200,7 +209,11 @@ function initialSession(initialGame?: EngineState): {
     try {
       const engine = replayJournal(stored);
       // 復元時の戦績追記(終局時の保存失敗の補完)はマウント効果側で行う(#310)。
-      return { engine, journal: stored };
+      return {
+        engine,
+        journal: stored,
+        historySaveStatus: engine.phase === "gameEnd" ? "pending" : "idle",
+      };
     } catch {
       // 現在版engineで再生できない記録は新規対局へ安全にフォールバックする。
     }
@@ -209,7 +222,11 @@ function initialSession(initialGame?: EngineState): {
   const names = currentPlayerNames();
   const journal = newJournal(storage, seed, names);
   if (storage !== null && journal !== null) saveJournal(storage, journal);
-  return { engine: createGame({ seed, names }), journal };
+  return {
+    engine: createGame({ seed, names }),
+    journal,
+    historySaveStatus: "idle",
+  };
 }
 
 export interface GameProviderProps {
@@ -245,7 +262,14 @@ export function GameProvider({ children, initialGame }: GameProviderProps) {
     initialSessionRef.current = null;
     if (initial === null || initial.journal === null) return;
     // 新規半荘は phase が gameEnd でないため `recordFinishedGame` 側で no-op になる。
-    recordFinishedGame(initial.engine, initial.journal.seed);
+    if (initial.engine.phase !== "gameEnd") return;
+    const historySaveStatus = recordFinishedGame(
+      initial.engine,
+      initial.journal.seed,
+    );
+    const nextSession = { ...sessionRef.current, historySaveStatus };
+    sessionRef.current = nextSession;
+    setSession(nextSession);
   }, []);
 
   // engine の遷移は内部で `Wall` 等を可変更新するため、React Strict Mode で再実行され得る
@@ -259,11 +283,18 @@ export function GameProvider({ children, initialGame }: GameProviderProps) {
       // 再生不能なイベントを journal に残さない。
       if (nextEngine === engine) return;
       // この操作で半荘が終局したら、確定結果を戦績へ追記する(issue #293)。
-      if (journal !== null && nextEngine.phase === "gameEnd") {
-        recordFinishedGame(nextEngine, journal.seed);
-      }
+      const historySaveStatus =
+        nextEngine.phase === "gameEnd"
+          ? journal === null
+            ? "failed"
+            : recordFinishedGame(nextEngine, journal.seed)
+          : sessionRef.current.historySaveStatus;
       if (journal === null) {
-        const nextSession = { engine: nextEngine, journal: null };
+        const nextSession = {
+          engine: nextEngine,
+          journal: null,
+          historySaveStatus,
+        };
         sessionRef.current = nextSession;
         setSession(nextSession);
         return;
@@ -272,7 +303,11 @@ export function GameProvider({ children, initialGame }: GameProviderProps) {
         ...journal,
         actions: [...journal.actions, action],
       };
-      const nextSession = { engine: nextEngine, journal: nextJournal };
+      const nextSession = {
+        engine: nextEngine,
+        journal: nextJournal,
+        historySaveStatus,
+      };
       // storage / React state より先に同期 ref を進め、同一 tick の次イベントを直列化する。
       sessionRef.current = nextSession;
       const storage = sessionStorageOrNull();
@@ -304,6 +339,7 @@ export function GameProvider({ children, initialGame }: GameProviderProps) {
         const nextSession = {
           engine: createGame({ seed, names }),
           journal: nextJournal,
+          historySaveStatus: "idle" as const,
         };
         sessionRef.current = nextSession;
         if (storage !== null && nextJournal !== null)
@@ -319,9 +355,10 @@ export function GameProvider({ children, initialGame }: GameProviderProps) {
       phase: engine.phase,
       pending: engine.pending,
       roundSummary: engine.lastRound,
+      historySaveStatus: session.historySaveStatus,
       controls,
     }),
-    [engine, controls],
+    [engine, session.historySaveStatus, controls],
   );
 
   return <GameContext.Provider value={value}>{children}</GameContext.Provider>;

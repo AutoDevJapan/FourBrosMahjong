@@ -161,7 +161,7 @@ export default function MatchHistoryList() {
           className="flex flex-col items-start gap-2 rounded-lg border border-foreground/15 p-6"
         >
           <p className="text-sm text-foreground/70">
-            保存された戦績はまだありません。半荘を最後まで打つと、最終順位とソシー内訳がこの端末に自動で記録されます。
+            保存された戦績はまだありません。半荘終了時にこの端末のストレージが利用できる場合、最終順位とソシー内訳が自動で記録されます。記録されない場合は、ブラウザのストレージ設定や空き容量を確認してください。
           </p>
         </div>
       ) : (
