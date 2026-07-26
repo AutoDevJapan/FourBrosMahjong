@@ -491,6 +491,14 @@ export function isHaitei(remainingLiveTiles: number): boolean {
   return remainingLiveTiles === 0;
 }
 
+/** 通常ツモが海底牌か。嶺上補充はライブ牌残数を0にしても海底摸月ではない。 */
+export function isHaiteiTsumo(
+  remainingLiveTiles: number,
+  fromKan: boolean,
+): boolean {
+  return isHaitei(remainingLiveTiles) && !fromKan;
+}
+
 /**
  * 他家の打牌に対しポン(need=2)/大明槓(need=3)を宣言できるか(純述語)。
  * - 放銃者自身(`isDiscarder`)は自分の打牌を鳴けない。
@@ -1051,7 +1059,8 @@ function pump(state: EngineState): EngineState {
       hand.tempMiss[seat] = false; // 同巡内フリテンは次の自ツモで解消。
     }
 
-    const haitei = isHaitei(hand.wall.remainingLiveTiles);
+    const wallExhausted = isHaitei(hand.wall.remainingLiveTiles);
+    const haitei = isHaiteiTsumo(hand.wall.remainingLiveTiles, hand.fromKan);
 
     if (isHuman) {
       if (hand.riichi[seat]) {
@@ -1107,7 +1116,7 @@ function pump(state: EngineState): EngineState {
     }
 
     // AI: 海底でなければ加槓→暗槓の順で合法なカンを宣言する。
-    if (canKanOnDrawTurn(hand.drawn !== null, haitei)) {
+    if (canKanOnDrawTurn(hand.drawn !== null, wallExhausted)) {
       const pool = [...hand.hands[seat], hand.drawn];
       const meldCount = hand.melds[seat].length;
       // 向聴を悪化させるカンは宣言しない(#304)。ドラ増加より手を崩さないことを優先する。
@@ -1349,7 +1358,8 @@ function buildHumanPending(state: EngineState, seat: SeatKey): Pending {
   const hand = state.hand;
   if (hand === null) return null;
   const drawn = hand.drawn;
-  const haitei = isHaitei(hand.wall.remainingLiveTiles);
+  const wallExhausted = isHaitei(hand.wall.remainingLiveTiles);
+  const haitei = isHaiteiTsumo(hand.wall.remainingLiveTiles, hand.fromKan);
   const canTsumo =
     drawn !== null && analyzeTsumo(state, seat, drawn, haitei) !== null;
 
@@ -1362,7 +1372,7 @@ function buildHumanPending(state: EngineState, seat: SeatKey): Pending {
     drawn !== null && menzen && state.points[occupant] >= RIICHI_STICK_POINTS;
   const riichiTiles = riichiEligible ? riichiDiscardTiles(hand, seat) : [];
   // 海底(ライブ牌 0 = 嶺上を引けない)ではカン(暗槓・加槓)不可(標準慣行・#128)。
-  const canKan = canKanOnDrawTurn(drawn !== null, haitei);
+  const canKan = canKanOnDrawTurn(drawn !== null, wallExhausted);
   const ankanTiles = canKan ? ankanCandidates(pool) : [];
   const kakanTiles = canKan ? kakanCandidates(hand, seat, pool) : [];
   // 喰い替え禁止: ポン直後のみ、ポンした牌と同種の打牌を禁止(現物喰い替え / スペック1 1.4)。
@@ -2359,7 +2369,10 @@ export function declareTsumo(state: EngineState): EngineState {
   }
   const seat = seatOfPlayer(state.hand.seating, HUMAN_ID);
   if (seat === null) return state;
-  const haitei = isHaitei(state.hand.wall.remainingLiveTiles);
+  const haitei = isHaiteiTsumo(
+    state.hand.wall.remainingLiveTiles,
+    state.hand.fromKan,
+  );
   const analysis = analyzeTsumo(state, seat, state.hand.drawn, haitei);
   if (analysis === null) return state;
   return settleWin(

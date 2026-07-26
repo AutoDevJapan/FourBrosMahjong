@@ -10,6 +10,7 @@ import {
   declareKakan,
   type EngineState,
   isHaitei,
+  isHaiteiTsumo,
   type Pending,
 } from "./engine";
 
@@ -45,6 +46,21 @@ describe("isHaitei(ライブ牌0 = 海底)", () => {
     expect(isHaitei(1)).toBe(false);
     expect(isHaitei(2)).toBe(false);
     expect(isHaitei(69)).toBe(false);
+  });
+});
+
+describe("isHaiteiTsumo(海底摸月の文脈)", () => {
+  it("通常ツモでライブ牌0なら海底摸月", () => {
+    expect(isHaiteiTsumo(0, false)).toBe(true);
+  });
+
+  it("嶺上補充でライブ牌0になっても海底摸月ではない", () => {
+    expect(isHaiteiTsumo(0, true)).toBe(false);
+  });
+
+  it("ライブ牌が残っていれば通常ツモ・嶺上とも海底摸月ではない", () => {
+    expect(isHaiteiTsumo(1, false)).toBe(false);
+    expect(isHaiteiTsumo(1, true)).toBe(false);
   });
 });
 
