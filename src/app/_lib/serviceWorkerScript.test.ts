@@ -12,6 +12,7 @@
 import { describe, expect, it, vi } from "vitest";
 import {
   buildServiceWorkerScript,
+  MAX_RUNTIME_ENTRIES,
   PRECACHE_ASSETS,
   PRECACHE_ROUTES,
   resolveServiceWorkerVersion,
@@ -40,6 +41,7 @@ function toKey(target: FakeRequest | string): string {
 
 class FakeCache {
   readonly store = new Map<string, Response>();
+  putError: Error | null = null;
 
   constructor(private readonly fetchImpl: () => typeof fetch) {}
 
@@ -54,11 +56,24 @@ class FakeCache {
   }
 
   async put(target: FakeRequest | string, response: Response): Promise<void> {
+    if (this.putError) throw this.putError;
     this.store.set(toKey(target), response);
   }
 
   async match(target: FakeRequest | string): Promise<Response | undefined> {
     return this.store.get(toKey(target));
+  }
+
+  async keys(): Promise<FakeRequest[]> {
+    return [...this.store.keys()].map((url) => ({
+      method: "GET",
+      url,
+      mode: "no-cors",
+    }));
+  }
+
+  async delete(target: FakeRequest | string): Promise<boolean> {
+    return this.store.delete(toKey(target));
   }
 }
 
@@ -232,6 +247,80 @@ describe("buildServiceWorkerScript", () => {
     expect(await response.text()).toBe("fresh-shell");
     const runtime = sw.cacheStorage.caches.get("fbm-runtime-v1");
     expect(runtime?.store.has(`${ORIGIN}/game`)).toBe(true);
+  });
+
+  it("query違いの同一routeをcanonical keyへ畳み込みruntime cacheを増やさない", async () => {
+    const sw = bootServiceWorker();
+    sw.setFetchImpl(vi.fn(async () => new Response("fresh-shell")));
+
+    for (let i = 0; i < MAX_RUNTIME_ENTRIES + 20; i++) {
+      await sw.dispatchFetch(
+        request(`/rules?runtime-cache-repro=${i}`, { mode: "navigate" }),
+      );
+    }
+
+    const runtime = sw.cacheStorage.caches.get("fbm-runtime-v1");
+    expect(runtime?.store.size).toBe(1);
+    expect(runtime?.store.has(`${ORIGIN}/rules`)).toBe(true);
+
+    sw.setFetchImpl(OFFLINE);
+    const offline = await sw.dispatchFetch(
+      request("/rules?runtime-cache-repro=offline", { mode: "navigate" }),
+    );
+    const response: Response = await offline.respondWith.mock.calls[0][0];
+    expect(await response.text()).toBe("fresh-shell");
+  });
+
+  it("runtime cacheは上限超過時に古いentryから削除する", async () => {
+    const sw = bootServiceWorker();
+    sw.setFetchImpl(vi.fn(async () => new Response("chunk")));
+
+    // 実ブラウザ同様に並列取得しても、write + eviction の直列化で上限を越えない。
+    await Promise.all(
+      Array.from({ length: MAX_RUNTIME_ENTRIES + 5 }, (_, i) =>
+        sw.dispatchFetch(request(`/_next/static/chunks/${i}.js`)),
+      ),
+    );
+
+    const runtime = sw.cacheStorage.caches.get("fbm-runtime-v1");
+    expect(runtime?.store.size).toBe(MAX_RUNTIME_ENTRIES);
+    expect(runtime?.store.has(`${ORIGIN}/_next/static/chunks/0.js`)).toBe(
+      false,
+    );
+    expect(
+      runtime?.store.has(
+        `${ORIGIN}/_next/static/chunks/${MAX_RUNTIME_ENTRIES + 4}.js`,
+      ),
+    ).toBe(true);
+  });
+
+  it("cache.putが失敗しても取得済みオンラインresponseを返す", async () => {
+    const sw = bootServiceWorker();
+    const online = new Response("online-success");
+    sw.setFetchImpl(vi.fn(async () => online.clone()));
+    const runtime = await sw.cacheStorage.open("fbm-runtime-v1");
+    runtime.putError = new DOMException("quota exceeded", "QuotaExceededError");
+
+    const event = await sw.dispatchFetch(
+      request("/game", { mode: "navigate" }),
+    );
+    const response: Response = await event.respondWith.mock.calls[0][0];
+
+    expect(response.status).toBe(200);
+    expect(await response.text()).toBe("online-success");
+  });
+
+  it("一時GET/RSCはinterceptせず、未知navigationはfallback用にinterceptするが保存しない", async () => {
+    const sw = bootServiceWorker();
+
+    const api = await sw.dispatchFetch(request("/api/data?request=1"));
+    const unknown = await sw.dispatchFetch(
+      request("/unknown?query=1", { mode: "navigate" }),
+    );
+
+    expect(api.respondWith).not.toHaveBeenCalled();
+    expect(unknown.respondWith).toHaveBeenCalledOnce();
+    expect(sw.cacheStorage.caches.has("fbm-runtime-v1")).toBe(false);
   });
 
   it("オフラインのナビゲーションはプリキャッシュ済みHTMLで応答する(#292回帰防止)", async () => {

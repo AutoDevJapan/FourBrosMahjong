@@ -14,7 +14,8 @@
  * - ナビゲーション(HTML): network-first。オンライン時は常に最新シェルを取得し、
  *   オフライン時のみキャッシュ(最後は `/` へフォールバック)で応答する。
  * - `/_next/static/`(コンテンツハッシュ付き)・牌 SVG・アイコン: cache-first(実質不変)。
- * - その他の同一オリジン GET(RSC ペイロード・フォント等): network-first + キャッシュ退避。
+ * - その他の同一オリジン GET(RSC/API/未知URL等): キャッシュせずブラウザへ委譲。
+ *   未知URLへのナビゲーションだけは、オフライン時の `/` fallback のため仲介する。
  *
  * 生成文字列内では `self.*` を明示参照する(暗黙のグローバル参照を避け、Vitest で
  * 偽の ServiceWorkerGlobalScope を注入してハンドラの挙動を検証できるようにするため)。
@@ -40,6 +41,15 @@ export const PRECACHE_ASSETS: readonly string[] = [
   "/icons/icon-512",
   ...TILE_ASSET_URLS,
 ];
+
+/**
+ * 1デプロイ中に保持する runtime cache の最大件数。
+ *
+ * プリキャッシュ外で実際に増えるのは主にコンテンツハッシュ付き Next.js chunk だが、
+ * クエリ違い・将来の route 追加・ブラウザの投機取得でも origin quota を無制限に
+ * 消費しないよう明示的な上限を置く。超過時は Cache API の挿入順で古いものから削除する。
+ */
+export const MAX_RUNTIME_ENTRIES = 100;
 
 /**
  * SW のキャッシュバージョンを決定する。
@@ -70,7 +80,13 @@ const OWNED_CACHE_PREFIX = "fbm-";
 const PRECACHE = OWNED_CACHE_PREFIX + "precache-" + VERSION;
 const RUNTIME = OWNED_CACHE_PREFIX + "runtime-" + VERSION;
 const PRECACHE_URLS = ${JSON.stringify(precacheUrls)};
+const CACHEABLE_PATHS = new Set(PRECACHE_URLS);
+const MAX_RUNTIME_ENTRIES = ${MAX_RUNTIME_ENTRIES};
 const NAVIGATION_FALLBACK_URL = "/";
+
+// cache.put + eviction を直列化する。同時 fetch が各々「上限未満」と判定してから
+// 書き込む競合を防ぎ、完了後の件数上限を常に維持する。
+let cacheWriteChain = Promise.resolve();
 
 /** コンテンツハッシュ付き・または実質不変の静的アセットか。 */
 function isImmutableAsset(pathname) {
@@ -82,21 +98,49 @@ function isImmutableAsset(pathname) {
   );
 }
 
-async function putRuntimeCache(request, response) {
-  const cache = await self.caches.open(RUNTIME);
-  await cache.put(request, response);
+function canonicalCacheKey(request) {
+  const url = new URL(request.url);
+  // 本アプリでは query は表示シェル/静的アセットの内容を変えない。本番の ?seed も無効。
+  // URLごとの無制限エントリ化を防ぎ、同じ pathname は1つのキャッシュへ畳み込む。
+  url.search = "";
+  url.hash = "";
+  return url.href;
+}
+
+function isCacheableRequest(url) {
+  return (
+    CACHEABLE_PATHS.has(url.pathname) ||
+    url.pathname.startsWith("/_next/static/")
+  );
+}
+
+function putRuntimeCache(cacheKey, response) {
+  const write = cacheWriteChain.then(async () => {
+    const cache = await self.caches.open(RUNTIME);
+    await cache.put(cacheKey, response);
+    const keys = await cache.keys();
+    const excess = keys.length - MAX_RUNTIME_ENTRIES;
+    if (excess > 0) {
+      await Promise.all(keys.slice(0, excess).map((key) => cache.delete(key)));
+    }
+  });
+  // 失敗を次の書き込みへ伝播させない。呼び出し元は個別 write の成否だけを待てる。
+  cacheWriteChain = write.catch(() => {});
+  return write;
 }
 
 /** network-first: 成功したらキャッシュへ退避し、失敗(オフライン)時はキャッシュで応答する。 */
-async function networkFirst(request, fallbackUrl) {
+async function networkFirst(request, cacheKey, fallbackUrl) {
   try {
     const response = await self.fetch(request);
-    if (response.ok) {
-      await putRuntimeCache(request, response.clone());
+    if (response.ok && cacheKey) {
+      // Cache Storage は progressive enhancement。quota/権限エラーでも、既に取得できた
+      // オンラインレスポンスは必ず利用者へ返す。
+      await putRuntimeCache(cacheKey, response.clone()).catch(() => {});
     }
     return response;
   } catch (error) {
-    const cached = await self.caches.match(request);
+    const cached = cacheKey ? await self.caches.match(cacheKey) : undefined;
     if (cached) {
       return cached;
     }
@@ -111,14 +155,14 @@ async function networkFirst(request, fallbackUrl) {
 }
 
 /** cache-first: 不変アセット用。キャッシュ済みなら network に一切出ない。 */
-async function cacheFirst(request) {
-  const cached = await self.caches.match(request);
+async function cacheFirst(request, cacheKey) {
+  const cached = await self.caches.match(cacheKey);
   if (cached) {
     return cached;
   }
   const response = await self.fetch(request);
   if (response.ok) {
-    await putRuntimeCache(request, response.clone());
+    await putRuntimeCache(cacheKey, response.clone()).catch(() => {});
   }
   return response;
 }
@@ -157,15 +201,29 @@ self.addEventListener("fetch", (event) => {
   if (url.origin !== self.location.origin) {
     return;
   }
+  const cacheable = isCacheableRequest(url);
   if (request.mode === "navigate") {
-    event.respondWith(networkFirst(request, NAVIGATION_FALLBACK_URL));
+    // 未知URLもオフライン時は / へ戻すが、そのレスポンス自体は保存しない。
+    event.respondWith(
+      networkFirst(
+        request,
+        cacheable ? canonicalCacheKey(request) : null,
+        NAVIGATION_FALLBACK_URL,
+      ),
+    );
     return;
   }
+  // オフライン契約に含まれる画面・素材と、ビルド固有 chunk だけを保存する。
+  // API/RSC等の一時的な GET はブラウザへ任せ、runtime cache を汚染しない。
+  if (!cacheable) {
+    return;
+  }
+  const cacheKey = canonicalCacheKey(request);
   if (isImmutableAsset(url.pathname)) {
-    event.respondWith(cacheFirst(request));
+    event.respondWith(cacheFirst(request, cacheKey));
     return;
   }
-  event.respondWith(networkFirst(request));
+  event.respondWith(networkFirst(request, cacheKey));
 });
 `;
 }
