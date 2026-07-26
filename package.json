@@ -28,7 +28,7 @@
     "docs": "typedoc"
   },
   "dependencies": {
-    "next": "16.2.11",
+    "next": "16.2.12",
     "react": "^19.2.8",
     "react-dom": "^19.2.8"
   },
@@ -58,7 +58,8 @@
   },
   "pnpm": {
     "overrides": {
-      "postcss": ">=8.5.10"
+      "postcss": ">=8.5.10",
+      "sharp": ">=0.35.3"
     }
   }
 }
