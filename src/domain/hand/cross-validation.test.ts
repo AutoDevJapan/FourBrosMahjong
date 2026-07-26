@@ -16,14 +16,19 @@
  */
 
 import { describe, expect, it } from "vitest";
-import { shanten } from "../game/ai";
+import { shanten, ukeire } from "../game/ai";
+import { SANMA_TILE_KINDS, tileKey } from "./tile-identity";
 import type { Tile } from "../tiles/tile";
 import {
   isCompleteOracle34,
   standardDecompositions34,
   waitingIndicesOracle34,
 } from "./__oracle__/agari-oracle";
-import { tilesToCount34, tileTo34Index } from "./__oracle__/counts34";
+import {
+  SANMA_INDICES_34,
+  tilesToCount34,
+  tileTo34Index,
+} from "./__oracle__/counts34";
 import {
   makeRng,
   randomHand,
@@ -94,6 +99,60 @@ describe("クロス検証: 向聴数(ai.shanten ⇔ オラクル)", () => {
     );
     expect(mismatches).toBe(0);
   });
+});
+
+describe("クロス検証: 受け入れ候補枝刈り(#368)", () => {
+  it("門前13枚で全27牌種を走査する独立向聴オラクルと一致する", () => {
+    const rng = makeRng(0x3680_0001);
+    const hands = 2_000;
+    for (let i = 0; i < hands; i += 1) {
+      const tiles = rng() < 0.5 ? randomHand(rng, 13) : structured13(rng);
+      const counts = tilesToCount34(tiles);
+      const base = shantenOracle34(counts);
+      let kinds = 0;
+      let copies = 0;
+      for (const index of SANMA_INDICES_34) {
+        if (counts[index] >= 4) continue;
+        const drawn = [...counts];
+        drawn[index] += 1;
+        if (shantenOracle34(drawn) < base) {
+          kinds += 1;
+          copies += 4 - counts[index];
+        }
+      }
+      expect(ukeire(tiles), describeHand(tiles)).toEqual({ kinds, copies });
+    }
+  }, 20_000);
+
+  it("副露数1〜4でも全27牌種走査と一致し、特殊形候補を混入しない", () => {
+    const rng = makeRng(0x3680_0002);
+    for (let meldCount = 1; meldCount <= 4; meldCount += 1) {
+      for (let i = 0; i < 500; i += 1) {
+        const tiles = randomHand(rng, 13 - 3 * meldCount);
+        const base = shanten(tiles, meldCount);
+        let kinds = 0;
+        let copies = 0;
+        for (const kind of SANMA_TILE_KINDS) {
+          const key = tileKey(kind);
+          const used = tiles.filter((tile) => tileKey(tile) === key).length;
+          if (used >= 4) continue;
+          const drawn: Tile = {
+            ...kind,
+            isRed:
+              kind.rank === 5 && (kind.suit === "pin" || kind.suit === "sou"),
+          };
+          if (shanten([...tiles, drawn], meldCount) < base) {
+            kinds += 1;
+            copies += 4 - used;
+          }
+        }
+        expect(ukeire(tiles, meldCount), describeHand(tiles)).toEqual({
+          kinds,
+          copies,
+        });
+      }
+    }
+  }, 20_000);
 });
 
 describe("クロス検証: 和了・分解・待ち(decompose/tenpai ⇔ オラクル)", () => {

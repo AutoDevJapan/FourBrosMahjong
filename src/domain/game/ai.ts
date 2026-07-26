@@ -396,11 +396,19 @@ function remainingCopies(tiles: readonly Tile[], key: string): number {
 
 /**
  * 受け入れ候補になり得る牌種のキー集合。
- * ある牌を引いて向聴が下がるのは、それが手牌のいずれかと面子/塔子/対子を作れるとき、
- * すなわち同種か(数牌なら)同スート±2以内のときに限る。孤立牌は浮くだけで向聴を進めない。
- * 遠い孤立牌を除外することで受け入れ計算の探索母数を約1/3へ削減する(結果は厳密同値)。
+ *
+ * 標準形では、引いた牌が既存牌と面子/塔子/対子を作る必要があるため、同種または
+ * 同スート±2へ厳密に絞れる。一方、七対子は7種類未満なら未所持の任意牌種、国士は
+ * 未所持の么九牌でも向聴が下がる(#368)。特殊形の現在値が全体の最小向聴と同じとき
+ * (次の1枚で全体を進め得るとき)だけ、その役種固有候補を和集合する。
+ *
+ * これにより全牌種走査と同値のまま、通常の標準形では従来の探索母数を維持する。
  */
-function ukeireCandidateKeys(tiles13: readonly Tile[]): Set<string> {
+function ukeireCandidateKeys(
+  tiles13: readonly Tile[],
+  meldCount: number,
+  baseShanten: number,
+): Set<string> {
   const keys = new Set<string>();
   for (const tile of tiles13) {
     if (tile.suit === "honor") {
@@ -409,6 +417,30 @@ function ukeireCandidateKeys(tiles13: readonly Tile[]): Set<string> {
     }
     for (let r = tile.rank - 2; r <= tile.rank + 2; r++) {
       if (r >= 1 && r <= 9) keys.add(`${tile.suit}-${r}`);
+    }
+  }
+
+  // 七対子・国士は門前専用。副露手では標準形候補だけで完全である。
+  if (meldCount > 0) return keys;
+
+  const counts = toCounts(tiles13);
+  if (chiitoitsuShanten(counts) === baseShanten) {
+    let kinds = 0;
+    for (const suit of ORDER) {
+      for (const count of counts[suit]) if (count > 0) kinds += 1;
+    }
+    if (kinds < 7) {
+      for (const kind of SANMA_TILE_KINDS) {
+        if (counts[kind.suit][kind.rank - 1] === 0) keys.add(tileKey(kind));
+      }
+    }
+  }
+
+  if (kokushiShanten(tiles13) === baseShanten) {
+    for (const kind of SANMA_TILE_KINDS) {
+      if (isYaochu(kind) && counts[kind.suit][kind.rank - 1] === 0) {
+        keys.add(tileKey(kind));
+      }
     }
   }
   return keys;
@@ -433,8 +465,9 @@ export interface Ukeire {
  * ここでは補正しない。
  */
 export function ukeire(tiles13: readonly Tile[], meldCount = 0): Ukeire {
-  const base = shanten(tiles13, meldCount);
-  const candidateKeys = ukeireCandidateKeys(tiles13);
+  const melds = Math.max(0, Math.min(4, Math.trunc(meldCount)));
+  const base = shanten(tiles13, melds);
+  const candidateKeys = ukeireCandidateKeys(tiles13, melds, base);
   let kinds = 0;
   let copies = 0;
   for (const kind of SANMA_TILE_KINDS) {
@@ -443,7 +476,7 @@ export function ukeire(tiles13: readonly Tile[], meldCount = 0): Ukeire {
     const remaining = remainingCopies(tiles13, key);
     if (remaining <= 0) continue;
     const drawn = makeTile(kind.suit, kind.rank);
-    if (shanten([...tiles13, drawn], meldCount) < base) {
+    if (shanten([...tiles13, drawn], melds) < base) {
       kinds += 1;
       copies += remaining;
     }

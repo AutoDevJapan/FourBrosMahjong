@@ -223,6 +223,18 @@ describe("ai: 受け入れ(ukeire)", () => {
     expect(r.kinds).toBe(1);
     expect(r.copies).toBe(3);
   });
+
+  it("国士テンパイでは未所持の么九牌も受け入れに含める(#368)", () => {
+    // 中(7z)だけ未所持。字牌は同種以外の標準形候補にならないが、国士では4枚全て有効。
+    const r = ukeire(parseTiles("11m 9m 19p 19s 123456z"));
+    expect(r).toEqual({ kinds: 1, copies: 4 });
+  });
+
+  it("七対子1向聴では7種類目になり得る全未所持牌を含める(#368)", () => {
+    // 6対子相当・6種類(1mは刻子)。未所持21種類のどれを引いても種類数が7となりテンパイ。
+    const r = ukeire(parseTiles("111m 22p 44p 66p 88s 11z"));
+    expect(r).toEqual({ kinds: 21, copies: 84 });
+  });
 });
 
 describe("ai: 打牌選択(chooseDiscard)", () => {
