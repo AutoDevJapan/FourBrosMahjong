@@ -65,6 +65,26 @@ jobs:
       - name: Build (next build)
         run: pnpm build
 
+      # Service Worker は production build でのみ登録されるため、通常の dev E2E job では
+      # pwa-offline.spec.ts の2件が意図的に skip される。既にこのjobで作った `.next` を
+      # そのまま `next start` し、依存install/buildを重複させず実ブラウザのPWA結線を固定する。
+      - name: Cache Playwright browser for production PWA E2E
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-browsers-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
+
+      - name: Install Playwright browser for production PWA E2E
+        env:
+          DEBIAN_FRONTEND: noninteractive
+          NEEDRESTART_MODE: a
+        run: pnpm exec playwright install --with-deps chromium
+
+      - name: Production PWA E2E (service worker / offline)
+        env:
+          E2E_PORT: "3101"
+        run: pnpm test:e2e:pwa:prebuilt
+
   e2e:
     name: E2E (Playwright)
     runs-on: ubuntu-latest

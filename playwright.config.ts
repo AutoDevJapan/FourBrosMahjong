@@ -17,6 +17,14 @@ const e2eBaseURL = `http://127.0.0.1:${e2ePort}`;
 // service worker は production でのみ登録されるため(dev はキャッシュ汚染防止で無効)、
 // PWA オフライン系スペック(e2e/pwa-offline.spec.ts)はこのモードでのみ動く。
 const useProdServer = process.env.E2E_PROD === "1";
+// CI の品質ジョブは Playwright より先に `pnpm build` を完了している。同じ job/workspace の
+// `.next` を再利用し、PWA 2件のためだけに二重 build しない。単独ローカル実行は既定どおり
+// build から行うため、このフラグは明示した場合にだけ有効。
+const usePrebuiltProdServer = process.env.E2E_PROD_PREBUILT === "1";
+
+if (usePrebuiltProdServer && !useProdServer) {
+  throw new Error("E2E_PROD_PREBUILT=1 requires E2E_PROD=1");
+}
 
 export default defineConfig({
   testDir: "./e2e",
@@ -33,7 +41,7 @@ export default defineConfig({
   projects: [{ name: "chromium", use: { ...devices["Desktop Chrome"] } }],
   webServer: {
     command: useProdServer
-      ? `pnpm build && pnpm start --hostname 127.0.0.1 --port ${e2ePort}`
+      ? `${usePrebuiltProdServer ? "" : "pnpm build && "}pnpm start --hostname 127.0.0.1 --port ${e2ePort}`
       : `pnpm dev --hostname 127.0.0.1 --port ${e2ePort}`,
     url: e2eBaseURL,
     // Never trust an arbitrary process already listening on the E2E port.

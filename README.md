@@ -37,6 +37,7 @@ pnpm test:component # Vitest — jsdom プロジェクトのみ(*.{test,spec}.ts
 pnpm test:watch     # Vitest ウォッチモード
 pnpm test:coverage  # Vitest + v8 カバレッジ
 pnpm test:e2e       # Playwright E2E — ./e2e 配下(初回のみ `pnpm exec playwright install` が必要。詳細は後述の「E2E テスト」参照)
+pnpm test:e2e:pwa   # production build + Service Worker / オフライン専用E2E
 pnpm test:e2e:ui    # Playwright UI モード(テストの選択実行・トレース確認向け)
 
 pnpm format         # Biome: フォーマット適用
@@ -114,6 +115,7 @@ pnpm exec playwright install --with-deps   # Linux CI ランナー等、OS 依�
 
 ```bash
 pnpm test:e2e       # ヘッドレスで全 E2E スペックを実行
+pnpm test:e2e:pwa   # production serverでPWA専用スペックを実行(buildを含む)
 pnpm test:e2e:ui    # Playwright UI モード(対話的にテストを選択・トレースを確認)
 ```
 
@@ -122,6 +124,7 @@ pnpm test:e2e:ui    # Playwright UI モード(対話的にテストを選択・�
 ### CI での実行に関する注意
 
 - `.github/workflows/ci.yml` の `E2E (Playwright)` ジョブが、PR および main への push 時にヘッドレスで `pnpm test:e2e` を実行します([#29](https://github.com/AutoDevJapan/FourBrosMahjong/issues/29) で組み込み済み)。
+- Service Worker はdev serverでは無効なため、通常E2EではPWA専用2件をskipします。CIは品質ジョブの既存production buildを再利用して `pnpm test:e2e:pwa:prebuilt` を実行し、登録・プリキャッシュ・オフライン再読込を別途検証します。`prebuilt` はCI内部用で、ローカルではbuild込みの `pnpm test:e2e:pwa` を使ってください。
 - CI ではブラウザバイナリ(`~/.cache/ms-playwright`)を `pnpm-lock.yaml` のハッシュをキーにキャッシュし、テスト実行前の `pnpm exec playwright install --with-deps chromium` はキャッシュの有無に関わらず毎回実行します(キャッシュヒット時はブラウザ本体の再ダウンロードのみスキップされ、OS 依存パッケージは毎回導入されます)。
 - `playwright.config.ts` は `retries: process.env.CI ? 2 : 0` としており、CI 環境(`CI=true`)でのみ失敗テストを自動リトライします。
 - E2E テストは lint/typecheck 等と比べて不安定化(flaky)しやすいため、現時点ではブランチ保護の必須ステータスチェックには含めていません(結果は PR 上で可視化されます。必要になれば別途判断して追加します)。
