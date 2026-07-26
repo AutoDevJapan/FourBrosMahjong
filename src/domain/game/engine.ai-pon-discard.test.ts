@@ -1,15 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { DiscardContext } from "@/domain/game/ai";
+import type { Meld } from "@/domain/hand/meld";
 import { parseTile, parseTiles } from "@/domain/hand/notation";
 import { sameKind } from "@/domain/hand/tile-identity";
 import type { Tile } from "@/domain/tiles/tile";
-import {
-  canCallMeldOnDiscard,
-  createGame,
-  discard,
-  type EngineState,
-  type SeatKey,
-} from "./engine";
+import { createGame, discard, type EngineState, type SeatKey } from "./engine";
 
 /**
  * ポン直後打牌で `chooseDiscard` に渡る手牌の不変条件(issue #319 / #303 の回帰ネット)。
@@ -21,17 +16,9 @@ import {
  *
  * ここでは `chooseDiscard` をスパイして `applyAiCall` からの実引数を直接検証する。
  *
- * ## 射程の限界(意図的)
- * 現行 engine で到達できるのは「同種**ちょうど2枚**でポン」だけ(3枚以上は必ずカンへ抜ける /
- * 下の前提固定テスト参照)。この場合ポンで2枚とも消費されて手牌に同種は残らないため、
- * **#303 修正前の実装(禁止牌を filter して渡す)でもここは緑になる**。実際に
- * 差が出るのは「3枚持ちでポン」= 現状到達不能な局面であり、それが #319 が
- * 「engine レイヤで固定できない」と述べていた理由そのものである。
- *
- * したがって本ファイルの価値は退行の再現ではなく、
- * 1. engine → `chooseDiscard` の境界契約(枚数・禁止牌の渡し方)を将来に向けて固定する
- * 2. 「3枚持ちポンは到達不能」という engine コメントの前提をコードで守る
- * の2点にある。前提が崩れた時(#304)に何を足すべきかは下の describe に記した。
+ * #322 の向聴悪化ガードにより、同種3枚を持っていても大明槓せず
+ * ポンする経路が到達可能になった。その経路でも禁止牌を `tiles` から削らず、
+ * engine → `chooseDiscard` の境界契約を守ることを固定する(#325)。
  */
 
 const { chooseDiscardSpy } = vi.hoisted(() => ({
@@ -91,6 +78,25 @@ function armAiPon(seed: number): EngineState {
   };
 }
 
+/**
+ * 白ポン済みの南が 5s を3枚持ち、4枚目の捨て5sをポンする局面。
+ * 大明槓では向聴が悪化するため、#322 のガードでポンへ落ちる。
+ */
+function armAiThreeTilePon(seed: number): EngineState {
+  const state = armAiPon(seed);
+  const hand = state.hand;
+  if (hand === null) throw new Error("hand should exist");
+  const whitePon: Meld = {
+    type: "pon",
+    tiles: parseTiles("5z 5z 5z"),
+    concealed: false,
+  };
+  hand.hands.south = parseTiles("5s 5s 5s 4s 6s 1p 2p 3p 9m 1z");
+  hand.melds.south = [whitePon];
+  hand.drawn = parseTile("5s");
+  return state;
+}
+
 /** ポン直後打牌にあたる最初の `chooseDiscard` 呼び出しの引数。 */
 function firstCallContext(): DiscardContext {
   const ctx = chooseDiscardSpy.mock.calls[0]?.[0];
@@ -135,59 +141,24 @@ describe("engine: ポン直後打牌の手牌枚数(#319 / #303)", () => {
     // 禁止牌は手牌側にも残っている必要はない(ポンで2枚とも消費済み)が、
     // 「候補から除くだけで tiles から削らない」契約は枚数テストで固定している。
   });
-});
 
-/**
- * `applyAiCall` の「3枚持ちならポンではなくカンへ抜ける」前提(engine.ts のコメント)を
- * コードで固定する(#319 の選択肢3)。
- *
- * `canPon`(need 2)と `canKan`(need 3)は `need` 以外まったく同じ引数で
- * `canCallMeldOnDiscard` を呼ぶため、同種3枚以上あれば必ず両方 true になり、
- * engine は `kan=true` でカン分岐へ早期 return する。つまり「3枚持ちのままポン打牌へ
- * 到達する」局面は現行 engine では発生しない。
- *
- * ⚠️ issue #304(向聴を悪化させるカンの見送り)が入ると**この前提は崩れうる**。
- * その時点で `applyAiCall` の `forbiddenDiscards` が防御的な指定から load-bearing に
- * 変わるため、上のスパイ検証を「3枚持ちでポン」の局面でも行うよう拡張すること。
- */
-describe("engine: canPon && !canKan は同種3枚以上では成立しない(#319 前提の固定)", () => {
-  const tile = parseTile("5z");
+  it("同種3枚持ちでポンしても chooseDiscard は 14 − 3×副露数 枚を受け取る", () => {
+    const after = discard(armAiThreeTilePon(3250), parseTile("5s"));
 
-  it("ガードの全組み合わせで canPon と canKan が一致する", () => {
-    const concealedByCount = [
-      parseTiles("5z 5z 5z 123m 456m 1p"), // 3枚
-      parseTiles("5z 5z 5z 5z 123m 456m"), // 4枚
-    ];
-    let sawBothTrue = false;
+    const ctx = firstCallContext();
+    expect(ctx.meldCount).toBe(2);
+    // 14 − 3×2 = 8枚。4枚目の5sを禁止牌として tiles から削ると7枚になる。
+    expect(ctx.tiles).toHaveLength(8);
+    expect(ctx.tiles.filter((t) => sameKind(t, parseTile("5s")))).toHaveLength(
+      1,
+    );
+    expect(
+      ctx.forbiddenDiscards?.some((t) => sameKind(t, parseTile("5s"))),
+    ).toBe(true);
 
-    for (const concealed of concealedByCount) {
-      for (const inRiichi of [false, true]) {
-        for (const haitei of [false, true]) {
-          for (const isDiscarder of [false, true]) {
-            const args = { concealed, tile, inRiichi, haitei, isDiscarder };
-            const canPon = canCallMeldOnDiscard({ ...args, need: 2 });
-            const canKan = canCallMeldOnDiscard({ ...args, need: 3 });
-            expect(canPon).toBe(canKan);
-            if (canPon && canKan) sawBothTrue = true;
-          }
-        }
-      }
-    }
-
-    // 「常に false 同士で一致」ではないこと(= このテストが空振りしない)。
-    expect(sawBothTrue).toBe(true);
-  });
-
-  it("同種ちょうど2枚なら canPon のみ true(ポン打牌分岐が到達可能である根拠)", () => {
-    const concealed = parseTiles("5z 5z 123m 456m 1p 2p");
-    const args = {
-      concealed,
-      tile,
-      inRiichi: false,
-      haitei: false,
-      isDiscarder: false,
-    };
-    expect(canCallMeldOnDiscard({ ...args, need: 2 })).toBe(true);
-    expect(canCallMeldOnDiscard({ ...args, need: 3 })).toBe(false);
+    const melds = after.hand?.melds.south;
+    if (melds === undefined) throw new Error("ポン後も hand は存在するはず");
+    expect(melds).toHaveLength(2);
+    expect(melds[1].type).toBe("pon");
   });
 });
