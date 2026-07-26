@@ -4,6 +4,45 @@ import { walkToGameEnd } from "@/components/game/finishedGameFixture";
 const HISTORY_KEY = "four-bros-mahjong.history.v1";
 
 test.describe("戦績のローカル保存・閲覧(#293)", () => {
+  test("同一ブラウザの2タブが同時に終局復元しても両方の戦績を残す(#363)", async ({
+    context,
+  }) => {
+    const first = await context.newPage();
+    const second = await context.newPage();
+    const journals = [walkToGameEnd(1).journal, walkToGameEnd(2).journal];
+
+    await Promise.all(
+      [first, second].map((tab, index) =>
+        tab.addInitScript(
+          (raw) => sessionStorage.setItem("four-bros-mahjong.game.v1", raw),
+          JSON.stringify(journals[index]),
+        ),
+      ),
+    );
+
+    // localStorage は同一 context で共有、sessionStorage はタブごとに独立する。
+    // 2つの復元効果を同時に起動し、Web Locks が read-modify-write を直列化する。
+    await Promise.all([first.goto("/game"), second.goto("/game")]);
+    await expect
+      .poll(() =>
+        first.evaluate(
+          (key) =>
+            JSON.parse(localStorage.getItem(key) ?? "null")
+              ?.entries?.map((entry: { seed: number }) => entry.seed)
+              .sort((a: number, b: number) => a - b) ?? [],
+          HISTORY_KEY,
+        ),
+      )
+      .toEqual([1, 2]);
+
+    await expect(
+      first.getByText("この端末に今回の戦績を保存できませんでした。"),
+    ).toHaveCount(0);
+    await expect(
+      second.getByText("この端末に今回の戦績を保存できませんでした。"),
+    ).toHaveCount(0);
+  });
+
   for (const failure of ["SecurityError", "QuotaExceededError"] as const) {
     test(`戦績保存が${failure}でも結果を表示し、保存失敗を通知する(issue #358)`, async ({
       page,

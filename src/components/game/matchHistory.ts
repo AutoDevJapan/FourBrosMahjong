@@ -194,6 +194,14 @@ function save(storage: Storage, entries: readonly MatchHistoryEntry[]): void {
  */
 export type HistoryPersistenceResult = "appended" | "already-exists" | "failed";
 
+/** Web Locks で使う origin 内共通名。戦績 JSON の read-modify-write 全体を直列化する。 */
+const MATCH_HISTORY_LOCK = "four-bros-mahjong.history.write.v1";
+
+/** テストで決定的な lock manager を注入できる最小インターフェース。 */
+export interface HistoryLockManager {
+  request<T>(name: string, callback: () => T | PromiseLike<T>): Promise<T>;
+}
+
 /**
  * 戦績追記の詳細結果。GameProvider は「既に保存済み」と「保存失敗」を区別して
  * 結果画面へ正しい状態を渡す必要があるため、boolean 版とは別に公開する(#358)。
@@ -221,6 +229,43 @@ export function persistHistory(
     }
   } catch {
     // 保存不可でも対局・画面表示は継続する。
+    return "failed";
+  }
+}
+
+/**
+ * 複数タブで安全に戦績を追記する。
+ *
+ * `localStorage` の get/set 単体は同期でも、その間の read-modify-write は原子的でない。
+ * Web Locks の origin 内排他区間へ `persistHistory` 全体を入れ、別タブの終局結果を古い
+ * スナップショットで上書きしない。lock API が無い・取得処理が失敗した場合は、保存成功を
+ * 偽らず `failed` とする。GameProvider は既存の復旧導線（終局 journal の再読込）と
+ * 保存失敗表示を維持するため、無排他の危険な書き込みへはフォールバックしない。
+ */
+export async function persistHistoryAcrossTabs(
+  storage: Storage,
+  entry: MatchHistoryEntry,
+  locks?: HistoryLockManager | null,
+): Promise<HistoryPersistenceResult> {
+  const lockManager =
+    locks === undefined
+      ? typeof navigator !== "undefined" && navigator.locks !== undefined
+        ? (navigator.locks as HistoryLockManager)
+        : null
+      : locks;
+  if (lockManager === null) return "failed";
+  try {
+    return await lockManager.request(MATCH_HISTORY_LOCK, () => {
+      const result = persistHistory(storage, entry);
+      if (result === "failed") return result;
+      // lock callback 内で再読込し、自分の結果が実際に残っている場合だけ成功を返す。
+      return loadHistory(storage).some(
+        (existing) => existing.seed === entry.seed,
+      )
+        ? result
+        : "failed";
+    });
+  } catch {
     return "failed";
   }
 }

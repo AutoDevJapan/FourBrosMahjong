@@ -9,7 +9,7 @@
  * - `localStorage` が使えない環境でも対局が継続すること
  * を検証する。
  */
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { useSyncExternalStore } from "react";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { walkToGameEnd } from "./finishedGameFixture";
@@ -29,6 +29,8 @@ const originalLocalStorageDescriptor = Object.getOwnPropertyDescriptor(
   window,
   "localStorage",
 );
+
+const originalLocks = navigator.locks;
 
 function blockLocalStorage() {
   Object.defineProperty(window, "localStorage", {
@@ -137,10 +139,23 @@ afterEach(() => {
   }
   window.sessionStorage.clear();
   window.localStorage.clear();
+  Object.defineProperty(navigator, "locks", {
+    configurable: true,
+    value: originalLocks,
+  });
 });
 
 describe("GameProvider match history recording (#293)", () => {
-  it("終局する最終操作の瞬間に確定結果を戦績へ保存する", () => {
+  beforeEach(() => {
+    Object.defineProperty(navigator, "locks", {
+      configurable: true,
+      value: {
+        request: async (_name: string, callback: () => unknown) => callback(),
+      },
+    });
+  });
+
+  it("終局する最終操作の後に確定結果を戦績へ保存する", async () => {
     const lastAction = fixture.journal.actions.at(-1);
     if (!lastAction) throw new Error("ジャーナルが空");
     window.sessionStorage.setItem(
@@ -162,7 +177,12 @@ describe("GameProvider match history recording (#293)", () => {
 
     expect(screen.getByTestId("phase")).toHaveTextContent("gameEnd");
     expect(screen.getByTestId("history-save-status")).toHaveTextContent(
-      "saved",
+      "pending",
+    );
+    await waitFor(() =>
+      expect(screen.getByTestId("history-save-status")).toHaveTextContent(
+        "saved",
+      ),
     );
     const entries = loadHistory(window.localStorage);
     expect(entries).toHaveLength(1);
@@ -171,7 +191,7 @@ describe("GameProvider match history recording (#293)", () => {
     expect(Number.isSafeInteger(entries[0].finishedAt)).toBe(true);
   });
 
-  it("終局済みジャーナルの復元で保存漏れを補完し、再復元でも二重保存しない", () => {
+  it("終局済みジャーナルの復元で保存漏れを補完し、再復元でも二重保存しない", async () => {
     window.sessionStorage.setItem(
       GAME_SESSION_KEY,
       JSON.stringify(fixture.journal),
@@ -182,7 +202,9 @@ describe("GameProvider match history recording (#293)", () => {
         <output data-testid="probe" />
       </GameProvider>,
     );
-    expect(loadHistory(window.localStorage)).toHaveLength(1);
+    await waitFor(() =>
+      expect(loadHistory(window.localStorage)).toHaveLength(1),
+    );
 
     // リロード相当(同一ジャーナルからの再マウント)でも同一半荘は追記されない。
     first.unmount();
@@ -197,7 +219,7 @@ describe("GameProvider match history recording (#293)", () => {
     expect(entries[0].players).toEqual(expectedPlayers);
   });
 
-  it("終局操作での追記が同時マウント中の購読者へ届く(通知経路の対称性 / #310)", () => {
+  it("終局操作での追記が同時マウント中の購読者へ届く(通知経路の対称性 / #310)", async () => {
     const lastAction = fixture.journal.actions.at(-1);
     if (!lastAction) throw new Error("ジャーナルが空");
     window.sessionStorage.setItem(
@@ -221,10 +243,12 @@ describe("GameProvider match history recording (#293)", () => {
     fireEvent.click(screen.getByRole("button", { name: "最終操作" }));
 
     // 通知が無いと購読者は 0 のまま(= 「保存したのに一覧が更新されない」無音のバグ)。
-    expect(screen.getByTestId("subscribed-count")).toHaveTextContent("1");
+    await waitFor(() =>
+      expect(screen.getByTestId("subscribed-count")).toHaveTextContent("1"),
+    );
   });
 
-  it("復元時の追記も購読者へ届き、描画フェーズでは戦績を書き換えない(#310)", () => {
+  it("復元時の追記も購読者へ届き、描画フェーズでは戦績を書き換えない(#310)", async () => {
     window.sessionStorage.setItem(
       GAME_SESSION_KEY,
       JSON.stringify(fixture.journal),
@@ -248,11 +272,15 @@ describe("GameProvider match history recording (#293)", () => {
     expect(observed.length).toBeGreaterThan(0);
     expect(observed.every((count) => count === 0)).toBe(true);
     // 復元経路の追記はマウント効果で行われ、購読者へも届く。
-    expect(screen.getByTestId("subscribed-count")).toHaveTextContent("1");
-    expect(loadHistory(window.localStorage)).toHaveLength(1);
+    await waitFor(() =>
+      expect(screen.getByTestId("subscribed-count")).toHaveTextContent("1"),
+    );
+    await waitFor(() =>
+      expect(loadHistory(window.localStorage)).toHaveLength(1),
+    );
   });
 
-  it("localStorageが使えない環境でも終局ジャーナルの復元と対局継続に影響しない", () => {
+  it("localStorageが使えない環境でも終局ジャーナルの復元と対局継続に影響しない", async () => {
     blockLocalStorage();
     window.sessionStorage.setItem(
       GAME_SESSION_KEY,
@@ -266,12 +294,14 @@ describe("GameProvider match history recording (#293)", () => {
         </GameProvider>,
       ),
     ).not.toThrow();
-    expect(screen.getByTestId("history-save-status")).toHaveTextContent(
-      "failed",
+    await waitFor(() =>
+      expect(screen.getByTestId("history-save-status")).toHaveTextContent(
+        "failed",
+      ),
     );
   });
 
-  it("localStorage書き込みが容量不足でも終局結果を保ち、保存失敗を公開する", () => {
+  it("localStorage書き込みが容量不足でも終局結果を保ち、保存失敗を公開する", async () => {
     const lastAction = fixture.journal.actions.at(-1);
     if (!lastAction) throw new Error("ジャーナルが空");
     window.sessionStorage.setItem(
@@ -309,8 +339,10 @@ describe("GameProvider match history recording (#293)", () => {
     fireEvent.click(screen.getByRole("button", { name: "最終操作" }));
 
     expect(screen.getByTestId("phase")).toHaveTextContent("gameEnd");
-    expect(screen.getByTestId("history-save-status")).toHaveTextContent(
-      "failed",
+    await waitFor(() =>
+      expect(screen.getByTestId("history-save-status")).toHaveTextContent(
+        "failed",
+      ),
     );
   });
 });
