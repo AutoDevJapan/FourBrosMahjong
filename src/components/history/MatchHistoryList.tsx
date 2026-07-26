@@ -22,8 +22,8 @@ import {
   clearHistory,
   getHistorySnapshot,
   getServerHistorySnapshot,
-  type MatchHistoryEntry,
   MAX_HISTORY_ENTRIES,
+  type MatchHistoryEntry,
   notifyHistoryChanged,
   subscribeHistory,
 } from "@/components/game/matchHistory";
@@ -58,7 +58,7 @@ function HistoryItem({ entry }: { entry: MatchHistoryEntry }) {
         </span>
         <span
           aria-hidden="true"
-          className="ml-auto text-foreground/70 transition-transform group-open:rotate-90"
+          className="ml-auto text-foreground/70 transition-transform motion-reduce:transition-none group-open:rotate-90"
         >
           →
         </span>

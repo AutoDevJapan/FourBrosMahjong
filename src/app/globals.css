@@ -194,6 +194,24 @@ body {
 }
 
 /*
+ * 動きを減らす OS 設定(issue #364)。コンポーネント側の `motion-reduce` は意図を局所的に
+ * 示し、この全体規則は今後追加される transition / animation の漏れも防ぐ。状態そのものは
+ * 即時に反映し、フォーカスリングや選択リングなど動きに依存しない手掛かりは維持する。
+ */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    transition-duration: 0s !important;
+    transition-delay: 0s !important;
+    animation-duration: 0.01ms !important;
+    animation-delay: 0s !important;
+    animation-iteration-count: 1 !important;
+  }
+}
+
+/*
  * フォーカスリング(スペック5 5.2.2): フォーカスは除去せず、隣接背景に対し
  * コントラスト比 3:1 以上を確保する専用リングを付与する。
  */
