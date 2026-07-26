@@ -109,8 +109,6 @@ function bootServiceWorker({ version = "v1" } = {}) {
     location: new URL(`${ORIGIN}/`),
     caches: cacheStorage,
     fetch: (...args: Parameters<typeof fetch>) => fetchImpl(...args),
-    skipWaiting: vi.fn(async () => {}),
-    clients: { claim: vi.fn(async () => {}) },
     addEventListener: (type: string, handler: (event: unknown) => void) => {
       listeners.set(type, handler);
     },
@@ -186,7 +184,7 @@ describe("buildServiceWorkerScript", () => {
     expect(PRECACHE_ASSETS).toContain("/manifest.webmanifest");
   });
 
-  it("installで全URLをプリキャッシュしskipWaitingする", async () => {
+  it("installでプリキャッシュし、旧タブ保護のため即時activateしない(#349)", async () => {
     const sw = bootServiceWorker();
     await sw.dispatchLifecycle("install");
 
@@ -196,15 +194,22 @@ describe("buildServiceWorkerScript", () => {
       PRECACHE_ROUTES.length + PRECACHE_ASSETS.length,
     );
     expect(precache?.store.has(`${ORIGIN}/game`)).toBe(true);
-    expect(sw.scope.skipWaiting).toHaveBeenCalled();
+    expect(buildServiceWorkerScript("v1")).not.toContain("skipWaiting");
   });
 
-  it("activateで旧fbm-*キャッシュのみ破棄し、他名前空間は残してclients.claimする", async () => {
+  it("waiting中は旧chunk cacheを残し、activate後にだけ旧fbm-*を回収する(#349)", async () => {
     const sw = bootServiceWorker();
-    await sw.cacheStorage.open("fbm-precache-old");
+    const old = await sw.cacheStorage.open("fbm-precache-old");
+    await old.put("/_next/static/chunks/old.js", new Response("old-chunk"));
     await sw.cacheStorage.open("fbm-runtime-old");
     await sw.cacheStorage.open("unrelated-cache");
     await sw.dispatchLifecycle("install");
+
+    expect(
+      await sw.cacheStorage.match("/_next/static/chunks/old.js"),
+    ).toBeDefined();
+    expect(await sw.cacheStorage.keys()).toContain("fbm-precache-old");
+
     await sw.dispatchLifecycle("activate");
 
     const remaining = await sw.cacheStorage.keys();
@@ -212,7 +217,7 @@ describe("buildServiceWorkerScript", () => {
     expect(remaining).not.toContain("fbm-runtime-old");
     expect(remaining).toContain("unrelated-cache");
     expect(remaining).toContain("fbm-precache-v1");
-    expect(sw.scope.clients.claim).toHaveBeenCalled();
+    expect(buildServiceWorkerScript("v1")).not.toContain("clients.claim");
   });
 
   it("ナビゲーションはnetwork-first: オンライン時は最新を返しつつキャッシュへ退避する", async () => {
