@@ -35,6 +35,15 @@ function suitKan(suit: Tile["suit"], rank: number, concealed = false): Meld {
   };
 }
 
+/** 数牌の刻子(ポン)。四槓子の「槓ではない副露」を作るのに使う。 */
+function suitPon(suit: Tile["suit"], rank: number): Meld {
+  return {
+    type: "pon",
+    tiles: [tile(suit, rank), tile(suit, rank), tile(suit, rank)],
+    concealed: false,
+  };
+}
+
 describe("isPaoTriggeringCall: パオ責任者判定(スペック3 3.3 / #99)", () => {
   describe("大三元", () => {
     it("三元牌2種が副露済み + 3種目をポン → パオ確定", () => {
@@ -192,6 +201,9 @@ describe("isPaoTriggeringCall: パオ責任者判定(スペック3 3.3 / #99)", 
    * 既存のケースは既存副露がすべて「判定対象と同種の字牌」または「四槓子用の数牌槓」で
    * 構成されており、フィルタを外しても種類数が変わらないため素通りしていた(#389)。
    * ここでは**判定対象外の副露が混ざる**ケースを固定する。
+   *
+   * なお大四喜分岐そのものの到達可能性(北の抜きドラ運用との関係)は
+   * `質問リスト.md` の Q26・Q32 で未解決。判定が残っている限りは正しさを固定する。
    */
   describe("判定対象外の副露は種類数に数えない (#389)", () => {
     it("大三元: 白ポン + 東ポン(風牌)の状態で發ポンしても確定しない", () => {
@@ -233,6 +245,51 @@ describe("isPaoTriggeringCall: パオ責任者判定(スペック3 3.3 / #99)", 
           suitKan("man", 9),
         ],
         newMeld: honorPon(HONOR.WEST),
+        fromOpponentDiscard: true,
+      };
+      expect(isPaoTriggeringCall(ctx)).toBe(false);
+    });
+
+    /**
+     * 四槓子側も同型。既存フィクスチャは既存副露が**すべて槓**で構成されており、
+     * 「槓だけを数える」フィルタと「新副露が槓であること」のガードが実際に効いている
+     * ことを主張するテストが 1 件も無かった。
+     */
+    it("四槓子: 既存副露が3つでも槓でなければ確定しない", () => {
+      const ctx = {
+        existingMelds: [
+          honorPon(HONOR.EAST),
+          honorPon(HONOR.WHITE),
+          suitPon("sou", 3),
+        ],
+        newMeld: suitKan("pin", 5),
+        fromOpponentDiscard: true,
+      };
+      expect(isPaoTriggeringCall(ctx)).toBe(false);
+    });
+
+    it("四槓子: 既存3槓でも新副露がポンなら確定しない", () => {
+      const ctx = {
+        existingMelds: [
+          suitKan("pin", 1),
+          suitKan("sou", 2),
+          suitKan("man", 9),
+        ],
+        newMeld: suitPon("pin", 5),
+        fromOpponentDiscard: true,
+      };
+      expect(isPaoTriggeringCall(ctx)).toBe(false);
+    });
+
+    it("四槓子: 既存が既に4槓なら「3つ目まで確定」に当たらず確定しない", () => {
+      const ctx = {
+        existingMelds: [
+          suitKan("pin", 1),
+          suitKan("sou", 2),
+          suitKan("man", 9),
+          suitKan("pin", 7),
+        ],
+        newMeld: suitKan("sou", 5),
         fromOpponentDiscard: true,
       };
       expect(isPaoTriggeringCall(ctx)).toBe(false);

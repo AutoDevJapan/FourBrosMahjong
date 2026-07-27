@@ -252,61 +252,47 @@ describe("resolveWinPayment — パオ(責任払い)", () => {
    * スペック3 3.1「端数」: パオ・ロンの折半のみ `ceil100(total/2)` で 100 点単位に
    * 切り上げ、**放銃者側が残差を負担**する。
    *
-   * 現行仕様のパオ対象は役満のみで、総額は {32,000 / 48,000 / 64,000} のいずれかなので
-   * 折半に端数は生じない。そのため既存テスト(32,000 = 16,000/16,000)では
-   * 切り上げを切り捨てへ変えても検出できなかった(#389)。
+   * パオ対象は構成役満のみで、その総額は基本点 `8,000 × 役満倍数` の 4 倍(子)/6 倍(親)
+   * = **必ず 200 の倍数**(32,000 / 48,000 / 64,000 / 96,000 …)。したがって折半に端数は
+   * 生じず、この分岐は現行仕様では到達しない。そのため既存テスト(32,000 = 16,000/16,000)
+   * では切り上げを切り捨てへ変えても検出できなかった(#389)。
+   *
    * `resolveWinPayment` は点数の出所を問わない純関数なので、端数の出る総額を直接与えて
-   * 「どちらが切り上げ側か」を固定する。
+   * 「どちらが切り上げ側か」を固定する。総額は点数表への結合を避けるため合成した値だが、
+   * いずれも現行の点数表で実際に生じる素点(親1翻 1,500 / 親2翻 2,900 / 子3翻 3,900)。
    */
   describe("パオ・ロンの折半端数 (#389)", () => {
-    // [説明, 責任者の負担(切り上げ側), 放銃者の負担(残差), 素点]
-    // 数値をテスト名へ出すため、フォーマット指定子に対応する順で並べる。
+    // [総額, 責任者の負担(切り上げ側), 放銃者の負担(残差)]
     const oddSplits = [
-      [
-        "親1翻 = 1,500",
-        800,
-        700,
-        computeScore({ han: 1, yakumanMultiplier: 0 }, true),
-      ],
-      [
-        "親2翻 = 2,900",
-        1500,
-        1400,
-        computeScore({ han: 2, yakumanMultiplier: 0 }, true),
-      ],
-      [
-        "子3翻 = 3,900",
-        2000,
-        1900,
-        computeScore({ han: 3, yakumanMultiplier: 0 }, false),
-      ],
+      [1500, 800, 700],
+      [2900, 1500, 1400],
+      [3900, 2000, 1900],
     ] as const;
 
     it.each(oddSplits)(
-      "%s: 責任者が切り上げ側 %d、放銃者が残差 %d を負担",
-      (_label, paoShare, discarderShare, score) => {
-        expect(paoShare + discarderShare).toBe(score.ronTotal);
+      "総額 %d: 責任者が切り上げ側 %d、放銃者が残差 %d を負担",
+      (total, paoShare, discarderShare) => {
+        expect(paoShare + discarderShare).toBe(total);
         const { deltas } = resolveWinPayment({
           winner: C1,
           winType: "ron",
-          score,
+          score: { ...yakuman, ronTotal: total },
           discarderId: "child2",
           others: [D, C2],
           paoResponsibleId: "dealer",
         });
         expect(deltas.dealer).toBe(-paoShare); // パオ責任者 = 切り上げ側
         expect(deltas.child2).toBe(-discarderShare); // 放銃者 = 残差
-        expect(deltas.child1).toBe(score.ronTotal);
+        expect(deltas.child1).toBe(total);
         expectZeroSum(deltas);
       },
     );
 
     it("責任者=放銃者なら端数が出ても全額1人が負担する", () => {
-      const score = computeScore({ han: 1, yakumanMultiplier: 0 }, true);
       const { deltas } = resolveWinPayment({
         winner: C1,
         winType: "ron",
-        score,
+        score: { ...yakuman, ronTotal: 1500 },
         discarderId: "dealer",
         others: [D, C2],
         paoResponsibleId: "dealer",
@@ -315,6 +301,27 @@ describe("resolveWinPayment — パオ(責任払い)", () => {
       expect(deltas.child2).toBe(0);
       expectZeroSum(deltas);
     });
+  });
+
+  /**
+   * パオ・ツモで責任者が負担するのは**ツモ総額**(`score.tsumo.total`)であって
+   * ロン総額ではない。役満では両者が一致するため、既存テスト(32,000)では
+   * 取り違えを検出できなかった。両者が食い違う素点で固定する。
+   */
+  it("パオ・ツモ: 責任者が負担するのは ronTotal ではなく tsumo.total", () => {
+    const score = computeScore({ han: 1, yakumanMultiplier: 0 }, true);
+    expect(score.tsumo.total).not.toBe(score.ronTotal);
+    const { deltas } = resolveWinPayment({
+      winner: D,
+      winType: "tsumo",
+      score,
+      others: [C1, C2],
+      paoResponsibleId: "child1",
+    });
+    expect(deltas.child1).toBe(-score.tsumo.total);
+    expect(deltas.child2).toBe(0);
+    expect(deltas.dealer).toBe(score.tsumo.total);
+    expectZeroSum(deltas);
   });
 
   it("パオ・ツモ: 責任者が全額(他家0)", () => {
