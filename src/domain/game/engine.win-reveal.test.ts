@@ -23,6 +23,7 @@ describe("engine: 和了形開示スナップショット(#259)", () => {
     const winningTile = parseTile("2z");
     hand.hands.east = concealed;
     hand.discards.east = [parseTile("9m")];
+    hand.discardHistory.east = [parseTile("9m")];
     hand.drawn = winningTile;
     hand.turn = "east";
 

@@ -47,7 +47,10 @@ function setSeat(
   if (h === null) throw new Error("no hand");
   h.hands[seat] = parseTiles(hand);
   h.melds[seat] = melds;
-  h.discards[seat] = discards.flatMap((d) => parseTiles(d));
+  const river = discards.flatMap((d) => parseTiles(d));
+  h.discards[seat] = river;
+  // 捨て牌フリテンの判定は打牌履歴側を見る(#395)。河と同じ内容で揃える。
+  h.discardHistory[seat] = [...river];
 }
 
 /** 3p のポン(加槓の土台)。 */
