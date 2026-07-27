@@ -68,11 +68,14 @@ jobs:
       # Service Worker は production build でのみ登録されるため、通常の dev E2E job では
       # pwa-offline.spec.ts の2件が意図的に skip される。既にこのjobで作った `.next` を
       # そのまま `next start` し、依存install/buildを重複させず実ブラウザのPWA結線を固定する。
+      # キャッシュキーにはインストールするブラウザ集合を必ず含める。両 job が同じ path を
+      # 同じキーで共有すると、先に保存した側(chromium のみ)の内容がキーを占有し、
+      # webkit を要求する e2e job は毎回ダウンロードし直しになる(exact hit のため保存も走らない)。
       - name: Cache Playwright browser for production PWA E2E
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.cache/ms-playwright
-          key: playwright-browsers-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
+          key: playwright-browsers-${{ runner.os }}-chromium-${{ hashFiles('pnpm-lock.yaml') }}
 
       - name: Install Playwright browser for production PWA E2E
         env:
@@ -111,14 +114,15 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       # ブラウザバイナリ (~/.cache/ms-playwright) を pnpm-lock.yaml のハッシュ (= @playwright/test の
-      # バージョン変化を含む) をキーにキャッシュし、CI 実行時間を短縮する。OS 依存パッケージの apt install
-      # はキャッシュの有無に関わらず --with-deps で毎回実行するため、キャッシュヒット時もブラウザ本体の
-      # 再ダウンロードのみがスキップされる。
+      # バージョン変化を含む) とインストールするブラウザ集合をキーにキャッシュし、CI 実行時間を短縮する。
+      # ブラウザ集合をキーに含めないと、chromium のみを入れる ci job とキーが衝突して webkit が
+      # 常にキャッシュから漏れる。OS 依存パッケージの apt install はキャッシュの有無に関わらず
+      # --with-deps で毎回実行するため、キャッシュヒット時もブラウザ本体の再ダウンロードのみがスキップされる。
       - name: Cache Playwright browsers
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.cache/ms-playwright
-          key: playwright-browsers-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
+          key: playwright-browsers-${{ runner.os }}-chromium-webkit-${{ hashFiles('pnpm-lock.yaml') }}
 
       # Ubuntu ランナーで --with-deps が apt-get 経由で依存パッケージを更新する際、needrestart が
       # 対話的な再起動確認プロンプトを出して非対話環境でハングすることがあるため、
