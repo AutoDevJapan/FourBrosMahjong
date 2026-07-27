@@ -88,6 +88,10 @@ export default function GameBoard() {
   // クロス配置のまま再確認するための開閉状態。モーダルの表示自体は `< 360px` でのみ意味を持つ。
   const [boardOpen, setBoardOpen] = useState(false);
   const boardOpenerRef = useRef<HTMLButtonElement>(null);
+  // トリガー(「全体盤面」ボタン)は段階②のサブツリー内にあり、卓幅が 360px 以上へ変わると
+  // コンテナクエリの display:none で到達不能になる。その場合の最終復帰先として、常に描画され
+  // 続ける盤面ルートを渡す(スペック5 5.2.2 / #377)。
+  const boardRootRef = useRef<HTMLDivElement>(null);
   const selfKitaCount =
     slots.self.kind === "seated" ? slots.self.player.kitaCount : 0;
   const roundKey = `${tableInfo.roundWind}-${tableInfo.handNumber}-${tableInfo.honba}`;
@@ -479,6 +483,9 @@ export default function GameBoard() {
 
   return (
     <div
+      ref={boardRootRef}
+      // モーダルの最終復帰先として focus() できるようにするだけで、タブ順には入れない。
+      tabIndex={-1}
       className="@container w-full"
       data-phase={phase}
       data-pending={pending?.kind ?? "none"}
@@ -536,6 +543,7 @@ export default function GameBoard() {
           title="全体盤面"
           onClose={() => setBoardOpen(false)}
           returnFocusRef={boardOpenerRef}
+          fallbackFocusRef={boardRootRef}
         >
           <div className="@container">
             {crossBoard("grid", undefined, false, true)}
