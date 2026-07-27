@@ -248,6 +248,74 @@ describe("resolveWinPayment — パオ(責任払い)", () => {
     expectZeroSum(deltas);
   });
 
+  /**
+   * スペック3 3.1「端数」: パオ・ロンの折半のみ `ceil100(total/2)` で 100 点単位に
+   * 切り上げ、**放銃者側が残差を負担**する。
+   *
+   * 現行仕様のパオ対象は役満のみで、総額は {32,000 / 48,000 / 64,000} のいずれかなので
+   * 折半に端数は生じない。そのため既存テスト(32,000 = 16,000/16,000)では
+   * 切り上げを切り捨てへ変えても検出できなかった(#389)。
+   * `resolveWinPayment` は点数の出所を問わない純関数なので、端数の出る総額を直接与えて
+   * 「どちらが切り上げ側か」を固定する。
+   */
+  describe("パオ・ロンの折半端数 (#389)", () => {
+    const oddSplits = [
+      // [説明, 素点, 責任者の負担, 放銃者の負担]
+      [
+        "親1翻 = 1,500",
+        computeScore({ han: 1, yakumanMultiplier: 0 }, true),
+        800,
+        700,
+      ],
+      [
+        "親2翻 = 2,900",
+        computeScore({ han: 2, yakumanMultiplier: 0 }, true),
+        1500,
+        1400,
+      ],
+      [
+        "子3翻 = 3,900",
+        computeScore({ han: 3, yakumanMultiplier: 0 }, false),
+        2000,
+        1900,
+      ],
+    ] as const;
+
+    it.each(oddSplits)(
+      "%s: 責任者が切り上げ側 %d、放銃者が残差 %d を負担",
+      (_label, score, paoShare, discarderShare) => {
+        expect(paoShare + discarderShare).toBe(score.ronTotal);
+        const { deltas } = resolveWinPayment({
+          winner: C1,
+          winType: "ron",
+          score,
+          discarderId: "child2",
+          others: [D, C2],
+          paoResponsibleId: "dealer",
+        });
+        expect(deltas.dealer).toBe(-paoShare); // パオ責任者 = 切り上げ側
+        expect(deltas.child2).toBe(-discarderShare); // 放銃者 = 残差
+        expect(deltas.child1).toBe(score.ronTotal);
+        expectZeroSum(deltas);
+      },
+    );
+
+    it("責任者=放銃者なら端数が出ても全額1人が負担する", () => {
+      const score = computeScore({ han: 1, yakumanMultiplier: 0 }, true);
+      const { deltas } = resolveWinPayment({
+        winner: C1,
+        winType: "ron",
+        score,
+        discarderId: "dealer",
+        others: [D, C2],
+        paoResponsibleId: "dealer",
+      });
+      expect(deltas.dealer).toBe(-1500);
+      expect(deltas.child2).toBe(0);
+      expectZeroSum(deltas);
+    });
+  });
+
   it("パオ・ツモ: 責任者が全額(他家0)", () => {
     const { deltas } = resolveWinPayment({
       winner: C1,

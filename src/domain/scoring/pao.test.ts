@@ -183,6 +183,62 @@ describe("isPaoTriggeringCall: パオ責任者判定(スペック3 3.3 / #99)", 
     });
   });
 
+  /**
+   * `pao.ts` の `honorKinds` は、既存副露のうち**判定対象の役牌だけ**を種類数に数える
+   * (大三元なら三元牌のみ / 大四喜なら風牌のみ)。このフィルタが外れると、無関係な
+   * 副露まで数えられて**誤ったパオ責任者**が生まれる(1 回あたり 32,000 点以上が
+   * 誤った 1 人へ集中する)。
+   *
+   * 既存のケースは既存副露がすべて「判定対象と同種の字牌」または「四槓子用の数牌槓」で
+   * 構成されており、フィルタを外しても種類数が変わらないため素通りしていた(#389)。
+   * ここでは**判定対象外の副露が混ざる**ケースを固定する。
+   */
+  describe("判定対象外の副露は種類数に数えない (#389)", () => {
+    it("大三元: 白ポン + 東ポン(風牌)の状態で發ポンしても確定しない", () => {
+      const ctx = {
+        existingMelds: [honorPon(HONOR.WHITE), honorPon(HONOR.EAST)],
+        newMeld: honorPon(HONOR.GREEN),
+        fromOpponentDiscard: true,
+      };
+      expect(isPaoTriggeringCall(ctx)).toBe(false);
+    });
+
+    it("大三元: 白ポン + 数牌の槓の状態で發ポンしても確定しない", () => {
+      const ctx = {
+        existingMelds: [honorPon(HONOR.WHITE), suitKan("pin", 1)],
+        newMeld: honorPon(HONOR.GREEN),
+        fromOpponentDiscard: true,
+      };
+      expect(isPaoTriggeringCall(ctx)).toBe(false);
+    });
+
+    it("大四喜: 東・南ポン + 白ポン(三元牌)の状態で西ポンしても確定しない", () => {
+      const ctx = {
+        existingMelds: [
+          honorPon(HONOR.EAST),
+          honorPon(HONOR.SOUTH),
+          honorPon(HONOR.WHITE),
+        ],
+        newMeld: honorPon(HONOR.WEST),
+        fromOpponentDiscard: true,
+      };
+      expect(isPaoTriggeringCall(ctx)).toBe(false);
+    });
+
+    it("大四喜: 東・南ポン + 数牌の槓の状態で西ポンしても確定しない", () => {
+      const ctx = {
+        existingMelds: [
+          honorPon(HONOR.EAST),
+          honorPon(HONOR.SOUTH),
+          suitKan("man", 9),
+        ],
+        newMeld: honorPon(HONOR.WEST),
+        fromOpponentDiscard: true,
+      };
+      expect(isPaoTriggeringCall(ctx)).toBe(false);
+    });
+  });
+
   describe("非パオ役満・通常役", () => {
     it("通常の役牌ポン(白のみ)ではパオなし", () => {
       const ctx = {

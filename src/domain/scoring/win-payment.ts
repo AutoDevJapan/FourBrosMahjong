@@ -148,6 +148,10 @@ function resolveRon(
 
   if (input.paoResponsibleId !== undefined) {
     // パオ・ロン: 放銃者と責任者で点数を折半(責任者=放銃者なら全額1人)。
+    // 折半はスペック3 3.1「端数」に従い 100 点単位へ切り上げ、残差は放銃者が負担する。
+    // 現行仕様のパオ対象は役満のみで総額は {32,000 / 48,000 / 64,000} のため端数は
+    // 発生しないが、点数体系やパオ対象が変わったときに切り上げ側が静かに入れ替わらないよう
+    // 確定挙動として固定してある(win-payment.test.ts「パオ・ロンの折半端数」/ #389)。
     const paoShare = ceil100(total / 2);
     const discarderShare = total - paoShare;
     if (input.paoResponsibleId === discarderId) {
