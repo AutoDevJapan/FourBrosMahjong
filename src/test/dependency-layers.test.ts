@@ -47,6 +47,7 @@ const FIXTURE: readonly [path: string, source: string][] = [
   ["src/app/_lib/securityHeaders.ts", "export const csp = 1;\n"],
   ["src/components/common/Modal.ts", "export const Modal = 1;\n"],
   ["src/domain/tiles/tile.ts", "export const tile = 1;\n"],
+  ["src/components/game/types.ts", "export type TileData = { id: number };\n"],
   // 逆流(すべて違反であるべき)
   [
     "src/domain/scoring/pao.ts",
@@ -59,6 +60,12 @@ const FIXTURE: readonly [path: string, source: string][] = [
   [
     "src/components/game/GameBoard.ts",
     'import { csp } from "../../app/_lib/securityHeaders";\nexport const c = csp;\n',
+  ],
+  // 型のみの import も逆流。`options.tsPreCompilationDeps` が false へ倒れると
+  // トランスパイル後に消える型 import が依存グラフから外れ、この抜け道が開く。
+  [
+    "src/domain/round/seat.ts",
+    'import type { TileData } from "../../components/game/types";\nexport type Seat = TileData;\n',
   ],
   // 正方向(違反であってはならない)
   [
@@ -163,6 +170,12 @@ describe("レイヤー逆流を dependency-cruiser が error として検出す�
       "src/components/game/GameBoard.ts",
       "src/app/_lib/securityHeaders.ts",
       COMPONENTS_RULE,
+    ],
+    [
+      "ドメイン → 共有コンポーネント(型のみの import)",
+      "src/domain/round/seat.ts",
+      "src/components/game/types.ts",
+      DOMAIN_RULE,
     ],
   ];
 
