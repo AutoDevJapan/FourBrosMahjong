@@ -674,7 +674,8 @@ function beginRound(state: EngineState): EngineState {
  *
  * `pulled` は**嶺上補充が1回でも走ったか**。返した牌が嶺上牌であることを意味し、
  * 海底摸月の判定(`isHaiteiTsumo`)を抑止するために呼び出し側へ伝える(#396)。
- * 嶺上が尽きて北をそのまま返した場合は嶺上牌ではないので `false`。
+ * `false` になるのは**ライブ壁から引いた北をそのまま返した初回のみ**(嶺上が尽きて
+ * 1枚も補充できなかった場合)。一度でも補充できていれば返す牌は嶺上牌なので `true`。
  */
 function autoPullNorth(
   hand: HandState,
@@ -685,17 +686,21 @@ function autoPullNorth(
   let pulled = false;
   // 北(字牌 rank=4)を引く限り抜いて嶺上補充する。王牌が尽きたら打ち切る。
   while (current.suit === "honor" && current.rank === HONOR.NORTH) {
-    hand.kita[seat] += 1;
+    let replacement: Tile;
     try {
-      current = hand.wall.drawReplacement();
-      pulled = true;
+      replacement = hand.wall.drawReplacement();
     } catch (error) {
       if (error instanceof WallEmptyError) {
-        // 嶺上が尽きた極端ケース: 北をそのまま手に残す(実運用では非到達)。
-        return { tile: current, pulled: false };
+        // 嶺上が尽きた極端ケース(実運用では非到達): 補充できないので**抜かずに**
+        // 北を手へ残す。ここで `kita` を増やすと抜き北と手牌に二重計上される。
+        // `pulled` は直前までの補充結果を保つ(current が嶺上牌のことがある)。
+        return { tile: current, pulled };
       }
       throw error;
     }
+    hand.kita[seat] += 1;
+    current = replacement;
+    pulled = true;
   }
   return { tile: current, pulled };
 }
@@ -718,7 +723,7 @@ function autoPullDealtNorths(hand: HandState): void {
   }
 }
 
-/** カン後の嶺上補充(北抜きも自動処理)。`drawn` と `fromKan` を更新する。 */
+/** カン後の嶺上補充(北抜きも自動処理)。`drawn` / `fromKan` / `fromReplacement` を更新する。 */
 function drawKanReplacement(hand: HandState, seat: SeatKey): void {
   let tile: Tile;
   try {
@@ -2319,6 +2324,9 @@ export function declareKan(state: EngineState): EngineState {
   hand.callsMade = true;
   hand.pendingDiscard = null;
   hand.passedRonSeats = [];
+  hand.drawn = null;
+  hand.fromKan = false;
+  hand.fromReplacement = false;
   hand.turn = seat;
   const abortiveDraw = settleFourKanAbortiveDraw(state);
   if (abortiveDraw !== null) return abortiveDraw;
