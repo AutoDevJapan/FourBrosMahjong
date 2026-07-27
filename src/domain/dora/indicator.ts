@@ -20,8 +20,7 @@
  * 純ロジック・副作用なし。React/DOM 非依存。
  */
 
-import type { Tile } from "../tiles/tile";
-import { createTile, HONOR } from "../tiles/tile";
+import { createTile, HONOR, type Tile } from "../tiles/tile";
 
 const NUMBER_MIN = 1;
 const NUMBER_MAX = 9;
