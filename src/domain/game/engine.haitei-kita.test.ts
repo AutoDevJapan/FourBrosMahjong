@@ -38,6 +38,14 @@ function whitePon(): Meld {
 }
 
 /**
+ * 和了者の副露: 2筒のポン。役牌でないので**役が1つも付かない**(非門前)。
+ * 海底摸月が誤付与されるかどうかが「和了できるか」を直接分ける。
+ */
+function plainPon(): Meld {
+  return { type: "pon", tiles: parseTiles("2p 2p 2p"), concealed: false };
+}
+
+/**
  * 和了者の門前10枚を「3面子 + `winTile` の単騎待ち」で組む。
  *
  * `456s`(中張牌)を含めるためチャンタ/純チャン/混老頭は付かず、`1p`/`789s` を
@@ -59,6 +67,11 @@ interface Options {
   readonly liveTiles: number;
   /** 北を引いて和了する席。`east` は自家(人間)経路。 */
   readonly winner: Extract<SeatKey, "east" | "south">;
+  /**
+   * 和了者の副露。`"white"` は役牌ポン(必ず役が付く)、`"plain"` は 2筒ポン
+   * (役が付かないので、海底摸月の誤付与の有無が和了可否を直接分ける)。
+   */
+  readonly meld?: "white" | "plain";
 }
 
 interface Fixture {
@@ -112,7 +125,7 @@ function armKitaWin(seed: number, opts: Options): Fixture {
     hand.tempMiss[seat] = false;
     hand.hands[seat] = parseTiles(seat === "west" ? JUNK_13_ALT : JUNK_13);
   }
-  hand.melds[opts.winner] = [whitePon()];
+  hand.melds[opts.winner] = [opts.meld === "plain" ? plainPon() : whitePon()];
   hand.hands[opts.winner] = tenpaiOn(winTile);
   hand.callsMade = true; // 鳴きが入った局(天和/地和を潰す)
 
@@ -243,6 +256,29 @@ describe("engine: 北抜きの嶺上ツモと海底摸月(#396)", () => {
     expect(yaku).not.toContain("海底摸月");
     expect(yaku).not.toContain("嶺上開花");
     expect(yaku).toEqual(["役牌(三元牌)"]);
+  });
+
+  it("役が海底摸月しかない手は、北抜きの嶺上ツモでは和了として提示されない", () => {
+    // `buildHumanPending` の役判定(ツモボタンの可否)を直接固定する。
+    // 役牌でないポンなので、海底摸月が誤付与されるかどうかが和了可否を分ける。
+    const { state, discardTile, winTile } = armKitaWin(7, {
+      liveTiles: 4,
+      winner: "east",
+      meld: "plain",
+    });
+
+    const after = discard(state, discardTile);
+
+    // 前提: 自家が北を抜いて嶺上牌をツモしている(空振り防止)。
+    expect(after.phase).toBe("playing");
+    expect(after.pending?.kind).toBe("humanDiscard");
+    if (after.pending?.kind !== "humanDiscard") return;
+    expect(after.hand?.drawn).toEqual(winTile);
+    expect(after.hand?.kita.east).toBe(1);
+    // 待ちは揃っているが役が無いので和了できない。海底摸月が誤って付くと true になる。
+    expect(after.pending.canTsumo).toBe(false);
+    // 防御的に直接呼んでも和了しない(`declareTsumo` 側の役判定)。
+    expect(declareTsumo(after).phase).toBe("playing");
   });
 
   it("海底ちょうどで北を抜いた嶺上ツモにも海底摸月は付かない(Q33 依存の局面)", () => {
