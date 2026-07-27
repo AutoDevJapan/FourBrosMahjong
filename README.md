@@ -2,7 +2,7 @@
 
 粗品 Official Channel「ギャンブル四兄弟」の麻雀企画をベースにした、関西式三人打ち(サンマ)麻雀のデジタル実装プロジェクトです。オールレッド5・北抜きドラ「ガリ」・サイコロ連動のドラ枚数・4人による着席ローテーション・「ソシー」精算など、番組独自のルールを再現します。
 
-> **プロジェクトの現状**: 開発中です。牌・山・配牌・ドラ・和了判定・局進行・点数精算を担うドメイン層と、ロビー(`/`)・ルール(`/rules`)・設定(`/settings`)・対局(`/game`)・結果(`/game/result`)の各画面を実装しています。対局画面は実対局エンジンで動作し、同一タブ内では操作履歴を `sessionStorage` に保存してリロード後に復元します。Vitest でドメイン/コンポーネントを、Playwright で実際の対局操作や半荘終了までの導線を検証しています。バックエンドや複数端末間の状態同期は未実装です。
+> **プロジェクトの現状**: 開発中です。牌・山・配牌・ドラ・和了判定・局進行・点数精算を担うドメイン層と、ロビー(`/`)・ルール(`/rules`)・設定(`/settings`)・対局(`/game`)・結果(`/game/result`)・戦績(`/history`)の各画面を実装しています。対局画面は実対局エンジンで動作し、同一タブ内では操作履歴を `sessionStorage` に保存してリロード後に復元します。Service Worker によるオフライン対応(PWA)も組み込み済みです。Vitest でドメイン/コンポーネントを、Playwright で実際の対局操作や半荘終了までの導線を検証しています。バックエンドや複数端末間の状態同期は未実装です。
 
 ## 技術スタック
 
@@ -53,7 +53,7 @@ pnpm docs           # TypeDoc → docs/api(gitignore対象)
 ## ディレクトリ構成
 
 ```
-src/app/          Next.js App Router の各画面(`/`・`/rules`・`/settings`・`/game`・`/game/result`)
+src/app/          Next.js App Router の各画面(`/`・`/rules`・`/settings`・`/game`・`/game/result`・`/history`)と PWA 資産(`sw.js`・`manifest.ts`)
 src/components/   対局盤面・結果・共通 UI コンポーネント
 src/domain/       牌・山・和了判定・対局進行・点数精算などのゲームロジック
 e2e/              Playwright E2E テスト
@@ -105,9 +105,11 @@ it("renders", () => {
 Playwright はブラウザ本体を別途ダウンロードする必要があります。`pnpm install` 後、初回のみ以下を実行してください。
 
 ```bash
-pnpm exec playwright install          # ローカル開発環境(このリポジトリでは chromium のみ使用)
-pnpm exec playwright install --with-deps   # Linux CI ランナー等、OS 依存パッケージも同時に導入する場合
+pnpm exec playwright install chromium webkit               # ローカル開発環境(このリポジトリが使う 2 ブラウザ)
+pnpm exec playwright install --with-deps chromium webkit   # Linux CI ランナー等、OS 依存パッケージも同時に導入する場合
 ```
+
+`playwright.config.ts` は `chromium` と `webkit-modal-focus`(Desktop Safari)の **2 プロジェクト**を定義しているため、**webkit を入れないと `pnpm test:e2e` が失敗します**。引数を省略した `pnpm exec playwright install` でも全ブラウザが入りますが、firefox など不要なブラウザまで取得するため上記の明示指定を推奨します。
 
 `--with-deps` は Linux 上で Playwright 実行に必要な OS パッケージ(apt 経由)も併せてインストールするオプションで、GitHub Actions の `ubuntu-latest` ランナーなど Linux 環境では基本的にこちらを使用してください。macOS/Windows のローカル環境では通常 `pnpm exec playwright install` のみで十分です。
 
@@ -119,12 +121,21 @@ pnpm test:e2e:pwa   # production serverでPWA専用スペックを実行(build�
 pnpm test:e2e:ui    # Playwright UI モード(対話的にテストを選択・トレースを確認)
 ```
 
-`test:e2e` はデフォルトでヘッドレス実行です(`playwright.config.ts` の `projects` は `chromium` のみを定義)。CI 上でもブラウザ UI は表示されず、ヘッドレスのまま実行されます。
+`test:e2e` はデフォルトでヘッドレス実行です。CI 上でもブラウザ UI は表示されず、ヘッドレスのまま実行されます。
+
+`playwright.config.ts` の `projects` は 2 つです。
+
+| プロジェクト | ブラウザ | 対象 spec | 目的 |
+| --- | --- | --- | --- |
+| `chromium` | Desktop Chrome | `e2e/` 配下すべて | 通常の E2E 一式 |
+| `webkit-modal-focus` | Desktop Safari | `e2e/modal-focus.spec.ts` のみ | WebKit はポインター操作で `button` にフォーカスしないため、モーダルのフォーカス復帰回帰([#369](https://github.com/AutoDevJapan/FourBrosMahjong/issues/369))だけを Safari 相当で固定する。全 spec の重複実行は避けています |
+
+プロジェクト構成は `src/test/playwright-projects.test.ts` が回帰テストとして固定しています(`testMatch` が 0 件一致になっても Playwright は無警告で exit 0 になるため)。
 
 ### CI での実行に関する注意
 
 - `.github/workflows/ci.yml` の `E2E (Playwright)` ジョブが、PR および main への push 時にヘッドレスで `pnpm test:e2e` を実行します([#29](https://github.com/AutoDevJapan/FourBrosMahjong/issues/29) で組み込み済み)。
-- Service Worker はdev serverでは無効なため、通常E2EではPWA専用2件をskipします。CIは品質ジョブの既存production buildを再利用して `pnpm test:e2e:pwa:prebuilt` を実行し、登録・プリキャッシュ・オフライン再読込を別途検証します。`prebuilt` はCI内部用で、ローカルではbuild込みの `pnpm test:e2e:pwa` を使ってください。
+- Service Worker はdev serverでは無効なため、通常E2Eでは `e2e/pwa-offline.spec.ts` の全件をskipします。CIは品質ジョブの既存production buildを再利用して `pnpm test:e2e:pwa:prebuilt` を実行し、登録・プリキャッシュ・オフライン再読込を別途検証します。`prebuilt` はCI内部用で、ローカルではbuild込みの `pnpm test:e2e:pwa` を使ってください。
 - CI ではブラウザバイナリ(`~/.cache/ms-playwright`)と pnpm store をキャッシュします。`playwright install --with-deps` はキャッシュの有無に関わらず毎回実行し、キャッシュヒット時はブラウザ本体の再ダウンロードのみスキップされます(OS 依存パッケージは毎回導入されます)。
 - **キャッシュの保存は `main` への push 実行のみ**に限定しています([#380](https://github.com/AutoDevJapan/FourBrosMahjong/issues/380))。GitHub Actions のキャッシュ予算はリポジトリあたり 10GB・超過分は LRU で退避されるうえ、キャッシュは ref スコープなので、PR ref (`refs/pull/N/merge`) でも保存すると同一内容が ref の数だけ複製されて予算が数日で一巡し、「保存はするが復元前に消える」恒常ミス状態になります。既定ブランチのキャッシュは全ブランチ・全 PR から復元できるため、保存を `main` に限定してもヒット率は落ちません。PR / dev / stg の実行は `actions/cache/restore` による復元専用です。この不変条件は `src/test/ci-workflow.test.ts` が回帰テストとして固定しています。
 - `playwright.config.ts` は `retries: process.env.CI ? 2 : 0` としており、CI 環境(`CI=true`)でのみ失敗テストを自動リトライします。

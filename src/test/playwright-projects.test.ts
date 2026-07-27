@@ -1,4 +1,4 @@
-import { readdirSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 import config from "../../playwright.config";
@@ -56,5 +56,41 @@ describe("Playwright projects", () => {
     );
     expect(webkit, "webkit-modal-focus プロジェクトが必要").toBeDefined();
     expect(matchedSpecBasename(webkit?.testMatch)).toBe("modal-focus.spec.ts");
+  });
+
+  /**
+   * README がローカル導入手順から必要ブラウザを 1 つでも落とすと、その手順どおりに環境を
+   * 用意した開発者の `pnpm test:e2e` が「実行ファイルが見つからない」で失敗する(#383 の実害)。
+   * `playwright.config.ts` にプロジェクトを足したとき README の更新を忘れないよう固定する。
+   */
+  it("README のインストール手順が全プロジェクトのブラウザを網羅している", () => {
+    const readme = readFileSync(resolve(process.cwd(), "README.md"), "utf8");
+    // 散文中の言及ではなく、コードブロック内の実行可能なコマンド行だけを見る。
+    const installCommands = readme
+      .split("\n")
+      .filter((line) => /^\s*pnpm exec playwright install\b/.test(line));
+    expect(
+      installCommands.length,
+      "README に `pnpm exec playwright install …` のコマンド行が無い",
+    ).toBeGreaterThanOrEqual(1);
+
+    const required = new Set(
+      (config.projects ?? []).map(
+        (project) =>
+          (project.use as { defaultBrowserType?: string } | undefined)
+            ?.defaultBrowserType,
+      ),
+    );
+    expect(
+      [...required].every((browser) => typeof browser === "string"),
+      "プロジェクトの use から defaultBrowserType を解決できない",
+    ).toBe(true);
+
+    for (const browser of required) {
+      expect(
+        installCommands.some((line) => line.includes(browser as string)),
+        `README の playwright install 手順に ${browser} が無い(その手順で用意した環境は pnpm test:e2e が失敗する)`,
+      ).toBe(true);
+    }
   });
 });
