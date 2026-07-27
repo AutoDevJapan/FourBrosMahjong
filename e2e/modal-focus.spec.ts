@@ -47,3 +47,30 @@ test.describe("モーダル終了時のフォーカス復帰(#369)", () => {
     await expect(opener).toBeFocused();
   });
 });
+
+test.describe("復帰先が到達不能なときの連鎖(#377)", () => {
+  test("トリガーが display:none になっても盤面ルートへ復帰する", async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 320, height: 800 });
+    await page.goto("/game?seed=0");
+
+    const { dialog } = await openFullBoard(page);
+    // 表示中の背景は aria-hidden になりロール照会から外れるため、可視状態は CSS 由来の
+    // locator で見る(ロール照会では「隠れた」のか「除外された」のか区別できない)。
+    const trigger = page.locator("button", { hasText: "全体盤面" });
+    await expect(trigger).toBeVisible();
+
+    // 開いたまま卓幅が 360px 以上へ変わると段階①へ切り替わり、トリガーを含む段階②の
+    // サブツリーがコンテナクエリの display:none で隠れる。要素は DOM に残るため
+    // isConnected では到達不能を判定できない(#377)。
+    await page.setViewportSize({ width: 900, height: 800 });
+    await expect(trigger).toBeHidden();
+    await expect(dialog).toBeVisible();
+
+    await page.keyboard.press("Escape");
+    await expect(dialog).toBeHidden();
+    // <body> へ落とさず、モーダルが補完していた領域のルートへ復帰する。
+    await expect(page.locator("[data-phase]").first()).toBeFocused();
+  });
+});
