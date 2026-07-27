@@ -4,7 +4,7 @@
   "private": true,
   "packageManager": "pnpm@10.33.0",
   "engines": {
-    "node": "^22 || ^24 || >=26",
+    "node": "^22.22.2 || ^24.15.0 || >=26",
     "pnpm": "10.33.0"
   },
   "scripts": {
@@ -50,7 +50,7 @@
     "dependency-cruiser": "^18.1.0",
     "eslint": "^9",
     "eslint-config-next": "16.2.12",
-    "jsdom": "^29.1.1",
+    "jsdom": "^30.0.0",
     "knip": "^6.29.0",
     "tailwindcss": "^4",
     "typedoc": "^0.28.20",
