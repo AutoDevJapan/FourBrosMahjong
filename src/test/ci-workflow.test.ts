@@ -4,8 +4,10 @@ import { describe, expect, it } from "vitest";
 import { parse } from "yaml";
 
 type Step = {
+  name?: string;
   uses?: string;
   run?: string;
+  if?: string;
   with?: Record<string, unknown>;
 };
 
@@ -33,11 +35,29 @@ function readWorkflow(): Workflow {
 }
 
 /**
- * `actions/cache` で `~/.cache/ms-playwright` を保存する各ステップと、
- * 同じ job でその後に走る `playwright install` が要求するブラウザ集合を対応付ける。
+ * キャッシュを**書き込む**ステップか(一体型 `actions/cache@` と `actions/cache/save@`)。
+ * `actions/cache/restore@` は読み取り専用なのでここには含めない。
+ */
+function isCacheWritingStep(step: Step): boolean {
+  return (
+    step.uses?.startsWith("actions/cache@") === true ||
+    step.uses?.startsWith("actions/cache/save@") === true
+  );
+}
+
+/** キャッシュを**読み取る**ステップか(一体型 `actions/cache@` は復元も行う)。 */
+function isCacheReadingStep(step: Step): boolean {
+  return (
+    step.uses?.startsWith("actions/cache@") === true ||
+    step.uses?.startsWith("actions/cache/restore@") === true
+  );
+}
+
+/**
+ * `~/.cache/ms-playwright` を復元する各ステップと、同じ job でその後に走る
+ * `playwright install` が要求するブラウザ集合を対応付ける。
  *
  * 前提(崩れた場合は下の件数アサーションで落ちる): Playwright を使うのは `ci.yml` のみ、
- * キャッシュは `actions/cache@` の一体型ステップ(`restore@`/`save@` 分割ではない)、
  * `with.path` は単一行で `~/.cache/ms-playwright` 完全一致。
  */
 function playwrightBrowserCaches(workflow: Workflow) {
@@ -50,7 +70,7 @@ function playwrightBrowserCaches(workflow: Workflow) {
   for (const [job, definition] of Object.entries(workflow.jobs ?? {})) {
     const steps = definition.steps ?? [];
     steps.forEach((step, index) => {
-      if (!step.uses?.startsWith("actions/cache@")) return;
+      if (!isCacheReadingStep(step)) return;
       if (String(step.with?.path ?? "").trim() !== PLAYWRIGHT_CACHE_PATH)
         return;
       const install = steps
@@ -120,6 +140,54 @@ describe("Playwright browser cache keys", () => {
         [...browserSets],
         `cache key ${key} が異なるブラウザ集合で共有されている`,
       ).toHaveLength(1);
+    }
+  });
+});
+
+/**
+ * GitHub Actions のキャッシュ予算はリポジトリあたり 10GB で、超過分は LRU で退避される。
+ * キャッシュは ref スコープなので、PR ref (`refs/pull/N/merge`) でも無条件に save すると
+ * 同一内容が ref の数だけ複製され、数日で予算が一巡して「保存はするが復元前に消える」
+ * 恒常ミス状態になる(#380: 実測 11.1GB / 47 件、Playwright ブラウザ取得が毎回 100 秒超)。
+ *
+ * 既定ブランチ (main) のキャッシュは全ブランチ・全 PR から復元できるため、
+ * **保存を main に限定しても復元ヒット率は落とさずに複製だけを止められる**。
+ * 以下はその不変条件を固定する回帰テスト。
+ */
+describe("Actions cache budget (#380)", () => {
+  it("キャッシュを保存するステップは既定ブランチ (main) に限定されている", () => {
+    const workflow = readWorkflow();
+    const writers: { job: string; name: string; if?: string }[] = [];
+    for (const [job, definition] of Object.entries(workflow.jobs ?? {})) {
+      for (const step of definition.steps ?? []) {
+        if (!isCacheWritingStep(step)) continue;
+        writers.push({ job, name: step.name ?? step.uses ?? "", if: step.if });
+      }
+    }
+
+    expect(
+      writers.length,
+      "キャッシュ保存ステップが 1 つも無い(復元専用ではヒットしないため設定ミスの可能性が高い)",
+    ).toBeGreaterThan(0);
+
+    for (const writer of writers) {
+      expect(
+        writer.if ?? "",
+        `${writer.job} / ${writer.name}: 保存ステップに main 限定の if が無い(PR ref ごとにキャッシュが複製される)`,
+      ).toContain("github.ref == 'refs/heads/main'");
+    }
+  });
+
+  it("setup-node の内蔵キャッシュ (cache:) を使っていない", () => {
+    const workflow = readWorkflow();
+    for (const [job, definition] of Object.entries(workflow.jobs ?? {})) {
+      for (const step of definition.steps ?? []) {
+        if (!step.uses?.startsWith("actions/setup-node@")) continue;
+        expect(
+          step.with?.cache,
+          `${job}: setup-node の cache: は ref スコープで無条件に save するため使用不可(#380)。actions/cache/restore + main 限定 save を使う`,
+        ).toBeUndefined();
+      }
     }
   });
 });
