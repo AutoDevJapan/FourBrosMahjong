@@ -6,7 +6,7 @@
  */
 
 import type { Suit, Tile } from "./tile";
-import { HONOR } from "./tile";
+import { createTile, HONOR } from "./tile";
 
 /**
  * 使用牌の総数(スペック1 1.2 / スペック4 4.4 不変条件)。
@@ -20,13 +20,9 @@ export const TOTAL_TILE_COUNT = 108;
  */
 export const COPIES_PER_TILE = 4;
 
-/** 赤5となるスート(オール赤5: 5筒・5索)。萬子に5は存在しない。 */
-const RED_FIVE_SUITS: ReadonlySet<Suit> = new Set(["pin", "sou"]);
-
+/** 同一牌種を {@link COPIES_PER_TILE} 枚ぶん生成する(赤5は {@link createTile} に委譲)。 */
 function makeCopies(suit: Suit, rank: number): Tile[] {
-  // オール赤5(スペック1 1.2 / スペック4 4.4): 5筒・5索は常に赤。
-  const isRed = rank === 5 && RED_FIVE_SUITS.has(suit);
-  return Array.from({ length: COPIES_PER_TILE }, () => ({ suit, rank, isRed }));
+  return Array.from({ length: COPIES_PER_TILE }, () => createTile(suit, rank));
 }
 
 /**

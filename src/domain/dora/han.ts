@@ -19,12 +19,12 @@
  * 純ロジック・副作用なし。React/DOM 非依存。
  */
 
-import { HONOR, type Tile } from "../tiles/tile";
+import { createTile, HONOR, type Tile } from "../tiles/tile";
 import type { DoraSet } from "./doraSet";
 import { resolveDora } from "./doraSet";
 
-/** 抜いた北(ガリ)牌の値。赤フラグは常に false(北は赤5ではない)。 */
-const NORTH_TILE: Tile = { suit: "honor", rank: HONOR.NORTH, isRed: false };
+/** 抜いた北(ガリ)牌の値。赤フラグは `createTile` により常に false(北は赤5ではない)。 */
+const NORTH_TILE: Tile = createTile("honor", HONOR.NORTH);
 
 /** 翻集計の入力。 */
 export interface DoraHanInput {

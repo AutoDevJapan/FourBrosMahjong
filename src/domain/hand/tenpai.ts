@@ -6,16 +6,10 @@
  * 役の有無は問わない(形式テンパイ)。純関数・決定的。
  */
 
-import type { Suit, Tile } from "../tiles/tile";
+import type { Tile } from "../tiles/tile";
+import { createTile } from "../tiles/tile";
 import { type MeldInput, isCompleteHand } from "./decompose";
 import { SANMA_TILE_KINDS, tileKey } from "./tile-identity";
-
-const RED_FIVE_SUITS: ReadonlySet<Suit> = new Set(["pin", "sou"]);
-
-/** 種別から `Tile` を生成(赤5筒/5索は不変条件どおり赤)。 */
-function makeTile(suit: Suit, rank: number): Tile {
-  return { suit, rank, isRed: rank === 5 && RED_FIVE_SUITS.has(suit) };
-}
 
 /** 牌種ごとの現在枚数(手牌+副露)。1牌種は最大4枚まで。 */
 function usedCounts(
@@ -45,7 +39,7 @@ export function waitingTiles(
   for (const kind of SANMA_TILE_KINDS) {
     const key = tileKey(kind);
     if ((used.get(key) ?? 0) >= 4) continue; // 4枚使用済みは待ちになり得ない
-    const candidate = makeTile(kind.suit, kind.rank);
+    const candidate = createTile(kind.suit, kind.rank);
     if (isCompleteHand([...concealedTiles, candidate], melds)) {
       waits.push(candidate);
     }

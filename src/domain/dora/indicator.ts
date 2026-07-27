@@ -13,14 +13,15 @@
  * - 字牌 三元牌: 白→發→中→白(rank 5→6→7→5 で巡回)。
  *
  * 実ドラ牌は牌種(`suit`/`rank`)の同定にのみ用いるため、`isRed` は牌集合の
- * 規約(5筒/5索は常に赤)に合わせて算出する。翻集計での照合は牌種で行う
+ * 規約(5筒/5索は常に赤)に合わせて算出する。算出は牌モデル側の唯一のファクトリ
+ * {@link "../tiles/tile".createTile} に委譲する。翻集計での照合は牌種で行う
  * (→ {@link "./han".countDoraHan})。
  *
  * 純ロジック・副作用なし。React/DOM 非依存。
  */
 
 import type { Tile } from "../tiles/tile";
-import { HONOR } from "../tiles/tile";
+import { createTile, HONOR } from "../tiles/tile";
 
 const NUMBER_MIN = 1;
 const NUMBER_MAX = 9;
@@ -31,11 +32,6 @@ const WIND_MAX = HONOR.NORTH; // 4
 /** 三元牌(白發中)の rank 範囲。 */
 const DRAGON_MIN = HONOR.WHITE; // 5
 const DRAGON_MAX = HONOR.RED; // 7
-
-/** 5筒・5索は常に赤(スペック4 4.4)。実ドラ牌の isRed を規約通りに補う。 */
-function isRedFive(suit: Tile["suit"], rank: number): boolean {
-  return rank === 5 && (suit === "pin" || suit === "sou");
-}
 
 /** [min, max] の閉区間で「次の値」を返す(max の次は min に巡回)。 */
 function cycle(value: number, min: number, max: number): number {
@@ -60,7 +56,7 @@ export function nextTile(indicator: Tile): Tile {
     } else {
       throw new RangeError(`Invalid honor rank for dora indicator: ${rank}.`);
     }
-    return { suit, rank: next, isRed: false };
+    return createTile(suit, next);
   }
 
   if (suit === "man") {
@@ -71,7 +67,7 @@ export function nextTile(indicator: Tile): Tile {
       );
     }
     const next = rank === NUMBER_MIN ? NUMBER_MAX : NUMBER_MIN;
-    return { suit, rank: next, isRed: false };
+    return createTile(suit, next);
   }
 
   // 筒子・索子: 1〜9、9 の次は 1。
@@ -81,5 +77,5 @@ export function nextTile(indicator: Tile): Tile {
     );
   }
   const next = cycle(rank, NUMBER_MIN, NUMBER_MAX);
-  return { suit, rank: next, isRed: isRedFive(suit, next) };
+  return createTile(suit, next);
 }

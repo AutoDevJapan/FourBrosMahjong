@@ -26,11 +26,39 @@ export type Suit = "man" | "pin" | "sou" | "honor";
  *   萬子(`man`)はサンマ標準で rank ∈ {1, 9} のみ(2〜8 を抜く / スペック1 1.2)。
  * - `isRed` … オール赤5。5筒・5索は常に `true`、それ以外は常に `false`
  *   (スペック4 4.4 不変条件「赤5は5筒・5索に限る」)。
+ *
+ * 牌種から生成するときは {@link createTile} を使うこと(不変条件の唯一の定義元)。
  */
 export interface Tile {
   readonly suit: Suit;
   readonly rank: number;
   readonly isRed: boolean;
+}
+
+/** オール赤5の対象スート(5筒・5索)。萬子に5は存在しない(スペック1 1.2)。 */
+const RED_FIVE_SUITS: ReadonlySet<Suit> = new Set<Suit>(["pin", "sou"]);
+
+/** オール赤5の対象 rank。 */
+const RED_FIVE_RANK = 5;
+
+/**
+ * 牌種(`suit` + `rank`)から `Tile` を生成する**唯一のファクトリ**(issue #375)。
+ *
+ * オール赤5の不変条件(5筒・5索は常に赤 / それ以外は常に非赤 — スペック1 1.2・
+ * スペック4 4.4)は**この関数だけが知っている**。`{ suit, rank, isRed: … }` を
+ * 直に組み立てると不変条件が分散し、片方だけ直した時に静かな不整合が生まれるため、
+ * 牌種から `Tile` を作る箇所はすべてここを経由すること。
+ *
+ * 牌種の**実在性は検証しない**(サンマに存在しない萬子2〜8 や範囲外 rank でも
+ * そのまま返す)。実在牌種の母集合は {@link "../hand/tile-identity".SANMA_TILE_KINDS}、
+ * 山の構成は {@link "./tileSet".buildTileSet} の責務。
+ */
+export function createTile(suit: Suit, rank: number): Tile {
+  return {
+    suit,
+    rank,
+    isRed: rank === RED_FIVE_RANK && RED_FIVE_SUITS.has(suit),
+  };
 }
 
 /**

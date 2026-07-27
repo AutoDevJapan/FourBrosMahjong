@@ -31,11 +31,9 @@ import {
   SANMA_TILE_KINDS,
   tileKey,
 } from "@/domain/hand/tile-identity";
-import { HONOR, type Suit, type Tile } from "@/domain/tiles/tile";
+import { createTile, HONOR, type Suit, type Tile } from "@/domain/tiles/tile";
 import { COPIES_PER_TILE } from "@/domain/tiles/tileSet";
 import { BoundedMemo } from "./boundedMemo";
-
-const RED_FIVE_SUITS: ReadonlySet<Suit> = new Set(["pin", "sou"]);
 
 /** AI が他家の打牌を鳴くか判断するために必要な公開文脈。 */
 export interface CallMeldContext {
@@ -73,11 +71,6 @@ export function shouldCallMeld(ctx: CallMeldContext): boolean {
       isValueHonor(representative, ctx.seatWind, ctx.roundWind)
     );
   });
-}
-
-/** 種別(suit+rank)から `Tile` を生成(赤5筒/5索は不変条件どおり赤)。 */
-function makeTile(suit: Suit, rank: number): Tile {
-  return { suit, rank, isRed: rank === 5 && RED_FIVE_SUITS.has(suit) };
 }
 
 // ---------------------------------------------------------------------------
@@ -510,7 +503,7 @@ export function ukeire(tiles13: readonly Tile[], meldCount = 0): Ukeire {
     if (!candidateKeys.has(key)) continue; // 孤立牌は向聴を進めない(厳密に除外可)。
     const remaining = remainingCopies(tiles13, key);
     if (remaining <= 0) continue;
-    const drawn = makeTile(kind.suit, kind.rank);
+    const drawn = createTile(kind.suit, kind.rank);
     if (shanten([...tiles13, drawn], melds) < base) {
       kinds += 1;
       copies += remaining;
