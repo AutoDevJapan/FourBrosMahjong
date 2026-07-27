@@ -111,11 +111,16 @@
   --u: 0.9rem;
 
   /*
-   * 河牌1枚の幅。牌寸法(.game-tile--river)と河グリッドの列幅(.river-grid)の唯一の定義元。
-   * カスタムプロパティは使用箇所で遅延解決されるため、ここに書いても var(--u) は
-   * 「その要素で有効な --u」(卓内なら .board-cross の clamp())で評価される。
+   * 河牌の --u 倍率。牌寸法(.game-tile--river)と河グリッドの列幅(.river-grid)が
+   * 同じ幅を導くための唯一の定義元。
+   *
+   * **var() を含めてはならない**。カスタムプロパティの計算値は「宣言された要素で var() を
+   * 置換したトークン列」であり、置換済みの値が子孫へ継承される(CSS Variables L1)。
+   * ここで `calc(var(--u) * 1.65)` と書くと :root の --u(0.9rem)で確定してしまい、
+   * .board-cross の --u 上書き(コンテナ幅連動 clamp)が一切効かなくなる。
+   * 倍率だけを共有し、--u との掛け算は使用側(卓内で --u が有効な要素)で行う。
    */
-  --tile-river-w: calc(var(--u) * 1.65);
+  --tile-river-ratio: 1.65;
 }
 
 /* 手動でダークを選択した場合は OS 設定より優先し、全トークンをダーク値にする。 */
@@ -241,7 +246,7 @@ body {
 
 .game-tile--river {
   height: calc(var(--u) * 2.2);
-  width: var(--tile-river-w);
+  width: calc(var(--u) * var(--tile-river-ratio));
   /* 牌面テキストは色非依存の識別情報(§5.2.1)。狭幅でも判読性を保つよう字面を確保しつつ幅内に収める。 */
   font-size: calc(var(--u) * 0.7);
 }
@@ -250,23 +255,36 @@ body {
  * 河(捨て牌)のグリッド(#258 / #387)。
  *
  * 列は河牌1枚ぶんの固定幅(--tile-river-w)とし、`auto-fill` で「スロット幅に入るぶんだけ」
- * 列を作る。上限は 6 列で、これは max-width が 6 列ぶんに満たない幅を要求することで効かせる
- * (固定幅トラックの auto-fill は、コンテナ幅が広くても max-width を超える列を作らない)。
+ * 列を作る。上限は 6 列で、これは max-width が 7 列ぶんに満たない幅を要求することで効かせる。
  *
  * 6 列固定だと最小コンテンツ幅が牌6枚ぶんに固定され、段階①のクロス配置で左右スロットの
  * 幅(卓幅の 1/3.5)を超えた瞬間にページ全体が横スクロールしていた(#387)。列数を可変に
  * することで、狭いスロットでは自動的に段数が増えて幅に収まる。
  * spec 5.3.2「いずれの段階でも横スクロールでのレイアウト成立は採用しない」。
+ *
+ * このルールは Tailwind のユーティリティ層の外(レイヤー外)にあるため、`max-w-*` 等の
+ * ユーティリティでは上書きできない(既存の .game-tile* 群と同方針)。
  */
 .river-grid {
   /* 牌間隔(従来の gap-0.5 相当)。列数の上限計算にも使うため名前を付ける。 */
   --river-gap: 0.125rem;
+  /*
+   * --u は「この要素で有効な値」(卓内なら .board-cross の clamp())で解決される。
+   * :root 側で var(--u) ごと確定させてはならない理由は --tile-river-ratio の注記を参照。
+   */
+  --tile-river-w: calc(var(--u) * var(--tile-river-ratio));
   display: grid;
   grid-auto-flow: row;
   grid-auto-rows: min-content;
   grid-template-columns: repeat(auto-fill, var(--tile-river-w));
   gap: var(--river-gap);
-  max-width: calc(6 * var(--tile-river-w) + 5 * var(--river-gap));
+  /*
+   * 上限 6 列。`6 * w + 5 * gap`(6 列ぴったり)ではなく gap 1 つぶんの余裕を持たせる。
+   * Gecko はトラック幅を 1/60px 単位で切り上げるため、ぴったりだと合計が max-width を
+   * 数百分の1px 超えて 6 列目が落ち、Firefox でだけ 5 列/段になる。7 列目には
+   * `w + gap`(> gap)が必要なので、この余裕で 7 列になることはない。
+   */
+  max-width: calc(6 * (var(--tile-river-w) + var(--river-gap)));
 }
 
 .game-tile--dora {

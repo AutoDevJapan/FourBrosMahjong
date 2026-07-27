@@ -429,8 +429,13 @@ test.describe("対局画面(/game)", () => {
    *
    * 既存の 700px / 320px 固定の検査は (a) この帯を外し (b) 河が空の初期局面で測るため、
    * この破綻を構造的に検出できなかった。ここでは**実際に河を溜めてから**測る。
+   *
+   * 下限を 393px にしているのは、`/game` の `p-4`(左右 32px)により viewport 392px が
+   * 卓 container 幅ちょうど 360.00px = 段階①/②の境界そのものになるため。境界上の値で
+   * 検査すると、ページ余白の微修正やスクロールバー幅の差で段階②へ落ち、意図しない失敗に
+   * なる。393px は Pixel 8 / iPhone 15 Pro の実幅でもある。
    */
-  for (const width of [392, 414, 460]) {
+  for (const width of [393, 414, 460]) {
     test(`主要スマホ幅(${width}px)で河が溜まっても横スクロールしない(#387 / スペック5 5.3.2)`, async ({
       page,
     }) => {
@@ -495,8 +500,71 @@ test.describe("対局画面(/game)", () => {
         ),
       );
       expect(Math.max(...columnCounts)).toBe(6);
+
+      // 局終了まで進め、点差(ScoreDisplay の delta)が描画された状態でも測る。
+      // 点差は局終了でしか出ないため、上の「河が6枚」到達時点では未描画で、
+      // ScoreDisplay の折り返し修正がこのテストで守られない状態だった。
+      await advanceUntil(page, (state) => state?.phase === "roundEnd", {
+        maxSteps: 400,
+        onRoundEnd: "stop",
+        onGameEnd: "stop",
+      });
+      await expect(
+        page
+          .getByText(/^[+−]\d/)
+          .filter({ visible: true })
+          .first(),
+      ).toBeVisible();
+      expect(await maxOverflow()).toBeLessThanOrEqual(1);
     });
   }
+
+  test("河の牌幅と列幅が卓幅に連動して縮む(スペック5 5.3.2 段階①の流体縮小)", async ({
+    page,
+  }) => {
+    // 牌寸法は `--u`(`.board-cross` でコンテナ幅連動の clamp() に差し替わる)の倍数で
+    // 決まる。倍率トークンではなく「`--u` を掛け終えた長さ」を `:root` で定義すると、
+    // カスタムプロパティの計算値が :root の `--u` で確定してしまい、卓内の上書きが
+    // 効かなくなって河牌だけ縮まなくなる(幅は固定・高さだけ縮んで牌が歪む)。
+    // CSS からは読み取れない退行なので実描画で固定する。
+    test.setTimeout(60_000);
+    // 自家の河(段階①のクロス配置側)。空の `ul` は高さ 0 で「不可視」判定になるため、
+    // `filter({ visible: true })` ではなく席の region から一意に取る。
+    const ownRiver = page
+      .getByRole("region", { name: /^あなた/ })
+      .getByRole("list", { name: "捨て牌" })
+      .first();
+
+    const measure = async (width: number) => {
+      await page.setViewportSize({ width, height: 900 });
+      await expect(ownRiver).toBeVisible();
+      return ownRiver.evaluate((list) => {
+        const style = getComputedStyle(list);
+        const tile = list.querySelector(".game-tile--river");
+        return {
+          track: Number.parseFloat(style.gridTemplateColumns.split(/\s+/)[0]),
+          tile: tile ? tile.getBoundingClientRect().width : Number.NaN,
+        };
+      });
+    };
+
+    await page.goto("/game?seed=0");
+    // 河が 1 枚以上ある状態にする(空だと計測対象の牌が無い)。
+    await advanceUntil(
+      page,
+      async () => (await ownRiver.getByRole("listitem").count()) > 0,
+      { maxSteps: 60, onRoundEnd: "stop", onGameEnd: "stop" },
+    );
+
+    const wide = await measure(1280);
+    const narrow = await measure(393);
+
+    // トラック幅と牌幅は同じ倍率から導くため常に一致する。
+    expect(narrow.track).toBeCloseTo(narrow.tile, 1);
+    expect(wide.track).toBeCloseTo(wide.tile, 1);
+    // 卓が狭まれば牌もトラックも縮む(固定長になっていない)。
+    expect(narrow.tile).toBeLessThan(wide.tile);
+  });
 
   test("極狭幅(320px)でフォーカス表示へ切替わり、全体盤面モーダルで盤面を確認できる(スペック5 5.3.2 段階② / 5.2.2)", async ({
     page,

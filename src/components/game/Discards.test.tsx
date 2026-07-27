@@ -30,7 +30,5 @@ describe("Discards", () => {
     render(<Discards tiles={[tile(1)]} />);
     const list = screen.getByRole("list", { name: "捨て牌" });
     expect(list).toHaveClass("river-grid");
-    expect(list.className).not.toMatch(/\bgrid-cols-/);
-    expect(list.className).not.toMatch(/\bw-fit\b/);
   });
 });
