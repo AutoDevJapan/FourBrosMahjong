@@ -90,14 +90,13 @@ export default function Modal({
   useEffect(() => lockDocumentScroll(), []);
 
   // 閉じる瞬間にフォーカス復帰先を解決する。WebKit はポインターで button を起動しても
-  // フォーカスを移さないため(#369)、呼び出し元が明示した returnFocusRef を優先し、
-  // 無い場合のみ「開く直前の activeElement」へ戻す。ref を非リアクティブに読むことで
-  // 隔離エフェクトを ref の identity から切り離しつつ、表示中にトリガーが再マウント
-  // されても最新のノードへ戻せる。
+  // フォーカスを移さないため(#369)、呼び出し元が明示した returnFocusRef を最優先にする。
+  // ref を非リアクティブに読むことで隔離エフェクトを ref の identity から切り離しつつ、
+  // 表示中にトリガーが再マウントされても最新のノードへ戻せる。
   //
-  // 候補は DOM 接続だけでは足りない(#377)。display:none / visibility:hidden / disabled /
-  // inert 配下の要素への focus() は no-op になるため、実際に activeElement が移ったかで
-  // 到達可否を実測し、移らなければ次の候補へ連鎖する(スペック5 5.2.2)。
+  // 到達可否は DOM 接続では判定できない(#377)。display:none / visibility:hidden /
+  // disabled / inert 配下の要素への focus() は no-op になるため、実際に activeElement が
+  // 移ったかで実測し、移らなければ次の候補へ連鎖する(スペック5 5.2.2)。
   const restoreFocus = useEffectEvent(
     (previouslyFocused: HTMLElement | null) => {
       const candidates = [
