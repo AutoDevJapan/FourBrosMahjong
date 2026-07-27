@@ -259,31 +259,32 @@ describe("resolveWinPayment — パオ(責任払い)", () => {
    * 「どちらが切り上げ側か」を固定する。
    */
   describe("パオ・ロンの折半端数 (#389)", () => {
+    // [説明, 責任者の負担(切り上げ側), 放銃者の負担(残差), 素点]
+    // 数値をテスト名へ出すため、フォーマット指定子に対応する順で並べる。
     const oddSplits = [
-      // [説明, 素点, 責任者の負担, 放銃者の負担]
       [
         "親1翻 = 1,500",
-        computeScore({ han: 1, yakumanMultiplier: 0 }, true),
         800,
         700,
+        computeScore({ han: 1, yakumanMultiplier: 0 }, true),
       ],
       [
         "親2翻 = 2,900",
-        computeScore({ han: 2, yakumanMultiplier: 0 }, true),
         1500,
         1400,
+        computeScore({ han: 2, yakumanMultiplier: 0 }, true),
       ],
       [
         "子3翻 = 3,900",
-        computeScore({ han: 3, yakumanMultiplier: 0 }, false),
         2000,
         1900,
+        computeScore({ han: 3, yakumanMultiplier: 0 }, false),
       ],
     ] as const;
 
     it.each(oddSplits)(
       "%s: 責任者が切り上げ側 %d、放銃者が残差 %d を負担",
-      (_label, score, paoShare, discarderShare) => {
+      (_label, paoShare, discarderShare, score) => {
         expect(paoShare + discarderShare).toBe(score.ronTotal);
         const { deltas } = resolveWinPayment({
           winner: C1,
