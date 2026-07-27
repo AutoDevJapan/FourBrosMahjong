@@ -47,7 +47,7 @@ jobs:
       needs_update: ${{ steps.compare.outputs.needs_update }}
     steps:
       - name: Checkout
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Compare pinned version with latest release
         id: compare
@@ -97,7 +97,7 @@ jobs:
       LATEST_VERSION: ${{ needs.check-version.outputs.latest_version }}
     steps:
       - name: Checkout
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Skip if a bump PR is already open
         id: existing
