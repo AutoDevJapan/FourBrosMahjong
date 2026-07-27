@@ -1635,13 +1635,17 @@ function analyzeTsumo(
 /**
  * 天和/地和の権利を実対局状態から導く。
  * 東の初回自摸は天和、南/西の最初の自摸は地和。いずれも局中の鳴きで消滅する。
+ *
+ * @param discardHistory 席ごとの**打牌履歴**(`HandState.discardHistory`)。条件は
+ *   「その席がまだ一度も打牌していない」ことなので、鳴きで牌が抜ける表示用の河
+ *   (`HandState.discards`)を渡してはならない(#395)。
  */
 export function blessingForTsumo(
   seat: SeatKey,
-  discards: Readonly<Record<SeatKey, readonly Tile[]>>,
+  discardHistory: Readonly<Record<SeatKey, readonly Tile[]>>,
   callsMade: boolean,
 ): "heaven" | "earth" | undefined {
-  if (callsMade || discards[seat].length !== 0) return undefined;
+  if (callsMade || discardHistory[seat].length !== 0) return undefined;
   return seat === "east" ? "heaven" : "earth";
 }
 

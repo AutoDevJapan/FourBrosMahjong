@@ -213,7 +213,10 @@ describe("engine: 鳴かれた牌によるフリテンでも AI はリーチし�
     hand.hands.south = parseTiles(SOUTH_RYANMEN_TENPAI);
     if (southDiscardedWait) {
       hand.discardHistory.south = parseTiles("5s");
-      hand.callsMade = true; // 鳴きが入った局
+      // 鳴きが入った局であることを表す。リーチ可否・フリテン判定は `callsMade` を
+      // 参照しない(`canDeclareRiichi` / `nonFuritenRiichiTiles`)ため、対照との
+      // 差分は「打牌履歴に待ち牌があるか」だけに保たれる。
+      hand.callsMade = true;
     }
     hand.hands.east = parseTiles("1m 9m 1p 9p 1s 9s 1z 2z 3z 5z 6z 7z 2p");
     hand.hands.west = parseTiles("1m 9m 9p 2p 5p 8p 2s 8s 9s 1z 2z 6z 7z");

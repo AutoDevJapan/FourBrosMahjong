@@ -158,6 +158,7 @@ function observeAiActions(
 
   expect([...observed]).toEqual(expect.arrayContaining([...wanted]));
   expectTileConservation(state);
+  expectRiverIsSubsequenceOfHistory(state);
   return state;
 }
 
