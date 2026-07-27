@@ -10,6 +10,9 @@
  * - 閉じたら**開く前のフォーカス位置へ戻す**(呼び出し元のトリガーへ復帰)。WebKit は
  *   ポインターで `button` を起動してもフォーカスを移さず `activeElement` がトリガーに
  *   ならないため(#369)、トリガーが判っている呼び出し元は `returnFocusRef` で明示する。
+ * - **背面 document のスクロールをロックする**(issue #371)。`inert` はスクロールを止めないため、
+ *   オーバーレイ操作やダイアログ端のオーバースクロールが背面ページへ連鎖するのを
+ *   `lockDocumentScroll` で防ぎ、閉じたら開く前のスクロール位置へ正確に戻す。
  *
  * 卓UIの「全体盤面」等をスタッキング順の影響を受けずに最前面へ出すため `document.body` へ
  * ポータルする。表示制御(開閉状態)は呼び出し元が持ち、本コンポーネントは開いている間だけ描画する。
@@ -23,6 +26,7 @@ import {
   useRef,
 } from "react";
 import { createPortal } from "react-dom";
+import { lockDocumentScroll } from "./documentScrollLock";
 
 export interface ModalProps {
   /** ダイアログの見出し(`aria-labelledby` の対象)。 */
@@ -56,6 +60,10 @@ export default function Modal({
   const dialogRef = useRef<HTMLDivElement>(null);
   const requestClose = useEffectEvent(onClose);
   const titleId = useId();
+
+  // 背面 document のスクロールロックは隔離処理より前に確定させる。ロックは適用時点の
+  // スクロール位置を退避するため、後続の dialog.focus() 等がページを動かす前に取る。
+  useEffect(() => lockDocumentScroll(), []);
 
   // 閉じる瞬間にフォーカス復帰先を解決する。WebKit はポインターで button を起動しても
   // フォーカスを移さないため(#369)、呼び出し元が明示した returnFocusRef を優先し、
@@ -173,7 +181,9 @@ export default function Modal({
         onKeyDown={handleKeyDown}
         // ダイアログ内クリックはオーバーレイへ伝播させない(誤クローズ防止)。
         onClick={(event) => event.stopPropagation()}
-        className="flex max-h-[90vh] w-full max-w-lg flex-col overflow-auto rounded-xl border border-foreground/15 bg-background p-4 shadow-xl"
+        // overscroll-contain: ダイアログ端まで到達した後の慣性/ラバーバンドを内側で止める
+        // (body のロックと二重の防波堤にし、pull-to-refresh 等の連鎖も抑える / #371)。
+        className="flex max-h-[90vh] w-full max-w-lg flex-col overflow-auto overscroll-contain rounded-xl border border-foreground/15 bg-background p-4 shadow-xl"
       >
         <div className="mb-3 flex items-center justify-between gap-4">
           <h2 id={titleId} className="text-base font-bold">

@@ -81,6 +81,21 @@ function formatViolations(violations: AxeViolations): string {
     .join("\n");
 }
 
+/**
+ * wheel を送った後、スクロール適用が終わるまで 2 フレーム進める。
+ *
+ * 「スクロールしないこと」を検証する箇所では `expect.poll` が未適用のまま即成立して
+ * しまうため、フレームを進めてから確認して検証を空振りさせない。
+ */
+async function settleScroll(page: Page): Promise<void> {
+  await page.evaluate(
+    () =>
+      new Promise<void>((resolve) => {
+        requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
+      }),
+  );
+}
+
 /** ページ全体へ axe(WCAG 2.1 A/AA)を実行し違反ゼロを検証する(状態駆動監査で共用)。 */
 async function auditPage(page: Page): Promise<void> {
   const results = await new AxeBuilder({ page })
@@ -254,6 +269,61 @@ test.describe("状態駆動 a11y 監査(狭幅・モーダル / #148)", () => {
         };
       }),
     ).toEqual({ inert: false, ariaHidden: null });
+  });
+
+  test("モーダル表示中は背面documentへスクロールが連鎖せず、閉じると位置が戻る(#371)", async ({
+    page,
+  }) => {
+    // 高さも 320px に絞り、ダイアログ内部がはみ出してスクロールする状況を作る。
+    await page.setViewportSize({ width: 320, height: 320 });
+    await openScreen(page, gameScreen, "ライト", "?seed=1");
+
+    // 背面ページをあらかじめスクロールしておき、閉じた後の位置復元まで検証する。
+    // トリガーへ先にフォーカスしてからスクロールし、キーボードで開く。locator 経由の
+    // click/press は要素を可視位置までスクロールし直すため、ここでは使わない。
+    const openButton = page.getByRole("button", { name: "全体盤面" });
+    await openButton.focus();
+    await page.evaluate(() => window.scrollTo(0, 200));
+    const scrollBefore = await page.evaluate(() => window.scrollY);
+    expect(scrollBefore).toBe(200);
+
+    await page.keyboard.press("Enter");
+    const dialog = page.getByRole("dialog", { name: "全体盤面" });
+    await expect(dialog).toBeVisible();
+    // ロック中は body が fixed 化され、document 側にスクロール可能量が残らない。
+    expect(await page.evaluate(() => window.scrollY)).toBe(0);
+
+    // (1) オーバーレイ余白(左端)上の wheel は背面へ伝播しない。
+    await page.mouse.move(4, 160);
+    await page.mouse.wheel(0, 500);
+    await settleScroll(page);
+    expect(await page.evaluate(() => window.scrollY)).toBe(0);
+
+    // (2) ダイアログ内は末尾までスクロールできる。
+    const box = await dialog.boundingBox();
+    if (box === null) throw new Error("ダイアログの矩形が取得できない");
+    await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+    await page.mouse.wheel(0, 2000);
+    const scrollMax = await dialog.evaluate(
+      (el) => el.scrollHeight - el.clientHeight,
+    );
+    expect(scrollMax).toBeGreaterThan(0);
+    await expect
+      .poll(() => dialog.evaluate((el) => el.scrollTop))
+      .toBe(scrollMax);
+
+    // (3) 末尾に到達した状態でさらに送っても背面へ連鎖しない。
+    await page.mouse.wheel(0, 500);
+    await settleScroll(page);
+    expect(await page.evaluate(() => window.scrollY)).toBe(0);
+    expect(await dialog.evaluate((el) => el.scrollTop)).toBe(scrollMax);
+
+    // (4) 閉じると開く前の document スクロール位置へ戻る。
+    await page.keyboard.press("Escape");
+    await expect(dialog).toHaveCount(0);
+    await expect
+      .poll(() => page.evaluate(() => window.scrollY))
+      .toBe(scrollBefore);
   });
 
   test("強制色・reduced-motionでも閲覧専用モーダルは静的listでaxe違反ゼロ(#187)", async ({

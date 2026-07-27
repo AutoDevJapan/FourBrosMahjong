@@ -176,6 +176,60 @@ describe("Modal (spec 5.2.2 dialog / focus trap / Escape)", () => {
     expect(backgroundRoot).not.toHaveAttribute("aria-hidden");
   });
 
+  it("表示中は body のスクロールをロックし、閉じると位置とインラインスタイルを復元する(#371)", () => {
+    // jsdom は実スクロールを持たないため、ロック前のスクロール位置を差し替えて検証する。
+    Object.defineProperty(window, "scrollY", {
+      value: 120,
+      configurable: true,
+    });
+    Object.defineProperty(window, "scrollX", { value: 0, configurable: true });
+    const scrollTo = vi.spyOn(window, "scrollTo").mockImplementation(() => {});
+    // ロック前から body に付いていたインラインスタイルも、そのまま復元されること。
+    document.body.style.paddingRight = "7px";
+
+    const { unmount } = render(
+      <Modal title="全体盤面" onClose={vi.fn()}>
+        <p>本文</p>
+      </Modal>,
+    );
+    expect(document.body.style.position).toBe("fixed");
+    expect(document.body.style.overflow).toBe("hidden");
+    expect(document.body.style.width).toBe("100%");
+    expect(document.body.style.top).toBe("-120px");
+
+    unmount();
+    expect(document.body.style.position).toBe("");
+    expect(document.body.style.overflow).toBe("");
+    expect(document.body.style.width).toBe("");
+    expect(document.body.style.top).toBe("");
+    expect(document.body.style.paddingRight).toBe("7px");
+    expect(scrollTo).toHaveBeenCalledWith(0, 120);
+
+    scrollTo.mockRestore();
+    document.body.removeAttribute("style");
+  });
+
+  it("モーダルが重なっても、最後の 1 つが閉じるまでロックを維持する(#371)", () => {
+    const first = render(
+      <Modal title="全体盤面" onClose={vi.fn()}>
+        <p>1枚目</p>
+      </Modal>,
+    );
+    const second = render(
+      <Modal title="確認" onClose={vi.fn()}>
+        <p>2枚目</p>
+      </Modal>,
+    );
+    expect(document.body.style.position).toBe("fixed");
+
+    second.unmount();
+    // まだ 1 枚開いているのでロックは解けない。
+    expect(document.body.style.position).toBe("fixed");
+
+    first.unmount();
+    expect(document.body.style.position).toBe("");
+  });
+
   it("外部へ移されたフォーカスを回収し、Escape と復帰を維持する", async () => {
     const user = userEvent.setup();
     function Harness() {
