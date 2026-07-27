@@ -14,6 +14,16 @@
 import type { Suit, Tile } from "../../tiles/tile";
 import { index34ToKind, SANMA_INDICES_34 } from "./counts34";
 
+/**
+ * 赤5となるスート(オール赤5: 5筒・5索)。
+ *
+ * ⚠️ **本番の {@link "../../tiles/tile".createTile} との重複は意図的**(issue #375)。
+ * 本ディレクトリは「本番コードへ依存しない独立オラクル」であることが検証価値の源泉
+ * (→ `counts34.ts` 冒頭の方針)であり、本番ファクトリへ寄せると本番の赤5判定が壊れた
+ * ときにオラクル側も同時に壊れてクロス検証が空振りする。そのため本番へは寄せず、
+ * ここで独立に定義する。なお赤フラグは手牌の「構造」に影響しないため、この重複が
+ * クロス検証の結果を左右することはない。
+ */
 const RED_FIVE_SUITS: ReadonlySet<Suit> = new Set(["pin", "sou"]);
 
 /** mulberry32: 32bit シードの決定的 PRNG(0<=x<1)。 */

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { resolveDora } from "@/domain/dora/doraSet";
 import { sameKind } from "@/domain/hand/tile-identity";
-import { HONOR, type Suit, type Tile } from "@/domain/tiles/tile";
+import { createTile, HONOR, type Suit, type Tile } from "@/domain/tiles/tile";
 import {
   canAnkanAfterRiichi,
   createGame,
@@ -24,15 +24,6 @@ import {
  * 実行フロー(嶺上ツモ・新ドラ無し・リンシャン和了・リーチ継続ロック)を結線で検証する。
  */
 
-/** テスト用の牌生成(赤5は5筒/5索のみ・不変条件どおり)。 */
-function t(suit: Suit, rank: number): Tile {
-  return {
-    suit,
-    rank,
-    isRed: rank === 5 && (suit === "pin" || suit === "sou"),
-  };
-}
-
 const isNorth = (tile: Tile): boolean =>
   tile.suit === "honor" && tile.rank === HONOR.NORTH;
 
@@ -40,42 +31,44 @@ describe("canAnkanAfterRiichi(純関数): リーチ後暗槓の許可判定(Q18 
   it("待ち・面子構成が変わらない暗刻の4枚目ツモは許可する", () => {
     // 111m(暗刻)+ 234p 567p 234s + 9s 単騎待ち。待ちは {9s} のみ。
     const hand13 = [
-      t("man", 1),
-      t("man", 1),
-      t("man", 1),
-      t("pin", 2),
-      t("pin", 3),
-      t("pin", 4),
-      t("pin", 5),
-      t("pin", 6),
-      t("pin", 7),
-      t("sou", 2),
-      t("sou", 3),
-      t("sou", 4),
-      t("sou", 9),
+      createTile("man", 1),
+      createTile("man", 1),
+      createTile("man", 1),
+      createTile("pin", 2),
+      createTile("pin", 3),
+      createTile("pin", 4),
+      createTile("pin", 5),
+      createTile("pin", 6),
+      createTile("pin", 7),
+      createTile("sou", 2),
+      createTile("sou", 3),
+      createTile("sou", 4),
+      createTile("sou", 9),
     ];
     // 1m は待ちに含まれず、全和了形で 111m は暗刻に確定 → 許可。
-    expect(canAnkanAfterRiichi(hand13, t("man", 1))).toBe(true);
+    expect(canAnkanAfterRiichi(hand13, createTile("man", 1))).toBe(true);
   });
 
   it("孤立した字牌の暗刻もツモ4枚目なら許可する(待ち不変)", () => {
     // 東東東(暗刻)+ 234p 567p 234s + 9s 単騎。東は順子を作らず常に暗刻。
     const hand13 = [
-      t("honor", HONOR.EAST),
-      t("honor", HONOR.EAST),
-      t("honor", HONOR.EAST),
-      t("pin", 2),
-      t("pin", 3),
-      t("pin", 4),
-      t("pin", 5),
-      t("pin", 6),
-      t("pin", 7),
-      t("sou", 2),
-      t("sou", 3),
-      t("sou", 4),
-      t("sou", 9),
+      createTile("honor", HONOR.EAST),
+      createTile("honor", HONOR.EAST),
+      createTile("honor", HONOR.EAST),
+      createTile("pin", 2),
+      createTile("pin", 3),
+      createTile("pin", 4),
+      createTile("pin", 5),
+      createTile("pin", 6),
+      createTile("pin", 7),
+      createTile("sou", 2),
+      createTile("sou", 3),
+      createTile("sou", 4),
+      createTile("sou", 9),
     ];
-    expect(canAnkanAfterRiichi(hand13, t("honor", HONOR.EAST))).toBe(true);
+    expect(canAnkanAfterRiichi(hand13, createTile("honor", HONOR.EAST))).toBe(
+      true,
+    );
   });
 
   it("送り槓(暗刻が待ちに絡み面子構成が変わる)は拒否する", () => {
@@ -84,64 +77,64 @@ describe("canAnkanAfterRiichi(純関数): リーチ後暗槓の許可判定(Q18 
     //  - 11p を雀頭にすると 123p 順子 + 2z 待ち(→222z)
     // 1p は待ちでもあり、2z 和了形では 1p が暗刻でない(送り槓)→ 拒否。
     const hand13 = [
-      t("pin", 1),
-      t("pin", 1),
-      t("pin", 1),
-      t("pin", 2),
-      t("pin", 3),
-      t("sou", 4),
-      t("sou", 5),
-      t("sou", 6),
-      t("sou", 7),
-      t("sou", 8),
-      t("sou", 9),
-      t("honor", HONOR.SOUTH),
-      t("honor", HONOR.SOUTH),
+      createTile("pin", 1),
+      createTile("pin", 1),
+      createTile("pin", 1),
+      createTile("pin", 2),
+      createTile("pin", 3),
+      createTile("sou", 4),
+      createTile("sou", 5),
+      createTile("sou", 6),
+      createTile("sou", 7),
+      createTile("sou", 8),
+      createTile("sou", 9),
+      createTile("honor", HONOR.SOUTH),
+      createTile("honor", HONOR.SOUTH),
     ];
-    expect(canAnkanAfterRiichi(hand13, t("pin", 1))).toBe(false);
+    expect(canAnkanAfterRiichi(hand13, createTile("pin", 1))).toBe(false);
   });
 
   it("七対子テンパイでは暗槓を拒否する(暗刻が存在しない)", () => {
     // 6対子 + 単騎(9s)= 七対子テンパイ。同種3枚が無く暗槓不可。
     const hand13 = [
-      t("pin", 1),
-      t("pin", 1),
-      t("pin", 2),
-      t("pin", 2),
-      t("pin", 3),
-      t("pin", 3),
-      t("pin", 4),
-      t("pin", 4),
-      t("sou", 5),
-      t("sou", 5),
-      t("sou", 6),
-      t("sou", 6),
-      t("sou", 9),
+      createTile("pin", 1),
+      createTile("pin", 1),
+      createTile("pin", 2),
+      createTile("pin", 2),
+      createTile("pin", 3),
+      createTile("pin", 3),
+      createTile("pin", 4),
+      createTile("pin", 4),
+      createTile("sou", 5),
+      createTile("sou", 5),
+      createTile("sou", 6),
+      createTile("sou", 6),
+      createTile("sou", 9),
     ];
     // どの牌をツモっても同種は最大2枚 → 4枚目にならず暗槓不可。
-    expect(canAnkanAfterRiichi(hand13, t("pin", 1))).toBe(false);
-    expect(canAnkanAfterRiichi(hand13, t("sou", 5))).toBe(false);
-    expect(canAnkanAfterRiichi(hand13, t("sou", 9))).toBe(false);
+    expect(canAnkanAfterRiichi(hand13, createTile("pin", 1))).toBe(false);
+    expect(canAnkanAfterRiichi(hand13, createTile("sou", 5))).toBe(false);
+    expect(canAnkanAfterRiichi(hand13, createTile("sou", 9))).toBe(false);
   });
 
   it("暗刻でない牌(3枚未満)のツモは暗槓不可", () => {
     const hand13 = [
-      t("man", 1),
-      t("man", 1),
-      t("pin", 2),
-      t("pin", 3),
-      t("pin", 4),
-      t("pin", 5),
-      t("pin", 6),
-      t("pin", 7),
-      t("sou", 2),
-      t("sou", 3),
-      t("sou", 4),
-      t("sou", 8),
-      t("sou", 9),
+      createTile("man", 1),
+      createTile("man", 1),
+      createTile("pin", 2),
+      createTile("pin", 3),
+      createTile("pin", 4),
+      createTile("pin", 5),
+      createTile("pin", 6),
+      createTile("pin", 7),
+      createTile("sou", 2),
+      createTile("sou", 3),
+      createTile("sou", 4),
+      createTile("sou", 8),
+      createTile("sou", 9),
     ];
     // 1m は手牌に2枚のみ(ツモで3枚)→ 4枚目にならず暗槓不可。
-    expect(canAnkanAfterRiichi(hand13, t("man", 1))).toBe(false);
+    expect(canAnkanAfterRiichi(hand13, createTile("man", 1))).toBe(false);
   });
 });
 
@@ -151,9 +144,9 @@ describe("canAnkanAfterRiichi(純関数): リーチ後暗槓の許可判定(Q18 
 
 /** 3枚連番の順子。 */
 const seq = (suit: Suit, r: number): Tile[] => [
-  t(suit, r),
-  t(suit, r + 1),
-  t(suit, r + 2),
+  createTile(suit, r),
+  createTile(suit, r + 1),
+  createTile(suit, r + 2),
 ];
 
 /** リーチ待ちの humanDiscard Pending(pump が生成する形に一致)を構築する。 */
@@ -200,7 +193,7 @@ function setupRinshanWin(): {
       rinshanTile.suit === "honor" && rinshanTile.rank === HONOR.EAST
         ? HONOR.SOUTH
         : HONOR.EAST;
-    const ankanTile = t("honor", aRank);
+    const ankanTile = createTile("honor", aRank);
 
     // T の種を含まない完成3面子(単騎 T の待ちを純粋にする)。
     let filler: Tile[];
@@ -350,28 +343,28 @@ describe("declareAnkan: リーチ後暗槓の結線(Q18 / #116)", () => {
 
     // 111p が待ち(送り槓)になる多面待ち手。ツモ 1p は暗槓不可。
     hand.hands[seat] = [
-      t("pin", 1),
-      t("pin", 1),
-      t("pin", 1),
-      t("pin", 2),
-      t("pin", 3),
-      t("sou", 4),
-      t("sou", 5),
-      t("sou", 6),
-      t("sou", 7),
-      t("sou", 8),
-      t("sou", 9),
-      t("honor", HONOR.SOUTH),
-      t("honor", HONOR.SOUTH),
+      createTile("pin", 1),
+      createTile("pin", 1),
+      createTile("pin", 1),
+      createTile("pin", 2),
+      createTile("pin", 3),
+      createTile("sou", 4),
+      createTile("sou", 5),
+      createTile("sou", 6),
+      createTile("sou", 7),
+      createTile("sou", 8),
+      createTile("sou", 9),
+      createTile("honor", HONOR.SOUTH),
+      createTile("honor", HONOR.SOUTH),
     ];
     hand.riichi[seat] = true;
     hand.turn = seat;
-    hand.drawn = t("pin", 1);
+    hand.drawn = createTile("pin", 1);
     hand.fromKan = false;
 
     // ankanTiles を空(=pump が提示しない)にした状態で暗槓要求 → no-op。
     const state: EngineState = { ...s0, pending: riichiPending([], true) };
-    const after = declareAnkan(state, t("pin", 1));
+    const after = declareAnkan(state, createTile("pin", 1));
     expect(after).toBe(state);
   });
 });
