@@ -110,6 +110,7 @@ classDiagram
 - `Player.points` は抜け番中に変化しない。
 - `DoraSet.count` は 1〜3 のいずれか。裏ドラ枚数は表と同数。
 - 赤5は5筒・5索に限る。
+  > この不変条件の**唯一の定義元**は `src/domain/tiles/tile.ts` の `createTile(suit, rank)`(issue #375)。牌種(`suit`+`rank`)から `Tile` を組み立てる処理はすべてこのファクトリを経由し、`{ suit, rank, isRed: … }` を直に書かない。例外はテスト専用の独立オラクル `src/domain/hand/__oracle__/`(本番へ依存しないことが検証価値の源泉のため、意図的に重複させる)。
 - 常に着席3人(東/南/西)+抜け番1人の計4人。`benchWarmer` は席(`Seat`)を持たない。
 - 抜け番は**直前局の親**(親流れ時)。連荘中は席・抜け番・`roundNumber` を据え置く。
 - `Hanchan.roundNumber` は 1〜4(各場4局)。`wind ∈ {EAST, SOUTH}`。オーラス = `wind=SOUTH ∧ roundNumber=4`。
