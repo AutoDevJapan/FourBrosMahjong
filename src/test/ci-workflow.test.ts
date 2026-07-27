@@ -15,7 +15,14 @@ type Workflow = {
 
 /** Playwright のブラウザバイナリを置く共有キャッシュパス。 */
 const PLAYWRIGHT_CACHE_PATH = "~/.cache/ms-playwright";
-const PLAYWRIGHT_BROWSERS = ["chromium", "firefox", "webkit"] as const;
+/** `playwright install` に名前で渡せるターゲット。増やしたらここへ追加する。 */
+const PLAYWRIGHT_BROWSERS = [
+  "chromium",
+  "firefox",
+  "webkit",
+  "chrome",
+  "msedge",
+] as const;
 
 function readWorkflow(): Workflow {
   const source = readFileSync(
@@ -28,9 +35,18 @@ function readWorkflow(): Workflow {
 /**
  * `actions/cache` で `~/.cache/ms-playwright` を保存する各ステップと、
  * 同じ job でその後に走る `playwright install` が要求するブラウザ集合を対応付ける。
+ *
+ * 前提(崩れた場合は下の件数アサーションで落ちる): Playwright を使うのは `ci.yml` のみ、
+ * キャッシュは `actions/cache@` の一体型ステップ(`restore@`/`save@` 分割ではない)、
+ * `with.path` は単一行で `~/.cache/ms-playwright` 完全一致。
  */
 function playwrightBrowserCaches(workflow: Workflow) {
-  const caches: { job: string; key: string; browsers: string[] }[] = [];
+  const caches: {
+    job: string;
+    key: string;
+    install: string | undefined;
+    browsers: string[];
+  }[] = [];
   for (const [job, definition] of Object.entries(workflow.jobs ?? {})) {
     const steps = definition.steps ?? [];
     steps.forEach((step, index) => {
@@ -43,6 +59,7 @@ function playwrightBrowserCaches(workflow: Workflow) {
       caches.push({
         job,
         key: String(step.with?.key ?? ""),
+        install,
         browsers: PLAYWRIGHT_BROWSERS.filter((browser) =>
           new RegExp(`\\b${browser}\\b`).test(install ?? ""),
         ),
@@ -75,10 +92,15 @@ describe("Playwright browser cache keys", () => {
     const caches = playwrightBrowserCaches(readWorkflow());
     expect(caches.length).toBeGreaterThanOrEqual(2);
 
-    for (const { job, key, browsers } of caches) {
-      expect(browsers, `${job}: playwright install が見つからない`).not.toEqual(
-        [],
-      );
+    for (const { job, key, install, browsers } of caches) {
+      expect(
+        install,
+        `${job}: キャッシュの後に playwright install ステップが無い`,
+      ).toBeTypeOf("string");
+      expect(
+        browsers,
+        `${job}: playwright install がブラウザ名を明示していない(引数なしは全ブラウザ取得になりキーと対応付けられない)`,
+      ).not.toEqual([]);
       for (const browser of browsers) {
         expect(
           key,

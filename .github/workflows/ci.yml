@@ -95,7 +95,9 @@ jobs:
     # playwright.config.ts の webServer は `pnpm dev` を自前で起動するためビルド成果物に依存せず、
     # ci ジョブの完了を待つ必要がない。
     # ハングした場合にジョブを長時間占有し続けないようタイムアウトを明示する。
-    timeout-minutes: 15
+    # webkit 追加(#369)で --with-deps の apt install(gstreamer 系等)とバイナリ取得が増えた分、
+    # 15分から引き上げている。
+    timeout-minutes: 20
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
