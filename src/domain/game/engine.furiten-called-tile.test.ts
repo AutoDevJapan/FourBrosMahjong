@@ -58,17 +58,19 @@ function armKokushiTenpai(
   for (const seat of ["east", "south", "west"] as SeatKey[]) {
     hand.melds[seat] = [];
     hand.discards[seat] = [];
+    hand.discardHistory[seat] = [];
     hand.riichi[seat] = false;
     hand.riichiMiss[seat] = false;
     hand.tempMiss[seat] = false;
   }
   hand.hands.east = parseTiles(KOKUSHI_13_WAIT);
+  // サンマの萬子は一萬・九萬のみ(`tileSet.ts`)。存在しない 2〜8萬 は使わない。
   hand.hands.south = southHoldsPonTiles
-    ? parseTiles("5z 5z 13567p 3456s 4m 9m")
-    : parseTiles("2m 3m 4m 13567p 3456s 9m");
+    ? parseTiles("5z 5z 13567p 3456s 9m 9p")
+    : parseTiles("2p 2s 13567p 3456s 9m 9p");
   // 西は白を持たず(ポン競合なし)、かつテンパイから遠い散らばり手(局が
   // 自家の手番へ戻る前に終わらないようにする)。
-  hand.hands.west = parseTiles("2m 5m 8m 6m 4m 2p 5p 8p 4p 2s 5s 8s 4s");
+  hand.hands.west = parseTiles("1m 1m 9m 9m 23p 56p 8p 23s 5s 8s");
   const drawnTile = parseTile(drawn);
   hand.drawn = drawnTile;
   hand.turn = "east";
@@ -160,11 +162,96 @@ describe("engine: 鳴かれた牌の捨て牌フリテン(#395)", () => {
     expect(after.hand?.discards.east.some((t) => sameKind(t, drawnTile))).toBe(
       false,
     );
+    // 判定用の打牌履歴には残っている(本 PR の核心)。
+    expect(
+      after.hand?.discardHistory.east.some((t) => sameKind(t, drawnTile)),
+    ).toBe(true);
 
     const won = declareRon(armHumanRon(after, parseTile(RON_TILE), "west"));
 
     // 捨て牌フリテンは恒久。鳴きは自分の意思と無関係な事象であり解除しない。
     expect(won.phase).toBe("playing");
     expect(won.lastRound?.kind).not.toBe("win");
+  });
+});
+
+/**
+ * AI のフリテンリーチ回避(#295)も同じ入力契約に従う(#395)。
+ *
+ * `engine.ai-furiten-riichi.test.ts` のランダム完走ドライバでは「打った牌が
+ * 鳴かれてフリテンが解除される」局面が出現しないため、ここで決定的に固定する。
+ * 上の3ケースが実エンジンのポン経路(河から実体が消える)を通しているので、
+ * ここでは AI のリーチ判断だけを分離して観測する。
+ */
+describe("engine: 鳴かれた牌によるフリテンでも AI はリーチしない(#395 / #295)", () => {
+  /** 3面子 + 99s(頭)+ 34s(両面 2s/5s 待ち)。他の打牌ではテンパイを維持できない。 */
+  const SOUTH_RYANMEN_TENPAI = "123p 456p 789p 99s 34s";
+
+  /**
+   * 南(AI)が 2s/5s 待ちでテンパイし、自家(東)の打牌で手番が回る局面を組む。
+   *
+   * `southDiscardedWait` が true なら「南が待ち牌 5s を打ち、その 5s が鳴かれて
+   * 河から消えた」後の状態(河は空・打牌履歴には残る・`callsMade`)を表す。
+   */
+  function armSouthRiichiDecision(
+    seed: number,
+    southDiscardedWait: boolean,
+  ): EngineState {
+    const base = createGame({ seed });
+    const hand = base.hand;
+    if (hand === null)
+      throw new Error("hand should exist right after createGame");
+
+    for (const seat of ["east", "south", "west"] as SeatKey[]) {
+      hand.melds[seat] = [];
+      hand.discards[seat] = [];
+      hand.discardHistory[seat] = [];
+      hand.riichi[seat] = false;
+      hand.riichiMiss[seat] = false;
+      hand.tempMiss[seat] = false;
+    }
+    hand.hands.south = parseTiles(SOUTH_RYANMEN_TENPAI);
+    if (southDiscardedWait) {
+      hand.discardHistory.south = parseTiles("5s");
+      hand.callsMade = true; // 鳴きが入った局
+    }
+    hand.hands.east = parseTiles("1m 9m 1p 9p 1s 9s 1z 2z 3z 5z 6z 7z 2p");
+    hand.hands.west = parseTiles("1m 9m 9p 2p 5p 8p 2s 8s 9s 1z 2z 6z 7z");
+    hand.drawn = parseTile("8p"); // 誰にも鳴かれず、南のテンパイにも無関係
+    hand.turn = "east";
+
+    return {
+      ...base,
+      pending: {
+        kind: "humanDiscard",
+        canTsumo: false,
+        canRiichi: false,
+        riichiTiles: [],
+        ankanTiles: [],
+        kakanTiles: [],
+        forbiddenDiscards: [],
+        locked: false,
+      },
+    };
+  }
+
+  it("対照: 待ち牌を打っていなければ南はリーチを宣言する", () => {
+    const after = discard(armSouthRiichiDecision(3950, false), parseTile("8p"));
+    expect(after.phase).toBe("playing");
+    expect(after.hand?.riichi.south).toBe(true);
+  });
+
+  it("待ち牌が鳴かれて河から消えていても、南はフリテンリーチを宣言しない", () => {
+    const after = discard(armSouthRiichiDecision(3950, true), parseTile("8p"));
+    expect(after.phase).toBe("playing");
+    // フィクスチャの前提: 待ち牌 5s は河には無いが打牌履歴には残っている。
+    const wait = parseTile("5s");
+    expect(after.hand?.discards.south.some((t) => sameKind(t, wait))).toBe(
+      false,
+    );
+    expect(
+      after.hand?.discardHistory.south.some((t) => sameKind(t, wait)),
+    ).toBe(true);
+    expect(after.hand?.riichi.south).toBe(false);
   });
 });

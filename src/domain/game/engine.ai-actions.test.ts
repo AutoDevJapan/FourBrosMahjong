@@ -46,6 +46,29 @@ function expectTileConservation(state: EngineState): void {
   expect(signature(actual)).toEqual(signature(buildTileSet()));
 }
 
+/**
+ * 表示用の河が判定用の打牌履歴の**部分列**であることを検証する(#395)。
+ *
+ * 河は「履歴から鳴かれた牌を抜いたもの」でなければならない。将来 `discards` にだけ
+ * append する経路(または `discardHistory` を鳴きで削る退行)が入ると、ここで落ちる。
+ */
+function expectRiverIsSubsequenceOfHistory(state: EngineState): void {
+  const hand = state.hand;
+  if (hand === null) return;
+  for (const seat of ["east", "south", "west"] as const) {
+    const river = hand.discards[seat];
+    const history = hand.discardHistory[seat];
+    expect(river.length).toBeLessThanOrEqual(history.length);
+    let cursor = 0;
+    for (const tile of river) {
+      while (cursor < history.length && history[cursor] !== tile) cursor += 1;
+      // 実体(参照)一致で照合する。同種の別牌に読み替えられるのを防ぐ。
+      expect(history[cursor]).toBe(tile);
+      cursor += 1;
+    }
+  }
+}
+
 /** 自家は合法牌を切り、鳴き/ロンを見送ってAIの自動判断を観測する決定的ドライバ。 */
 function observeAiActions(
   seed: number,
@@ -56,6 +79,7 @@ function observeAiActions(
 
   for (let guard = 0; guard < 3000 && state.phase !== "gameEnd"; guard++) {
     expectTileConservation(state);
+    expectRiverIsSubsequenceOfHistory(state);
     const before = state.hand
       ? {
           riichi: { ...state.hand.riichi },
