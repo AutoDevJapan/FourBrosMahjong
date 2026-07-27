@@ -1,5 +1,5 @@
-import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
+import { allDeclarations, block, CSS, declaration } from "./globals.cssParse";
 
 /**
  * 河(捨て牌)グリッドのトラック定義の回帰テスト(#258 / #387 / spec5 5.3.2)。
@@ -17,28 +17,10 @@ import { describe, expect, it } from "vitest";
  *   (`:root` で `calc(var(--u) * …)` まで確定させると `.board-cross` の `--u` 上書きが
  *   効かず、卓幅連動の流体縮小が死ぬ。カスタムプロパティの計算値は「宣言された要素で
  *   `var()` を置換したトークン列」であり、置換済みの値が子孫へ継承されるため)
+ *
+ * 「無いこと」の検査はブロック限定にしない。`block()` は最初のマッチしか返さず、
+ * ブロック内コメントの `}` でも探索範囲が縮むため、否定条件が空振りで真になりうる。
  */
-
-const CSS = readFileSync(new URL("./globals.css", import.meta.url), "utf8");
-
-/** セレクタブロック(`selector { ... }`、ネストなし)の中身を切り出す。 */
-function block(selector: string): string {
-  const escaped = selector.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  const match = CSS.match(new RegExp(`${escaped}\\s*\\{([^}]*)\\}`));
-  if (match === null) throw new Error(`block not found: ${selector}`);
-  return match[1];
-}
-
-/** 宣言 1 件の値を取り出す(末尾のセミコロンは任意)。 */
-function declaration(selector: string, property: string): string {
-  const match = block(selector).match(
-    new RegExp(`(?:^|[;\\s])${property}:\\s*([^;}]+)`),
-  );
-  if (match === null) {
-    throw new Error(`declaration not found: ${property} in ${selector}`);
-  }
-  return match[1].trim().replace(/\s+/g, " ");
-}
 
 describe(".river-grid のトラック定義(#258 / #387)", () => {
   const columns = declaration(".river-grid", "grid-template-columns");
@@ -61,11 +43,17 @@ describe(".river-grid のトラック定義(#258 / #387)", () => {
     expect(declaration(".river-grid", "--tile-river-w")).toContain(ratio);
   });
 
-  it("倍率トークンは var() を含まず、--u との掛け算を :root で確定させない", () => {
-    // ここで calc(var(--u) * …) まで書くと :root の --u で確定し、.board-cross の
+  it("倍率トークンはどこで宣言しても var() を含まない", () => {
+    // calc(var(--u) * …) まで書くと宣言元(:root)の --u で確定し、.board-cross の
     // --u 上書き(コンテナ幅連動 clamp)が効かなくなって河牌が縮まなくなる。
-    expect(declaration(":root", "--tile-river-ratio")).not.toContain("var(");
-    // --tile-river-w は :root ではなく、--u が有効な .river-grid 側で組み立てる。
-    expect(block(":root")).not.toContain("--tile-river-w");
+    const values = allDeclarations("--tile-river-ratio");
+    expect(values.length).toBeGreaterThan(0);
+    for (const value of values) expect(value).not.toContain("var(");
+  });
+
+  it("--tile-river-w の宣言は .river-grid ただ1か所", () => {
+    // :root やダーク用スコープに長さとして持たせると上と同じ理由で流体縮小が死ぬ。
+    expect(CSS.match(/--tile-river-w\s*:/g) ?? []).toHaveLength(1);
+    expect(block(".river-grid")).toContain("--tile-river-w:");
   });
 });

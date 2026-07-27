@@ -431,9 +431,13 @@ test.describe("対局画面(/game)", () => {
    * この破綻を構造的に検出できなかった。ここでは**実際に河を溜めてから**測る。
    *
    * 下限を 393px にしているのは、`/game` の `p-4`(左右 32px)により viewport 392px が
-   * 卓 container 幅ちょうど 360.00px = 段階①/②の境界そのものになるため。境界上の値で
-   * 検査すると、ページ余白の微修正やスクロールバー幅の差で段階②へ落ち、意図しない失敗に
-   * なる。393px は Pixel 8 / iPhone 15 Pro の実幅でもある。
+   * 卓 container 幅ちょうど 360.00px、つまり**段階①の下端(境界を含むので段階①側)**に
+   * なるため。境界ぴったりの値で検査すると、ページ余白の微修正やスクロールバー幅の差で
+   * 段階②側へ倒れ、意図しない失敗になる。393px は Pixel 8 / iPhone 15 Pro の実幅でもある。
+   *
+   * **393px を外さないこと**: 破綻量は卓が狭いほど大きく、実測では 6 列固定への巻き戻しも
+   * `ScoreDisplay` の `nowrap` への巻き戻しも 460px では overflow 0 で、393px でのみ
+   * 検出できる。414 / 460px は「上限 6 列に張り付く」別条件を見るための併走。
    */
   for (const width of [393, 414, 460]) {
     test(`主要スマホ幅(${width}px)で河が溜まっても横スクロールしない(#387 / スペック5 5.3.2)`, async ({
@@ -501,14 +505,16 @@ test.describe("対局画面(/game)", () => {
       );
       expect(Math.max(...columnCounts)).toBe(6);
 
-      // 局終了まで進め、点差(ScoreDisplay の delta)が描画された状態でも測る。
+      // 和了の局終了まで進め、点差(ScoreDisplay の delta)が描画された状態でも測る。
       // 点差は局終了でしか出ないため、上の「河が6枚」到達時点では未描画で、
       // ScoreDisplay の折り返し修正がこのテストで守られない状態だった。
-      await advanceUntil(page, (state) => state?.phase === "roundEnd", {
-        maxSteps: 400,
-        onRoundEnd: "stop",
-        onGameEnd: "stop",
-      });
+      // `delta === 0` は描画されない(全員テンパイ/全員ノーテンの流局)ため和了局に限定し、
+      // 到達失敗を後段アサーションの不透明なタイムアウトではなく明示エラーにする。
+      await advanceUntil(
+        page,
+        (state) => state?.phase === "roundEnd" && state.kind === "win",
+        { maxSteps: 400, onGameEnd: "stop" },
+      );
       await expect(
         page
           .getByText(/^[+−]\d/)

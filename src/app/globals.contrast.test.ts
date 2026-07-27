@@ -1,5 +1,5 @@
-import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
+import { token } from "./globals.cssParse";
 
 /**
  * 配色トークンのコントラスト回帰テスト(#147 / spec5 5.2.4)。
@@ -10,23 +10,6 @@ import { describe, expect, it } from "vitest";
  * ダークの `--tile-badge-red` は `:root` の値を継承する(ダーク側で上書きしない)ため、
  * ライト・ダークとも地色は同一の深い赤で評価する。
  */
-
-const CSS = readFileSync(new URL("./globals.css", import.meta.url), "utf8");
-
-/** セレクタブロック(`selector { ... }`、ネストなし)の中身を切り出す。 */
-function block(selector: string): string {
-  const escaped = selector.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  const match = CSS.match(new RegExp(`${escaped}\\s*\\{([^}]*)\\}`));
-  if (match === null) throw new Error(`block not found: ${selector}`);
-  return match[1];
-}
-
-/** ブロック内から CSS カスタムプロパティの 6 桁 HEX 値を取り出す。 */
-function token(scope: string, name: string): string {
-  const match = block(scope).match(new RegExp(`${name}:\\s*(#[0-9a-fA-F]{6})`));
-  if (match === null) throw new Error(`token not found: ${name} in ${scope}`);
-  return match[1];
-}
 
 /** sRGB 1 チャンネルを相対輝度用の線形値へ変換(WCAG 2.1 定義)。 */
 function linearize(channel: number): number {
