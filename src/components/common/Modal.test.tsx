@@ -263,6 +263,9 @@ describe("Modal (spec 5.2.2 dialog / focus trap / Escape)", () => {
     );
     await user.keyboard("{Escape}");
 
+    // 到達可能な復帰先が一つも無い以上フォーカスは <body> に落ちるが、それを黙って
+    // 見過ごさず開発ビルドで知らせる、が spec 5.2.2 の要求。
+    expect(document.body).toHaveFocus();
     expect(warn).toHaveBeenCalledTimes(1);
     expect(warn.mock.calls[0][0]).toContain("fallbackFocusRef");
   });
