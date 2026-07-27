@@ -38,7 +38,21 @@ export default defineConfig({
     baseURL: e2eBaseURL,
     trace: "on-first-retry",
   },
-  projects: [{ name: "chromium", use: { ...devices["Desktop Chrome"] } }],
+  projects: [
+    // chromium は全 spec を走らせる。modal-focus.spec.ts は #369 の条件(ポインター起動で
+    // フォーカスが移らない)を chromium では再現しないが、returnFocusRef 経路が既定ブラウザで
+    // 壊れていないことの安価なガードとして意図的に重複実行する。
+    { name: "chromium", use: { ...devices["Desktop Chrome"] } },
+    {
+      // #369: WebKit はポインターで button を起動してもフォーカスしない。
+      // 全 E2E の重複実行は避け、モーダル復帰の専用回帰だけを Safari 相当で固定する。
+      // testMatch が実在 spec を指すことは src/test/playwright-projects.test.ts が固定する
+      // (spec をリネームすると Playwright は無警告で 0 件になり、回帰が静かに消えるため)。
+      name: "webkit-modal-focus",
+      testMatch: "**/modal-focus.spec.ts",
+      use: { ...devices["Desktop Safari"] },
+    },
+  ],
   webServer: {
     command: useProdServer
       ? `${usePrebuiltProdServer ? "" : "pnpm build && "}pnpm start --hostname 127.0.0.1 --port ${e2ePort}`

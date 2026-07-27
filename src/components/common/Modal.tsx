@@ -7,12 +7,21 @@
  * - **フォーカストラップ**: 開いた瞬間にダイアログへフォーカスを移し、`Tab`/`Shift+Tab` は
  *   ダイアログ内の可視フォーカス可能要素を循環させて外へ出さない。
  * - **`Escape` で閉じる**、背景(オーバーレイ)クリックでも閉じる。
- * - 閉じたら**開く前のフォーカス位置へ戻す**(呼び出し元のトリガーへ復帰)。
+ * - 閉じたら**開く前のフォーカス位置へ戻す**(呼び出し元のトリガーへ復帰)。WebKit は
+ *   ポインターで `button` を起動してもフォーカスを移さず `activeElement` がトリガーに
+ *   ならないため(#369)、トリガーが判っている呼び出し元は `returnFocusRef` で明示する。
  *
  * 卓UIの「全体盤面」等をスタッキング順の影響を受けずに最前面へ出すため `document.body` へ
  * ポータルする。表示制御(開閉状態)は呼び出し元が持ち、本コンポーネントは開いている間だけ描画する。
  */
-import { useCallback, useEffect, useEffectEvent, useId, useRef } from "react";
+import {
+  type RefObject,
+  useCallback,
+  useEffect,
+  useEffectEvent,
+  useId,
+  useRef,
+} from "react";
 import { createPortal } from "react-dom";
 
 export interface ModalProps {
@@ -20,6 +29,8 @@ export interface ModalProps {
   title: string;
   /** 閉じる要求(`Escape`・オーバーレイクリック・閉じるボタン)。 */
   onClose: () => void;
+  /** ポインター起動時も含め、閉じた後に戻す呼び出し元。省略時は開く前の activeElement。 */
+  returnFocusRef?: RefObject<HTMLElement | null>;
   children: React.ReactNode;
 }
 
@@ -35,11 +46,26 @@ function focusableElements(root: HTMLElement): HTMLElement[] {
   return Array.from(nodes).filter((el) => !el.hidden);
 }
 
-export default function Modal({ title, onClose, children }: ModalProps) {
+export default function Modal({
+  title,
+  onClose,
+  returnFocusRef,
+  children,
+}: ModalProps) {
   const overlayRef = useRef<HTMLDivElement>(null);
   const dialogRef = useRef<HTMLDivElement>(null);
   const requestClose = useEffectEvent(onClose);
   const titleId = useId();
+
+  // 閉じる瞬間にフォーカス復帰先を解決する。WebKit はポインターで button を起動しても
+  // フォーカスを移さないため(#369)、呼び出し元が明示した returnFocusRef を優先し、
+  // 無い場合のみ「開く直前の activeElement」へ戻す。ref を非リアクティブに読むことで
+  // 隔離エフェクトを ref の identity から切り離しつつ、表示中にトリガーが再マウント
+  // されても最新のノードへ戻せる。
+  const restoreFocus = useEffectEvent((fallback: HTMLElement | null) => {
+    const target = returnFocusRef?.current ?? fallback;
+    if (target?.isConnected) target.focus();
+  });
 
   // Portal の外にあるページ全体を modal の間だけ隔離する。呼び出し元の一部分だけを
   // inert にすると、GameBoard の兄弟（ページヘッダー等）が操作可能なまま残るため、
@@ -95,7 +121,7 @@ export default function Modal({ title, onClose, children }: ModalProps) {
         if (ariaHidden === null) element.removeAttribute("aria-hidden");
         else element.setAttribute("aria-hidden", ariaHidden);
       }
-      if (previouslyFocused?.isConnected) previouslyFocused.focus();
+      restoreFocus(previouslyFocused);
     };
   }, []);
 

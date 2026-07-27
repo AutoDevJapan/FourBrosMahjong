@@ -23,6 +23,7 @@ import {
   useCallback,
   useEffect,
   useMemo,
+  useRef,
   useState,
   useSyncExternalStore,
 } from "react";
@@ -86,6 +87,7 @@ export default function GameBoard() {
   // 全体盤面モーダル(スペック5 5.3.2 段階②): フォーカス表示でコンパクト化された他家情報を
   // クロス配置のまま再確認するための開閉状態。モーダルの表示自体は `< 360px` でのみ意味を持つ。
   const [boardOpen, setBoardOpen] = useState(false);
+  const boardOpenerRef = useRef<HTMLButtonElement>(null);
   const selfKitaCount =
     slots.self.kind === "seated" ? slots.self.player.kitaCount : 0;
   const roundKey = `${tableInfo.roundWind}-${tableInfo.handNumber}-${tableInfo.honba}`;
@@ -505,6 +507,7 @@ export default function GameBoard() {
               自分手番フォーカス表示
             </p>
             <button
+              ref={boardOpenerRef}
               type="button"
               onClick={() => setBoardOpen(true)}
               className="inline-flex items-center gap-1.5 rounded-lg border border-foreground/25 px-3 py-1.5 text-xs font-medium hover:bg-foreground/5"
@@ -529,7 +532,11 @@ export default function GameBoard() {
 
       {/* 全体盤面モーダル(段階②の補完): クロス配置を閲覧専用で再表示。フォーカストラップ/Escape は Modal が担保。 */}
       {boardOpen ? (
-        <Modal title="全体盤面" onClose={() => setBoardOpen(false)}>
+        <Modal
+          title="全体盤面"
+          onClose={() => setBoardOpen(false)}
+          returnFocusRef={boardOpenerRef}
+        >
           <div className="@container">
             {crossBoard("grid", undefined, false, true)}
           </div>

@@ -1,6 +1,6 @@
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { describe, expect, it, vi } from "vitest";
 import Modal from "./Modal";
 
@@ -89,6 +89,71 @@ describe("Modal (spec 5.2.2 dialog / focus trap / Escape)", () => {
     // 開いた後、閉じるとトリガーへフォーカスが戻る。
     await user.keyboard("{Escape}");
     expect(opener).toHaveFocus();
+  });
+
+  // WebKit はポインターで button を起動してもフォーカスを移さないため、開いた時点の
+  // activeElement はトリガーではない(#369)。jsdom の `user.click` は逆にトリガーを
+  // フォーカスしてしまい条件を再現できないので、フォーカス副作用を持たない
+  // `fireEvent.click` で「起動元が activeElement でない」状態を作る。
+  function ReturnFocusHarness({ generation }: { generation: number }) {
+    const [open, setOpen] = useState(false);
+    const openerRef = useRef<HTMLButtonElement>(null);
+    return (
+      <div>
+        <button
+          key={generation}
+          ref={openerRef}
+          type="button"
+          onClick={() => setOpen(true)}
+        >
+          開く
+        </button>
+        {open ? (
+          <Modal
+            title="全体盤面"
+            onClose={() => setOpen(false)}
+            returnFocusRef={openerRef}
+          >
+            <p>本文</p>
+          </Modal>
+        ) : null}
+      </div>
+    );
+  }
+
+  it("起動元がactiveElementでなくても明示した呼び出し元へ戻す", async () => {
+    const user = userEvent.setup();
+    render(<ReturnFocusHarness generation={0} />);
+    const opener = screen.getByRole("button", { name: "開く" });
+
+    fireEvent.click(opener);
+    expect(opener).not.toHaveFocus();
+    expect(screen.getByRole("dialog", { name: "全体盤面" })).toHaveFocus();
+
+    await user.keyboard("{Escape}");
+    expect(opener).toHaveFocus();
+  });
+
+  it("表示中にトリガーが再マウントされても閉じた時点のノードへ戻す", async () => {
+    const user = userEvent.setup();
+    const { container, rerender } = render(
+      <ReturnFocusHarness generation={0} />,
+    );
+    // 開いている間は背景が aria-hidden になりロール照会から外れるため、
+    // トリガーは Portal 外のコンテナから直接引く。
+    const currentOpener = () =>
+      container.querySelector("button") as HTMLButtonElement;
+    const staleOpener = currentOpener();
+    fireEvent.click(staleOpener);
+
+    // key を変えてトリガーを作り直す。開いた時点で掴んだノードは DOM から外れる。
+    rerender(<ReturnFocusHarness generation={1} />);
+    const freshOpener = currentOpener();
+    expect(freshOpener).not.toBe(staleOpener);
+    expect(staleOpener.isConnected).toBe(false);
+
+    await user.keyboard("{Escape}");
+    expect(freshOpener).toHaveFocus();
   });
 
   it("Portal 外のページ全体を inert にし、閉じると既存属性を復元する", () => {
