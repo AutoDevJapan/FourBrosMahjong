@@ -3,8 +3,12 @@
  *
  * 王牌14枚は「ドラ表示牌の確保領域(表3+裏3=6)」と「嶺上供給領域(8)」に分かれる。
  * 8 は1局で発生し得る嶺上補充の上限(北4 + カン4)と**ちょうど一致**しており、
- * 余裕はゼロである。したがってこの等式は暗黙の前提ではなく、明示的に固定すべき
- * 不変条件になる。
+ * 余裕はゼロである。したがって
+ * `DEAD_WALL_SIZE − DORA_INDICATOR_RESERVE >= MAX_REPLACEMENTS_PER_HAND`
+ * は暗黙の前提ではなく、明示的に固定すべき不変条件になる。
+ *
+ * なお供給領域が実際に減るのは**海底(ライブ壁が空で補填が入らない)での補充**だけで、
+ * ライブ壁が残る限り補充回数に上限は無い。上の 8 は設計上の安全側の見積りである。
  *
  * 修正前は表示牌の選定(王牌**先頭**から)と嶺上供給(王牌**末尾**から `pop` し
  * 先頭へ補填)が同じ配列を共有しており、補充のたびに表示牌が末尾へ押し出されて、
@@ -30,17 +34,21 @@ const MAX_DORA_ROLL = [6, 6] as const;
 const SEEDS = [1, 42, 386, 2024] as const;
 
 describe("結合: 王牌の予算(ドラ表示牌の確保 × 嶺上供給の上限 / #386)", () => {
-  it("嶺上補充の上限は 北抜き4 + カン4 で、確保後の王牌残量とちょうど一致する", () => {
+  it("嶺上供給領域は 1局の嶺上補充上限(北抜き4 + カン4)を賄える", () => {
     // 北は牌構成上4枚しか無い(1枚につき1回の嶺上補充)。
-    // カンは5組目が四槓散了で途中流局になり嶺上を引かないため4回が上限。
+    // カンは1人四槓(四槓子継続)の経路でのみ4回引ける。5組目は必ず複数家に
+    // またがるため四槓散了になり、散了判定は嶺上補充より先なので引かない。
     expect(MAX_REPLACEMENTS_PER_HAND).toBe(
       COPIES_PER_TILE + FOUR_KAN_ABORT_THRESHOLD,
     );
-    expect(DEAD_WALL_SIZE - DORA_INDICATOR_RESERVE).toBe(
+    // 守るべき不変条件は不等式。現状は等号成立(= 余裕ゼロ)。
+    expect(DEAD_WALL_SIZE - DORA_INDICATOR_RESERVE).toBeGreaterThanOrEqual(
       MAX_REPLACEMENTS_PER_HAND,
     );
-    // 確保領域は表ドラ上限3枚 + 裏ドラ同数。
-    expect(DORA_INDICATOR_RESERVE).toBe(6);
+    // 現在値も固定する(王牌枚数を減らす変更が上の不等式を破る前に気づけるように)。
+    expect(DEAD_WALL_SIZE).toBe(14);
+    expect(DORA_INDICATOR_RESERVE).toBe(6); // 表ドラ上限3枚 + 裏ドラ同数
+    expect(MAX_REPLACEMENTS_PER_HAND).toBe(8);
   });
 
   it.each(SEEDS)(
@@ -57,10 +65,9 @@ describe("結合: 王牌の予算(ドラ表示牌の確保 × 嶺上供給の上
         drawn.push(wall.drawReplacement());
       }
 
-      // 牌の**実体**(参照)で照合する。同種の別牌との取り違えを避けるため。
-      for (const tile of drawn) {
-        expect(indicators).not.toContain(tile);
-      }
+      // 牌の**実体**(参照)で照合する。同種の別牌との取り違えを避けるため、
+      // マッチャの比較方式に依存しない形で書く。
+      expect(drawn.some((tile) => indicators.includes(tile))).toBe(false);
     },
   );
 
@@ -79,9 +86,7 @@ describe("結合: 王牌の予算(ドラ表示牌の確保 × 嶺上供給の上
         drawn.push(wall.drawReplacement());
       }
 
-      for (const tile of drawn) {
-        expect(indicators).not.toContain(tile);
-      }
+      expect(drawn.some((tile) => indicators.includes(tile))).toBe(false);
       // 確保領域は最後まで王牌の先頭に残り続ける。
       expect(wall.deadWall.slice(0, DORA_INDICATOR_RESERVE)).toEqual(
         indicators,
