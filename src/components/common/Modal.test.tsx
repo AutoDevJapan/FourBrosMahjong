@@ -2,7 +2,7 @@ import { fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { useRef, useState } from "react";
 import { describe, expect, it, vi } from "vitest";
-import Modal from "./Modal";
+import Modal, { isRestoreFocusCandidate } from "./Modal";
 
 describe("Modal (spec 5.2.2 dialog / focus trap / Escape)", () => {
   it("公開: role=dialog + aria-modal + 見出しでラベル付けされる", () => {
@@ -154,6 +154,127 @@ describe("Modal (spec 5.2.2 dialog / focus trap / Escape)", () => {
 
     await user.keyboard("{Escape}");
     expect(freshOpener).toHaveFocus();
+  });
+
+  // 復帰先が「DOM には接続されているがフォーカス不能」なケース(#377)。jsdom はレイアウトを
+  // 持たず `display: none` / `visibility: hidden` を focus() の可否へ反映しないため、jsdom が
+  // 実際に到達不能として扱う `disabled` でトリガーを封じて同じ条件を作る(実ブラウザでの
+  // `display: none` シナリオは e2e/modal-focus.spec.ts が担保する)。
+  function UnreachableTriggerHarness({
+    triggerDisabled,
+    withFallback,
+  }: {
+    triggerDisabled: boolean;
+    withFallback: boolean;
+  }) {
+    const [open, setOpen] = useState(false);
+    const openerRef = useRef<HTMLButtonElement>(null);
+    const fallbackRef = useRef<HTMLDivElement>(null);
+    return (
+      <div>
+        {/* モーダルが補完している領域のルート。タブ順には入れずプログラム的復帰先にする。 */}
+        <div ref={fallbackRef} tabIndex={-1} data-testid="fallback">
+          盤面ルート
+        </div>
+        <button
+          ref={openerRef}
+          type="button"
+          disabled={triggerDisabled}
+          onClick={() => setOpen(true)}
+        >
+          開く
+        </button>
+        <button type="button">別の操作</button>
+        {open ? (
+          <Modal
+            title="全体盤面"
+            onClose={() => setOpen(false)}
+            returnFocusRef={openerRef}
+            fallbackFocusRef={withFallback ? fallbackRef : undefined}
+          >
+            <p>本文</p>
+          </Modal>
+        ) : null}
+      </div>
+    );
+  }
+
+  it("トリガーが到達不能なら開いた時点の activeElement へ連鎖する", async () => {
+    const user = userEvent.setup();
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const { container, rerender } = render(
+      <UnreachableTriggerHarness triggerDisabled={false} withFallback />,
+    );
+    const [opener, other] = Array.from(
+      container.querySelectorAll("button"),
+    ) as HTMLButtonElement[];
+
+    // 開く直前の activeElement を「別の操作」にしたうえで、フォーカス副作用のない
+    // fireEvent でモーダルを開く。
+    other.focus();
+    fireEvent.click(opener);
+    expect(screen.getByRole("dialog", { name: "全体盤面" })).toHaveFocus();
+
+    // 表示中にトリガーが到達不能になる(実アプリでは卓幅変化による display: none)。
+    rerender(<UnreachableTriggerHarness triggerDisabled withFallback />);
+    await user.keyboard("{Escape}");
+
+    expect(other).toHaveFocus();
+    expect(warn).not.toHaveBeenCalled();
+    warn.mockRestore();
+  });
+
+  it("トリガーも開いた時点の activeElement も到達不能なら fallbackFocusRef へ連鎖する", async () => {
+    const user = userEvent.setup();
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const { container, rerender } = render(
+      <UnreachableTriggerHarness triggerDisabled={false} withFallback />,
+    );
+    const opener = container.querySelectorAll("button")[0] as HTMLButtonElement;
+
+    // 開く時点の activeElement は <body>。復帰先として無効なため候補から外れる。
+    expect(document.body).toHaveFocus();
+    fireEvent.click(opener);
+    rerender(<UnreachableTriggerHarness triggerDisabled withFallback />);
+    await user.keyboard("{Escape}");
+
+    expect(screen.getByTestId("fallback")).toHaveFocus();
+    expect(warn).not.toHaveBeenCalled();
+    warn.mockRestore();
+  });
+
+  it("候補がすべて到達不能なら黙って body へ落とさず開発ビルドで警告する", async () => {
+    const user = userEvent.setup();
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const { container, rerender } = render(
+      <UnreachableTriggerHarness
+        triggerDisabled={false}
+        withFallback={false}
+      />,
+    );
+    const opener = container.querySelectorAll("button")[0] as HTMLButtonElement;
+
+    fireEvent.click(opener);
+    rerender(
+      <UnreachableTriggerHarness triggerDisabled withFallback={false} />,
+    );
+    await user.keyboard("{Escape}");
+
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(warn.mock.calls[0][0]).toContain("fallbackFocusRef");
+    warn.mockRestore();
+  });
+
+  it("復帰先候補の判定: <body>/<html>・未接続ノードは候補にしない", () => {
+    const button = document.createElement("button");
+    expect(isRestoreFocusCandidate(button)).toBe(false); // 未接続
+    document.body.append(button);
+    expect(isRestoreFocusCandidate(button)).toBe(true);
+    button.remove();
+
+    expect(isRestoreFocusCandidate(document.body)).toBe(false);
+    expect(isRestoreFocusCandidate(document.documentElement)).toBe(false);
+    expect(isRestoreFocusCandidate(null)).toBe(false);
   });
 
   it("Portal 外のページ全体を inert にし、閉じると既存属性を復元する", () => {
