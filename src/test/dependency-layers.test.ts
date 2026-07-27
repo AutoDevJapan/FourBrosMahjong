@@ -2,13 +2,16 @@ import {
   existsSync,
   mkdirSync,
   mkdtempSync,
+  readdirSync,
+  readFileSync,
   realpathSync,
   rmSync,
   writeFileSync,
 } from "node:fs";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
-import { dirname, join, resolve } from "node:path";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import {
   cruise,
   type IConfiguration,
@@ -31,9 +34,12 @@ import { beforeAll, describe, expect, it } from "vitest";
  * `src/domain/...` 等に揃え、リポジトリの `forbidden` ルールをそのまま適用する。
  */
 
-/** `mkdtemp` は macOS で `/var/…`(`/private/var/…` へのシンボリックリンク)を返す。 */
-/* dependency-cruiser は依存の解決に realpath を使うため、`baseDir` 側も realpath に揃えないと */
-/* 依存の相対パスが `../../…` になり `to.path` が当たらない。 */
+/**
+ * `mkdtemp` は macOS で `/var/…`(`/private/var/…` へのシンボリックリンク)を返す。
+ * dependency-cruiser は依存の解決に realpath を使うため、`baseDir` 側も realpath へ
+ * 揃えないと依存の相対パスが `../../…` になり `to.path` が当たらない
+ * (Linux CI では `/tmp` が実パスなので no-op)。
+ */
 function makeFixtureDir(): string {
   return realpathSync(mkdtempSync(join(tmpdir(), "depcruise-layers-")));
 }
@@ -98,7 +104,16 @@ const FIXTURE: readonly [path: string, source: string][] = [
     "src/proxy.ts",
     'import { csp } from "./app/_lib/securityHeaders";\nexport const j = csp;\n',
   ],
+  // 解決できない import。一時ディレクトリにはリポジトリの `tsconfig.json` が無いため
+  // `@/` エイリアスは解決されず、`no-unresolvable-in-src` に当たるべき。
+  [
+    "src/domain/dora/dora.ts",
+    'import { Modal } from "@/components/common/Modal";\nexport const k = Modal;\n',
+  ],
 ];
+
+/** 解決できない import の specifier(上記フィクスチャと対応)。 */
+const UNRESOLVABLE_SPECIFIER = "@/components/common/Modal";
 
 /** ドメイン → プレゼンテーションの逆流を禁止するルール名。 */
 const DOMAIN_RULE = "no-domain-to-presentation";
@@ -106,13 +121,19 @@ const DOMAIN_RULE = "no-domain-to-presentation";
 const COMPONENTS_RULE = "no-components-to-app";
 const LAYER_RULES: readonly string[] = [DOMAIN_RULE, COMPONENTS_RULE];
 
+/** 設定・レイヤーの実在確認は cwd ではなくこのテストファイルからの相対で解決する。 */
 const require_ = createRequire(import.meta.url);
+const repoPath = (relative: string) =>
+  fileURLToPath(new URL(`../../${relative}`, import.meta.url));
 const depcruiseConfig = require_(
-  resolve(process.cwd(), ".dependency-cruiser.cjs"),
+  repoPath(".dependency-cruiser.cjs"),
 ) as IConfiguration;
 
 let violations: IViolation[] = [];
 
+// フィクスチャ書き出しと `cruise()` は `beforeAll` にまとめる(全テストで同一の
+// 判定結果を共有するため)。`vitest.config.ts` の `testTimeout: 30_000` は hook には
+// 効かず、hook は既定の 10,000ms のままだが、実測 100ms 未満なので十分な余裕がある。
 beforeAll(async () => {
   const dir = makeFixtureDir();
   try {
@@ -123,8 +144,9 @@ beforeAll(async () => {
     }
     const result = await cruise(["src"], {
       ...depcruiseConfig.options,
-      // リポジトリの `tsconfig.json` は一時ディレクトリに存在しないため外す
-      // (フィクスチャは相対 import のみで、パスエイリアス解決を必要としない)。
+      // リポジトリの `tsconfig.json` は一時ディレクトリに存在しないため外す。
+      // レイヤーの各ケースは相対 import で書いてあり解決に影響しない。唯一の
+      // `@/` import は「解決できない依存」のケースとして意図的に残している。
       tsConfig: undefined,
       baseDir: dir,
       ruleSet: { forbidden: depcruiseConfig.forbidden },
@@ -244,7 +266,7 @@ describe("ルールが指すレイヤーが実リポジトリに存在する (#3
     "%s が実在する",
     (layer) => {
       expect(
-        existsSync(resolve(process.cwd(), layer)),
+        existsSync(repoPath(layer)),
         `${layer} が無い: 実在しないフォルダへの path ルールは検証不能な死んだ設定になる`,
       ).toBe(true);
     },
@@ -257,5 +279,82 @@ describe("ルールが指すレイヤーが実リポジトリに存在する (#3
         layer,
       );
     }
+  });
+
+  /**
+   * レイヤールールは `src/` 直下のモジュールを対象にしていない(`src/proxy.ts` は
+   * Next.js の middleware エントリで、`src/app/_lib` の CSP ヘルパを使うのが正当なため)。
+   * ここに共有モジュールが増えると、`src/domain` → `src/shared` → `src/app` のような
+   * 迂回路でレイヤールールを回避できてしまう。実測でこの経路が違反にならないことは
+   * 確認済みなので、「`src/` 直下は middleware と型宣言のみ」を不変条件として固定する。
+   */
+  it("src/ 直下は middleware エントリと型宣言のみ(層ルールの迂回路を作らない)", () => {
+    const topLevel = readdirSync(repoPath("src"), { withFileTypes: true })
+      .filter((entry) => entry.isFile())
+      .map((entry) => entry.name)
+      .sort();
+    expect(
+      topLevel,
+      "src/ 直下に共有モジュールを置くとレイヤールールの迂回路になる。src/domain・src/components・src/app のいずれかへ配置すること",
+    ).toEqual(["global.d.ts", "proxy.ts"]);
+  });
+});
+
+/**
+ * レイヤールールは「解決できた依存」にしか当たらない。`src/` は `@/*` エイリアスを
+ * 多用しており、その解決は `options.tsConfig` に依存する。この設定が外れると `src/` の
+ * import が大量に unresolvable になり、**レイヤールールは何にも当たらないまま exit 0** に
+ * なる(実測: ドメイン→UI のカナリアを置いても `tsConfig` 無しでは exit 0)。
+ * `no-unresolvable-in-src` がその失敗モードを error として顕在化させる。
+ */
+describe("レイヤールールが機能する前提条件 (#382)", () => {
+  it("解決できない import が error として報告される", () => {
+    const violation = violations.find(
+      (candidate) =>
+        candidate.from === "src/domain/dora/dora.ts" &&
+        candidate.to === UNRESOLVABLE_SPECIFIER,
+    );
+    expect(
+      violation?.rule.name,
+      "解決できない import が素通りすると、パスベースのルールが全て無効化されても気づけない",
+    ).toBe("no-unresolvable-in-src");
+    expect(violation?.rule.severity).toBe("error");
+  });
+
+  it("@/ エイリアスを解決するための tsConfig が設定されている", () => {
+    expect(
+      depcruiseConfig.options?.tsConfig?.fileName,
+      "options.tsConfig が無いと src/ の @/ import が全て unresolvable になる",
+    ).toBe("tsconfig.json");
+    expect(existsSync(repoPath("tsconfig.json"))).toBe(true);
+  });
+
+  it("型のみの import を依存として数える tsPreCompilationDeps が有効", () => {
+    expect(
+      depcruiseConfig.options?.tsPreCompilationDeps,
+      "false にすると型のみの逆流 import が依存グラフから消え、抜け道になる",
+    ).toBe(true);
+  });
+});
+
+/**
+ * ルールが正しくても、CI がそれを走らせる範囲が狭ければ意味がない
+ * (`depcruise src/app` に縮めても、CI からステップを消しても、上のテストは全て緑のまま)。
+ * 適用スコープもここで固定する。
+ */
+describe("レイヤールールの適用スコープ (#382)", () => {
+  it("pnpm depcruise が src 全体を対象にしている", () => {
+    const packageJson = JSON.parse(
+      readFileSync(repoPath("package.json"), "utf8"),
+    ) as { scripts?: Record<string, string> };
+    expect(packageJson.scripts?.depcruise).toBe("depcruise src");
+  });
+
+  it("CI が pnpm depcruise を実行している", () => {
+    const workflow = readFileSync(repoPath(".github/workflows/ci.yml"), "utf8");
+    expect(
+      workflow,
+      "CI から depcruise ステップが消えるとレイヤー境界は強制されない",
+    ).toContain("pnpm depcruise");
   });
 });

@@ -17,11 +17,17 @@
  *   route files always import at least React/Next APIs, so they never match.
  * - `no-domain-to-presentation` / `no-components-to-app` are `severity: "error"`
  *   for the same exit-code reason as `no-circular`. They encode the layered
- *   "presentation → domain, one direction only" discipline that issue #12
- *   listed but deferred while `src/` had no domain layer; `src/domain/` is now
- *   implemented, so the deferral condition is satisfied (issue #382).
- *
- * @type {import('dependency-cruiser').IConfiguration}
+ *   dependency direction (presentation → domain, and within presentation
+ *   app → components) that issue #12 listed but deferred while `src/` had no
+ *   domain layer; `src/domain/` is now implemented, so the deferral condition
+ *   is satisfied (issue #382).
+ * - `no-unresolvable-in-src` is `severity: "error"` because it guards the
+ *   *precondition* of every path-based rule above. `src/` imports go through
+ *   the `@/*` alias, which dependency-cruiser can only follow via
+ *   `options.tsConfig`. Drop that option and 47 `src/` imports silently become
+ *   unresolvable, at which point the layer rules match nothing and a
+ *   domain → UI canary passes with exit 0 (measured). Without this rule that
+ *   failure mode is completely silent.
  */
 
 /**
@@ -41,7 +47,10 @@ const PRESENTATION = "^src/(app|components)/";
 const APP_ROUTER = "^src/app/";
 /** Shared React components, inner to the App Router tree. */
 const COMPONENTS = "^src/components/";
+/** Everything the layer rules govern. */
+const SRC = "^src/";
 
+/** @type {import('dependency-cruiser').IConfiguration} */
 module.exports = {
   forbidden: [
     {
@@ -80,6 +89,17 @@ module.exports = {
       severity: "error",
       from: { path: COMPONENTS, pathNot: TEST_FILE },
       to: { path: APP_ROUTER },
+    },
+    {
+      name: "no-unresolvable-in-src",
+      comment:
+        "An import under src/ that dependency-cruiser cannot resolve produces no " +
+        "dependency edge, so every path-based rule above stops matching it. Scoped " +
+        "to src/ because root-level tooling configs legitimately reference modules " +
+        "outside the cruised graph.",
+      severity: "error",
+      from: { path: SRC },
+      to: { couldNotResolve: true },
     },
   ],
   options: {
