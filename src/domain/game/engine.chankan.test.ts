@@ -82,7 +82,10 @@ function seatWaits(
   if (hand === null) throw new Error("no hand");
   hand.hands[seat] = parseTiles(notation);
   hand.melds[seat] = [];
-  hand.discards[seat] = discards.flatMap((d) => parseTiles(d));
+  const river = discards.flatMap((d) => parseTiles(d));
+  hand.discards[seat] = river;
+  // 捨て牌フリテンの判定は打牌履歴側を見る(#395)。河と同じ内容で揃える。
+  hand.discardHistory[seat] = [...river];
 }
 
 describe("engine: 槍槓(チャンカン / Q17・#115)", () => {

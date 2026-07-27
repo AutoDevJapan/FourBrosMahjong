@@ -143,8 +143,20 @@ interface HandState {
   hands: Record<SeatKey, Tile[]>;
   /** 席ごとの副露(ポン・カン)。 */
   melds: Record<SeatKey, Meld[]>;
-  /** 席ごとの河(捨て牌)。 */
+  /**
+   * 席ごとの河(捨て牌)。**表示用**。他家に鳴かれた牌は実体ごと取り除かれる
+   * (現実の卓で鳴かれた牌が副露へ移るのと同じ)。フリテン判定には使わない。
+   */
   discards: Record<SeatKey, Tile[]>;
+  /**
+   * 席ごとの全打牌履歴(#395)。鳴かれても取り除かない**判定用**の SSOT。
+   *
+   * 捨て牌フリテンは恒久(`hand/furiten.ts`)であり、他家の鳴きという自分の意思と
+   * 無関係な事象では解除されない。表示用の `discards` を判定に流用すると、
+   * 鳴かれた瞬間にフリテンが解けて不正ロンが成立する。安全牌(現物)の評価も
+   * 同じ理由で履歴側を見る。
+   */
+  discardHistory: Record<SeatKey, Tile[]>;
   /** 席ごとの北抜き枚数(ガリ)。 */
   kita: Record<SeatKey, number>;
   /** 現在の手番の席。 */
@@ -419,7 +431,10 @@ function takeKind(
   return { taken, rest };
 }
 
-/** 河から鳴かれた牌(最後の該当牌)を取り除く。 */
+/**
+ * 河(表示用)から鳴かれた牌(最後の該当牌)を取り除く。
+ * 判定用の `discardHistory` は**一切触らない**(捨て牌フリテンは恒久 / #395)。
+ */
 function removeCalledTileFromRiver(
   hand: HandState,
   discarder: SeatKey,
@@ -613,6 +628,7 @@ function beginRound(state: EngineState): EngineState {
     hands: { east: dealt[0], south: dealt[1], west: dealt[2] },
     melds: { east: [], south: [], west: [] },
     discards: { east: [], south: [], west: [] },
+    discardHistory: { east: [], south: [], west: [] },
     kita: { east: 0, south: 0, west: 0 },
     turn: "east",
     drawn: null,
@@ -725,7 +741,7 @@ function settleFourKanAbortiveDraw(state: EngineState): EngineState | null {
 
 /**
  * AI 手番の打牌を手牌効率(向聴・受け入れ)ベースで選ぶ(#98)。
- * 他家の河から現物(危険牌回避)、表ドラ+赤5から打点温存を加味する。
+ * 他家の打牌履歴から現物(危険牌回避 / #395)、表ドラ+赤5から打点温存を加味する。
  * 和了牌の温存は考えない(和了は本関数の前段でツモ宣言済み)。
  * 副露後は門前牌だけを評価対象にし、副露数 `meldCount` を渡して向聴・受け入れを
  * 副露込みで補正する(#294: 未補正だと副露手で向聴値が飽和し、AI が自らテンパイを崩す)。
@@ -739,7 +755,9 @@ function chooseAiDiscard(
   const tiles = [...hand.hands[seat], ...(drawn ? [drawn] : [])];
   const opponentDiscards = (["east", "south", "west"] as SeatKey[])
     .filter((s) => s !== seat)
-    .map((s) => hand.discards[s]);
+    // 他家が打った牌はその家に対する現物(安全牌)であり続ける。鳴かれて河から
+    // 消えても安全性は変わらないため、履歴側を見る(#395)。
+    .map((s) => hand.discardHistory[s]);
   const doraKinds = new Set(
     resolveDora(hand.doraSet).omote.map((t) => tileKey(t)),
   );
@@ -766,7 +784,10 @@ function nonFuritenRiichiTiles(
   if (hand.drawn === null) return [];
   const melds = meldInputsOf(hand.melds[seat]);
   const pool = [...hand.hands[seat], hand.drawn];
-  const ownDiscardKeys = new Set(hand.discards[seat].map((t) => tileKey(t)));
+  const ownDiscardKeys = new Set(
+    // 鳴かれた牌も恒久フリテンの原因として残る(#395)。
+    hand.discardHistory[seat].map((t) => tileKey(t)),
+  );
   return candidates.filter((candidate) => {
     const index = pool.findIndex((t) => sameTile(t, candidate));
     if (index < 0) return false;
@@ -808,7 +829,9 @@ function applyAiRiichi(state: EngineState, seat: SeatKey): EngineState {
     declarable.find((candidate) => sameTile(candidate, selected)) ??
     declarable[0];
   hand.riichi[seat] = true;
-  hand.doubleRiichi[seat] = hand.discards[seat].length === 0 && !hand.callsMade;
+  hand.doubleRiichi[seat] =
+    // 「まだ一度も打牌していない」= 履歴が空(表示用の河は鳴きで減りうる / #395)。
+    hand.discardHistory[seat].length === 0 && !hand.callsMade;
   hand.pendingRiichiSeat = seat;
   const callsMadeBeforeDeclaration = hand.callsMade;
   const discarded = applyDiscard(state, seat, tile);
@@ -1416,6 +1439,7 @@ function applyDiscard(
   pool.splice(idx, 1);
   hand.hands[seat] = pool;
   hand.discards[seat] = [...hand.discards[seat], discarded];
+  hand.discardHistory[seat] = [...hand.discardHistory[seat], discarded];
   hand.drawn = null;
   hand.fromKan = false;
   hand.ponnedKind = null; // 打牌で喰い替え禁止の窓(ポン直後の1打)を閉じる。
@@ -1590,7 +1614,8 @@ function analyzeTsumo(
 ): WinAnalysis | null {
   const hand = state.hand;
   if (hand === null) return null;
-  const blessing = blessingForTsumo(seat, hand.discards, hand.callsMade);
+  // 天和/地和は「自分がまだ打牌していない」ことが条件のため打牌履歴を渡す(#395)。
+  const blessing = blessingForTsumo(seat, hand.discardHistory, hand.callsMade);
   return analyzeWin({
     concealedTiles: [...hand.hands[seat], winningTile],
     melds: hand.melds[seat],
@@ -1610,13 +1635,17 @@ function analyzeTsumo(
 /**
  * 天和/地和の権利を実対局状態から導く。
  * 東の初回自摸は天和、南/西の最初の自摸は地和。いずれも局中の鳴きで消滅する。
+ *
+ * @param discardHistory 席ごとの**打牌履歴**(`HandState.discardHistory`)。条件は
+ *   「その席がまだ一度も打牌していない」ことなので、鳴きで牌が抜ける表示用の河
+ *   (`HandState.discards`)を渡してはならない(#395)。
  */
 export function blessingForTsumo(
   seat: SeatKey,
-  discards: Readonly<Record<SeatKey, readonly Tile[]>>,
+  discardHistory: Readonly<Record<SeatKey, readonly Tile[]>>,
   callsMade: boolean,
 ): "heaven" | "earth" | undefined {
-  if (callsMade || discards[seat].length !== 0) return undefined;
+  if (callsMade || discardHistory[seat].length !== 0) return undefined;
   return seat === "east" ? "heaven" : "earth";
 }
 
@@ -1639,7 +1668,8 @@ function analyzeRon(
     {
       concealedTiles: hand.hands[seat],
       melds: meldInputsOf(hand.melds[seat]),
-      ownDiscards: hand.discards[seat],
+      // 鳴かれて河から消えた牌も捨て牌フリテンの対象として残す(#395)。
+      ownDiscardHistory: hand.discardHistory[seat],
       temporaryMiss: hand.tempMiss[seat],
       riichiMiss: hand.riichiMiss[seat],
     },
@@ -2126,7 +2156,9 @@ export function declareRiichi(state: EngineState, tile: Tile): EngineState {
   const hand = state.hand;
   hand.riichi[seat] = true;
   // ダブルリーチ = 自分の第一打・鳴きなし。
-  hand.doubleRiichi[seat] = hand.discards[seat].length === 0 && !hand.callsMade;
+  hand.doubleRiichi[seat] =
+    // 「まだ一度も打牌していない」= 履歴が空(表示用の河は鳴きで減りうる / #395)。
+    hand.discardHistory[seat].length === 0 && !hand.callsMade;
   hand.pendingRiichiSeat = seat;
   const callsMadeBeforeDeclaration = hand.callsMade;
 

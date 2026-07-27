@@ -9,7 +9,7 @@ describe("evaluateFuriten", () => {
   it("待ち牌が自河にあれば捨て牌フリテン", () => {
     const result = evaluateFuriten({
       concealedTiles: TENPAI,
-      ownDiscards: parseTiles("5s"),
+      ownDiscardHistory: parseTiles("5s"),
     });
     expect(result.furiten).toBe(true);
     expect(result.reason).toBe("discard");
@@ -18,7 +18,7 @@ describe("evaluateFuriten", () => {
   it("待ちと無関係な捨て牌ではフリテンにならない", () => {
     const result = evaluateFuriten({
       concealedTiles: TENPAI,
-      ownDiscards: parseTiles("1p 9p"),
+      ownDiscardHistory: parseTiles("1p 9p"),
     });
     expect(result.furiten).toBe(false);
   });
@@ -27,14 +27,14 @@ describe("evaluateFuriten", () => {
     expect(
       evaluateFuriten({
         concealedTiles: TENPAI,
-        ownDiscards: [],
+        ownDiscardHistory: [],
         temporaryMiss: true,
       }).reason,
     ).toBe("temporary");
     expect(
       evaluateFuriten({
         concealedTiles: TENPAI,
-        ownDiscards: [],
+        ownDiscardHistory: [],
         riichiMiss: true,
       }).reason,
     ).toBe("riichi");
@@ -43,19 +43,19 @@ describe("evaluateFuriten", () => {
 
 describe("canRon / canTsumo(spec 2.4 受け入れ基準)", () => {
   it("フリテンではロン不可・ツモ可(見逃し扱い)", () => {
-    const ctx = { concealedTiles: TENPAI, ownDiscards: parseTiles("2s") };
+    const ctx = { concealedTiles: TENPAI, ownDiscardHistory: parseTiles("2s") };
     expect(canRon(ctx, parseTile("5s"))).toBe(false);
     expect(canTsumo(ctx, parseTile("5s"))).toBe(true);
   });
 
   it("非フリテンなら当たり牌でロン可", () => {
-    const ctx = { concealedTiles: TENPAI, ownDiscards: parseTiles("1m") };
+    const ctx = { concealedTiles: TENPAI, ownDiscardHistory: parseTiles("1m") };
     expect(canRon(ctx, parseTile("2s"))).toBe(true);
     expect(canRon(ctx, parseTile("5s"))).toBe(true);
   });
 
   it("待ち牌でない牌ではロンもツモも不可", () => {
-    const ctx = { concealedTiles: TENPAI, ownDiscards: [] };
+    const ctx = { concealedTiles: TENPAI, ownDiscardHistory: [] };
     expect(canRon(ctx, parseTile("3s"))).toBe(false);
     expect(canTsumo(ctx, parseTile("3s"))).toBe(false);
   });

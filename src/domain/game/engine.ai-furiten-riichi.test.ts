@@ -48,7 +48,8 @@ function sameTile(a: Tile, b: Tile): boolean {
 /** engine の chooseAiDiscard と同じ文脈で打牌を選ぶ。 */
 function aiPickDiscard(hand: Hand, seat: SeatKey, pool: readonly Tile[]): Tile {
   const opponentDiscards = SEATS.filter((s) => s !== seat).map(
-    (s) => hand.discards[s],
+    // engine と同じく打牌履歴を渡す(鳴かれても現物であり続ける / #395)。
+    (s) => hand.discardHistory[s],
   );
   const doraKinds = new Set(
     resolveDora(hand.doraSet).omote.map((t) => tileKey(t)),
@@ -65,7 +66,7 @@ function nonFuritenTiles(
   if (hand.drawn === null) return [];
   const melds = meldInputs(hand.melds[seat]);
   const pool = [...hand.hands[seat], hand.drawn];
-  const ownKeys = new Set(hand.discards[seat].map((t) => tileKey(t)));
+  const ownKeys = new Set(hand.discardHistory[seat].map((t) => tileKey(t)));
   return candidates.filter((candidate) => {
     const index = pool.findIndex((t) => sameTile(t, candidate));
     if (index < 0) return false;
@@ -155,7 +156,9 @@ function scanRiichi(
     if (seen.has(key)) continue;
     seen.add(key);
     const waits = waitingTiles(hand.hands[seat], meldInputs(hand.melds[seat]));
-    const ownKeys = new Set(hand.discards[seat].map((t) => tileKey(t)));
+    // 判定オラクルも engine と同じ入力(打牌履歴)を見る。表示用の河を見ると、
+    // 鳴かれた牌が原因のフリテンリーチを取り逃がす(#395)。
+    const ownKeys = new Set(hand.discardHistory[seat].map((t) => tileKey(t)));
     events.push({
       round: state.roundsPlayed,
       seat,
