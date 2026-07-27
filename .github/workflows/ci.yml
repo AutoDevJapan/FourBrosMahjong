@@ -18,6 +18,17 @@ concurrency:
 permissions:
   contents: read
 
+# キャッシュ方針 (#380)
+# GitHub Actions のキャッシュ予算はリポジトリあたり 10GB で、超過分は LRU で退避される。
+# キャッシュは ref スコープで、PR (`refs/pull/N/merge`) 用に保存したエントリは他の PR から
+# 参照できないため、全 job が無条件に save すると同一内容が ref の数だけ複製され、
+# 数日で予算が一巡して「保存はするが復元前に消える」恒常ミス状態になる。
+#
+# したがって本ワークフローでは **保存は既定ブランチ (main) の push 実行のみ** に限定し、
+# PR / dev / stg は復元専用とする。既定ブランチのキャッシュは全ブランチ・全 PR から
+# 復元できるため、ヒット率を落とさずに複製だけを止められる。
+# この不変条件は `src/test/ci-workflow.test.ts` が回帰テストとして固定している。
+
 jobs:
   ci:
     name: lint / typecheck / format / test / build
@@ -39,10 +50,34 @@ jobs:
           # dependency-cruiser@18 の engines.node が Node 22+ を要求し、
           # .npmrc の engine-strict=true により Node 20 では install が失敗するため 22 LTS を .nvmrc に固定している。
           node-version-file: ".nvmrc"
-          cache: pnpm
+          # `cache: pnpm` は使わない。setup-node の内蔵キャッシュは ref スコープで無条件に save するため、
+          # PR ref ごとに同一内容の pnpm store (約 165MB) が複製され 10GB 予算を食い潰す (#380)。
+          # 代わりに下の restore / save を使い、save を main に限定する。
+
+      - name: Resolve pnpm store path
+        id: pnpm-store
+        run: echo "path=$(pnpm store path --silent)" >> "$GITHUB_OUTPUT"
+
+      # main で保存したキャッシュは既定ブランチ由来のため PR / dev / stg からも復元できる。
+      # PR 側は復元専用にして、ref ごとの複製を作らない (#380)。
+      - name: Restore pnpm store
+        id: pnpm-cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ steps.pnpm-store.outputs.path }}
+          key: pnpm-store-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
+
+      # pnpm store のキーは e2e job と共通のため、保存は ci job のみが行う。
+      # 両 job から同一キーで save すると後発が "Cache already exists" 警告になるだけで無駄。
+      - name: Save pnpm store
+        if: github.ref == 'refs/heads/main' && steps.pnpm-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ steps.pnpm-store.outputs.path }}
+          key: pnpm-store-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
 
       - name: Lint (eslint)
         run: pnpm lint
@@ -72,8 +107,9 @@ jobs:
       # キャッシュキーにはインストールするブラウザ集合を必ず含める。両 job が同じ path を
       # 同じキーで共有すると、先に保存した側(chromium のみ)の内容がキーを占有し、
       # webkit を要求する e2e job は毎回ダウンロードし直しになる(exact hit のため保存も走らない)。
-      - name: Cache Playwright browser for production PWA E2E
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      - name: Restore Playwright browser for production PWA E2E
+        id: pwa-playwright-cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.cache/ms-playwright
           key: playwright-browsers-${{ runner.os }}-chromium-${{ hashFiles('pnpm-lock.yaml') }}
@@ -83,6 +119,13 @@ jobs:
           DEBIAN_FRONTEND: noninteractive
           NEEDRESTART_MODE: a
         run: pnpm exec playwright install --with-deps chromium
+
+      - name: Save Playwright browser for production PWA E2E
+        if: github.ref == 'refs/heads/main' && steps.pwa-playwright-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-browsers-${{ runner.os }}-chromium-${{ hashFiles('pnpm-lock.yaml') }}
 
       - name: Production PWA E2E (service worker / offline)
         env:
@@ -111,7 +154,18 @@ jobs:
         with:
           # .nvmrc がリポジトリの Node バージョンの単一の情報源。
           node-version-file: ".nvmrc"
-          cache: pnpm
+          # `cache: pnpm` を使わない理由と代替は ci job 側のコメントを参照 (#380)。
+          # pnpm store の保存は ci job のみが行い、この job は復元専用。
+
+      - name: Resolve pnpm store path
+        id: pnpm-store
+        run: echo "path=$(pnpm store path --silent)" >> "$GITHUB_OUTPUT"
+
+      - name: Restore pnpm store
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ steps.pnpm-store.outputs.path }}
+          key: pnpm-store-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
@@ -121,8 +175,9 @@ jobs:
       # ブラウザ集合をキーに含めないと、chromium のみを入れる ci job とキーが衝突して webkit が
       # 常にキャッシュから漏れる。OS 依存パッケージの apt install はキャッシュの有無に関わらず
       # --with-deps で毎回実行するため、キャッシュヒット時もブラウザ本体の再ダウンロードのみがスキップされる。
-      - name: Cache Playwright browsers
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      - name: Restore Playwright browsers
+        id: playwright-cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.cache/ms-playwright
           key: playwright-browsers-${{ runner.os }}-chromium-webkit-${{ hashFiles('pnpm-lock.yaml') }}
@@ -135,6 +190,13 @@ jobs:
           DEBIAN_FRONTEND: noninteractive
           NEEDRESTART_MODE: a
         run: pnpm exec playwright install --with-deps chromium webkit
+
+      - name: Save Playwright browsers
+        if: github.ref == 'refs/heads/main' && steps.playwright-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-browsers-${{ runner.os }}-chromium-webkit-${{ hashFiles('pnpm-lock.yaml') }}
 
       - name: Test (playwright e2e)
         run: pnpm test:e2e
