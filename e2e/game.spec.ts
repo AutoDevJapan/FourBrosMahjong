@@ -423,6 +423,155 @@ test.describe("対局画面(/game)", () => {
     expect(overflow).toBeLessThanOrEqual(1);
   });
 
+  /**
+   * 主要スマホ幅(#387)。卓 container 幅が 360px 以上になるため必ず段階①に入る帯で、
+   * 河が溜まった状態でも横スクロールしないことを固定する。
+   *
+   * 既存の 700px / 320px 固定の検査は (a) この帯を外し (b) 河が空の初期局面で測るため、
+   * この破綻を構造的に検出できなかった。ここでは**実際に河を溜めてから**測る。
+   *
+   * 下限を 393px にしているのは、`/game` の `p-4`(左右 32px)により viewport 392px が
+   * 卓 container 幅ちょうど 360.00px、つまり**段階①の下端(境界を含むので段階①側)**に
+   * なるため。境界ぴったりの値で検査すると、ページ余白の微修正やスクロールバー幅の差で
+   * 段階②側へ倒れ、意図しない失敗になる。393px は Pixel 8 / iPhone 15 Pro の実幅でもある。
+   *
+   * **393px を外さないこと**: 破綻量は卓が狭いほど大きく、実測では 6 列固定への巻き戻しも
+   * `ScoreDisplay` の `nowrap` への巻き戻しも 460px では overflow 0 で、393px でのみ
+   * 検出できる。414 / 460px は「上限 6 列に張り付く」別条件を見るための併走。
+   */
+  for (const width of [393, 414, 460]) {
+    test(`主要スマホ幅(${width}px)で河が溜まっても横スクロールしない(#387 / スペック5 5.3.2)`, async ({
+      page,
+    }) => {
+      test.setTimeout(90_000);
+      await page.setViewportSize({ width, height: 850 });
+      await page.goto("/game?seed=0");
+      await expect(
+        page.getByRole("heading", { level: 1, name: "対局画面" }),
+      ).toBeVisible();
+
+      // この帯は段階①(クロス配置)であることを先に固定する。段階②へ落ちて
+      // 「たまたま横スクロールしない」状態を合格と誤認しないため。
+      await expect(page.getByRole("button", { name: "全体盤面" })).toBeHidden();
+
+      const maxOverflow = () =>
+        page.evaluate(
+          () =>
+            document.documentElement.scrollWidth -
+            document.documentElement.clientWidth,
+        );
+      expect(await maxOverflow()).toBeLessThanOrEqual(1);
+
+      const visibleRivers = () =>
+        page.getByRole("list", { name: "捨て牌" }).filter({ visible: true });
+      const riverCounts = () =>
+        visibleRivers().evaluateAll((lists) =>
+          lists.map((list) => list.childElementCount),
+        );
+
+      // 全員の河が 6 枚(= 旧実装の固定列数)以上になるまで進める。6 枚を超えた時点で
+      // 旧実装の河は最小幅が牌6枚ぶんに固定され、左右スロット幅を超えてはみ出していた。
+      // 進行の各ステップで測り、途中の局面(局終了の和了内訳表示を含む)も見る。
+      // 局が先に終わっても次局へ送って探索を続ける(1局目が早く終わる seed でも空振りしない)。
+      let worst = 0;
+      await advanceUntil(
+        page,
+        async () => {
+          worst = Math.max(worst, await maxOverflow());
+          const counts = await riverCounts();
+          return counts.length >= 3 && counts.every((n) => n >= 6);
+        },
+        { maxSteps: 400, onGameEnd: "stop" },
+      );
+
+      // 到達失敗(半荘が先に終わる等)を「河が空のまま合格」に化けさせない。
+      const counts = await riverCounts();
+      expect(counts.length).toBeGreaterThanOrEqual(3);
+      expect(counts.every((n) => n >= 6)).toBe(true);
+
+      worst = Math.max(worst, await maxOverflow());
+      expect(worst).toBeLessThanOrEqual(1);
+
+      // 列数を可変にした副作用で河が全幅へ散らばっていないこと(#258 の不変条件)。
+      // 上限 6 列は max-width で与えているため、実描画のトラック数で固定する。
+      // 自家スロットは卓幅いっぱい(3列ぶん)あるため必ず上限に張り付く。`toBe(6)` は
+      // 「上限が効かず 7 列以上になる」と「丸め誤差で 5 列に落ちる」の両方を検出する。
+      const columnCounts = await visibleRivers().evaluateAll((lists) =>
+        lists.map(
+          (list) =>
+            getComputedStyle(list).gridTemplateColumns.trim().split(/\s+/)
+              .length,
+        ),
+      );
+      expect(Math.max(...columnCounts)).toBe(6);
+
+      // 和了の局終了まで進め、点差(ScoreDisplay の delta)が描画された状態でも測る。
+      // 点差は局終了でしか出ないため、上の「河が6枚」到達時点では未描画で、
+      // ScoreDisplay の折り返し修正がこのテストで守られない状態だった。
+      // `delta === 0` は描画されない(全員テンパイ/全員ノーテンの流局)ため和了局に限定し、
+      // 到達失敗を後段アサーションの不透明なタイムアウトではなく明示エラーにする。
+      await advanceUntil(
+        page,
+        (state) => state?.phase === "roundEnd" && state.kind === "win",
+        { maxSteps: 400, onGameEnd: "stop" },
+      );
+      await expect(
+        page
+          .getByText(/^[+−]\d/)
+          .filter({ visible: true })
+          .first(),
+      ).toBeVisible();
+      expect(await maxOverflow()).toBeLessThanOrEqual(1);
+    });
+  }
+
+  test("河の牌幅と列幅が卓幅に連動して縮む(スペック5 5.3.2 段階①の流体縮小)", async ({
+    page,
+  }) => {
+    // 牌寸法は `--u`(`.board-cross` でコンテナ幅連動の clamp() に差し替わる)の倍数で
+    // 決まる。倍率トークンではなく「`--u` を掛け終えた長さ」を `:root` で定義すると、
+    // カスタムプロパティの計算値が :root の `--u` で確定してしまい、卓内の上書きが
+    // 効かなくなって河牌だけ縮まなくなる(幅は固定・高さだけ縮んで牌が歪む)。
+    // CSS からは読み取れない退行なので実描画で固定する。
+    test.setTimeout(60_000);
+    // 自家の河(段階①のクロス配置側)。空の `ul` は高さ 0 で「不可視」判定になるため、
+    // `filter({ visible: true })` ではなく席の region から一意に取る。
+    const ownRiver = page
+      .getByRole("region", { name: /^あなた/ })
+      .getByRole("list", { name: "捨て牌" })
+      .first();
+
+    const measure = async (width: number) => {
+      await page.setViewportSize({ width, height: 900 });
+      await expect(ownRiver).toBeVisible();
+      return ownRiver.evaluate((list) => {
+        const style = getComputedStyle(list);
+        const tile = list.querySelector(".game-tile--river");
+        return {
+          track: Number.parseFloat(style.gridTemplateColumns.split(/\s+/)[0]),
+          tile: tile ? tile.getBoundingClientRect().width : Number.NaN,
+        };
+      });
+    };
+
+    await page.goto("/game?seed=0");
+    // 河が 1 枚以上ある状態にする(空だと計測対象の牌が無い)。
+    await advanceUntil(
+      page,
+      async () => (await ownRiver.getByRole("listitem").count()) > 0,
+      { maxSteps: 60, onRoundEnd: "stop", onGameEnd: "stop" },
+    );
+
+    const wide = await measure(1280);
+    const narrow = await measure(393);
+
+    // トラック幅と牌幅は同じ倍率から導くため常に一致する。
+    expect(narrow.track).toBeCloseTo(narrow.tile, 1);
+    expect(wide.track).toBeCloseTo(wide.tile, 1);
+    // 卓が狭まれば牌もトラックも縮む(固定長になっていない)。
+    expect(narrow.tile).toBeLessThan(wide.tile);
+  });
+
   test("極狭幅(320px)でフォーカス表示へ切替わり、全体盤面モーダルで盤面を確認できる(スペック5 5.3.2 段階② / 5.2.2)", async ({
     page,
   }) => {
