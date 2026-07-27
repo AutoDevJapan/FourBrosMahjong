@@ -7,7 +7,9 @@
  * - **フォーカストラップ**: 開いた瞬間にダイアログへフォーカスを移し、`Tab`/`Shift+Tab` は
  *   ダイアログ内の可視フォーカス可能要素を循環させて外へ出さない。
  * - **`Escape` で閉じる**、背景(オーバーレイ)クリックでも閉じる。
- * - 閉じたら**開く前のフォーカス位置へ戻す**(呼び出し元のトリガーへ復帰)。
+ * - 閉じたら**開く前のフォーカス位置へ戻す**(呼び出し元のトリガーへ復帰)。WebKit は
+ *   ポインターで `button` を起動してもフォーカスを移さず `activeElement` がトリガーに
+ *   ならないため(#369)、トリガーが判っている呼び出し元は `returnFocusRef` で明示する。
  *
  * 卓UIの「全体盤面」等をスタッキング順の影響を受けずに最前面へ出すため `document.body` へ
  * ポータルする。表示制御(開閉状態)は呼び出し元が持ち、本コンポーネントは開いている間だけ描画する。
@@ -44,11 +46,6 @@ function focusableElements(root: HTMLElement): HTMLElement[] {
   return Array.from(nodes).filter((el) => !el.hidden);
 }
 
-function restoreFocus(element: HTMLElement) {
-  if (!element.isConnected) return;
-  element.focus({ preventScroll: true });
-}
-
 export default function Modal({
   title,
   onClose,
@@ -60,12 +57,21 @@ export default function Modal({
   const requestClose = useEffectEvent(onClose);
   const titleId = useId();
 
+  // 閉じる瞬間にフォーカス復帰先を解決する。WebKit はポインターで button を起動しても
+  // フォーカスを移さないため(#369)、呼び出し元が明示した returnFocusRef を優先し、
+  // 無い場合のみ「開く直前の activeElement」へ戻す。ref を非リアクティブに読むことで
+  // 隔離エフェクトを ref の identity から切り離しつつ、表示中にトリガーが再マウント
+  // されても最新のノードへ戻せる。
+  const restoreFocus = useEffectEvent((fallback: HTMLElement | null) => {
+    const target = returnFocusRef?.current ?? fallback;
+    if (target?.isConnected) target.focus();
+  });
+
   // Portal の外にあるページ全体を modal の間だけ隔離する。呼び出し元の一部分だけを
   // inert にすると、GameBoard の兄弟（ページヘッダー等）が操作可能なまま残るため、
   // body 直下に portal された overlay 以外を対象にする。既存属性は閉じる際に正確に戻す。
   useEffect(() => {
-    const previouslyFocused =
-      returnFocusRef?.current ?? (document.activeElement as HTMLElement | null);
+    const previouslyFocused = document.activeElement as HTMLElement | null;
     const overlay = overlayRef.current;
     const dialog = dialogRef.current;
     if (!overlay || !dialog) return;
@@ -115,9 +121,9 @@ export default function Modal({
         if (ariaHidden === null) element.removeAttribute("aria-hidden");
         else element.setAttribute("aria-hidden", ariaHidden);
       }
-      if (previouslyFocused) restoreFocus(previouslyFocused);
+      restoreFocus(previouslyFocused);
     };
-  }, [returnFocusRef]);
+  }, []);
 
   const handleKeyDown = useCallback(
     (event: React.KeyboardEvent<HTMLDivElement>) => {

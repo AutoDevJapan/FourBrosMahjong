@@ -6,6 +6,9 @@ async function openFullBoard(page: Page) {
 
   const opener = page.getByRole("button", { name: "全体盤面" });
   await expect(opener).toBeVisible();
+  // 事前にキーボード相当のフォーカスを与えたうえでポインター起動する。WebKit は
+  // click でトリガーをフォーカスしないだけでなく既存のフォーカスも落とすため、
+  // 「開く直前は合っていた activeElement」に依存できないことまで含めて固定する。
   await opener.focus();
   await opener.click();
   await expect(page.getByRole("dialog", { name: "全体盤面" })).toBeVisible();
