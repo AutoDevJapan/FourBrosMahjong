@@ -1,5 +1,20 @@
-import { expect, test } from "@playwright/test";
+import { expect, type Page, test } from "@playwright/test";
 import { advanceUntil, armRiichi } from "./helpers/gameDriver";
+
+/**
+ * wheel を送った後、スクロール適用が終わるまで 2 フレーム進める。
+ *
+ * 「スクロールしないこと」を検証する箇所では `expect.poll` が未適用のまま即成立して
+ * しまうため、フレームを進めてから確認して検証を空振りさせない。
+ */
+async function settleScroll(page: Page): Promise<void> {
+  await page.evaluate(
+    () =>
+      new Promise<void>((resolve) => {
+        requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
+      }),
+  );
+}
 
 /**
  * 対局画面(`/game`)の E2E 検証(#30 / #67)。
@@ -589,5 +604,72 @@ test.describe("対局画面(/game)", () => {
     // 次局が AI の自動進行だけで即時決着する場合もあるため、playing 固定ではなく
     // 四槓散了の局から実際に遷移したことを検証する。
     await expect(page.getByText("四槓散了", { exact: true })).toHaveCount(0);
+  });
+
+  test("全体盤面モーダル表示中は背面へスクロールが連鎖せず、閉じると位置が戻る(#371)", async ({
+    page,
+  }) => {
+    // 幅 320px で「自分手番フォーカス表示」(段階②)に入り「全体盤面」ボタンが出る。
+    // 高さも 320px に絞ると、ダイアログ内部がはみ出して縦スクロールする状況になる。
+    await page.setViewportSize({ width: 320, height: 320 });
+    await page.goto("/game?seed=1");
+    const openButton = page.getByRole("button", { name: "全体盤面" });
+    await expect(openButton).toBeVisible();
+
+    // 背面ページをスクロールした状態から開き、閉じた後の位置復元まで見る。
+    // トリガーは画面内に残す(実利用と同じ条件)。画面外だと閉時のフォーカス復帰が
+    // フォーカスリングを見せるためにスクロールし直すため、前提が変わってしまう。
+    const scrollTarget = await openButton.evaluate((el) => {
+      const rect = el.getBoundingClientRect();
+      // ボタンをビューポート上端から 40px の位置に置く。
+      return Math.max(0, Math.round(rect.top + window.scrollY - 40));
+    });
+    await page.evaluate((y) => window.scrollTo(0, y), scrollTarget);
+    const scrollBefore = await page.evaluate(() => window.scrollY);
+    expect(scrollBefore).toBeGreaterThan(0);
+
+    // locator 経由の click/press は要素を可視位置までスクロールし直すため、
+    // フォーカス済みのトリガーへキーボードで直接送る。
+    await openButton.focus();
+    await page.keyboard.press("Enter");
+    const dialog = page.getByRole("dialog", { name: "全体盤面" });
+    await expect(dialog).toBeVisible();
+    // ロックの実現方法には踏み込まず、「表示中に背面が動かない」という受け入れ基準
+    // だけを見るため、ロック適用後の値を基準にする。
+    await settleScroll(page);
+    const scrollWhileOpen = await page.evaluate(() => window.scrollY);
+
+    // (1) オーバーレイ余白(左端)上の wheel は背面へ伝播しない。
+    await page.mouse.move(4, 160);
+    await page.mouse.wheel(0, 500);
+    await settleScroll(page);
+    expect(await page.evaluate(() => window.scrollY)).toBe(scrollWhileOpen);
+
+    // (2) ダイアログ内は末尾までスクロールできる。
+    const box = await dialog.boundingBox();
+    if (box === null) throw new Error("ダイアログの矩形が取得できない");
+    await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+    await page.mouse.wheel(0, 2000);
+    const scrollMax = await dialog.evaluate(
+      (el) => el.scrollHeight - el.clientHeight,
+    );
+    expect(scrollMax).toBeGreaterThan(0);
+    await expect
+      .poll(() => dialog.evaluate((el) => el.scrollTop))
+      .toBe(scrollMax);
+
+    // (3) 末尾に到達した状態でさらに送っても背面へ連鎖しない。
+    await page.mouse.wheel(0, 500);
+    await settleScroll(page);
+    expect(await page.evaluate(() => window.scrollY)).toBe(scrollWhileOpen);
+    expect(await dialog.evaluate((el) => el.scrollTop)).toBe(scrollMax);
+
+    // (4) 閉じると開く前の document スクロール位置へ戻り、トリガーへフォーカスが返る。
+    await page.keyboard.press("Escape");
+    await expect(dialog).toHaveCount(0);
+    await expect(openButton).toBeFocused();
+    await expect
+      .poll(() => page.evaluate(() => window.scrollY))
+      .toBe(scrollBefore);
   });
 });

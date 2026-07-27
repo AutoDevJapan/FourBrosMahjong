@@ -1,5 +1,5 @@
 /**
- * モーダル表示中に document（背面ページ）のスクロールを止めるロック（issue #371）。
+ * モーダル表示中に document(背面ページ)のスクロールを止めるロック(issue #371)。
  *
  * `inert` はフォーカス・ポインタ操作を抑止するが、document 自体のスクロールコンテナは
  * 止めない。そのためオーバーレイ上の wheel/touch や、ダイアログ端でのオーバースクロールが
@@ -68,8 +68,10 @@ function applyLock(): () => void {
  * 返された解除関数は冪等。同じロックに対して複数回呼んでも 1 回ぶんとして扱う。
  */
 export function lockDocumentScroll(): () => void {
+  // applyLock が失敗した場合にカウントだけ進んで復元不能になるのを避けるため、
+  // 適用が成功してからカウントを進める。
+  if (lockCount === 0) restore = applyLock();
   lockCount += 1;
-  if (lockCount === 1) restore = applyLock();
 
   let released = false;
   return () => {

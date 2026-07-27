@@ -129,6 +129,9 @@ export default function Modal({
         if (ariaHidden === null) element.removeAttribute("aria-hidden");
         else element.setAttribute("aria-hidden", ariaHidden);
       }
+      // フォーカス復帰に preventScroll は指定しない。トリガーが可視なら既定の focus() は
+      // 何もスクロールしないため #371 の復元位置は保たれ、画面外のときはフォーカスリングの
+      // 視認性(spec 5.2.2)を優先してスクロールインさせる。
       restoreFocus(previouslyFocused);
     };
   }, []);
