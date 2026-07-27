@@ -15,16 +15,33 @@
  *   positives today because the rule requires a module to have **both** zero
  *   incoming *and* zero outgoing edges (`from: { orphan: true }`, `to: {}`);
  *   route files always import at least React/Next APIs, so they never match.
- * - A layered "UI → domain, one direction only" rule (the other example in
- *   issue #12) is deferred until `src/` actually has more than one layer
- *   (currently only `src/app/` exists per CLAUDE.md's "Project state") —
- *   encoding a path-based rule against folders that don't exist yet would be
- *   untestable dead config. Add it under a `no-ui-importing-domain-internals`
- *   (or similar) rule name once `documents/spec/domain-model.md` is
- *   implemented as code.
+ * - `no-domain-to-presentation` / `no-components-to-app` are `severity: "error"`
+ *   for the same exit-code reason as `no-circular`. They encode the layered
+ *   "presentation → domain, one direction only" discipline that issue #12
+ *   listed but deferred while `src/` had no domain layer; `src/domain/` is now
+ *   implemented, so the deferral condition is satisfied (issue #382).
  *
  * @type {import('dependency-cruiser').IConfiguration}
  */
+
+/**
+ * Test files are excluded from the *source* side of the layer rules: the
+ * boundary being enforced is the shipped dependency graph, and domain tests
+ * legitimately reuse presentation-side fixtures/view-model mappers to drive
+ * integration-style scenarios (e.g. `components/game/finishedGameFixture.ts`,
+ * which documents itself as test-only). Production modules get no such waiver.
+ */
+const TEST_FILE = "\\.(test|spec)\\.tsx?$";
+
+/** Domain layer: pure game logic, must not know about any UI. */
+const DOMAIN = "^src/domain/";
+/** Presentation layer: React components plus the Next.js App Router tree. */
+const PRESENTATION = "^src/(app|components)/";
+/** App Router tree only (routing/page shell), the outermost presentation ring. */
+const APP_ROUTER = "^src/app/";
+/** Shared React components, inner to the App Router tree. */
+const COMPONENTS = "^src/components/";
+
 module.exports = {
   forbidden: [
     {
@@ -43,6 +60,26 @@ module.exports = {
         pathNot: ["\\.d\\.ts$", "(^|/)\\.[^/]+\\.(js|cjs|mjs|ts)$"],
       },
       to: {},
+    },
+    {
+      name: "no-domain-to-presentation",
+      comment:
+        "Domain (src/domain) must not depend on presentation (src/app, src/components). " +
+        "Dependencies point inward only; a domain module that imports UI cannot be " +
+        "reasoned about, tested, or reused without the React/Next runtime.",
+      severity: "error",
+      from: { path: DOMAIN, pathNot: TEST_FILE },
+      to: { path: PRESENTATION },
+    },
+    {
+      name: "no-components-to-app",
+      comment:
+        "Shared components (src/components) must not depend on the App Router tree " +
+        "(src/app). Route files compose components, never the reverse; the inverse " +
+        "edge couples reusable UI to a specific route's shell.",
+      severity: "error",
+      from: { path: COMPONENTS, pathNot: TEST_FILE },
+      to: { path: APP_ROUTER },
     },
   ],
   options: {
