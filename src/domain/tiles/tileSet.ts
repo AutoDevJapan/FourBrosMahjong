@@ -14,8 +14,11 @@ import { HONOR } from "./tile";
  */
 export const TOTAL_TILE_COUNT = 108;
 
-/** 各牌の重複枚数(すべての種別で4枚)。 */
-const COPIES_PER_TILE = 4;
+/**
+ * 各牌の重複枚数(すべての種別で4枚)。
+ * 受け入れの残り枚数(`4 − 手牌内枚数`)など、山の構成に依存する計算はこの定数を参照する。
+ */
+export const COPIES_PER_TILE = 4;
 
 /** 赤5となるスート(オール赤5: 5筒・5索)。萬子に5は存在しない。 */
 const RED_FIVE_SUITS: ReadonlySet<Suit> = new Set(["pin", "sou"]);

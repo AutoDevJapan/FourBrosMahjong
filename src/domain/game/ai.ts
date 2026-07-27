@@ -32,6 +32,7 @@ import {
   tileKey,
 } from "@/domain/hand/tile-identity";
 import { HONOR, type Suit, type Tile } from "@/domain/tiles/tile";
+import { COPIES_PER_TILE } from "@/domain/tiles/tileSet";
 import { BoundedMemo } from "./boundedMemo";
 
 const RED_FIVE_SUITS: ReadonlySet<Suit> = new Set(["pin", "sou"]);
@@ -117,8 +118,8 @@ function countsSignature(counts: Counts): string {
 // 向聴数(シャンテン数): 標準形 / 七対子 / 国士 の最小
 // ---------------------------------------------------------------------------
 
-/** 標準形が使える面子の上限(副露と門前の合計)。 */
-const MAX_MELD_COUNT = 4;
+/** 標準形が使える面子の上限(副露と門前の合計)。副露数の正規化上限でもある。 */
+export const MAX_MELD_COUNT = 4;
 
 /** 七対子の成立に必要な対子数 = 種類数。 */
 const CHIITOITSU_PAIRS = 7;
@@ -417,11 +418,11 @@ export function shanten(tiles: readonly Tile[], meldCount = 0): number {
 // 受け入れ(有効牌)
 // ---------------------------------------------------------------------------
 
-/** ある種別の残り枚数(4枚 − 手牌内枚数)。他家の河は見ない。 */
+/** ある種別の残り枚数(総枚数 − 手牌内枚数)。他家の河は見ない。 */
 function remainingCopies(tiles: readonly Tile[], key: string): number {
   let inHand = 0;
   for (const tile of tiles) if (tileKey(tile) === key) inHand += 1;
-  return 4 - inHand;
+  return COPIES_PER_TILE - inHand;
 }
 
 /**

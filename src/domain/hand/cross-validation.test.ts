@@ -18,6 +18,7 @@
 import { describe, expect, it } from "vitest";
 import { shanten, ukeire } from "../game/ai";
 import type { Tile } from "../tiles/tile";
+import { COPIES_PER_TILE } from "../tiles/tileSet";
 import {
   isCompleteOracle34,
   standardDecompositions34,
@@ -35,6 +36,7 @@ import {
 } from "./__oracle__/generator";
 import { shantenOracle34 } from "./__oracle__/shanten-oracle";
 import { decomposeStandard, isCompleteHand } from "./decompose";
+import { tileNotation } from "./notation";
 import { waitingTiles } from "./tenpai";
 
 /**
@@ -49,9 +51,6 @@ const STRUCTURED_HANDS = 20_000;
  * 向聴照合より1手のコストが約27倍になる。網羅性と実行時間の釣り合いをここで調整する。
  */
 const UKEIRE_HANDS = 2_000;
-
-/** 1牌種あたりの総枚数(残り枚数の計算に使う)。 */
-const TILE_COPIES = 4;
 
 /** 本作 `StandardForm` を decompose.ts の mentsuSignature と同形式へ正規化。 */
 function formSignature(
@@ -119,12 +118,12 @@ describe("クロス検証: 受け入れ候補枝刈り(#368)", () => {
       let kinds = 0;
       let copies = 0;
       for (const index of SANMA_INDICES_34) {
-        if (counts[index] >= TILE_COPIES) continue;
+        if (counts[index] >= COPIES_PER_TILE) continue;
         const drawn = [...counts];
         drawn[index] += 1;
         if (shantenOracle34(drawn) < base) {
           kinds += 1;
-          copies += TILE_COPIES - counts[index];
+          copies += COPIES_PER_TILE - counts[index];
         }
       }
       expect(ukeire(tiles), describeHand(tiles)).toEqual({ kinds, copies });
@@ -228,18 +227,11 @@ function setEqualNum(a: Set<number>, b: Set<number>): boolean {
   return true;
 }
 
-const SUIT_LETTER: Record<string, string> = {
-  man: "m",
-  pin: "p",
-  sou: "s",
-  honor: "z",
-};
-
 /** 手牌をデバッグ用の簡易記法へ(例: "123p 55z")。 */
 function describeHand(tiles: readonly Tile[]): string {
   const order = ["man", "pin", "sou", "honor"];
   const sorted = [...tiles].sort(
     (a, b) => order.indexOf(a.suit) - order.indexOf(b.suit) || a.rank - b.rank,
   );
-  return sorted.map((t) => `${t.rank}${SUIT_LETTER[t.suit]}`).join("");
+  return sorted.map(tileNotation).join("");
 }

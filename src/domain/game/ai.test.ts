@@ -1,40 +1,17 @@
 import { describe, expect, it } from "vitest";
 import { makeRng, randomHand } from "@/domain/hand/__oracle__/generator";
-import { parseTile, parseTiles } from "@/domain/hand/notation";
+import { parseTile, parseTiles, tileNotation } from "@/domain/hand/notation";
 import { SANMA_TILE_KINDS, sameKind } from "@/domain/hand/tile-identity";
-import type { Suit, Tile } from "@/domain/tiles/tile";
-import { chooseDiscard, shanten, ukeire } from "./ai";
-
-/** 1牌種あたりの総枚数(残り枚数の計算に使う)。 */
-const TILE_COPIES = 4;
-
-/** 副露数の上限(サンマの標準形が使える面子数)。 */
-const MAX_MELD_COUNT = 4;
+import type { Tile } from "@/domain/tiles/tile";
+import { COPIES_PER_TILE } from "@/domain/tiles/tileSet";
+import { chooseDiscard, MAX_MELD_COUNT, shanten, ukeire } from "./ai";
 
 /** 副露手の受け入れ照合で、副露数ごとに検証する手牌数。 */
 const MELD_UKEIRE_HANDS = 500;
 
-const LETTER_OF_SUIT: Record<Suit, string> = {
-  man: "m",
-  pin: "p",
-  sou: "s",
-  honor: "z",
-};
-
-/**
- * 牌種 → `Tile`。赤5の不変条件を再実装せず {@link parseTile} に委ねる
- * (赤5判定の定義箇所を増やさない)。
- */
-function kindToTile(kind: { suit: Suit; rank: number }): Tile {
-  return parseTile(`${kind.rank}${LETTER_OF_SUIT[kind.suit]}`);
-}
-
 /** 失敗時に手牌を特定するための簡易記法(例: "123p55z")。 */
 function handNotation(tiles: readonly Tile[]): string {
-  return [...tiles]
-    .map((tile) => `${tile.rank}${LETTER_OF_SUIT[tile.suit]}`)
-    .sort()
-    .join("");
+  return [...tiles].map(tileNotation).sort().join("");
 }
 
 /** ツモ切り(引いた牌をそのまま切る)相当の打牌後13枚。 */
@@ -283,10 +260,11 @@ describe("ai: 受け入れ(ukeire)", () => {
         let copies = 0;
         for (const kind of SANMA_TILE_KINDS) {
           const used = tiles.filter((tile) => sameKind(tile, kind)).length;
-          if (used >= TILE_COPIES) continue;
-          if (shanten([...tiles, kindToTile(kind)], meldCount) < base) {
+          if (used >= COPIES_PER_TILE) continue;
+          const drawn = parseTile(tileNotation(kind));
+          if (shanten([...tiles, drawn], meldCount) < base) {
             kinds += 1;
-            copies += TILE_COPIES - used;
+            copies += COPIES_PER_TILE - used;
           }
         }
         expect(ukeire(tiles, meldCount), handNotation(tiles)).toEqual({
