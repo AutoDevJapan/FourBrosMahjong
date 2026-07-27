@@ -68,6 +68,7 @@ jobs:
       # Service Worker は production build でのみ登録されるため、通常の dev E2E job では
       # pwa-offline.spec.ts の2件が意図的に skip される。既にこのjobで作った `.next` を
       # そのまま `next start` し、依存install/buildを重複させず実ブラウザのPWA結線を固定する。
+
       # キャッシュキーにはインストールするブラウザ集合を必ず含める。両 job が同じ path を
       # 同じキーで共有すると、先に保存した側(chromium のみ)の内容がキーを占有し、
       # webkit を要求する e2e job は毎回ダウンロードし直しになる(exact hit のため保存も走らない)。
