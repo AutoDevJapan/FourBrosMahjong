@@ -48,20 +48,27 @@ export const DEAD_WALL_SIZE = 14;
 export const DORA_INDICATOR_RESERVE = MAX_OMOTE_DORA_COUNT * 2;
 
 /**
- * 1局で成立し得るカンの上限(= 嶺上牌を引けるカンの回数)。
+ * 1局でカン由来の嶺上牌を引ける回数の上限。
  *
- * 四槓散了は**4組目**のカンで発火するが、それは複数家にまたがる場合に限られる。
- * 1人四槓(四槓子の機会を残す)は継続するため4回まで嶺上を引ける。5組目のカンは
- * 必ず複数家にまたがるため必ず散了し、しかも散了判定は嶺上補充より先に行われるので
- * 嶺上を引かない。→ `engine.ts` の `FOUR_KAN_ABORT_THRESHOLD`(結合テストで照合)。
+ * 到達経路は2つあり、大きい方が上限になる。
+ *
+ * 1. **1人四槓**(四槓子の機会を残すため散了しない): その家の手牌に作れる面子は
+ *    最大4つ(14枚 = 4面子 + 雀頭)なので **4回**。四槓散了のしきい値には依存しない。
+ * 2. **複数家にまたがる**: 四槓散了のしきい値の1つ手前まで(散了判定は嶺上補充より
+ *    先に行われるため、散了させたカンは嶺上を引かない)= `FOUR_KAN_ABORT_THRESHOLD − 1` 回。
+ *
+ * 現状は 1 が 4、2 が 3 なので上限は 4。**駆動しているのは手牌の面子上限であり、
+ * `FOUR_KAN_ABORT_THRESHOLD` が同じ 4 なのは偶然の一致**である。両者の関係
+ * (`FOUR_KAN_ABORT_THRESHOLD − 1 <= MAX_KAN_PER_HAND`)は
+ * `src/domain/integration/dead-wall-budget.integration.test.ts` で照合している。
  */
-const MAX_KAN_PER_HAND = 4;
+export const MAX_KAN_PER_HAND = 4;
 
 /**
  * 1局で発生し得る嶺上補充の上限。
  *
  * - **北抜き(ガリ)**: 北は {@link COPIES_PER_TILE} 枚しかないため最大4回。
- * - **カン**: {@link MAX_KAN_PER_HAND} 回。
+ * - **カン**: {@link MAX_KAN_PER_HAND} 回(= 手牌に作れる面子の上限)。
  *
  * これは嶺上供給領域(`DEAD_WALL_SIZE − DORA_INDICATOR_RESERVE` = 8枚)を決める
  * **設計上の安全側の見積り**である。実際にはライブ壁から補填が入るため、
@@ -104,12 +111,20 @@ export class Wall {
   /**
    * @param tiles        108枚の牌(通常はシャッフル済み)。順序はそのまま採用する。
    * @param deadWallSize 王牌に確保する枚数(既定 {@link DEAD_WALL_SIZE})。
-   * @throws RangeError 枚数が108でない、または `deadWallSize` が範囲外のとき。
+   *   **0(王牌なし)** か **{@link DORA_INDICATOR_RESERVE} 以上**の整数でなければならない。
+   * @throws RangeError 牌が108枚でないとき、`deadWallSize` が整数でないとき、
+   *   `[0, 108]` の範囲外のとき、または 1〜{@link DORA_INDICATOR_RESERVE}−1 のとき。
    */
   constructor(tiles: readonly Tile[], deadWallSize: number = DEAD_WALL_SIZE) {
     if (tiles.length !== TOTAL_TILE_COUNT) {
       throw new RangeError(
         `Wall requires exactly ${TOTAL_TILE_COUNT} tiles, received ${tiles.length}.`,
+      );
+    }
+    // NaN / 小数は以下の比較をすり抜けて壊れた `Wall` を作るため、最初に弾く。
+    if (!Number.isInteger(deadWallSize)) {
+      throw new RangeError(
+        `deadWallSize must be an integer, received ${deadWallSize}.`,
       );
     }
     if (deadWallSize < 0 || deadWallSize > tiles.length) {

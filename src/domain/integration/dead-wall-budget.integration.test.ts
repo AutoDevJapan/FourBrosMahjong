@@ -25,6 +25,7 @@ import {
   buildWall,
   DEAD_WALL_SIZE,
   DORA_INDICATOR_RESERVE,
+  MAX_KAN_PER_HAND,
   MAX_REPLACEMENTS_PER_HAND,
 } from "../wall/wall";
 
@@ -34,18 +35,29 @@ const MAX_DORA_ROLL = [6, 6] as const;
 const SEEDS = [1, 42, 386, 2024] as const;
 
 describe("結合: 王牌の予算(ドラ表示牌の確保 × 嶺上供給の上限 / #386)", () => {
-  it("嶺上供給領域は 1局の嶺上補充上限(北抜き4 + カン4)を賄える", () => {
+  it("嶺上補充の上限は 北抜き(北の枚数)+ カン(手牌の面子上限)で決まる", () => {
     // 北は牌構成上4枚しか無い(1枚につき1回の嶺上補充)。
-    // カンは1人四槓(四槓子継続)の経路でのみ4回引ける。5組目は必ず複数家に
-    // またがるため四槓散了になり、散了判定は嶺上補充より先なので引かない。
-    expect(MAX_REPLACEMENTS_PER_HAND).toBe(
-      COPIES_PER_TILE + FOUR_KAN_ABORT_THRESHOLD,
-    );
+    expect(MAX_REPLACEMENTS_PER_HAND).toBe(COPIES_PER_TILE + MAX_KAN_PER_HAND);
+    // カン上限を駆動しているのは「1人の手牌に作れる面子は最大4つ」であって、
+    // 四槓散了のしきい値ではない(1人四槓は散了しないため、しきい値を動かしても
+    // この経路の4回は変わらない)。
+    expect(MAX_KAN_PER_HAND).toBe(4);
+  });
+
+  it("四槓散了のしきい値を上げてもカン由来の補充が上限を超えない", () => {
+    // 複数家にまたがる経路では、散了判定が嶺上補充より先に走るため
+    // しきい値の1つ手前まで嶺上を引ける。ここが手牌の面子上限を超えると
+    // 嶺上供給領域の見積りが破れる。
+    expect(FOUR_KAN_ABORT_THRESHOLD - 1).toBeLessThanOrEqual(MAX_KAN_PER_HAND);
+  });
+
+  it("嶺上供給領域は 1局の嶺上補充上限を賄える", () => {
     // 守るべき不変条件は不等式。現状は等号成立(= 余裕ゼロ)。
     expect(DEAD_WALL_SIZE - DORA_INDICATOR_RESERVE).toBeGreaterThanOrEqual(
       MAX_REPLACEMENTS_PER_HAND,
     );
-    // 現在値も固定する(王牌枚数を減らす変更が上の不等式を破る前に気づけるように)。
+    // 現在値も個別に固定する。上の不等式は3つの定数を同時に動かすと成立したまま
+    // 意味が変わるため、増減どちらの変更でもここが red になって設計判断を促す。
     expect(DEAD_WALL_SIZE).toBe(14);
     expect(DORA_INDICATOR_RESERVE).toBe(6); // 表ドラ上限3枚 + 裏ドラ同数
     expect(MAX_REPLACEMENTS_PER_HAND).toBe(8);

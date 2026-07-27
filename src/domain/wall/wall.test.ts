@@ -49,6 +49,13 @@ describe("Wall(スペック4 4.1)", () => {
       expect(() => new Wall(buildTileSet(), 109)).toThrow(RangeError);
     });
 
+    it("deadWallSize が整数でなければ RangeError", () => {
+      // NaN / 小数は大小比較をすり抜けるため、壊れた Wall が例外なく構築されていた。
+      for (const size of [Number.NaN, 6.5, Number.POSITIVE_INFINITY]) {
+        expect(() => new Wall(buildTileSet(), size)).toThrow(RangeError);
+      }
+    });
+
     it("deadWallSize がドラ表示牌の確保枚数未満なら RangeError(0 は許す / #386)", () => {
       // 1〜5 は表示牌領域を確保すると嶺上が1枚も供給できず、遅延した
       // WallEmptyError になる。構築時に落とす。
@@ -184,11 +191,23 @@ describe("Wall(スペック4 4.1)", () => {
       expect(() => wall.drawReplacement()).toThrow(WallEmptyError);
     });
 
-    it("補充後も deadWall の末尾が次に供給される嶺上牌である", () => {
-      // `engine.riichi-ankan.test.ts` がこの対応に依存している(嶺上牌を覗いて
-      // フィクスチャを組む)。領域分割で要素順が変わったため明示的に固定する。
+    // `engine.riichi-ankan.test.ts` がこの対応に依存している(嶺上牌を覗いて
+    // フィクスチャを組む)。領域分割で `deadWall` の要素順が変わったため明示的に固定する。
+    it.each([0, 3, MAX_REPLACEMENTS_PER_HAND - 1])(
+      "補充%i回後も deadWall の末尾が次に供給される嶺上牌である",
+      (warmup) => {
+        const wall = new Wall(buildTileSet(), DEAD_WALL_SIZE);
+        for (let i = 0; i < warmup; i++) wall.drawReplacement();
+        const dead = wall.deadWall;
+        expect(wall.drawReplacement()).toBe(dead[dead.length - 1]);
+      },
+    );
+
+    it("海底(補填なしで供給領域が減った状態)でも末尾が次の嶺上牌である", () => {
       const wall = new Wall(buildTileSet(), DEAD_WALL_SIZE);
-      for (let i = 0; i < 3; i++) wall.drawReplacement();
+      for (let i = 0; i < TOTAL_TILE_COUNT - DEAD_WALL_SIZE; i++) wall.draw();
+      for (let i = 0; i < 5; i++) wall.drawReplacement();
+      expect(wall.remainingReplacements).toBe(MAX_REPLACEMENTS_PER_HAND - 5);
       const dead = wall.deadWall;
       expect(wall.drawReplacement()).toBe(dead[dead.length - 1]);
     });
