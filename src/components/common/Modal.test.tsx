@@ -176,6 +176,20 @@ describe("Modal (spec 5.2.2 dialog / focus trap / Escape)", () => {
     expect(backgroundRoot).not.toHaveAttribute("aria-hidden");
   });
 
+  it("表示中は背面 document のスクロールをロックし、閉じると解除する(#371)", () => {
+    // ロックの中身(退避・復元・参照カウント)は documentScrollLock.test.ts が担保する。
+    // ここでは Modal が開閉に合わせてロックを取得・解放する結線だけを見る。
+    const { unmount } = render(
+      <Modal title="全体盤面" onClose={vi.fn()}>
+        <p>本文</p>
+      </Modal>,
+    );
+    expect(document.body.style.position).toBe("fixed");
+
+    unmount();
+    expect(document.body.style.position).toBe("");
+  });
+
   it("外部へ移されたフォーカスを回収し、Escape と復帰を維持する", async () => {
     const user = userEvent.setup();
     function Harness() {
