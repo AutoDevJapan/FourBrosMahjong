@@ -46,15 +46,17 @@ export interface ModalProps {
 }
 
 /**
- * フォーカス復帰先の候補として扱えるか(スペック5 5.2.2)。
+ * フォーカス復帰先として意味のある要素か(スペック5 5.2.2)。
  *
- * `<body>` / `<html>` は「復帰できていない状態」そのもののため候補から外す。ブラウザでは
+ * `<body>` / `<html>` は「復帰できていない状態」そのもののため対象外とする。ブラウザでは
  * `body.focus()` が成功してしまい、候補に残すとそこで連鎖が止まってフォーカスを失う。
+ * 到達できるかどうか(DOM 接続・可視性・`disabled` 等)はここでは判定しない。実際に
+ * `focus()` してみるまで確定しないため、`restoreFocus` が `activeElement` で実測する。
  */
-export function isRestoreFocusCandidate(
+export function isRestoreFocusTarget(
   element: HTMLElement | null | undefined,
 ): element is HTMLElement {
-  if (!element?.isConnected) return false;
+  if (!element) return false;
   const { body, documentElement } = element.ownerDocument;
   return element !== body && element !== documentElement;
 }
@@ -104,14 +106,15 @@ export default function Modal({
           previouslyFocused,
           fallbackFocusRef?.current,
         ]),
-      ].filter(isRestoreFocusCandidate);
+      ].filter(isRestoreFocusTarget);
       for (const candidate of candidates) {
         candidate.focus();
         if (candidate.ownerDocument.activeElement === candidate) return;
       }
-      // 候補があったのに一つも到達できなかった場合だけ知らせる。呼び出し元が
-      // fallbackFocusRef を渡していない/その要素も到達不能という契約違反であり、
-      // 黙って <body> へ落とさない(スペック5 5.2.2)。
+      // 戻すべき先があったのに一つも到達できなかった場合だけ知らせる(候補が皆無なのは
+      // 「開く前からフォーカスがどこにも無かった」ケースで、失われたものが無い)。
+      // 呼び出し元が fallbackFocusRef を渡していない/その要素も到達不能という契約違反
+      // であり、黙って <body> へ落とさない(スペック5 5.2.2)。
       if (candidates.length > 0 && process.env.NODE_ENV !== "production") {
         console.warn(
           "Modal: フォーカス復帰先の候補がすべて到達不能でした。到達可能な fallbackFocusRef を渡してください(スペック5 5.2.2 / #377)。",

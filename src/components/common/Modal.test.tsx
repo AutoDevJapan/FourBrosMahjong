@@ -2,7 +2,7 @@ import { fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { useRef, useState } from "react";
 import { describe, expect, it, vi } from "vitest";
-import Modal, { isRestoreFocusCandidate } from "./Modal";
+import Modal, { isRestoreFocusTarget } from "./Modal";
 
 describe("Modal (spec 5.2.2 dialog / focus trap / Escape)", () => {
   it("公開: role=dialog + aria-modal + 見出しでラベル付けされる", () => {
@@ -265,16 +265,18 @@ describe("Modal (spec 5.2.2 dialog / focus trap / Escape)", () => {
     warn.mockRestore();
   });
 
-  it("復帰先候補の判定: <body>/<html>・未接続ノードは候補にしない", () => {
-    const button = document.createElement("button");
-    expect(isRestoreFocusCandidate(button)).toBe(false); // 未接続
-    document.body.append(button);
-    expect(isRestoreFocusCandidate(button)).toBe(true);
-    button.remove();
+  it("復帰先の判定: <body>/<html> は復帰先にしない", () => {
+    // jsdom では body.focus() が no-op のため、この除外は activeElement 判定だけでは
+    // 再現できない(ブラウザでは成功して連鎖が止まる)。純関数として直接固定する。
+    expect(isRestoreFocusTarget(document.body)).toBe(false);
+    expect(isRestoreFocusTarget(document.documentElement)).toBe(false);
+    expect(isRestoreFocusTarget(null)).toBe(false);
+    expect(isRestoreFocusTarget(undefined)).toBe(false);
 
-    expect(isRestoreFocusCandidate(document.body)).toBe(false);
-    expect(isRestoreFocusCandidate(document.documentElement)).toBe(false);
-    expect(isRestoreFocusCandidate(null)).toBe(false);
+    // 未接続ノードは「戻すべき先はあったが到達できなかった」ケースとして扱うため、
+    // ここでは弾かない(到達可否は restoreFocus が activeElement で実測する)。
+    const detached = document.createElement("button");
+    expect(isRestoreFocusTarget(detached)).toBe(true);
   });
 
   it("Portal 外のページ全体を inert にし、閉じると既存属性を復元する", () => {
