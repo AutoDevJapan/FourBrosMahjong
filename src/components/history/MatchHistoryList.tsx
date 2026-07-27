@@ -210,7 +210,7 @@ export default function MatchHistoryList() {
                   <button
                     type="button"
                     onClick={() => setConfirmingClear(false)}
-                    className="rounded-full border border-foreground/25 px-4 py-2 text-sm hover:bg-foreground/5"
+                    className="rounded-full border border-control-border px-4 py-2 text-sm hover:bg-foreground/5"
                   >
                     キャンセル
                   </button>
@@ -223,7 +223,7 @@ export default function MatchHistoryList() {
                   setStatusMessage("");
                   setConfirmingClear(true);
                 }}
-                className="rounded-full border border-foreground/25 px-4 py-2 text-sm hover:bg-foreground/5"
+                className="rounded-full border border-control-border px-4 py-2 text-sm hover:bg-foreground/5"
               >
                 戦績をすべて削除
               </button>

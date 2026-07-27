@@ -94,7 +94,7 @@ export default function Home() {
               return (
                 <li
                   key={item.href}
-                  className="rounded-lg border border-foreground/15"
+                  className="rounded-lg border border-control-border"
                 >
                   {item.ready ? (
                     <Link

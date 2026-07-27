@@ -243,7 +243,7 @@ export default function Modal({
             type="button"
             onClick={onClose}
             aria-label="閉じる"
-            className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-foreground/25 text-foreground/70 hover:bg-foreground/5"
+            className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-control-border text-foreground/70 hover:bg-foreground/5"
           >
             <span aria-hidden="true">✕</span>
           </button>

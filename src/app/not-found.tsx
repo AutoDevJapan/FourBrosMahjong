@@ -29,7 +29,7 @@ export default function NotFound() {
         </Link>
         <Link
           href="/rules"
-          className="rounded-full border border-foreground/25 px-5 py-2 text-sm"
+          className="rounded-full border border-control-border px-5 py-2 text-sm"
         >
           ルールを見る
         </Link>
