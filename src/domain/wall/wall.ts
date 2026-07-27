@@ -14,10 +14,15 @@
  *   詳細は下記コンストラクタ注記を参照。
  */
 
+import { MAX_OMOTE_DORA_COUNT } from "../dora/dice";
 import type { Rng } from "../random/rng";
 import { shuffle } from "../random/shuffle";
 import type { Tile } from "../tiles/tile";
-import { buildTileSet, TOTAL_TILE_COUNT } from "../tiles/tileSet";
+import {
+  buildTileSet,
+  COPIES_PER_TILE,
+  TOTAL_TILE_COUNT,
+} from "../tiles/tileSet";
 
 /**
  * 王牌の既定枚数。標準麻雀の王牌は14枚(嶺上4 + ドラ表示領域)。
@@ -28,6 +33,29 @@ import { buildTileSet, TOTAL_TILE_COUNT } from "../tiles/tileSet";
  * (不変条件「総数108」は `deadWallSize` に依存しない)。
  */
 export const DEAD_WALL_SIZE = 14;
+
+/**
+ * ドラ表示牌のために王牌の**先頭側へ確保**する枚数(表 + 裏 = 上限枚数 × 2 = 6)。
+ *
+ * この領域の牌は嶺上牌として供給されない(#386)。`createDoraSet` は王牌先頭から
+ * 表 `count` 枚 + 裏 `count` 枚を取るため(スペック2 2.2)、`count` が上限の 3 でも
+ * 表示牌はこの領域に収まる。確保を最大枚数で固定するのは、`Wall` が構築時点で
+ * 開門サイコロの出目(= `count`)を知らないためである。
+ */
+export const DORA_INDICATOR_RESERVE = MAX_OMOTE_DORA_COUNT * 2;
+
+/**
+ * 1局で発生し得る嶺上補充の上限。
+ *
+ * - **北抜き(ガリ)**: 北は {@link COPIES_PER_TILE} 枚しかないため最大4回。
+ * - **カン**: 5組目のカンは四槓散了で途中流局になり嶺上を引かないため最大4回
+ *   (→ `engine.ts` の `FOUR_KAN_ABORT_THRESHOLD`)。
+ *
+ * 嶺上供給に使えるのは `DEAD_WALL_SIZE − DORA_INDICATOR_RESERVE` 枚(= 8)で、
+ * この上限とちょうど一致する。両者の関係は
+ * `src/domain/integration/dead-wall-budget.integration.test.ts` で固定している。
+ */
+export const MAX_REPLACEMENTS_PER_HAND = COPIES_PER_TILE + 4;
 
 /** 山が尽きている状態で `draw()`/`drawReplacement()` を呼んだ場合に投げる。 */
 export class WallEmptyError extends Error {
@@ -44,8 +72,16 @@ export class WallEmptyError extends Error {
 export class Wall {
   /** ライブ壁。先頭が次のツモ牌。 */
   private readonly _live: Tile[];
-  /** 王牌(末尾側を嶺上として消費)。 */
-  private readonly _dead: Tile[];
+  /**
+   * 王牌のうち**ドラ表示牌用に確保した先頭側**({@link DORA_INDICATOR_RESERVE} 枚)。
+   * 嶺上として供給しないため、場に晒された表示牌が手に渡ることは構造的に起きない(#386)。
+   */
+  private readonly _reserved: Tile[];
+  /**
+   * 王牌のうち**嶺上供給に使う残り**。末尾から供給し、ライブ壁からの補填は先頭へ入る。
+   * 供給と補填が同じ配列で閉じているため、表示牌が押し出されて配られることがない。
+   */
+  private readonly _rinshan: Tile[];
 
   /**
    * @param tiles        108枚の牌(通常はシャッフル済み)。順序はそのまま採用する。
@@ -65,7 +101,11 @@ export class Wall {
     }
     const boundary = tiles.length - deadWallSize;
     this._live = tiles.slice(0, boundary);
-    this._dead = tiles.slice(boundary);
+    const dead = tiles.slice(boundary);
+    // 王牌が既定より小さく指定された場合も表示牌側の確保を優先する(残りが嶺上)。
+    const reserve = Math.min(DORA_INDICATOR_RESERVE, dead.length);
+    this._reserved = dead.slice(0, reserve);
+    this._rinshan = dead.slice(reserve);
   }
 
   /** ライブ壁の現在の内容(読み取り専用ビュー)。 */
@@ -73,9 +113,19 @@ export class Wall {
     return this._live;
   }
 
-  /** 王牌の現在の内容(読み取り専用ビュー)。ドラ表示の選定は #64 の責務。 */
+  /**
+   * 王牌の現在の内容(読み取り専用ビュー)。ドラ表示の選定は `DoraSet` の責務。
+   *
+   * 先頭 {@link DORA_INDICATOR_RESERVE} 枚がドラ表示牌用の確保領域、残りが嶺上供給
+   * 領域。末尾が次に供給される嶺上牌である。
+   */
   get deadWall(): readonly Tile[] {
-    return this._dead;
+    return [...this._reserved, ...this._rinshan];
+  }
+
+  /** 残りの嶺上供給可能枚数(確保領域は含めない)。 */
+  get remainingReplacements(): number {
+    return this._rinshan.length;
   }
 
   /** ライブ壁に残るツモ可能枚数(0 で海底 / スペック2 2.1)。 */
@@ -102,21 +152,25 @@ export class Wall {
    *
    * 標準ルールに従い、王牌はライブ壁の末尾から1枚補填して枚数を保つ
    * (結果としてライブ壁が1枚減り、海底が早まる)。ライブ壁が空なら補填せず
-   * 王牌が減っていく。北は4枚+カンで嶺上要求が標準の4回を超え得るため、
-   * 上限は設けず「王牌が尽きるまで」補充可能とする。
+   * 嶺上供給領域が減っていく。
    *
-   * @throws WallEmptyError 王牌が空で嶺上牌が無いとき。
+   * **ドラ表示牌用の確保領域からは決して供給しない**(#386)。供給(末尾から `pop`)も
+   * 補填(先頭へ `unshift`)も嶺上供給領域の内側で閉じているため、場に晒された表示牌が
+   * 押し出されてプレイヤーの手に渡ることは構造的に起きない。ライブ壁が有る限り
+   * 補充回数に上限は無く、無くなっても {@link MAX_REPLACEMENTS_PER_HAND} 回までは供給できる。
+   *
+   * @throws WallEmptyError 嶺上供給領域が尽きたとき(残るのは表示牌のみで、配れない)。
    */
   drawReplacement(): Tile {
-    const tile = this._dead.pop();
+    const tile = this._rinshan.pop();
     if (tile === undefined) {
       throw new WallEmptyError(
-        "Dead wall is empty; no replacement tile available.",
+        "Dead wall has no replacement tile left; the remaining tiles are reserved dora indicators and are never dealt.",
       );
     }
     const replenishment = this._live.pop();
     if (replenishment !== undefined) {
-      this._dead.unshift(replenishment);
+      this._rinshan.unshift(replenishment);
     }
     return tile;
   }

@@ -2,7 +2,14 @@ import { describe, expect, it } from "vitest";
 import { createSeededRng } from "../random/rng";
 import type { Tile } from "../tiles/tile";
 import { buildTileSet, TOTAL_TILE_COUNT } from "../tiles/tileSet";
-import { buildWall, DEAD_WALL_SIZE, Wall, WallEmptyError } from "./wall";
+import {
+  buildWall,
+  DEAD_WALL_SIZE,
+  DORA_INDICATOR_RESERVE,
+  MAX_REPLACEMENTS_PER_HAND,
+  Wall,
+  WallEmptyError,
+} from "./wall";
 
 /** 山に属する牌の総数(ライブ壁 + 王牌)。不変条件の検証に使う。 */
 function tilesInWall(wall: Wall): number {
@@ -98,16 +105,57 @@ describe("Wall(スペック4 4.1)", () => {
       expect(wall.deadWall).toHaveLength(14);
     });
 
-    it("ライブ壁が空なら王牌が減っていき、尽きると WallEmptyError", () => {
+    it("ライブ壁が空なら嶺上供給領域が減り、尽きると WallEmptyError(表示牌は配らない)", () => {
       const wall = new Wall(buildTileSet(), 14);
       for (let i = 0; i < 94; i++) {
         wall.draw(); // ライブ壁を空にする
       }
-      // 以降の嶺上補充はライブ壁補填が無く、王牌が減る。
-      for (let i = 0; i < 14; i++) {
+      // 以降の嶺上補充はライブ壁補填が無く、嶺上供給領域(14 − 6 = 8枚)が減る。
+      const available = DEAD_WALL_SIZE - DORA_INDICATOR_RESERVE;
+      expect(available).toBe(MAX_REPLACEMENTS_PER_HAND);
+      for (let i = 0; i < available; i++) {
         expect(() => wall.drawReplacement()).not.toThrow();
       }
-      expect(wall.deadWall).toHaveLength(0);
+      // 残る6枚はドラ表示牌用の確保領域。配らずに WallEmptyError にする(#386)。
+      expect(wall.remainingReplacements).toBe(0);
+      expect(wall.deadWall).toHaveLength(DORA_INDICATOR_RESERVE);
+      expect(() => wall.drawReplacement()).toThrow(WallEmptyError);
+    });
+
+    it("末尾から供給する順序は確保領域の導入前後で変わらない", () => {
+      const tiles = buildTileSet();
+      const wall = new Wall(tiles, 14);
+      // 王牌 = tiles[94..107]。嶺上は末尾から順に供給される。
+      for (let i = 0; i < MAX_REPLACEMENTS_PER_HAND; i++) {
+        expect(key(wall.drawReplacement())).toBe(key(tiles[107 - i]));
+      }
+    });
+  });
+
+  describe("ドラ表示牌の確保領域(#386)", () => {
+    it("王牌の先頭 DORA_INDICATOR_RESERVE 枚は嶺上として供給されない", () => {
+      const tiles = buildTileSet();
+      const wall = new Wall(tiles, DEAD_WALL_SIZE);
+      // `createDoraSet` が表/裏の表示牌を取る領域(= 王牌先頭 6枚)。
+      const reserved = wall.deadWall.slice(0, DORA_INDICATOR_RESERVE);
+
+      // ライブ壁が有る限り補充回数に上限は無い。上限の倍以上引いても漏れないこと。
+      const drawn: Tile[] = [];
+      for (let i = 0; i < MAX_REPLACEMENTS_PER_HAND * 3; i++) {
+        drawn.push(wall.drawReplacement());
+      }
+
+      // 実体(参照)一致で照合する。同種の別牌との取り違えを避けるため。
+      for (const tile of drawn) {
+        expect(reserved).not.toContain(tile);
+      }
+      // 確保領域は消費されず、位置も内容も変わらない。
+      expect(wall.deadWall.slice(0, DORA_INDICATOR_RESERVE)).toEqual(reserved);
+    });
+
+    it("王牌が確保枚数より小さくても嶺上供給を表示牌領域へ食い込ませない", () => {
+      const wall = new Wall(buildTileSet(), DORA_INDICATOR_RESERVE);
+      expect(wall.remainingReplacements).toBe(0);
       expect(() => wall.drawReplacement()).toThrow(WallEmptyError);
     });
   });
