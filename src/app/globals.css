@@ -116,8 +116,6 @@
    * 「その要素で有効な --u」(卓内なら .board-cross の clamp())で評価される。
    */
   --tile-river-w: calc(var(--u) * 1.65);
-  /* 河グリッドの牌間隔(従来の gap-0.5 相当)。列数の上限計算にも使う。 */
-  --river-gap: 0.125rem;
 }
 
 /* 手動でダークを選択した場合は OS 設定より優先し、全トークンをダーク値にする。 */
@@ -261,6 +259,8 @@ body {
  * spec 5.3.2「いずれの段階でも横スクロールでのレイアウト成立は採用しない」。
  */
 .river-grid {
+  /* 牌間隔(従来の gap-0.5 相当)。列数の上限計算にも使うため名前を付ける。 */
+  --river-gap: 0.125rem;
   display: grid;
   grid-auto-flow: row;
   grid-auto-rows: min-content;

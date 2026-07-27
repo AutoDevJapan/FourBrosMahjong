@@ -453,34 +453,48 @@ test.describe("対局画面(/game)", () => {
         );
       expect(await maxOverflow()).toBeLessThanOrEqual(1);
 
+      const visibleRivers = () =>
+        page.getByRole("list", { name: "捨て牌" }).filter({ visible: true });
+      const riverCounts = () =>
+        visibleRivers().evaluateAll((lists) =>
+          lists.map((list) => list.childElementCount),
+        );
+
       // 全員の河が 6 枚(= 旧実装の固定列数)以上になるまで進める。6 枚を超えた時点で
       // 旧実装の河は最小幅が牌6枚ぶんに固定され、左右スロット幅を超えてはみ出していた。
-      // 進行の各ステップで測り、途中の局面も含めて横スクロールが出ないことを見る。
+      // 進行の各ステップで測り、途中の局面(局終了の和了内訳表示を含む)も見る。
+      // 局が先に終わっても次局へ送って探索を続ける(1局目が早く終わる seed でも空振りしない)。
       let worst = 0;
       await advanceUntil(
         page,
         async () => {
           worst = Math.max(worst, await maxOverflow());
-          const counts = await page
-            .getByRole("list", { name: "捨て牌" })
-            .filter({ visible: true })
-            .evaluateAll((lists) =>
-              lists.map((list) => list.childElementCount),
-            );
+          const counts = await riverCounts();
           return counts.length >= 3 && counts.every((n) => n >= 6);
         },
-        { maxSteps: 400, onRoundEnd: "stop" },
+        { maxSteps: 400, onGameEnd: "stop" },
       );
 
-      const counts = await page
-        .getByRole("list", { name: "捨て牌" })
-        .filter({ visible: true })
-        .evaluateAll((lists) => lists.map((list) => list.childElementCount));
-      // 到達失敗(局が先に終わる等)を「河が空のまま合格」に化けさせない。
+      // 到達失敗(半荘が先に終わる等)を「河が空のまま合格」に化けさせない。
+      const counts = await riverCounts();
+      expect(counts.length).toBeGreaterThanOrEqual(3);
       expect(counts.every((n) => n >= 6)).toBe(true);
 
       worst = Math.max(worst, await maxOverflow());
       expect(worst).toBeLessThanOrEqual(1);
+
+      // 列数を可変にした副作用で河が全幅へ散らばっていないこと(#258 の不変条件)。
+      // 上限 6 列は max-width で与えているため、実描画のトラック数で固定する。
+      // 自家スロットは卓幅いっぱい(3列ぶん)あるため必ず上限に張り付く。`toBe(6)` は
+      // 「上限が効かず 7 列以上になる」と「丸め誤差で 5 列に落ちる」の両方を検出する。
+      const columnCounts = await visibleRivers().evaluateAll((lists) =>
+        lists.map(
+          (list) =>
+            getComputedStyle(list).gridTemplateColumns.trim().split(/\s+/)
+              .length,
+        ),
+      );
+      expect(Math.max(...columnCounts)).toBe(6);
     });
   }
 
