@@ -109,6 +109,15 @@
    * 卓全体を横スクロールなしに流体縮小する。既定値は従来の固定サイズ相当(テーマ非依存)。
    */
   --u: 0.9rem;
+
+  /*
+   * 河牌1枚の幅。牌寸法(.game-tile--river)と河グリッドの列幅(.river-grid)の唯一の定義元。
+   * カスタムプロパティは使用箇所で遅延解決されるため、ここに書いても var(--u) は
+   * 「その要素で有効な --u」(卓内なら .board-cross の clamp())で評価される。
+   */
+  --tile-river-w: calc(var(--u) * 1.65);
+  /* 河グリッドの牌間隔(従来の gap-0.5 相当)。列数の上限計算にも使う。 */
+  --river-gap: 0.125rem;
 }
 
 /* 手動でダークを選択した場合は OS 設定より優先し、全トークンをダーク値にする。 */
@@ -234,9 +243,30 @@ body {
 
 .game-tile--river {
   height: calc(var(--u) * 2.2);
-  width: calc(var(--u) * 1.65);
+  width: var(--tile-river-w);
   /* 牌面テキストは色非依存の識別情報(§5.2.1)。狭幅でも判読性を保つよう字面を確保しつつ幅内に収める。 */
   font-size: calc(var(--u) * 0.7);
+}
+
+/*
+ * 河(捨て牌)のグリッド(#258 / #387)。
+ *
+ * 列は河牌1枚ぶんの固定幅(--tile-river-w)とし、`auto-fill` で「スロット幅に入るぶんだけ」
+ * 列を作る。上限は 6 列で、これは max-width が 6 列ぶんに満たない幅を要求することで効かせる
+ * (固定幅トラックの auto-fill は、コンテナ幅が広くても max-width を超える列を作らない)。
+ *
+ * 6 列固定だと最小コンテンツ幅が牌6枚ぶんに固定され、段階①のクロス配置で左右スロットの
+ * 幅(卓幅の 1/3.5)を超えた瞬間にページ全体が横スクロールしていた(#387)。列数を可変に
+ * することで、狭いスロットでは自動的に段数が増えて幅に収まる。
+ * spec 5.3.2「いずれの段階でも横スクロールでのレイアウト成立は採用しない」。
+ */
+.river-grid {
+  display: grid;
+  grid-auto-flow: row;
+  grid-auto-rows: min-content;
+  grid-template-columns: repeat(auto-fill, var(--tile-river-w));
+  gap: var(--river-gap);
+  max-width: calc(6 * var(--tile-river-w) + 5 * var(--river-gap));
 }
 
 .game-tile--dora {

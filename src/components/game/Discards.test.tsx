@@ -22,12 +22,15 @@ describe("Discards", () => {
     expect(list.querySelectorAll("li")).toHaveLength(6);
   });
 
-  it("河の列幅は内容基準で、スロット幅に引き伸ばされない(#258 回帰)", () => {
-    // grid-cols-6(1fr)だと全幅スロットで牌が散らばるため、
-    // w-fit + max-content 列で牌幅+gap のみの密な段組みを保証する。
+  it("河のグリッドは .river-grid に一本化する(#258 / #387 回帰)", () => {
+    // grid-cols-6(1fr)だと全幅スロットで牌が散らばり(#258)、6 列固定だと狭いスロットで
+    // ページが横スクロールする(#387)。両方の不変条件は `.river-grid`(globals.css)が
+    // 牌1枚幅の固定トラック × auto-fill × 6 列上限として持つ。
+    // トラック定義そのものの回帰は globals.river-grid.test.ts が固定する。
     render(<Discards tiles={[tile(1)]} />);
     const list = screen.getByRole("list", { name: "捨て牌" });
-    expect(list).toHaveClass("w-fit", "grid-cols-[repeat(6,max-content)]");
-    expect(list).not.toHaveClass("grid-cols-6");
+    expect(list).toHaveClass("river-grid");
+    expect(list.className).not.toMatch(/\bgrid-cols-/);
+    expect(list.className).not.toMatch(/\bw-fit\b/);
   });
 });

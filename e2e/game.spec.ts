@@ -423,6 +423,67 @@ test.describe("対局画面(/game)", () => {
     expect(overflow).toBeLessThanOrEqual(1);
   });
 
+  /**
+   * 主要スマホ幅(#387)。卓 container 幅が 360px 以上になるため必ず段階①に入る帯で、
+   * 河が溜まった状態でも横スクロールしないことを固定する。
+   *
+   * 既存の 700px / 320px 固定の検査は (a) この帯を外し (b) 河が空の初期局面で測るため、
+   * この破綻を構造的に検出できなかった。ここでは**実際に河を溜めてから**測る。
+   */
+  for (const width of [392, 414, 460]) {
+    test(`主要スマホ幅(${width}px)で河が溜まっても横スクロールしない(#387 / スペック5 5.3.2)`, async ({
+      page,
+    }) => {
+      test.setTimeout(90_000);
+      await page.setViewportSize({ width, height: 850 });
+      await page.goto("/game?seed=0");
+      await expect(
+        page.getByRole("heading", { level: 1, name: "対局画面" }),
+      ).toBeVisible();
+
+      // この帯は段階①(クロス配置)であることを先に固定する。段階②へ落ちて
+      // 「たまたま横スクロールしない」状態を合格と誤認しないため。
+      await expect(page.getByRole("button", { name: "全体盤面" })).toBeHidden();
+
+      const maxOverflow = () =>
+        page.evaluate(
+          () =>
+            document.documentElement.scrollWidth -
+            document.documentElement.clientWidth,
+        );
+      expect(await maxOverflow()).toBeLessThanOrEqual(1);
+
+      // 全員の河が 6 枚(= 旧実装の固定列数)以上になるまで進める。6 枚を超えた時点で
+      // 旧実装の河は最小幅が牌6枚ぶんに固定され、左右スロット幅を超えてはみ出していた。
+      // 進行の各ステップで測り、途中の局面も含めて横スクロールが出ないことを見る。
+      let worst = 0;
+      await advanceUntil(
+        page,
+        async () => {
+          worst = Math.max(worst, await maxOverflow());
+          const counts = await page
+            .getByRole("list", { name: "捨て牌" })
+            .filter({ visible: true })
+            .evaluateAll((lists) =>
+              lists.map((list) => list.childElementCount),
+            );
+          return counts.length >= 3 && counts.every((n) => n >= 6);
+        },
+        { maxSteps: 400, onRoundEnd: "stop" },
+      );
+
+      const counts = await page
+        .getByRole("list", { name: "捨て牌" })
+        .filter({ visible: true })
+        .evaluateAll((lists) => lists.map((list) => list.childElementCount));
+      // 到達失敗(局が先に終わる等)を「河が空のまま合格」に化けさせない。
+      expect(counts.every((n) => n >= 6)).toBe(true);
+
+      worst = Math.max(worst, await maxOverflow());
+      expect(worst).toBeLessThanOrEqual(1);
+    });
+  }
+
   test("極狭幅(320px)でフォーカス表示へ切替わり、全体盤面モーダルで盤面を確認できる(スペック5 5.3.2 段階② / 5.2.2)", async ({
     page,
   }) => {

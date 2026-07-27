@@ -19,7 +19,9 @@ export default function ScoreDisplay({ points, delta }: ScoreDisplayProps) {
   const deltaColor = isPositive ? "text-positive" : "text-danger";
 
   return (
-    <p className="flex items-baseline gap-2">
+    // 点差は狭いスロット(段階①のクロス配置の左右列)では持ち点と同じ行に収まらないため
+    // 折り返しを許す。折り返せないとスロット幅を超えてページが横スクロールする(#387)。
+    <p className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
       <span className="font-mono text-lg font-bold tabular-nums">
         {points.toLocaleString("ja-JP")}
         <span className="ml-0.5 text-xs font-normal">点</span>

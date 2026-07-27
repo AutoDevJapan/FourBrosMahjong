@@ -21,9 +21,10 @@ export default function Discards({ tiles, limit }: DiscardsProps) {
     <ul
       role="list"
       aria-label="捨て牌"
-      // grid-cols-6(1fr 列)はスロット幅いっぱいにセルが引き伸ばされ河が散らばるため、
-      // 列幅を牌の内容基準(max-content)にして 6 枚/段を gap-0.5 のみで密に並べる(#258)。
-      className="grid w-fit grid-flow-row auto-rows-min grid-cols-[repeat(6,max-content)] gap-0.5"
+      // 列幅を牌1枚ぶんの固定幅にして密に並べる(#258)。列数はスロット幅に入るぶんだけ
+      // 作られ上限 6 列(#387: 6 列固定だと狭いスロットでページが横スクロールしていた)。
+      // グリッド定義は `.river-grid`(globals.css)— 牌寸法と列幅の定義元を一本化するため。
+      className="river-grid"
     >
       {shown.map((tile, i) => (
         // 河は同一牌が複数並ぶため index を key に含める(捨て順の同一性は保持不要)。
