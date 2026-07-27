@@ -16,14 +16,19 @@
  */
 
 import { describe, expect, it } from "vitest";
-import { shanten } from "../game/ai";
+import { shanten, ukeire } from "../game/ai";
 import type { Tile } from "../tiles/tile";
+import { COPIES_PER_TILE } from "../tiles/tileSet";
 import {
   isCompleteOracle34,
   standardDecompositions34,
   waitingIndicesOracle34,
 } from "./__oracle__/agari-oracle";
-import { tilesToCount34, tileTo34Index } from "./__oracle__/counts34";
+import {
+  SANMA_INDICES_34,
+  tilesToCount34,
+  tileTo34Index,
+} from "./__oracle__/counts34";
 import {
   makeRng,
   randomHand,
@@ -31,6 +36,7 @@ import {
 } from "./__oracle__/generator";
 import { shantenOracle34 } from "./__oracle__/shanten-oracle";
 import { decomposeStandard, isCompleteHand } from "./decompose";
+import { tileNotation } from "./notation";
 import { waitingTiles } from "./tenpai";
 
 /**
@@ -39,6 +45,12 @@ import { waitingTiles } from "./tenpai";
  */
 const RANDOM_HANDS = 20_000;
 const STRUCTURED_HANDS = 20_000;
+
+/**
+ * 受け入れ照合の手牌数(#368)。1手あたり全27牌種ぶんオラクルを再評価するため、
+ * 向聴照合より1手のコストが約27倍になる。網羅性と実行時間の釣り合いをここで調整する。
+ */
+const UKEIRE_HANDS = 2_000;
 
 /** 本作 `StandardForm` を decompose.ts の mentsuSignature と同形式へ正規化。 */
 function formSignature(
@@ -93,6 +105,29 @@ describe("クロス検証: 向聴数(ai.shanten ⇔ オラクル)", () => {
       `[cross] structured shanten hands=${STRUCTURED_HANDS} mismatches=${mismatches}`,
     );
     expect(mismatches).toBe(0);
+  });
+});
+
+describe("クロス検証: 受け入れ候補枝刈り(#368)", () => {
+  it("門前13枚で全27牌種を走査する独立向聴オラクルと一致する", () => {
+    const rng = makeRng(0x3680_0001);
+    for (let i = 0; i < UKEIRE_HANDS; i += 1) {
+      const tiles = rng() < 0.5 ? randomHand(rng, 13) : structured13(rng);
+      const counts = tilesToCount34(tiles);
+      const base = shantenOracle34(counts);
+      let kinds = 0;
+      let copies = 0;
+      for (const index of SANMA_INDICES_34) {
+        if (counts[index] >= COPIES_PER_TILE) continue;
+        const drawn = [...counts];
+        drawn[index] += 1;
+        if (shantenOracle34(drawn) < base) {
+          kinds += 1;
+          copies += COPIES_PER_TILE - counts[index];
+        }
+      }
+      expect(ukeire(tiles), describeHand(tiles)).toEqual({ kinds, copies });
+    }
   });
 });
 
@@ -192,18 +227,11 @@ function setEqualNum(a: Set<number>, b: Set<number>): boolean {
   return true;
 }
 
-const SUIT_LETTER: Record<string, string> = {
-  man: "m",
-  pin: "p",
-  sou: "s",
-  honor: "z",
-};
-
 /** 手牌をデバッグ用の簡易記法へ(例: "123p 55z")。 */
 function describeHand(tiles: readonly Tile[]): string {
   const order = ["man", "pin", "sou", "honor"];
   const sorted = [...tiles].sort(
     (a, b) => order.indexOf(a.suit) - order.indexOf(b.suit) || a.rank - b.rank,
   );
-  return sorted.map((t) => `${t.rank}${SUIT_LETTER[t.suit]}`).join("");
+  return sorted.map(tileNotation).join("");
 }

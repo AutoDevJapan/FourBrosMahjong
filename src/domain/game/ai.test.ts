@@ -1,8 +1,18 @@
 import { describe, expect, it } from "vitest";
-import { parseTiles } from "@/domain/hand/notation";
-import { sameKind } from "@/domain/hand/tile-identity";
+import { makeRng, randomHand } from "@/domain/hand/__oracle__/generator";
+import { parseTile, parseTiles, tileNotation } from "@/domain/hand/notation";
+import { SANMA_TILE_KINDS, sameKind } from "@/domain/hand/tile-identity";
 import type { Tile } from "@/domain/tiles/tile";
-import { chooseDiscard, shanten, ukeire } from "./ai";
+import { COPIES_PER_TILE } from "@/domain/tiles/tileSet";
+import { chooseDiscard, MAX_MELD_COUNT, shanten, ukeire } from "./ai";
+
+/** 副露手の受け入れ照合で、副露数ごとに検証する手牌数。 */
+const MELD_UKEIRE_HANDS = 500;
+
+/** 失敗時に手牌を特定するための簡易記法(例: "123p55z")。 */
+function handNotation(tiles: readonly Tile[]): string {
+  return [...tiles].map(tileNotation).sort().join("");
+}
 
 /** ツモ切り(引いた牌をそのまま切る)相当の打牌後13枚。 */
 function afterTsumogiri(tiles14: readonly Tile[], drawn: Tile): Tile[] {
@@ -222,6 +232,47 @@ describe("ai: 受け入れ(ukeire)", () => {
     const r = ukeire(parseTiles("123p 456p 789p 234s 9m"));
     expect(r.kinds).toBe(1);
     expect(r.copies).toBe(3);
+  });
+
+  it("国士テンパイでは未所持の么九牌も受け入れに含める(#368)", () => {
+    // 中(7z)だけ未所持。字牌は同種以外の標準形候補にならないが、国士では4枚全て有効。
+    const r = ukeire(parseTiles("11m 9m 19p 19s 123456z"));
+    expect(r).toEqual({ kinds: 1, copies: 4 });
+  });
+
+  it("七対子1向聴では7種類目になり得る全未所持牌を含める(#368)", () => {
+    // 6対子相当・6種類(1mは刻子)。未所持21種類のどれを引いても種類数が7となりテンパイ。
+    const r = ukeire(parseTiles("111m 22p 44p 66p 88s 11z"));
+    expect(r).toEqual({ kinds: 21, copies: 84 });
+  });
+
+  // 候補枝刈りが「全27牌種を走査した場合」と厳密同値であることの性質テスト(#368)。
+  // 参照は同モジュールの `shanten` なので独立オラクル照合ではなく自己整合の検証であり、
+  // 独立オラクルとの照合は `hand/cross-validation.test.ts` が門前手で担当する。
+  // ここでは独立オラクルが `meldCount` を受け取れない副露手を受け持つ。
+  it("副露数1〜4でも全27牌種走査と一致し、特殊形候補を混入しない(#368)", () => {
+    const rng = makeRng(0x3680_0002);
+    for (let meldCount = 1; meldCount <= MAX_MELD_COUNT; meldCount += 1) {
+      for (let i = 0; i < MELD_UKEIRE_HANDS; i += 1) {
+        const tiles = randomHand(rng, 13 - 3 * meldCount);
+        const base = shanten(tiles, meldCount);
+        let kinds = 0;
+        let copies = 0;
+        for (const kind of SANMA_TILE_KINDS) {
+          const used = tiles.filter((tile) => sameKind(tile, kind)).length;
+          if (used >= COPIES_PER_TILE) continue;
+          const drawn = parseTile(tileNotation(kind));
+          if (shanten([...tiles, drawn], meldCount) < base) {
+            kinds += 1;
+            copies += COPIES_PER_TILE - used;
+          }
+        }
+        expect(ukeire(tiles, meldCount), handNotation(tiles)).toEqual({
+          kinds,
+          copies,
+        });
+      }
+    }
   });
 });
 

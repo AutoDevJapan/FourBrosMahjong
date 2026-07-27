@@ -47,3 +47,20 @@ export function parseTile(notation: string): Tile {
     throw new Error(`Expected exactly one tile: ${notation}`);
   return tiles[0];
 }
+
+const LETTER_OF_SUIT: Record<Suit, string> = {
+  man: "m",
+  pin: "p",
+  sou: "s",
+  honor: "z",
+};
+
+/**
+ * 牌種(suit+rank)を簡易記法の1枚へ書き戻す(例: `{ suit: "pin", rank: 5 }` → `"5p"`)。
+ * {@link parseTile} の逆写像。牌種から `Tile` を組み立てたい場合は
+ * `parseTile(tileNotation(kind))` とすることで、赤5の不変条件を再実装せずに済む。
+ * 失敗時のテストメッセージで手牌を人が読める形にするのにも使う。
+ */
+export function tileNotation(kind: Pick<Tile, "suit" | "rank">): string {
+  return `${kind.rank}${LETTER_OF_SUIT[kind.suit]}`;
+}

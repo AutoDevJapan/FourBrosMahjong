@@ -32,6 +32,7 @@ import {
   tileKey,
 } from "@/domain/hand/tile-identity";
 import { HONOR, type Suit, type Tile } from "@/domain/tiles/tile";
+import { COPIES_PER_TILE } from "@/domain/tiles/tileSet";
 import { BoundedMemo } from "./boundedMemo";
 
 const RED_FIVE_SUITS: ReadonlySet<Suit> = new Set(["pin", "sou"]);
@@ -117,6 +118,22 @@ function countsSignature(counts: Counts): string {
 // 向聴数(シャンテン数): 標準形 / 七対子 / 国士 の最小
 // ---------------------------------------------------------------------------
 
+/** 標準形が使える面子の上限(副露と門前の合計)。副露数の正規化上限でもある。 */
+export const MAX_MELD_COUNT = 4;
+
+/** 七対子の成立に必要な対子数 = 種類数。 */
+const CHIITOITSU_PAIRS = 7;
+
+/**
+ * 副露数を 0..{@link MAX_MELD_COUNT} の整数へ正規化する。
+ * 呼び出し側の異常値(負数・小数・上限超過)で向聴/受け入れが静かに壊れないようにする。
+ * {@link shanten} と {@link ukeire} は同じ境界解釈を共有する必要があるため、
+ * 両者はこの1か所を経由する(片方だけ変えると受け入れ候補と最終判定がずれる)。
+ */
+function normalizeMeldCount(meldCount: number): number {
+  return Math.max(0, Math.min(MAX_MELD_COUNT, Math.trunc(meldCount)));
+}
+
 /**
  * 向聴計算のメモ。古い局面を1件ずつ退避し、半荘を跨ぐheapを固定容量に保つ。
  * 25,000件は60半荘probeで上限維持と30秒以内の完走を両立した値(#362)。
@@ -133,11 +150,11 @@ function leafShanten(melds: number, taatsu: number, pairs: number): number {
   const headOptions = pairs >= 1 ? [true, false] : [false];
   // 標準形は4面子までしか使えない。牌数と副露数が不整合な呼び出し(public な `shanten` に
   // 過大な `meldCount` を渡した場合など)で5面子以上が合成されても、向聴が -1(和了)を
-  // 下回る不正値にならないよう 4 で頭打ちにする。
-  const effectiveMelds = Math.min(4, melds);
+  // 下回る不正値にならないよう頭打ちにする。
+  const effectiveMelds = Math.min(MAX_MELD_COUNT, melds);
   for (const hasHead of headOptions) {
     const poolForMelds = taatsu + pairs - (hasHead ? 1 : 0);
-    const useful = Math.min(poolForMelds, 4 - effectiveMelds);
+    const useful = Math.min(poolForMelds, MAX_MELD_COUNT - effectiveMelds);
     const s = 8 - 2 * effectiveMelds - useful - (hasHead ? 1 : 0);
     if (s < best) best = s;
   }
@@ -305,8 +322,14 @@ function standardShanten(counts: Counts, meldCount: number): number {
   return best;
 }
 
-/** 七対子の向聴数(門前前提)。`6 − 対子数 + max(0, 7 − 種類数)`。 */
-function chiitoitsuShanten(counts: Counts): number {
+/**
+ * 七対子の評価に必要な対子数・種類数。
+ * 向聴式と受け入れ候補の判定が同じ数え方を共有するため、集計はここへ一本化する。
+ */
+function chiitoitsuCounts(counts: Counts): {
+  pairs: number;
+  kinds: number;
+} {
   let pairs = 0;
   let kinds = 0;
   for (const suit of ORDER) {
@@ -315,7 +338,16 @@ function chiitoitsuShanten(counts: Counts): number {
       if (n >= 2) pairs += 1;
     }
   }
-  return 6 - pairs + Math.max(0, 7 - kinds);
+  return { pairs, kinds };
+}
+
+/**
+ * 七対子の向聴数(門前前提)。`6 − 対子数 + max(0, 7 − 種類数)`。
+ * 先頭の 6 はブロック数 − 1(標準の向聴式と同じ形)。
+ */
+function chiitoitsuShanten(counts: Counts): number {
+  const { pairs, kinds } = chiitoitsuCounts(counts);
+  return CHIITOITSU_PAIRS - 1 - pairs + Math.max(0, CHIITOITSU_PAIRS - kinds);
 }
 
 /** 国士無双の向聴数(門前前提)。`13 − 么九種類数 − (么九対子ありなら1)`。 */
@@ -362,8 +394,7 @@ function kokushiShanten(tiles: readonly Tile[]): number {
  *   共有し、参照ライブラリとはオフラインで別途アンカー済み。ここだけ補正すると両者が乖離する。
  */
 export function shanten(tiles: readonly Tile[], meldCount = 0): number {
-  // 呼び出し側の異常値(負数・小数・5以上)へ静かに壊れないよう 0..4 の整数へ正規化する。
-  const melds = Math.max(0, Math.min(4, Math.trunc(meldCount)));
+  const melds = normalizeMeldCount(meldCount);
   const counts = toCounts(tiles);
   const key = `${melds}:${countsSignature(counts)}`;
   const cached = shantenMemo.get(key);
@@ -387,28 +418,61 @@ export function shanten(tiles: readonly Tile[], meldCount = 0): number {
 // 受け入れ(有効牌)
 // ---------------------------------------------------------------------------
 
-/** ある種別の残り枚数(4枚 − 手牌内枚数)。他家の河は見ない。 */
+/** ある種別の残り枚数(総枚数 − 手牌内枚数)。他家の河は見ない。 */
 function remainingCopies(tiles: readonly Tile[], key: string): number {
   let inHand = 0;
   for (const tile of tiles) if (tileKey(tile) === key) inHand += 1;
-  return 4 - inHand;
+  return COPIES_PER_TILE - inHand;
 }
 
 /**
  * 受け入れ候補になり得る牌種のキー集合。
- * ある牌を引いて向聴が下がるのは、それが手牌のいずれかと面子/塔子/対子を作れるとき、
- * すなわち同種か(数牌なら)同スート±2以内のときに限る。孤立牌は浮くだけで向聴を進めない。
- * 遠い孤立牌を除外することで受け入れ計算の探索母数を約1/3へ削減する(結果は厳密同値)。
+ *
+ * 標準形では、引いた牌が既存牌と面子/塔子/対子を作る必要があるため、同種または
+ * 同スート±2へ厳密に絞れる。一方、七対子は7種類未満なら未所持の任意牌種、国士は
+ * 未所持の么九牌でも向聴が下がる(#368)。特殊形の現在値が全体の最小向聴と同じとき
+ * (次の1枚で全体を進め得るとき)だけ、その役種固有候補を和集合する。
+ *
+ * これにより全牌種走査と同値のまま、通常の標準形では従来の探索母数を維持する。
  */
-function ukeireCandidateKeys(tiles13: readonly Tile[]): Set<string> {
+function ukeireCandidateKeys(
+  tiles13: readonly Tile[],
+  meldCount: number,
+  baseShanten: number,
+): Set<string> {
   const keys = new Set<string>();
   for (const tile of tiles13) {
     if (tile.suit === "honor") {
       keys.add(tileKey(tile));
       continue;
     }
-    for (let r = tile.rank - 2; r <= tile.rank + 2; r++) {
-      if (r >= 1 && r <= 9) keys.add(`${tile.suit}-${r}`);
+    for (let rank = tile.rank - 2; rank <= tile.rank + 2; rank++) {
+      if (rank >= 1 && rank <= 9) keys.add(tileKey({ suit: tile.suit, rank }));
+    }
+  }
+
+  // 七対子・国士は門前専用。副露手では標準形候補だけで完全である。
+  if (meldCount > 0) return keys;
+
+  const counts = toCounts(tiles13);
+  const isMissing = (kind: { suit: Suit; rank: number }): boolean =>
+    counts[kind.suit][kind.rank - 1] === 0;
+
+  // 七対子: 種類数が7未満なら、未所持のどの牌種を引いても種類数が1増えて向聴が下がる。
+  // 7種類以上あれば `max(0, 7 − 種類数)` 項が既に 0 で、新種類は向聴を動かさない。
+  if (chiitoitsuShanten(counts) === baseShanten) {
+    const { kinds } = chiitoitsuCounts(counts);
+    if (kinds < CHIITOITSU_PAIRS) {
+      for (const kind of SANMA_TILE_KINDS) {
+        if (isMissing(kind)) keys.add(tileKey(kind));
+      }
+    }
+  }
+
+  // 国士: 未所持の么九牌は、既存牌と何の関係も無くても種類数を増やして向聴を下げる。
+  if (kokushiShanten(tiles13) === baseShanten) {
+    for (const kind of SANMA_TILE_KINDS) {
+      if (isYaochu(kind) && isMissing(kind)) keys.add(tileKey(kind));
     }
   }
   return keys;
@@ -431,10 +495,14 @@ export interface Ukeire {
  * 副露牌・河・ドラ表示牌にある同種牌は控除されない(副露手ではやや多めに出る)。
  * 受け入れは向聴同点の候補同士のタイブレークにしか使われず、順序への影響は小さいため
  * ここでは補正しない。
+ *
+ * 走査母数は {@link ukeireCandidateKeys} で絞るが、標準形の近傍候補に加えて七対子・国士の
+ * 役種固有候補を含めるため、全27牌種を走査した場合と結果は厳密に一致する(#368)。
  */
 export function ukeire(tiles13: readonly Tile[], meldCount = 0): Ukeire {
-  const base = shanten(tiles13, meldCount);
-  const candidateKeys = ukeireCandidateKeys(tiles13);
+  const melds = normalizeMeldCount(meldCount);
+  const base = shanten(tiles13, melds);
+  const candidateKeys = ukeireCandidateKeys(tiles13, melds, base);
   let kinds = 0;
   let copies = 0;
   for (const kind of SANMA_TILE_KINDS) {
@@ -443,7 +511,7 @@ export function ukeire(tiles13: readonly Tile[], meldCount = 0): Ukeire {
     const remaining = remainingCopies(tiles13, key);
     if (remaining <= 0) continue;
     const drawn = makeTile(kind.suit, kind.rank);
-    if (shanten([...tiles13, drawn], meldCount) < base) {
+    if (shanten([...tiles13, drawn], melds) < base) {
       kinds += 1;
       copies += remaining;
     }
