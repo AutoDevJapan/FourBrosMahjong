@@ -711,6 +711,15 @@ function drawKanReplacement(hand: HandState, seat: SeatKey): void {
 }
 
 /**
+ * 四槓散了となるカンの総数(複数家にまたがる場合)。
+ *
+ * これは1局で成立し得るカンの上限でもある(5組目の宣言はここで途中流局になり、
+ * 嶺上牌を引かない)。王牌の嶺上供給枚数の見積り(`wall.ts` の
+ * `MAX_REPLACEMENTS_PER_HAND`)の導出元。
+ */
+export const FOUR_KAN_ABORT_THRESHOLD = 4;
+
+/**
  * 複数家にまたがる4組目のカンを四槓散了として途中流局にする。
  * 1人だけの4槓は四槓子の和了機会を残すため継続する。
  * 呼び出し側は槍槓判定を先に完了し、槓子を状態へ反映した直後に本関数を呼ぶ。
@@ -726,7 +735,7 @@ function settleFourKanAbortiveDraw(state: EngineState): EngineState | null {
       total + hand.melds[seat].filter((meld) => meld.type === "kan").length,
     0,
   );
-  if (kanCount < 4 || owners.length < 2) return null;
+  if (kanCount < FOUR_KAN_ABORT_THRESHOLD || owners.length < 2) return null;
 
   const deltas = Object.fromEntries(ALL_IDS.map((id) => [id, 0])) as Record<
     PlayerId,

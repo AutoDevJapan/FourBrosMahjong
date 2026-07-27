@@ -41,6 +41,7 @@ classDiagram
     class Wall {
         +Tile[] liveWall
         +Tile[] deadWall
+        +int remainingReplacements
         +draw() Tile
         +drawReplacement() Tile
     }
@@ -100,7 +101,7 @@ classDiagram
 | `Hanchan` | 局列・場(東/南)・局番号・本場・供託の管理。席回転(北家抜けモデル)とオーラス判定 |
 | `Round` | 1局の進行(配牌・打牌・鳴き・北抜き・和了/流局判定) |
 | `Player` | 手牌・鳴き・抜き北・**持ち点(局をまたいで永続)** の保持 |
-| `Wall` | 108枚の山・王牌・嶺上・ドラ表示の供給 |
+| `Wall` | 108枚の山・王牌・嶺上の供給。ドラ表示牌は**領域を確保するだけ**で供給しない(選定は `DoraSet` / #386) |
 | `DoraSet` | サイコロ出目から枚数決定、表/裏ドラ表示の保持 |
 | `SoshiiLedger` | 素点+ウマ+祝儀のソシー累計と順位算出 |
 
