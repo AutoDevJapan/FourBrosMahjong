@@ -6,8 +6,7 @@
  * 役の有無は問わない(形式テンパイ)。純関数・決定的。
  */
 
-import type { Tile } from "../tiles/tile";
-import { createTile } from "../tiles/tile";
+import { createTile, type Tile } from "../tiles/tile";
 import { type MeldInput, isCompleteHand } from "./decompose";
 import { SANMA_TILE_KINDS, tileKey } from "./tile-identity";
 

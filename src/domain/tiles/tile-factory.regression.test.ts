@@ -40,6 +40,10 @@ const tileLiteral = () => /\bisRed\s*:/g;
  * 赤5判定そのものの再実装を検出する。
  * `RED_FIVE_SUITS` のような命名済みの集合と、`rank === 5` のインライン展開の両方を拾う
  * (旧 `engine.riichi-ankan.test.ts` は後者の形で重複していた)。
+ *
+ * 本ドメインで rank 5 に特別な意味があるのは赤5だけなので、`rank === 5` は赤5判定の
+ * シグナルとして扱ってよい。字牌の白も rank 5 だが、`HONOR.WHITE` という記号で書く規約
+ * (`tiles/tile.ts` / `hand/tile-identity.ts`)のためリテラル 5 とは衝突しない。
  */
 const redFiveRule = () => /RED_FIVE_SUITS|\brank\s*===\s*5\b/g;
 

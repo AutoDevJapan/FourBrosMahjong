@@ -20,8 +20,7 @@ import { isTenpai, waitingTiles } from "../hand/tenpai";
 import { SANMA_TILE_KINDS, sameKind } from "../hand/tile-identity";
 import { analyzeWin, isWinningHand, type WinContext } from "../hand/win";
 import { createSeededRng } from "../random/rng";
-import type { Tile } from "../tiles/tile";
-import { createTile } from "../tiles/tile";
+import { createTile, type Tile } from "../tiles/tile";
 import { buildWall } from "../wall/wall";
 
 /** 手牌中の牌種(赤無視)ごとの枚数。 */

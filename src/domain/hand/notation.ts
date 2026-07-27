@@ -9,8 +9,7 @@
  * ⚠️ 本番ロジックではなく、テストで手牌を簡潔に記述するための純ヘルパー。
  */
 
-import type { Suit, Tile } from "../tiles/tile";
-import { createTile } from "../tiles/tile";
+import { createTile, type Suit, type Tile } from "../tiles/tile";
 
 const SUIT_OF_LETTER: Record<string, Suit> = {
   m: "man",
