@@ -5,8 +5,7 @@
  * (シャッフルは別モジュール {@link "../random/shuffle".shuffle} の責務)。
  */
 
-import type { Suit, Tile } from "./tile";
-import { createTile, HONOR } from "./tile";
+import { createTile, HONOR, type Suit, type Tile } from "./tile";
 
 /**
  * 使用牌の総数(スペック1 1.2 / スペック4 4.4 不変条件)。

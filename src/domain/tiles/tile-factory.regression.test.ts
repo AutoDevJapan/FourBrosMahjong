@@ -28,13 +28,17 @@ const FACTORY = "tiles/tile.ts";
 
 /**
  * `Tile` のオブジェクトリテラル生成を検出する。`Tile` は `isRed` が必須なので、
- * `isRed:` を書いている箇所は牌そのものを組み立てている(牌種 `{ suit, rank }` は該当しない)。
+ * `isRed` を書いている箇所は牌そのものを組み立てている(牌種 `{ suit, rank }` は該当しない)。
+ *
+ * 後続文字を `[:,}]` にしているのは、`{ suit, rank, isRed }` という shorthand を
+ * 取りこぼさないため(`isRed:` だけを見ていると、判定を別の変数に切り出してから
+ * shorthand で詰める書き方ですり抜けられる)。
  *
  * `g` フラグ付き正規表現を定数で共有すると、`matchAll` は `lastIndex` を書き換えない
  * ものの**読み取りはする**ため、将来誰かが同じ定数へ `.test()` / `.exec()` を使うと
  * 以降の検出が静かに取りこぼす。毎回新しいインスタンスを返す関数にして事故を排除する。
  */
-const tileLiteral = () => /\bisRed\s*:/g;
+const tileLiteral = () => /\bisRed\s*[:,}]/g;
 
 /**
  * 赤5判定そのものの再実装を検出する。
@@ -44,8 +48,24 @@ const tileLiteral = () => /\bisRed\s*:/g;
  * 本ドメインで rank 5 に特別な意味があるのは赤5だけなので、`rank === 5` は赤5判定の
  * シグナルとして扱ってよい。字牌の白も rank 5 だが、`HONOR.WHITE` という記号で書く規約
  * (`tiles/tile.ts` / `hand/tile-identity.ts`)のためリテラル 5 とは衝突しない。
+ *
+ * ⚠️ この検出器は識別子名 `rank` に依存するため、`r === 5` のように別名へ束ねられると
+ * すり抜ける。上の {@link tileLiteral}(`Tile` の組み立てそのものを見る)と合わせた
+ * **多層防御の1枚**であり、単体で完全性を主張するものではない。
  */
 const redFiveRule = () => /RED_FIVE_SUITS|\brank\s*===\s*5\b/g;
+
+/**
+ * 行コメント / ブロックコメントを落とす。
+ *
+ * JSDoc で `{ suit, rank, isRed: … }` のように**書き方を説明する**のは自然な行為で、
+ * それを違反として報告すると誰も直せない偽陽性になる。逆に文字列リテラル中の `//`
+ * (URL など)を巻き込んで削りすぎる可能性はあるが、その場合に起きるのは検出漏れだけで、
+ * 正しいコードを不当に落とすことはない。
+ */
+function stripComments(source: string): string {
+  return source.replace(/\/\*[\s\S]*?\*\/|\/\/.*/g, "");
+}
 
 /** `src/domain` 配下の本番 .ts を再帰列挙(テスト・独立オラクルは除く)。 */
 function productionFiles(dir: string, base = ""): string[] {
@@ -72,7 +92,7 @@ function offenders(re: () => RegExp): string[] {
   const found: string[] = [];
   for (const rel of productionFiles(DOMAIN)) {
     if (rel === FACTORY) continue;
-    const text = readFileSync(join(DOMAIN, rel), "utf8");
+    const text = stripComments(readFileSync(join(DOMAIN, rel), "utf8"));
     for (const m of text.matchAll(re())) found.push(`${rel}: ${m[0]}`);
   }
   return found;
@@ -89,6 +109,30 @@ describe("牌ファクトリの単一起点(issue #375)", () => {
     expect(files).toContain("dora/indicator.ts");
     expect(files.some((f) => f.includes("__oracle__"))).toBe(false);
     expect(files.some((f) => /\.test\.ts$/.test(f))).toBe(false);
+  });
+
+  it("検出器そのものが違反例を捕まえる(正例)", () => {
+    // 走査対象が正しくても正規表現が壊れれば検査は静かに恒真化する。
+    // 「捕まえたい書き方」を直接当てて、検出器の生存を独立に固定する。
+    expect("return { suit, rank, isRed: false };").toMatch(tileLiteral());
+    expect("return { suit, rank, isRed };").toMatch(tileLiteral()); // shorthand
+    expect("const t = { suit, isRed, rank };").toMatch(tileLiteral()); // 末尾以外
+    expect("RED_FIVE_SUITS.has(suit)").toMatch(redFiveRule());
+    expect("rank === 5 && isRedSuit(suit)").toMatch(redFiveRule());
+
+    // 牌種(suit+rank)だけの射影は牌の組み立てではないので拾わない。
+    expect("tileKey({ suit: tile.suit, rank: tile.rank })").not.toMatch(
+      tileLiteral(),
+    );
+  });
+
+  it("コメント内の説明は違反として報告しない(偽陽性の抑制)", () => {
+    const jsdoc = "/** `{ suit, rank, isRed: … }` を直に書かないこと。 */";
+    expect(jsdoc).toMatch(tileLiteral()); // 素のままだと拾ってしまう
+    expect(stripComments(jsdoc)).not.toMatch(tileLiteral());
+    expect(stripComments("// rank === 5 は書かない")).not.toMatch(
+      redFiveRule(),
+    );
   });
 
   it("本番コードは tiles/tile.ts 以外で Tile を組み立てない", () => {

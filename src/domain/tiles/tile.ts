@@ -36,7 +36,7 @@ export interface Tile {
 }
 
 /** オール赤5の対象スート(5筒・5索)。萬子に5は存在しない(スペック1 1.2)。 */
-const RED_FIVE_SUITS: ReadonlySet<Suit> = new Set<Suit>(["pin", "sou"]);
+const RED_FIVE_SUITS: ReadonlySet<Suit> = new Set(["pin", "sou"]);
 
 /** オール赤5の対象 rank。 */
 const RED_FIVE_RANK = 5;
