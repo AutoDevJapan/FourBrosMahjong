@@ -1,8 +1,13 @@
 import { fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { useRef, useState } from "react";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import Modal, { isRestoreFocusTarget } from "./Modal";
+
+// console.warn のスパイがテスト失敗時に後続へ漏れないよう、毎回元へ戻す。
+afterEach(() => {
+  vi.restoreAllMocks();
+});
 
 describe("Modal (spec 5.2.2 dialog / focus trap / Escape)", () => {
   it("公開: role=dialog + aria-modal + 見出しでラベル付けされる", () => {
@@ -221,7 +226,6 @@ describe("Modal (spec 5.2.2 dialog / focus trap / Escape)", () => {
 
     expect(other).toHaveFocus();
     expect(warn).not.toHaveBeenCalled();
-    warn.mockRestore();
   });
 
   it("トリガーも開いた時点の activeElement も到達不能なら fallbackFocusRef へ連鎖する", async () => {
@@ -240,7 +244,6 @@ describe("Modal (spec 5.2.2 dialog / focus trap / Escape)", () => {
 
     expect(screen.getByTestId("fallback")).toHaveFocus();
     expect(warn).not.toHaveBeenCalled();
-    warn.mockRestore();
   });
 
   it("候補がすべて到達不能なら黙って body へ落とさず開発ビルドで警告する", async () => {
@@ -262,7 +265,6 @@ describe("Modal (spec 5.2.2 dialog / focus trap / Escape)", () => {
 
     expect(warn).toHaveBeenCalledTimes(1);
     expect(warn.mock.calls[0][0]).toContain("fallbackFocusRef");
-    warn.mockRestore();
   });
 
   it("復帰先の判定: <body>/<html> は復帰先にしない", () => {
