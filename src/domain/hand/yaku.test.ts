@@ -867,6 +867,40 @@ const FIXTURES: Record<SpecYakuId, { menzen: WinContext; open?: WinContext }> =
     },
   };
 
+/**
+ * 表の「—」(副露で無効)を**振る舞いとして**固定するための副露手フィクスチャ。
+ * いずれも「門前ガードを外せばその役が付く」形になっており、ガードの撤去を検出する。
+ */
+const OPEN_INVALID = {
+  riichi: { ...openBase, winType: "ron", riichi: true },
+  double_riichi: { ...openBase, winType: "ron", doubleRiichi: true },
+  ippatsu: { ...openBase, winType: "ron", riichi: true, ippatsu: true },
+  menzen_tsumo: { ...openBase, winType: "tsumo" },
+  tanyao: {
+    concealedTiles: parseTiles("234p 567p 678p 55p"),
+    melds: [pon("333s")],
+    winningTile: parseTile("2p"),
+    winType: "ron",
+  },
+  iipeikou: {
+    concealedTiles: parseTiles("234p 234p 567p 55p"),
+    melds: [pon("555z")],
+    winningTile: parseTile("2p"),
+    winType: "ron",
+  },
+} as const satisfies Partial<Record<SpecYakuId, WinContext>>;
+
+/**
+ * 副露手フィクスチャが**構造的に作れない**「—」の役。
+ * サンマにはチーが無く副露は必ず刻子・槓子になるため、4 面子すべてが順子である必要の
+ * ある平和・二盃口と、7 対子である七対子は副露手として存在し得ない。
+ */
+const STRUCTURALLY_MENZEN_ONLY: readonly SpecYakuId[] = [
+  "pinfu",
+  "ryanpeikou",
+  "chiitoitsu",
+];
+
 describe("spec 3.0 役表の翻を固定する (#391)", () => {
   const entries = Object.keys(SPEC_HAN) as SpecYakuId[];
 
@@ -883,19 +917,40 @@ describe("spec 3.0 役表の翻を固定する (#391)", () => {
     "%s: 副露の翻(喰い下がり)が spec 3.0 と一致する",
     (id) => {
       const fixture = FIXTURES[id].open;
-      expect(fixture, `${id} の副露フィクスチャが未定義`).toBeDefined();
-      const analysis = analyzeWin(fixture as WinContext);
+      if (!fixture) throw new Error(`${id} の副露フィクスチャが未定義`);
+      const analysis = analyzeWin(fixture);
       const yaku = analysis?.yaku.find((y) => y.id === id);
       expect(yaku, `${id} が副露フィクスチャで成立していない`).toBeDefined();
       expect(yaku?.han).toBe(SPEC_HAN[id].open);
     },
   );
 
-  it("副露で成立しない役(表の「—」)には副露フィクスチャを置かない", () => {
+  /**
+   * 表の「—」は「副露(ポン・カン)で無効化される」という**振る舞いの規定**なので、
+   * 「副露フィクスチャを置いていないこと」を確認しても何も守れない(恒真になる)。
+   * 実際に副露手を組み、その役が**付かない**ことを見る。
+   */
+  it.each(Object.keys(OPEN_INVALID) as (keyof typeof OPEN_INVALID)[])(
+    "%s: 副露手では成立しない(spec 3.0 表の「—」)",
+    (id) => {
+      const got = analyzeWin(OPEN_INVALID[id])?.yaku.map((y) => y.id) ?? [];
+      expect(got).not.toContain(id);
+    },
+  );
+
+  /**
+   * 「—」の役のうち、副露手フィクスチャを作れないものは構造的な理由を明示して除外する。
+   * サンマにはチーが無く**副露は必ず刻子・槓子**になるため、4 面子すべてが順子である
+   * 必要のある平和・二盃口と、7 対子である七対子は副露手として存在し得ない。
+   * この集合を明示的に固定することで、「単に書き忘れた」役が黙って漏れるのを防ぐ。
+   */
+  it("「—」の役は副露否定テストか構造的除外のどちらかで説明されている", () => {
     const menzenOnly = entries.filter((id) => SPEC_HAN[id].open === null);
-    expect(menzenOnly.map((id) => [id, FIXTURES[id].open])).toEqual(
-      menzenOnly.map((id) => [id, undefined]),
-    );
+    const explained = new Set<string>([
+      ...Object.keys(OPEN_INVALID),
+      ...STRUCTURALLY_MENZEN_ONLY,
+    ]);
+    expect(menzenOnly.filter((id) => !explained.has(id))).toEqual([]);
   });
 });
 
@@ -1038,7 +1093,33 @@ const SINGLE_YAKUMAN_NAMED: [label: string, id: string, ctx: WinContext][] = [
   ],
 ];
 
+/** spec 3.0「役満(一律シングル)」表の id(12 種)。 */
+const SPEC_YAKUMAN_IDS = [
+  "tenhou",
+  "chiihou",
+  "kokushi",
+  "tsuuiisou",
+  "chinroutou",
+  "ryuuiisou",
+  "daisangen",
+  "daisuushii",
+  "shousuushii",
+  "suuankou",
+  "suukantsu",
+  "chuuren",
+] as const;
+
 describe("spec 3.0 役満は一律シングル (#391)", () => {
+  // 12 種の網羅が 2 つのテーブルの和集合に暗黙依存すると、片方からエントリが
+  // 消えても緑のままになる。spec の id 一覧を独立に置いて突き合わせる。
+  it("spec 3.0 の役満 12 種すべてに yakuman=1 のフィクスチャがある", () => {
+    const covered = new Set<string>([
+      ...YAKUMAN_FIXTURES.map(([id]) => id),
+      ...SINGLE_YAKUMAN_NAMED.map(([, id]) => id),
+    ]);
+    expect(SPEC_YAKUMAN_IDS.filter((id) => !covered.has(id))).toEqual([]);
+  });
+
   it.each(YAKUMAN_FIXTURES)("%s の yakuman は 1", (id, ctx) => {
     const analysis = analyzeWin(ctx);
     const yaku = analysis?.yaku.find((y) => y.id === id);
