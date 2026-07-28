@@ -49,7 +49,7 @@ function HistoryItem({ entry }: { entry: MatchHistoryEntry }) {
   const topTotal = formatSignedSoshii(top.soshiiTotal);
 
   return (
-    <details className="group rounded-lg border border-foreground/15">
+    <details className="group rounded-lg border border-control-border">
       <summary className="flex cursor-pointer flex-wrap items-baseline gap-x-3 gap-y-1 rounded-lg p-4 text-sm hover:bg-foreground/5">
         <span className="font-medium">{finishedAt}</span>
         <span className="text-foreground/70">
