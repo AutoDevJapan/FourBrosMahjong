@@ -3,9 +3,9 @@ import { DEFAULT_NAMES } from "@/domain/game/engine";
 import {
   loadPlayerNames,
   MAX_PLAYER_NAME_LENGTH,
-  parsePlayerNames,
   PLAYER_NAMES_STORAGE_KEY,
   type PlayerNames,
+  parsePlayerNames,
   resolvePlayerNames,
   sanitizePlayerName,
   savePlayerNames,

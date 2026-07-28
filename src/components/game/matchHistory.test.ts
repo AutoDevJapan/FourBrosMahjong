@@ -2,15 +2,15 @@ import { describe, expect, it } from "vitest";
 import {
   appendHistory,
   clearHistory,
+  type HistoryLockManager,
   loadHistory,
   MATCH_HISTORY_KEY,
-  type MatchHistoryEntry,
   MAX_HISTORY_BYTES,
   MAX_HISTORY_ENTRIES,
+  type MatchHistoryEntry,
   parseHistory,
   persistHistory,
   persistHistoryAcrossTabs,
-  type HistoryLockManager,
 } from "./matchHistory";
 
 class MemoryStorage implements Storage {

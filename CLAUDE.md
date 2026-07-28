@@ -38,8 +38,8 @@ pnpm test:coverage  # Vitest with v8 coverage
 pnpm test:e2e       # Playwright E2E — specs in ./e2e (auto-starts dev server)
 
 pnpm format         # Biome: format & write
-pnpm format:check   # Biome: check formatting only
-pnpm check          # Biome: check (format + assist)
+pnpm check          # Biome: format + assist check (the CI gate)
+pnpm format:check   # Biome: formatting only (subset of `check`)
 pnpm knip           # find unused files/exports/deps
 pnpm depcruise      # dependency-cruiser rules over src
 pnpm docs           # TypeDoc → docs/api (gitignored)

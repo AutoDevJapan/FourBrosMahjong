@@ -1,3 +1,4 @@
+import { MAX_PLAYER_NAME_LENGTH } from "@/components/settings/playerNames";
 import {
   createGame,
   DEFAULT_NAMES,
@@ -10,12 +11,11 @@ import {
   declareTsumo,
   discard,
   type EngineState,
+  type PlayerNames,
   passRon,
   proceedToNextRound,
   tsumogiri,
-  type PlayerNames,
 } from "@/domain/game/engine";
-import { MAX_PLAYER_NAME_LENGTH } from "@/components/settings/playerNames";
 import type { Tile } from "@/domain/tiles/tile";
 
 const GAME_SESSION_KEY = "four-bros-mahjong.game.v1";

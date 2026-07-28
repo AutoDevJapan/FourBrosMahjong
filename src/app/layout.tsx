@@ -1,14 +1,14 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono, Noto_Sans_JP } from "next/font/google";
 import { headers } from "next/headers";
-import { ThemeStorageSync } from "@/components/layout/ThemeStorageSync";
-import { ServiceWorkerRegister } from "@/components/pwa/ServiceWorkerRegister";
 import {
   DEFAULT_DESCRIPTION,
   DEFAULT_TITLE,
   SITE_URL,
   socialMetadata,
 } from "@/app/_lib/metadata";
+import { ThemeStorageSync } from "@/components/layout/ThemeStorageSync";
+import { ServiceWorkerRegister } from "@/components/pwa/ServiceWorkerRegister";
 import "./globals.css";
 
 // 欧文フォント(ラテン)。和文グリフは持たないため、日本語は下記 Noto Sans JP に

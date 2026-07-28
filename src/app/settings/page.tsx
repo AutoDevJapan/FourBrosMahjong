@@ -18,9 +18,9 @@
 
 import type { Metadata } from "next";
 import Link from "next/link";
+import { socialMetadata } from "@/app/_lib/metadata";
 import { ThemeToggle } from "@/components/layout/ThemeToggle";
 import { PlayerNamesForm } from "@/components/settings/PlayerNamesForm";
-import { socialMetadata } from "@/app/_lib/metadata";
 
 const description =
   "四兄弟麻雀の設定。テーマ(システム設定に従う / ライト / ダーク)の手動切替と、四人回しの対局者4人の表示名を変更できます。";

@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
 import type { MeldInput } from "./decompose";
 import { parseTiles } from "./notation";
-import { tileKey } from "./tile-identity";
 import { isTenpai, waitingTiles } from "./tenpai";
+import { tileKey } from "./tile-identity";
 
 function waitKeys(notation: string, melds: MeldInput[] = []): string[] {
   return waitingTiles(parseTiles(notation), melds)

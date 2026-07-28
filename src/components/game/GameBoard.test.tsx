@@ -18,8 +18,8 @@ import type { Tile } from "@/domain/tiles/tile";
 import { tileLabel } from "../common/tileLabel";
 import { walkToGameEnd } from "./finishedGameFixture";
 import GameBoard, { pulledKitaCount, residualSticksNote } from "./GameBoard";
-import { type GameAction, replayJournal } from "./gamePersistence";
 import { GameProvider } from "./GameProvider";
+import { type GameAction, replayJournal } from "./gamePersistence";
 
 // App Router の useRouter を jsdom 用にスタブ(push/replace の呼び分けを検証する)。
 const routerMock = vi.hoisted(() => ({ push: vi.fn(), replace: vi.fn() }));

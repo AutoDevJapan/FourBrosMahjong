@@ -1,6 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
+import { MAX_PLAYER_NAME_LENGTH } from "@/components/settings/playerNames";
 import {
   createGame,
+  DEFAULT_NAMES,
   declareAnkan,
   declareKakan,
   declareKan,
@@ -8,7 +10,6 @@ import {
   declareRiichi,
   declareRon,
   declareTsumo,
-  DEFAULT_NAMES,
   discard,
   passRon,
   proceedToNextRound,
@@ -26,7 +27,6 @@ import {
   replayJournal,
   saveJournal,
 } from "./gamePersistence";
-import { MAX_PLAYER_NAME_LENGTH } from "@/components/settings/playerNames";
 import { selectView } from "./gameView";
 
 class MemoryStorage implements Storage {

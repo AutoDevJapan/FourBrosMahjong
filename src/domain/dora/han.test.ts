@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { HONOR, type Suit, type Tile } from "../tiles/tile";
-import { type DoraSet, createDoraSet } from "./doraSet";
+import { createDoraSet, type DoraSet } from "./doraSet";
 import { countDoraHan } from "./han";
 
 function t(suit: Suit, rank: number, isRed = false): Tile {

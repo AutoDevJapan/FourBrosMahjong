@@ -4,8 +4,9 @@
  * 晒した面子を全員分表示する。暗槓は両端2枚を伏せ、内側2枚のみ開示する慣行に従う
  * (ポン・明槓・加槓は全牌開示)。値渡しのみの純表示コンポーネント(スペック6 6.6)。
  */
-import type { MeldView } from "./types";
+
 import Tile from "../common/Tile";
+import type { MeldView } from "./types";
 
 export interface MeldsProps {
   melds: readonly MeldView[];

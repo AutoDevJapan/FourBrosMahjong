@@ -14,8 +14,8 @@
 
 import type { Tile } from "../tiles/tile";
 import type { MeldInput } from "./decompose";
-import { sameKind } from "./tile-identity";
 import { waitingTiles } from "./tenpai";
+import { sameKind } from "./tile-identity";
 
 /** フリテンの原因種別。 */
 type FuritenReason = "discard" | "temporary" | "riichi";

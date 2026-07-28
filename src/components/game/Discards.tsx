@@ -2,8 +2,9 @@
  * 河(捨て牌)の表示(スペック6 6.4.2)。着席プレイヤーごとに表示し、抜け番スロットには出さない。
  * 各牌は自己ラベル付きの `Tile` を再利用する。値渡しのみの純表示コンポーネント(スペック6 6.6)。
  */
-import type { TileData } from "./types";
+
 import Tile from "../common/Tile";
+import type { TileData } from "./types";
 
 export interface DiscardsProps {
   tiles: readonly TileData[];

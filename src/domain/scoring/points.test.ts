@@ -1,9 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
-  type ScoreCategory,
-  type TsumoPayments,
   computeScore,
   handValueFromHan,
+  type ScoreCategory,
+  type TsumoPayments,
 } from "./points";
 
 /** 非役満(翻指定)の入力ヘルパ。 */

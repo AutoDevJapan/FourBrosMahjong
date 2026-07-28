@@ -13,9 +13,10 @@
  * 抜け番だけがフルサイズ大カードで突出しないよう密度を揃える(issue #150 要検討点2)。
  * 「この局は休み」の補足文はコンパクト帯では省き、抜け番バッジで休みを伝える。
  */
-import type { BenchPlayerView } from "./types";
+
 import ScoreDisplay from "./ScoreDisplay";
 import StatusBadge from "./StatusBadge";
+import type { BenchPlayerView } from "./types";
 
 export interface BenchAreaProps {
   player: BenchPlayerView;
