@@ -9,7 +9,7 @@ import type { Tile } from "@/domain/tiles/tile";
  *
  * CLAUDE.md は ADR-0002 を AI 方策の SSOT と定めており、ADR だけを読んで実装を
  * 再現できることが要件になる。#393 では「実装にあるのに ADR に無い」記述漏れが
- * 2件見つかったが、ADR の文言は静的テキストなので同じ乖離が再発する。そこで
+ * 複数件見つかったが、ADR の文言は静的テキストなので同じ乖離が再発する。そこで
  * ADR が主張する挙動をここで固定する。
  *
  * ## フィクスチャの作り方(重要)
@@ -21,7 +21,8 @@ import type { Tile } from "@/domain/tiles/tile";
  *
  * `DiscardContext.tiles` の契約は `14 − 3×副露数` 枚(`ai.ts` / ADR のフィクスチャ注記)。
  * 枚数を破ると向聴評価が静かに壊れる(#303 / #320 で2度事故になっている)ため、
- * 全フィクスチャに枚数ガードを置く。
+ * 手牌を作る/削るすべての経路に枚数ガードを置く(`menzenHand` = 14枚 /
+ * `menzenHand13` = 13枚 / `discardOne` = 1枚だけ抜いて13枚)。
  *
  * ## ここで扱わないもの
  *
@@ -31,11 +32,34 @@ import type { Tile } from "@/domain/tiles/tile";
 
 /** 門前手の打牌フィクスチャは常に 14 枚(`14 − 3×0`)。 */
 const MENZEN_HAND_SIZE = 14;
+/** 打牌後(= `shanten`/`ukeire` に渡す)の門前手は 13 枚。 */
+const MENZEN_HAND_SIZE_AFTER_DISCARD = MENZEN_HAND_SIZE - 1;
 
 function menzenHand(notation: string): Tile[] {
   const tiles = parseTiles(notation);
   expect(tiles).toHaveLength(MENZEN_HAND_SIZE);
   return tiles;
+}
+
+/** `shanten`/`ukeire` に渡す 13 枚の門前手。 */
+function menzenHand13(notation: string): Tile[] {
+  const tiles = parseTiles(notation);
+  expect(tiles).toHaveLength(MENZEN_HAND_SIZE_AFTER_DISCARD);
+  return tiles;
+}
+
+/**
+ * 指定牌種を**1枚だけ**取り除いて 13 枚にする。
+ *
+ * `filter` で牌種一致を全部落とすと、同種を2枚以上持つ手で 12 枚以下になり、
+ * 向聴・受け入れが別物になる(枚数が `14 − 3×副露数` を破ると静かに壊れる)。
+ */
+function discardOne(tiles: readonly Tile[], key: string): Tile[] {
+  const index = tiles.findIndex((t) => tileKey(t) === key);
+  expect(index).toBeGreaterThanOrEqual(0);
+  const rest = [...tiles.slice(0, index), ...tiles.slice(index + 1)];
+  expect(rest).toHaveLength(MENZEN_HAND_SIZE_AFTER_DISCARD);
+  return rest;
 }
 
 /** 入力の並びだけを変える(内容は同じ多重集合)。 */
@@ -107,8 +131,9 @@ describe("ADR-0002 契約: 第4キー = 危険牌回避(現物優先 / #393)", (
 describe("ADR-0002 契約: 第5キー = 外側度(#393)", () => {
   /**
    * 2向聴の散らばり手。打牌後の向聴が最小になる候補が複数あり、向聴が
-   * `UKEIRE_SHANTEN_GATE`(=1)を超えるので受け入れは算出されない。
-   * よって温存価値・現物も同点で、**外側度だけが答えを変える**。
+   * `UKEIRE_SHANTEN_GATE`(=1)を超えるので受け入れは算出されない。加えて赤5・
+   * ドラを含まず他家の河も渡さないので温存価値・現物も同点になるよう選んであり、
+   * 結果として**外側度だけが答えを変える**。
    */
   const SCATTERED_2_SHANTEN = "4s 1m 7p 1s 6p 2p 6s 1m 9s 9p 7s 5s 2p 9s";
 
@@ -128,9 +153,10 @@ describe("ADR-0002 契約: 受け入れは UKEIRE_SHANTEN_GATE 以下でのみ�
 
   it("2向聴では受け入れを見ないので、受け入れの広い牌が選ばれるとは限らない", () => {
     const tiles = menzenHand(GATED_2_SHANTEN);
-    // 前提: ゲートを外して受け入れを見るなら白が勝つ(空振り防止)。
-    const withoutSouth = tiles.filter((t) => tileKey(t) !== "honor-2");
-    const withoutWhite = tiles.filter((t) => tileKey(t) !== "honor-5");
+    // 前提: 打牌後の向聴は同じで、ゲートを外して受け入れを見るなら白が勝つ(空振り防止)。
+    // 南は手牌に2枚あるため、牌種で filter せず1枚だけ取り除く(12枚手になるのを防ぐ)。
+    const withoutSouth = discardOne(tiles, "honor-2");
+    const withoutWhite = discardOne(tiles, "honor-5");
     expect(shanten(withoutSouth, 0)).toBe(shanten(withoutWhite, 0));
     expect(ukeire(withoutWhite, 0).copies).toBeGreaterThan(
       ukeire(withoutSouth, 0).copies,
@@ -141,18 +167,64 @@ describe("ADR-0002 契約: 受け入れは UKEIRE_SHANTEN_GATE 以下でのみ�
   });
 });
 
+describe("ADR-0002 契約: 第2キー = 受け入れ延べ枚数(#393)", () => {
+  /**
+   * 1向聴の手。`UKEIRE_SHANTEN_GATE`(=1)以下なので受け入れが算出され、
+   * 受け入れの広さが下位キーを覆す。
+   */
+  const ONE_SHANTEN = "8p 5s 2s 2p 3p 4p 7p 3s 7s 2p 4p 9s 3s 3p";
+
+  it("向聴が同点なら受け入れの広い方を残す(下位キーより優先)", () => {
+    const tiles = menzenHand(ONE_SHANTEN);
+    // 2索が選ばれる。受け入れキーを外すと外側度で 9索(外側度2 > 1)になる。
+    expect(tileKey(chooseDiscard({ tiles }))).toBe("sou-2");
+  });
+});
+
+describe("ADR-0002 契約: 第3キー = 打点温存価値は加算(#393)", () => {
+  /**
+   * 4面子 + 赤5筒 / 赤5索 の対称形。どちらを切っても打牌後は「4面子 + 単騎待ち」の
+   * テンパイで、受け入れ(残り3枚1種)・現物・外側度まで完全に同点になる。
+   * 差が付くのは温存価値だけ。
+   */
+  const RED_FIVE_SYMMETRY = "123p 789p 5p 123s 789s 5s";
+
+  it("赤5かつ表ドラの牌(価値3)は、赤5だけの牌(価値2)より優先して残す", () => {
+    const tiles = menzenHand(RED_FIVE_SYMMETRY);
+    // 前提: 5筒・5索はどちらも赤(本作はオール赤5)。
+    expect(
+      tiles
+        .filter((t) => t.isRed)
+        .map(tileKey)
+        .sort(),
+    ).toEqual(["pin-5", "sou-5"]);
+
+    // 5筒が表ドラ → 価値 2+1=3。価値2の5索を切る。
+    // 温存価値が排他(赤5なら2で打ち止め)なら両者2で同点になり、
+    // 第6キーの辞書順で "pin-5" < "sou-5" となって5筒を切ってしまう。
+    expect(
+      tileKey(chooseDiscard({ tiles, doraKinds: new Set(["pin-5"]) })),
+    ).toBe("sou-5");
+  });
+
+  it("対照: どちらもドラでなければ価値が同点になり第6キーで決まる", () => {
+    const tiles = menzenHand(RED_FIVE_SYMMETRY);
+    expect(tileKey(chooseDiscard({ tiles }))).toBe("pin-5");
+  });
+});
+
 describe("ADR-0002 契約: 門前では七対子・国士も向聴・受け入れの対象(#368 / #393)", () => {
   it("門前では七対子を対象に数える(6対子 + 浮き牌は七対子テンパイ)", () => {
     // 標準形では 4面子1雀頭にほど遠いが、七対子として見ればテンパイ(3s 単騎)。
     // 七対子を評価対象から外すと向聴が跳ね上がる。
-    expect(shanten(parseTiles("11p 33p 55p 77p 99p 11s 3s"), 0)).toBe(0);
+    expect(shanten(menzenHand13("11p 33p 55p 77p 99p 11s 3s"), 0)).toBe(0);
   });
 
   it("門前では国士を対象に数える(#368 の再現例)", () => {
     // ADR が挙げる再現例。国士12種 + 1m の対子で 7z 待ちのテンパイ。未所持の 7z は
     // 標準形の ±2 枝刈りでは候補に入らないため、国士を評価対象から外すと
     // 受け入れが変わる(実測: 1種4枚 → 11種33枚)。
-    const kokushiTenpai = parseTiles("11m 9m 19p 19s 123456z");
+    const kokushiTenpai = menzenHand13("11m 9m 19p 19s 123456z");
     expect(shanten(kokushiTenpai, 0)).toBe(0);
     expect(ukeire(kokushiTenpai, 0)).toEqual({ kinds: 1, copies: 4 });
   });
