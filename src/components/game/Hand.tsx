@@ -177,6 +177,8 @@ export default function Hand({
           : state?.indicator
             ? `${tileLabel(tile)}、${state.indicator}`
             : tileLabel(tile);
+        // 「リーチ可」と「選択中」は同じリングで、選択中だけ浮き上がりを足して区別する。
+        const ringed = state?.highlighted === true || isSelected;
         return (
           <li
             // 同一牌が複数あるため index を key に含める。
@@ -205,10 +207,13 @@ export default function Hand({
                 ? "cursor-not-allowed opacity-45 grayscale"
                 : "cursor-pointer hover:-translate-y-0.5"
             } ${
-              state?.highlighted
-                ? "ring-2 ring-turn-highlight ring-offset-2 ring-offset-background"
-                : ""
-            } ${isSelected ? "-translate-y-1 ring-2 ring-turn-highlight" : ""}`}
+              // 「リーチ可」も「選択中」も同じ 0〜2px のバンドのリングで表す(#399)。
+              // `ring-offset-*` を付けると 2〜4px を占め、グローバルの
+              // `:focus-visible { outline: 2px; outline-offset: 2px }` と同じ帯に重なる。
+              // outline は外側 box-shadow より上に描かれるため、キーボードでその牌へ
+              // フォーカスした瞬間に状態表示が完全に隠れていた。
+              ringed ? "ring-2 ring-turn-highlight" : ""
+            } ${isSelected ? "-translate-y-1" : ""}`}
           >
             <Tile tile={tile} decorative />
             {state?.indicator ? (
