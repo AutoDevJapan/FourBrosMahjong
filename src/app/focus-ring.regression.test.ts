@@ -56,8 +56,13 @@ const ringUtility = () =>
  * 状態表示のリングが完全に隠れる(#399 の「リーチ可」リング)。
  *
  * 状態表示のリングは `ring-offset` なしの 0〜2px に収め、2〜4px の帯はフォーカスリング専用に空ける。
+ *
+ * **接頭辞は任意個許す**(`dark:` / `hover:` / `md:` / `group-hover:` / `aria-selected:` …)。
+ * 先読み否定に `:` を含めると接頭辞付きが 1 件も引っかからず、
+ * 「ダークモードでだけ #399 が再発する」退行を無音で通してしまう。
  */
-const ringOffsetUtility = () => /(?<![\w:-])ring-offset-[\w[\]/.-]+/g;
+const ringOffsetUtility = () =>
+  /(?<![\w-])(?:[\w-]+:)*ring-offset-[\w[\]/.-]+/g;
 
 /** src 配下の .ts/.tsx を再帰列挙(テストファイル自身は除く)。 */
 function sourceFiles(dir: string, base = ""): string[] {
@@ -140,9 +145,12 @@ describe("フォーカスリングの単一起点(#314)", () => {
   });
 
   it("状態表示のリングは ring-offset-* でフォーカスリングの帯(2〜4px)へ食い込まない(#399)", () => {
-    // `focus-visible:` 接頭辞の有無に関わらず、`ring-offset-*` は必ずリングを 2〜4px の
-    // 帯へ押し出す。そこはグローバル `:focus-visible` の outline(offset 2px / 幅 2px)が
-    // 占める領域で、outline が上に描かれるためフォーカス時に状態表示が完全に消える。
+    // 接頭辞の有無に関わらず、`ring-offset-*` は必ずリングを 2〜4px の帯へ押し出す。
+    // そこはグローバル `:focus-visible` の outline(offset 2px / 幅 2px)が占める領域で、
+    // outline が上に描かれるためフォーカス時に状態表示が**完全に消える**。
+    // ここで縛るのは `ring-offset` の有無だけで、リングの太さ(`ring-4` 等)は縛らない
+    // ——太さ超過は帯へ食い込むが完全消失にはならないため。太さまで含めた帯の重なりは
+    // `e2e/game.spec.ts` が実描画(リング外縁 <= outline オフセット)で検証する。
     const offenders: string[] = [];
     for (const rel of sourceFiles(SRC)) {
       const text = readFileSync(join(SRC, rel), "utf8");

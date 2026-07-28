@@ -1,5 +1,5 @@
 import { expect, type Page, test } from "@playwright/test";
-import { advanceUntil, armRiichi } from "./helpers/gameDriver";
+import { advanceUntil, armRiichi, visibleHand } from "./helpers/gameDriver";
 
 /**
  * wheel を送った後、スクロール適用が終わるまで 2 フレーム進める。
@@ -14,6 +14,26 @@ async function settleScroll(page: Page): Promise<void> {
         requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
       }),
   );
+}
+
+/**
+ * CSS の色文字列を比較用に正規化する(`#b45309` / `rgb(180, 83, 9)` / `rgb(180,83,9)` を同一視)。
+ * トークン値(HEX)と `getComputedStyle` の返す `rgb()` を突き合わせるために使う。
+ */
+function normalizeColor(color: string): string {
+  const hex = color.trim().match(/^#([0-9a-fA-F]{6})$/);
+  if (hex !== null) {
+    const n = Number.parseInt(hex[1], 16);
+    return `${(n >> 16) & 255},${(n >> 8) & 255},${n & 255}`;
+  }
+  const rgb = color.match(/^rgba?\(([^)]+)\)$/);
+  if (rgb === null) return color.trim();
+  const parts = rgb[1]
+    .split(/[\s,/]+/)
+    .filter(Boolean)
+    .slice(0, 3)
+    .map((v) => Math.round(Number(v)));
+  return parts.join(",");
 }
 
 /**
@@ -640,7 +660,8 @@ test.describe("対局画面(/game)", () => {
     page,
   }) => {
     await page.goto("/game?seed=381");
-    const hand = page.getByRole("listbox", { name: "自家の手牌" }).first();
+    // 2 レイアウト分 DOM にあるため可視側に限定する(狭幅レイアウト追加時に壊れない)。
+    const hand = visibleHand(page);
     await armRiichi(page);
 
     const eligible = hand.getByRole("option", { name: /リーチ可/ }).first();
@@ -649,33 +670,64 @@ test.describe("対局画面(/game)", () => {
     // `:focus-visible` はキーボード操作を経ないと一致しない(直前が click 由来だと
     // グローバルの `:focus-visible` 規則が適用されず、UA 既定の outline を測ってしまう)。
     // ロービングタブインデックスの矢印移動で往復し、キーボードモダリティにしてから測る。
+    // 両方向ともラップアラウンドするため、端の牌でも必ず元の牌へ戻る。
     await page.keyboard.press("ArrowRight");
     await page.keyboard.press("ArrowLeft");
     await expect(eligible).toBeFocused();
 
-    // グローバル `:focus-visible` の outline は offset 2px / 幅 2px = border-box から 2〜4px。
-    // 「リーチ可」のリング(box-shadow)がこの帯へ入ると outline に覆われて完全に消える。
+    // 「リーチ可」の琥珀色。トークン(--turn-highlight。`@theme inline` は CSS 変数を出力しない
+    // ため生トークンを読む)経由で突き合わせ、リングが**実際にその状態表示として**
+    // 描かれていることまで主張する(正の spread があるだけでは、無関係な shadow-* でも通る)。
+    const highlight = await page.evaluate(() =>
+      getComputedStyle(document.documentElement)
+        .getPropertyValue("--turn-highlight")
+        .trim(),
+    );
+
     const band = await eligible.evaluate((el) => {
       const style = getComputedStyle(el);
-      // `ring-*` は `<spread> <color>` の box-shadow として描画される。外側リングの
-      // 最大到達距離(offset + spread)を取り出す。
-      const distances = [
+      // `ring-*` は `<offset-x> <offset-y> <blur> <spread> <color>` の box-shadow として
+      // 描画される。外側リングの到達距離は spread(4 番目)そのもの。
+      const shadows = [
         ...style.boxShadow.matchAll(
-          /(-?\d+(?:\.\d+)?)px\s+(-?\d+(?:\.\d+)?)px\s+(-?\d+(?:\.\d+)?)px\s+(-?\d+(?:\.\d+)?)px/g,
+          /(rgba?\([^)]*\))\s+(-?[\d.]+)px\s+(-?[\d.]+)px\s+(-?[\d.]+)px\s+(-?[\d.]+)px/g,
         ),
-      ].map((m) => Number(m[4]));
+      ].map((m) => ({ color: m[1], spread: Number(m[5]) }));
       return {
         boxShadow: style.boxShadow,
-        ringOuter: distances.length > 0 ? Math.max(...distances) : 0,
+        shadows,
+        ringOuter: shadows.reduce((max, s) => Math.max(max, s.spread), 0),
         outlineWidth: Number.parseFloat(style.outlineWidth),
         outlineOffset: Number.parseFloat(style.outlineOffset),
       };
     });
 
-    // リングが実際に描画されていること(状態表示が消えていない)。
-    expect(band.ringOuter).toBeGreaterThan(0);
+    // グローバル `:focus-visible` が当たっていること(当たっていないと以降の比較が無意味)。
+    expect(band.outlineWidth, `outline=${band.boxShadow}`).toBe(2);
+    expect(band.outlineOffset).toBe(2);
+
+    // 「リーチ可」リングが実際に描かれていること(状態表示が消えていない)。
+    // 外縁(spread 最大)の層を見る。`ring-offset-*` が付くと内側にオフセット色の層が
+    // 増えるため、先頭一致で拾うと状態表示の色ではなくオフセット色を検査してしまう。
+    const ring = band.shadows.reduce<(typeof band.shadows)[number] | undefined>(
+      (max, s) =>
+        s.spread > 0 && (max === undefined || s.spread > max.spread) ? s : max,
+      undefined,
+    );
+    expect(
+      ring,
+      `「リーチ可」リングが描画されていない: box-shadow=${band.boxShadow}`,
+    ).toBeDefined();
+    expect(
+      normalizeColor(ring?.color ?? ""),
+      `box-shadow=${band.boxShadow}`,
+    ).toBe(normalizeColor(highlight));
+
     // outline は 2〜4px を占める。リングの外縁がその開始位置以下なら覆われない。
-    expect(band.ringOuter).toBeLessThanOrEqual(band.outlineOffset);
+    expect(
+      band.ringOuter,
+      `リングが outline の帯(2〜4px)へ食い込んでいる: box-shadow=${band.boxShadow}`,
+    ).toBeLessThanOrEqual(band.outlineOffset);
   });
 
   test("リーチ宣言候補と非候補をマウス・キーボード・SRへ明示し、同じ禁止理由も再通知する(#168 / #250)", async ({
