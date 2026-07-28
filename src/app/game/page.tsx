@@ -38,8 +38,9 @@ export default function GamePage() {
         </Link>
       </header>
 
-      {/* 本文は単一の <main> に収める(スペック5 5.2.6)。盤面はランドマーク外に置かない。 */}
-      <main className="flex flex-col gap-4">
+      {/* 本文は単一の <main> に収める(スペック5 5.2.6)。盤面はランドマーク外に置かない。
+          子が <GameBoard /> 1 つだけなので、レイアウト用のクラスは持たせない。 */}
+      <main>
         <GameBoard />
       </main>
     </div>

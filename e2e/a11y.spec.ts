@@ -39,6 +39,15 @@ interface Screen {
    * 全ルール無効化は行わず、該当ノードだけを外して他は監査対象のまま残す。
    */
   readonly axeExclude?: readonly string[];
+  /**
+   * クライアントアイランドの描画完了を待つセレクタ(#409)。
+   *
+   * `heading` は Server shell 側にあるため、可視化しても**クライアント部分は未描画**の
+   * ことがある(`/game` は `[data-phase]` が生えるまで「対局を準備しています…」の
+   * プレースホルダで、盤面の要素が 1 つも無い)。ランドマーク監査は「本文がランドマーク外に
+   * 出ていないか」を見るので、本文そのものが未描画だと**無音で pass** してしまう。
+   */
+  readonly clientReady?: string;
 }
 
 const SCREENS: readonly Screen[] = [
@@ -46,8 +55,23 @@ const SCREENS: readonly Screen[] = [
   { path: "/rules", name: "ルール説明", heading: "ルール説明" },
   { path: "/settings", name: "設定", heading: "設定" },
   { path: "/history", name: "戦績", heading: "戦績" },
-  { path: "/game", name: "対局画面", heading: "対局画面" },
+  {
+    path: "/game",
+    name: "対局画面",
+    heading: "対局画面",
+    clientReady: "[data-phase]",
+  },
   { path: "/game/result", name: "対局結果", heading: "対局結果" },
+];
+
+/**
+ * ランドマーク監査(#409)の対象。実在ルートに加えて 404 も見る。
+ * 404 は `not-found.tsx` という独立した実装で、他のルートの規約が波及しない
+ * (実際 `<main>` の中に `<h1>` を置く形で、`/history` 系とは構造が異なる)。
+ */
+const LANDMARK_SCREENS: readonly Screen[] = [
+  ...SCREENS,
+  { path: "/no-such-page-409", name: "404", heading: "ページが見つかりません" },
 ];
 
 const THEMES: readonly Theme[] = ["ライト", "OSダーク", "手動ダーク"];
@@ -160,13 +184,18 @@ test.describe("自動 a11y 監査(axe-core)", () => {
    */
   const LANDMARK_RULES = ["landmark-one-main", "region"] as const;
 
-  for (const screen of SCREENS) {
+  for (const screen of LANDMARK_SCREENS) {
     test(`${screen.name}(${screen.path})は本文が単一の <main> に収まる(#409)`, async ({
       page,
     }) => {
       await openScreen(page, screen, "ライト");
+      // 本文が未描画のまま監査して無音 pass になるのを防ぐ(#409)。
+      if (screen.clientReady) {
+        await expect(page.locator(screen.clientReady).first()).toBeAttached();
+      }
 
       // `<main>` はちょうど 1 つ(0 個=ランドマーク無し / 2 個以上=どれが本文か曖昧)。
+      // `<div role="main">` は数えないが、その形は `landmark-one-main` 側が捕捉する。
       await expect(page.locator("main")).toHaveCount(1);
 
       const results = await new AxeBuilder({ page })
