@@ -42,7 +42,11 @@ interface Screen {
    * **クライアントアイランドが未描画のまま監査してしまう**(`/game` は `mounted` になるまで
    * 「対局を準備しています…」のプレースホルダで、盤面の対話要素が 1 つも存在しない)。
    * 実際にこれで手牌が丸ごと監査から漏れていたため、画面ごとに待つ対象を明示する。
+   *
+   * クライアントアイランドを持つ画面(`/game` の盤面、`/history` の一覧、`/game/result`)では
    * **サーバ側の殻に含まれる要素を指してはならない**(待ちにならず穴が残る)。
+   * 静的な画面(`/`・`/rules`・`/settings`)は SSR 済みで hydration により構造が変わらないため、
+   * ここでの `ready` は「監査対象が描画済みであること」の明示に留まる。
    */
   readonly ready: (page: Page) => Locator;
   /**
@@ -80,6 +84,8 @@ const GAME: Screen = {
       .getByRole("listbox", { name: "自家の手牌" })
       .filter({ visible: true })
       .first(),
+  // 内訳: 自家手牌 14 枚 + ヘッダの「ロビーへ戻る」1。配牌枚数を変える変更を入れると
+  // ここも動くので、赤くなったら「取りこぼし」か「仕様変更」かを内訳で切り分けること。
   minMeasured: 15,
 };
 
@@ -102,6 +108,8 @@ const SCREENS: readonly Screen[] = [
     path: "/settings",
     heading: "設定",
     ready: (page) => page.getByRole("radio").first(),
+    // 内訳: 対局者名の入力 4 + 保存/既定名に戻す 2 + テーマ選択カード 3 + 「戦績を見る」1。
+    // ラジオ入力自体は UA 描画で CSS 枠を持たないため測定対象にならない。
     minMeasured: 10,
   },
   HISTORY,
@@ -167,8 +175,17 @@ const SEED_RESULT = 1;
  */
 const RESULT_CONFIRMED_MIN_MEASURED = 3;
 
-/** 戦績 1 件があるときの `/history` の測定件数フロア(カード + 削除導線)。 */
+/** 戦績 1 件があるときの `/history` の測定件数フロア(`<details>` カード + 「戦績をすべて削除」)。 */
 const HISTORY_WITH_ENTRY_MIN_MEASURED = 2;
+
+/** 削除確認 UI の測定件数フロア(カード + 「削除する」+「キャンセル」)。 */
+const HISTORY_DELETE_CONFIRM_MIN_MEASURED = 3;
+
+/**
+ * 段階②(320px)の `/game` の測定件数フロア。
+ * 段階①の内訳(自家手牌 14 + ヘッダの「ロビーへ戻る」1)に「全体盤面」ボタンが 1 件加わる。
+ */
+const GAME_NARROW_MIN_MEASURED = 16;
 
 /**
  * 監査テーマ。配色トークンはライト/ダークの 2 系統だが、ダークは「OS 追従」と「手動選択」で
@@ -176,6 +193,12 @@ const HISTORY_WITH_ENTRY_MIN_MEASURED = 2;
  * 両方走らせる(`e2e/a11y.spec.ts` の全画面監査と同じ 3 テーマ)。
  */
 const THEMES: readonly Theme[] = ["ライト", "OSダーク", "手動ダーク"];
+
+/**
+ * 状態駆動シナリオで使うテーマ(`e2e/a11y.spec.ts` の `STATE_DRIVEN_THEMES` と同方針)。
+ * OS ダークは手動ダークと同一のトークン値なので、配色検証としては重複する。
+ */
+const STATE_DRIVEN_THEMES: readonly Theme[] = ["ライト", "手動ダーク"];
 
 interface Offender {
   readonly label: string;
@@ -367,7 +390,7 @@ async function collectOffenders(
       // (これが無いと `/rules` の既定展開セクション 4/6 が丸ごと未測定になっていた)
       if (el.tagName === "SUMMARY") {
         const details = el.parentElement;
-        if (details === null) return null;
+        if (details === null || details.tagName !== "DETAILS") return null;
         if (visibleBorder(getComputedStyle(el))) return el;
         return visibleBorder(getComputedStyle(details)) ? details : null;
       }
@@ -388,10 +411,14 @@ async function collectOffenders(
           rect.height <= base.height / COVERAGE
         );
       };
-      /** その要素が自分以外の対象コントロールを含んでいたら、共有の装飾枠とみなす。 */
+      /**
+       * その祖先が自分以外の対象コントロールを含んでいたら、共有の装飾枠とみなす。
+       * `contains` は自分自身にも真を返すため、`node` 自身と `el` は候補から除く。
+       */
       const wrapsOtherControls = (node: Element): boolean => {
         for (const target of targets) {
-          if (target !== el && node.contains(target)) return true;
+          if (target === el || target === node) continue;
+          if (node.contains(target)) return true;
         }
         return false;
       };
@@ -598,15 +625,36 @@ test.describe("非テキストコントラスト(WCAG 1.4.11 / #388)", () => {
   }) => {
     await page.setViewportSize({ width: 320, height: 800 });
     await openScreen(page, GAME, "ライト");
-    await auditScreen(page, "段階②(320px)", GAME.minMeasured);
+
+    // 段階②はクロス配置(段階①)に「全体盤面」ボタンが加わるぶんだけ対象が増える。
+    const before = await collectOffenders(page, MIN_RATIO);
+    expect(
+      before.measured,
+      `段階②(320px): 監査できた枠が ${before.measured} 件で想定(${GAME_NARROW_MIN_MEASURED} 件)を下回った。`,
+    ).toBeGreaterThanOrEqual(GAME_NARROW_MIN_MEASURED);
+    expect(
+      before.offenders,
+      `段階②(320px):\n${formatOffenders(before.offenders)}`,
+    ).toEqual([]);
 
     const opener = page.getByRole("button", { name: "全体盤面" });
     await expect(opener).toBeVisible();
     await opener.click();
     await expect(page.getByRole("dialog", { name: "全体盤面" })).toBeVisible();
-    // モーダルは Portal 配下で背景も別。閲覧専用なので手牌は option を持たず、
-    // 増える対象は Modal の「閉じる」ボタン 1 つ。取りこぼし検出は測定件数フロアが担う。
-    await auditScreen(page, "全体盤面モーダル", GAME.minMeasured + 1);
+
+    // モーダルは Portal 配下で背景の合成経路が別。閲覧専用なので手牌は option を持たず、
+    // 増える対象は Modal の「閉じる」ボタンちょうど 1 件。
+    // ここは**下限ではなく厳密増分**で固定する。下限だとモーダル分が 1 件も増えなくても
+    // 緑になり、この監査が潰そうとしている「フロアが低すぎて何も保証しない」形になる。
+    const after = await collectOffenders(page, MIN_RATIO);
+    expect(
+      after.measured,
+      "全体盤面モーダル: 「閉じる」ボタンが監査対象に増えていない(Portal 配下が測れていない)",
+    ).toBe(before.measured + 1);
+    expect(
+      after.offenders,
+      `全体盤面モーダル:\n${formatOffenders(after.offenders)}`,
+    ).toEqual([]);
   });
 
   /**
@@ -649,33 +697,48 @@ test.describe("非テキストコントラスト(WCAG 1.4.11 / #388)", () => {
    * 空の戦績では枠を持つ対話コントロールがほとんど描かれず、静的監査だけでは
    * `MatchHistoryList` の `<details>` カードと削除ボタン群が一度も測られない。
    */
-  test("状態駆動: 戦績のある /history でも 3:1 以上", async ({ page }) => {
-    await page.addInitScript((entry) => {
-      try {
-        localStorage.setItem("four-bros-mahjong.history.v1", entry);
-      } catch {
-        // localStorage 不可環境では空状態のまま監査する。
-      }
-    }, JSON.stringify(HISTORY_FIXTURE));
-
-    await openScreen(page, HISTORY, "ライト");
-    const card = page.getByRole("group").first();
-    await expect(card).toBeVisible();
-    await auditScreen(
+  for (const theme of STATE_DRIVEN_THEMES) {
+    test(`状態駆動: 戦績のある /history でも 3:1 以上 [${theme}]`, async ({
       page,
-      "戦績あり /history",
-      HISTORY_WITH_ENTRY_MIN_MEASURED,
-    );
+    }) => {
+      await page.addInitScript((entry) => {
+        try {
+          localStorage.setItem("four-bros-mahjong.history.v1", entry);
+        } catch {
+          // localStorage 不可環境では空状態のまま監査する。
+        }
+      }, JSON.stringify(HISTORY_FIXTURE));
 
-    // 展開すると内訳と削除導線が現れる。
-    await card.getByRole("button").or(card.locator("summary")).first().click();
-    await expect(
-      page.getByRole("button", { name: /戦績をすべて削除/ }),
-    ).toBeVisible();
-    await auditScreen(
-      page,
-      "戦績あり /history(展開後)",
-      HISTORY_WITH_ENTRY_MIN_MEASURED,
-    );
-  });
+      await openScreen(page, HISTORY, theme);
+      const card = page.getByRole("group").first();
+      await expect(card).toBeVisible();
+      await auditScreen(
+        page,
+        `戦績あり /history [${theme}]`,
+        HISTORY_WITH_ENTRY_MIN_MEASURED,
+      );
+
+      // 展開そのものを待つ。「戦績をすべて削除」は展開前から可視なので、
+      // それを待ちにするとクリックが不発でも緑になる。
+      await card.locator("summary").first().click();
+      await expect(card).toHaveAttribute("open", "");
+      await auditScreen(
+        page,
+        `戦績あり /history(展開後) [${theme}]`,
+        HISTORY_WITH_ENTRY_MIN_MEASURED,
+      );
+
+      // 削除確認 UI は --danger の枠を持つ唯一の実描画経路。トークン単体テストはあるが、
+      // 「実際に載る地」の上での比はここでしか測れない。
+      await page.getByRole("button", { name: /戦績をすべて削除/ }).click();
+      await expect(
+        page.getByRole("button", { name: /削除する/ }),
+      ).toBeVisible();
+      await auditScreen(
+        page,
+        `戦績削除の確認 UI [${theme}]`,
+        HISTORY_DELETE_CONFIRM_MIN_MEASURED,
+      );
+    });
+  }
 });
