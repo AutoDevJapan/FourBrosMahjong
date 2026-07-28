@@ -99,7 +99,7 @@ describe("engine 終了条件(spec 2.8 / #114)", () => {
         stateFor(roundAt("east", 1), {
           p0: 35000,
           p1: -100,
-          p2: 40000,
+          p2: 80000,
           p3: 25100,
         }),
         conclusion("dealerPasses", false),
@@ -115,7 +115,7 @@ describe("engine 終了条件(spec 2.8 / #114)", () => {
         stateFor(roundAt("east", 1), {
           p0: 90000,
           p1: -500,
-          p2: 5000,
+          p2: 45000,
           p3: 5500,
         }),
         conclusion("dealerContinues", false),
@@ -128,7 +128,7 @@ describe("engine 終了条件(spec 2.8 / #114)", () => {
       const s = finishRound(
         stateFor(roundAt("east", 2), {
           p0: -1,
-          p1: 40000,
+          p1: 70000,
           p2: 35001,
           p3: 35000,
         }),
@@ -160,7 +160,7 @@ describe("engine 終了条件(spec 2.8 / #114)", () => {
         stateFor(roundAt("south", 4), {
           p0: 40000,
           p1: 20000,
-          p2: 45000,
+          p2: 65000,
           p3: 15000,
         }),
         conclusion("dealerPasses", true),
@@ -173,7 +173,7 @@ describe("engine 終了条件(spec 2.8 / #114)", () => {
       // 親 p3=15000(トップでない)。子の和了で親流れ → 南4完了で終了。
       const s = finishRound(
         stateFor(roundAt("south", 4), {
-          p0: 50000,
+          p0: 70000,
           p1: 30000,
           p2: 25000,
           p3: 15000,
@@ -186,13 +186,13 @@ describe("engine 終了条件(spec 2.8 / #114)", () => {
 
   describe("経路1: 南4 親3万超トップやめ(dealerContinues)", () => {
     it("南4・親和了・親>30,000かつトップ → gameEnd(親トップやめ)", () => {
-      // 親 p3=40000 が単独トップ。
+      // 親 p3=50000 が単独トップ。
       const s = finishRound(
         stateFor(roundAt("south", 4), {
           p0: 30000,
           p1: 30000,
           p2: 30000,
-          p3: 40000,
+          p3: 50000,
         }),
         conclusion("dealerContinues", false),
       );
@@ -204,7 +204,7 @@ describe("engine 終了条件(spec 2.8 / #114)", () => {
       const s = finishRound(
         stateFor(roundAt("south", 4), {
           p0: 20000,
-          p1: 25000,
+          p1: 45000,
           p2: 20000,
           p3: 55000,
         }),
@@ -309,7 +309,7 @@ describe("engine 終了条件(spec 2.8 / #114)", () => {
       const round = roundAt("south", 4);
       const dealer = dealerOf(round); // p3
       const bench = benchWarmerOf(round); // p2(この局は対局外)
-      const points = even(10000);
+      const points = even(30500);
       points[dealer] = 40000; // 親が単独最高(抜け番含む全員より真に高い)
       points[bench] = 39000; // 抜け番は親より低い
       const s = finishRound(
@@ -391,7 +391,7 @@ describe("engine 終了条件(spec 2.8 / #114)", () => {
         stateFor(roundAt("south", 4), {
           p0: 40000,
           p1: 20000,
-          p2: 45000,
+          p2: 65000,
           p3: 15000,
         }),
         c,
@@ -407,7 +407,7 @@ describe("engine 終了条件(spec 2.8 / #114)", () => {
           p0: 30000,
           p1: 30000,
           p2: 30000,
-          p3: 40000,
+          p3: 50000,
         }),
         c,
       );
