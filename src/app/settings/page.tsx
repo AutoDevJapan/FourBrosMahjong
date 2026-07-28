@@ -86,7 +86,7 @@ export default function SettingsPage() {
           </p>
           <Link
             href="/history"
-            className="inline-flex w-fit items-center gap-1 rounded-full border border-foreground/25 px-4 py-2 text-sm hover:bg-foreground/5"
+            className="inline-flex w-fit items-center gap-1 rounded-full border border-control-border px-4 py-2 text-sm hover:bg-foreground/5"
           >
             戦績を見る <span aria-hidden="true">→</span>
           </Link>

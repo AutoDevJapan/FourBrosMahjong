@@ -39,7 +39,7 @@ export default function ResultPageClient() {
         <h1 className="text-xl font-bold sm:text-2xl">対局結果</h1>
         <Link
           href="/"
-          className="rounded-full border border-foreground/25 px-3 py-1.5 text-sm hover:bg-foreground/5"
+          className="rounded-full border border-control-border px-3 py-1.5 text-sm hover:bg-foreground/5"
         >
           ロビーへ戻る
         </Link>
@@ -60,7 +60,7 @@ export default function ResultPageClient() {
           </p>
           <Link
             href="/game"
-            className="rounded-full border border-foreground/25 px-4 py-2 text-sm hover:bg-foreground/5"
+            className="rounded-full border border-control-border px-4 py-2 text-sm hover:bg-foreground/5"
           >
             対局画面へ
           </Link>
@@ -123,13 +123,13 @@ export default function ResultPageClient() {
             </button>
             <Link
               href="/history"
-              className="rounded-full border border-foreground/25 px-5 py-2 text-sm hover:bg-foreground/5"
+              className="rounded-full border border-control-border px-5 py-2 text-sm hover:bg-foreground/5"
             >
               戦績を見る
             </Link>
             <Link
               href="/"
-              className="rounded-full border border-foreground/25 px-5 py-2 text-sm hover:bg-foreground/5"
+              className="rounded-full border border-control-border px-5 py-2 text-sm hover:bg-foreground/5"
             >
               ロビーへ戻る
             </Link>

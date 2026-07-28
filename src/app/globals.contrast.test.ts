@@ -33,6 +33,31 @@ function contrast(a: string, b: string): number {
   return (hi + 0.05) / (lo + 0.05);
 }
 
+/** #rrggbb を 0〜255 の 3 チャンネルへ分解する。 */
+function channels(hex: string): [number, number, number] {
+  return [
+    Number.parseInt(hex.slice(1, 3), 16),
+    Number.parseInt(hex.slice(3, 5), 16),
+    Number.parseInt(hex.slice(5, 7), 16),
+  ];
+}
+
+/**
+ * 不透明度 `alpha`(0〜1)の前景色 `fg` を地 `bg` へ重ねた合成色を返す(#388)。
+ *
+ * Tailwind の `text-x/25` / `bg-x/10` のような**不透明度修飾子は、トークンの値を見ても
+ * 実際に描画される色が分からない**。生トークン同士の比較だけでは、`border-foreground/25`
+ * が実際には 1.73:1 しかない、といった破綻を原理的に検出できない(#388 の根本原因)。
+ * 合成してから比を測ることで、修飾子付きの実描画色を回帰対象にできる。
+ */
+function composite(fg: string, alpha: number, bg: string): string {
+  const [fr, fg_, fb] = channels(fg);
+  const [br, bg_, bb] = channels(bg);
+  const mix = (f: number, b: number) => Math.round(f * alpha + b * (1 - alpha));
+  const hex = (v: number) => v.toString(16).padStart(2, "0");
+  return `#${hex(mix(fr, br))}${hex(mix(fg_, bg_))}${hex(mix(fb, bb))}`;
+}
+
 describe("赤ドラ「赤」バッジのコントラスト(#147 / WCAG 1.4.3)", () => {
   const badgeBg = token(":root", "--tile-badge-red");
   const lightFace = token(":root", "--tile-face");
@@ -139,4 +164,87 @@ describe("フォーカスリング --focus-ring の非テキストコントラ�
       contrast(token(scope, "--focus-ring"), token(scope, "--background")),
     ).toBeGreaterThanOrEqual(3);
   });
+});
+
+/**
+ * 対話コントロールの境界線(#388 / WCAG 1.4.11)。
+ *
+ * `--control-border` はボタン・リンクの pill・テキスト入力・ラジオのラベルカードの枠に使う。
+ * 枠が唯一のコントロール識別手段になる場合(`/settings` の対局者名入力は地が透明)があるため、
+ * ページ背景とホバー地の**双方**に対して非テキスト 3:1 を満たす必要がある。
+ *
+ * ホバー地は `hover:bg-foreground/5`(= `--foreground` を 5% ページ背景へ重ねた色)。
+ * 修飾子付きの実描画色を見るため `composite()` で合成してから比を測る。
+ */
+describe("対話コントロール枠 --control-border の非テキストコントラスト(#388 / WCAG 1.4.11)", () => {
+  const scopes = [
+    ["ライト", ":root"],
+    ['手動ダーク(data-theme="dark")', ':root[data-theme="dark"]'],
+    ["OS ダーク追従", ":root:not([data-theme])"],
+  ] as const;
+
+  for (const [label, scope] of scopes) {
+    const border = token(scope, "--control-border");
+    const bg = token(scope, "--background");
+
+    it(`${label}: ページ背景に対し 3:1 以上`, () => {
+      expect(contrast(border, bg)).toBeGreaterThanOrEqual(3);
+    });
+
+    it(`${label}: ホバー地(bg-foreground/5)に対し 3:1 以上`, () => {
+      const hover = composite(token(scope, "--foreground"), 0.05, bg);
+      expect(contrast(border, hover)).toBeGreaterThanOrEqual(3);
+    });
+  }
+
+  it("旧実装の border-foreground/25 は 3:1 を満たさない(この検査が実効的であることの確認)", () => {
+    // 合成を挟まずトークン同士を比べる従来の検査では、この破綻を検出できなかった。
+    for (const scope of [":root", ':root[data-theme="dark"]']) {
+      const bg = token(scope, "--background");
+      const legacy = composite(token(scope, "--foreground"), 0.25, bg);
+      expect(contrast(legacy, bg)).toBeLessThan(3);
+    }
+  });
+});
+
+/**
+ * spec 5.4.2 が要求しているのにテストが無かったトークンの回帰(#388)。
+ * いずれも現状値は合格しているが、無防備なままだと #159 と同種の退行が無音で通る。
+ */
+describe("spec 5.4.2 が名指しするトークンのコントラスト(#388)", () => {
+  const scopes = [
+    ["ライト", ":root"],
+    ['手動ダーク(data-theme="dark")', ':root[data-theme="dark"]'],
+    ["OS ダーク追従", ":root:not([data-theme])"],
+  ] as const;
+
+  for (const [label, scope] of scopes) {
+    const bg = token(scope, "--background");
+
+    it(`${label}: ActionPanel 主要ボタンの文字が淡地(bg-turn-highlight/10)に対し 4.5:1 以上`, () => {
+      const face = composite(token(scope, "--turn-highlight"), 0.1, bg);
+      expect(
+        contrast(token(scope, "--turn-highlight-strong"), face),
+      ).toBeGreaterThanOrEqual(4.5);
+    });
+
+    it(`${label}: 同ボタンのホバー地(bg-turn-highlight/20)でも 4.5:1 以上`, () => {
+      const face = composite(token(scope, "--turn-highlight"), 0.2, bg);
+      expect(
+        contrast(token(scope, "--turn-highlight-strong"), face),
+      ).toBeGreaterThanOrEqual(4.5);
+    });
+
+    it(`${label}: --danger がページ背景に対し 4.5:1 以上`, () => {
+      expect(contrast(token(scope, "--danger"), bg)).toBeGreaterThanOrEqual(
+        4.5,
+      );
+    });
+
+    it(`${label}: --positive がページ背景に対し 4.5:1 以上`, () => {
+      expect(contrast(token(scope, "--positive"), bg)).toBeGreaterThanOrEqual(
+        4.5,
+      );
+    });
+  }
 });

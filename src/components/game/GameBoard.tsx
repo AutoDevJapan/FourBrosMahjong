@@ -517,7 +517,7 @@ export default function GameBoard() {
               ref={boardOpenerRef}
               type="button"
               onClick={() => setBoardOpen(true)}
-              className="inline-flex items-center gap-1.5 rounded-lg border border-foreground/25 px-3 py-1.5 text-xs font-medium hover:bg-foreground/5"
+              className="inline-flex items-center gap-1.5 rounded-lg border border-control-border px-3 py-1.5 text-xs font-medium hover:bg-foreground/5"
             >
               <span aria-hidden="true">▦</span>
               全体盤面

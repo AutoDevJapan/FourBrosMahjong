@@ -226,7 +226,7 @@ export default function RulesPage() {
             <details
               key={section.heading}
               open={section.defaultOpen}
-              className="rounded-lg border border-foreground/15"
+              className="rounded-lg border border-control-border"
             >
               <summary className="cursor-pointer rounded-lg px-4 py-3 font-medium marker:text-foreground/60">
                 {section.heading}
