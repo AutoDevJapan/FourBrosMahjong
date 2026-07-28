@@ -532,3 +532,528 @@ describe("役満群の成立(spec 3.0・一律シングル)", () => {
     expect(analysis?.yaku.map((y) => y.id)).toContain("chuuren");
   });
 });
+
+// ---------------------------------------------------------------------------
+// spec 3.0 役表の翻を網羅的に固定する(#391)
+// ---------------------------------------------------------------------------
+
+/** 暗槓(門前を保つカン)。 */
+const closedKan = (notation: string): Meld => ({
+  type: "kan",
+  tiles: parseTiles(notation),
+  concealed: true,
+});
+
+/**
+ * `documents/spec/scoring-and-settlement.md` 3.0「通常役」表の**転記**。
+ * 表の左から順に `id → { 門前, 副露 }`。`open: null` は副露で成立しない役
+ * (表の「—」)を表す。
+ *
+ * spec 3.0 は「実装は `src/domain/hand/yaku.ts` であり、**本表と一致させる**」と
+ * 明記しているが、#391 の実測では表に載る翻値のうち実際に assert されていたのは
+ * 5 箇所だけで、**翻を書き換えるミューテーションは全テストを素通り**していた
+ * (残りは「役が成立すること(id を含むこと)」しか見ていなかった)。
+ * 打点はソシー精算・順位・ウマへ伝播するため、ここで表全体を機械的に固定する。
+ */
+const SPEC_HAN = {
+  riichi: { menzen: 1, open: null },
+  double_riichi: { menzen: 2, open: null },
+  ippatsu: { menzen: 1, open: null },
+  menzen_tsumo: { menzen: 1, open: null },
+  haitei: { menzen: 1, open: 1 },
+  rinshan: { menzen: 1, open: 1 },
+  chankan: { menzen: 1, open: 1 },
+  tanyao: { menzen: 1, open: null },
+  pinfu: { menzen: 1, open: null },
+  iipeikou: { menzen: 1, open: null },
+  ryanpeikou: { menzen: 3, open: null },
+  yakuhai_dragon_5: { menzen: 1, open: 1 },
+  yakuhai_dragon_6: { menzen: 1, open: 1 },
+  yakuhai_dragon_7: { menzen: 1, open: 1 },
+  yakuhai_round_wind: { menzen: 1, open: 1 },
+  yakuhai_seat_wind: { menzen: 1, open: 1 },
+  sanshoku_doukou: { menzen: 2, open: 2 },
+  ittsuu: { menzen: 2, open: 1 },
+  toitoi: { menzen: 2, open: 2 },
+  sanankou: { menzen: 2, open: 2 },
+  sankantsu: { menzen: 2, open: 2 },
+  shousangen: { menzen: 2, open: 2 },
+  chanta: { menzen: 2, open: 1 },
+  junchan: { menzen: 3, open: 2 },
+  honroutou: { menzen: 2, open: 2 },
+  honitsu: { menzen: 3, open: 2 },
+  chinitsu: { menzen: 6, open: 5 },
+  chiitoitsu: { menzen: 2, open: null },
+} as const satisfies Record<string, { menzen: number; open: number | null }>;
+
+type SpecYakuId = keyof typeof SPEC_HAN;
+
+/** 平和形の門前フィクスチャ(文脈役だけを乗せる土台として使う)。 */
+const menzenBase = {
+  concealedTiles: parseTiles("234p 567p 234s 678s 99p"),
+  winningTile: parseTile("4p"),
+} as const;
+/** 白ポンの副露フィクスチャ(同上・副露側)。 */
+const openBase = {
+  concealedTiles: parseTiles("234p 567p 678p 55p"),
+  melds: [pon("555z")],
+  winningTile: parseTile("2p"),
+} as const;
+
+/**
+ * 各役を成立させる最小フィクスチャ。翻は「その役の `han`」だけを見るので、
+ * 手が他の役と複合していても構わない(複合しないフィクスチャを探す方が不自然)。
+ */
+const FIXTURES: Record<SpecYakuId, { menzen: WinContext; open?: WinContext }> =
+  {
+    riichi: {
+      menzen: { ...menzenBase, winType: "ron", riichi: true },
+    },
+    double_riichi: {
+      menzen: { ...menzenBase, winType: "ron", doubleRiichi: true },
+    },
+    ippatsu: {
+      menzen: { ...menzenBase, winType: "ron", riichi: true, ippatsu: true },
+    },
+    menzen_tsumo: { menzen: { ...menzenBase, winType: "tsumo" } },
+    haitei: {
+      menzen: { ...menzenBase, winType: "tsumo", haitei: true },
+      open: { ...openBase, winType: "ron", haitei: true },
+    },
+    rinshan: {
+      menzen: { ...menzenBase, winType: "tsumo", rinshan: true },
+      open: { ...openBase, winType: "tsumo", rinshan: true },
+    },
+    chankan: {
+      menzen: { ...menzenBase, winType: "ron", chankan: true },
+      open: { ...openBase, winType: "ron", chankan: true },
+    },
+    tanyao: {
+      menzen: {
+        concealedTiles: parseTiles("234p 567p 234s 678s 55p"),
+        winningTile: parseTile("4p"),
+        winType: "ron",
+      },
+    },
+    pinfu: { menzen: { ...menzenBase, winType: "ron" } },
+    iipeikou: {
+      menzen: {
+        concealedTiles: parseTiles("234p 234p 567s 789s 55p"),
+        winningTile: parseTile("5s"),
+        winType: "tsumo",
+      },
+    },
+    ryanpeikou: {
+      menzen: {
+        concealedTiles: parseTiles("234p 234p 678s 678s 55p"),
+        winningTile: parseTile("4p"),
+        winType: "tsumo",
+      },
+    },
+    yakuhai_dragon_5: {
+      menzen: {
+        concealedTiles: parseTiles("555z 234p 567p 234s 99p"),
+        winningTile: parseTile("4p"),
+        winType: "tsumo",
+      },
+      open: { ...openBase, winType: "ron" },
+    },
+    yakuhai_dragon_6: {
+      menzen: {
+        concealedTiles: parseTiles("666z 234p 567p 234s 99p"),
+        winningTile: parseTile("4p"),
+        winType: "tsumo",
+      },
+      open: {
+        concealedTiles: parseTiles("234p 567p 678p 55p"),
+        melds: [pon("666z")],
+        winningTile: parseTile("2p"),
+        winType: "ron",
+      },
+    },
+    yakuhai_dragon_7: {
+      menzen: {
+        concealedTiles: parseTiles("777z 234p 567p 234s 99p"),
+        winningTile: parseTile("4p"),
+        winType: "tsumo",
+      },
+      open: {
+        concealedTiles: parseTiles("234p 567p 678p 55p"),
+        melds: [pon("777z")],
+        winningTile: parseTile("2p"),
+        winType: "ron",
+      },
+    },
+    yakuhai_round_wind: {
+      menzen: {
+        concealedTiles: parseTiles("111z 234p 567p 234s 99p"),
+        winningTile: parseTile("4p"),
+        winType: "tsumo",
+        roundWind: HONOR.EAST,
+      },
+      open: {
+        concealedTiles: parseTiles("234p 567p 678p 55p"),
+        melds: [pon("111z")],
+        winningTile: parseTile("2p"),
+        winType: "ron",
+        roundWind: HONOR.EAST,
+      },
+    },
+    yakuhai_seat_wind: {
+      menzen: {
+        concealedTiles: parseTiles("111z 234p 567p 234s 99p"),
+        winningTile: parseTile("4p"),
+        winType: "tsumo",
+        seatWind: HONOR.EAST,
+      },
+      open: {
+        concealedTiles: parseTiles("234p 567p 678p 55p"),
+        melds: [pon("111z")],
+        winningTile: parseTile("2p"),
+        winType: "ron",
+        seatWind: HONOR.EAST,
+      },
+    },
+    sanshoku_doukou: {
+      menzen: {
+        concealedTiles: parseTiles("111m 111p 111s 234p 99p"),
+        winningTile: parseTile("2p"),
+        winType: "tsumo",
+      },
+      open: {
+        concealedTiles: parseTiles("111p 111s 234p 99p"),
+        melds: [pon("111m")],
+        winningTile: parseTile("2p"),
+        winType: "ron",
+      },
+    },
+    ittsuu: {
+      menzen: {
+        concealedTiles: parseTiles("123p 456p 789p 234s 55s"),
+        winningTile: parseTile("9p"),
+        winType: "tsumo",
+      },
+      open: {
+        concealedTiles: parseTiles("123p 456p 789p 55s"),
+        melds: [pon("222s")],
+        winningTile: parseTile("9p"),
+        winType: "ron",
+      },
+    },
+    toitoi: {
+      menzen: {
+        concealedTiles: parseTiles("111p 333p 555s 777s 99p"),
+        winningTile: parseTile("1p"),
+        winType: "ron",
+      },
+      open: {
+        concealedTiles: parseTiles("333p 555s 777s 99p"),
+        melds: [pon("111p")],
+        winningTile: parseTile("3p"),
+        winType: "ron",
+      },
+    },
+    sanankou: {
+      menzen: {
+        concealedTiles: parseTiles("111p 333p 555s 234s 99p"),
+        winningTile: parseTile("2s"),
+        winType: "tsumo",
+      },
+      open: {
+        concealedTiles: parseTiles("111p 333p 555s 99s"),
+        melds: [pon("999p")],
+        winningTile: parseTile("9s"),
+        winType: "tsumo",
+      },
+    },
+    sankantsu: {
+      menzen: {
+        concealedTiles: parseTiles("234s 99s"),
+        melds: [closedKan("1111p"), closedKan("9999p"), closedKan("1111s")],
+        winningTile: parseTile("2s"),
+        winType: "tsumo",
+      },
+      open: {
+        concealedTiles: parseTiles("234s 99s"),
+        melds: [openKan("1111p"), openKan("9999p"), openKan("1111s")],
+        winningTile: parseTile("2s"),
+        winType: "ron",
+      },
+    },
+    shousangen: {
+      menzen: {
+        concealedTiles: parseTiles("555z 666z 234p 234s 77z"),
+        winningTile: parseTile("2p"),
+        winType: "tsumo",
+      },
+      open: {
+        concealedTiles: parseTiles("666z 234p 234s 77z"),
+        melds: [pon("555z")],
+        winningTile: parseTile("2p"),
+        winType: "ron",
+      },
+    },
+    chanta: {
+      menzen: {
+        concealedTiles: parseTiles("123p 789p 123s 111z 99s"),
+        winningTile: parseTile("3p"),
+        winType: "tsumo",
+      },
+      open: {
+        concealedTiles: parseTiles("123p 789p 123s 99s"),
+        melds: [pon("111z")],
+        winningTile: parseTile("3p"),
+        winType: "ron",
+      },
+    },
+    junchan: {
+      menzen: {
+        concealedTiles: parseTiles("123p 789p 123s 789s 99p"),
+        winningTile: parseTile("3p"),
+        winType: "tsumo",
+      },
+      open: {
+        concealedTiles: parseTiles("789p 123s 789s 99p"),
+        melds: [pon("111p")],
+        winningTile: parseTile("3s"),
+        winType: "ron",
+      },
+    },
+    honroutou: {
+      menzen: {
+        concealedTiles: parseTiles("111z 222z 333z 999p 99m"),
+        winningTile: parseTile("9p"),
+        winType: "ron",
+      },
+      open: {
+        concealedTiles: parseTiles("222z 333z 999p 99m"),
+        melds: [pon("111z")],
+        winningTile: parseTile("9p"),
+        winType: "ron",
+      },
+    },
+    honitsu: {
+      menzen: {
+        concealedTiles: parseTiles("123p 456p 789p 111z 99p"),
+        winningTile: parseTile("3p"),
+        winType: "tsumo",
+      },
+      open: {
+        concealedTiles: parseTiles("123p 456p 789p 99p"),
+        melds: [pon("111z")],
+        winningTile: parseTile("3p"),
+        winType: "ron",
+      },
+    },
+    chinitsu: {
+      menzen: {
+        concealedTiles: parseTiles("123p 456p 789p 234p 99p"),
+        winningTile: parseTile("3p"),
+        winType: "tsumo",
+      },
+      open: {
+        concealedTiles: parseTiles("123p 456p 789p 99p"),
+        melds: [pon("222p")],
+        winningTile: parseTile("3p"),
+        winType: "ron",
+      },
+    },
+    chiitoitsu: {
+      menzen: {
+        concealedTiles: parseTiles("11p 33p 55p 77p 99p 22s 44s"),
+        winningTile: parseTile("4s"),
+        winType: "tsumo",
+      },
+    },
+  };
+
+describe("spec 3.0 役表の翻を固定する (#391)", () => {
+  const entries = Object.keys(SPEC_HAN) as SpecYakuId[];
+
+  it.each(entries)("%s: 門前の翻が spec 3.0 と一致する", (id) => {
+    const analysis = analyzeWin(FIXTURES[id].menzen);
+    const yaku = analysis?.yaku.find((y) => y.id === id);
+    expect(yaku, `${id} が門前フィクスチャで成立していない`).toBeDefined();
+    expect(yaku?.han).toBe(SPEC_HAN[id].menzen);
+  });
+
+  const openEntries = entries.filter((id) => SPEC_HAN[id].open !== null);
+
+  it.each(openEntries)(
+    "%s: 副露の翻(喰い下がり)が spec 3.0 と一致する",
+    (id) => {
+      const fixture = FIXTURES[id].open;
+      expect(fixture, `${id} の副露フィクスチャが未定義`).toBeDefined();
+      const analysis = analyzeWin(fixture as WinContext);
+      const yaku = analysis?.yaku.find((y) => y.id === id);
+      expect(yaku, `${id} が副露フィクスチャで成立していない`).toBeDefined();
+      expect(yaku?.han).toBe(SPEC_HAN[id].open);
+    },
+  );
+
+  it("副露で成立しない役(表の「—」)には副露フィクスチャを置かない", () => {
+    const menzenOnly = entries.filter((id) => SPEC_HAN[id].open === null);
+    expect(menzenOnly.map((id) => [id, FIXTURES[id].open])).toEqual(
+      menzenOnly.map((id) => [id, undefined]),
+    );
+  });
+});
+
+/**
+ * spec 3.0「役満(一律シングル = `yakuman: 1`)」表の固定(#391)。
+ *
+ * spec 3.0 は「国士十三面・四暗刻単騎・大四喜・純正九蓮宝燈のダブル役満は**採用しない**
+ * (一律シングル)」と規定するが、既存テストは `isYakuman === true` と id の包含しか
+ * 見ておらず、**`yakuman === 1` を固定していなかった**。
+ *
+ * ここでは各役満役オブジェクトの `yakuman` を直接見る(手の合計ではないので、
+ * 天和・地和との複合フィクスチャでも 1 役あたりの倍数を正しく主張できる)。
+ */
+const YAKUMAN_FIXTURES: [id: string, ctx: WinContext][] = [
+  [
+    "tenhou",
+    {
+      concealedTiles: parseTiles("234p 567p 234s 678s 99p"),
+      winningTile: parseTile("4p"),
+      winType: "tsumo",
+      blessing: "heaven",
+    },
+  ],
+  [
+    "chiihou",
+    {
+      concealedTiles: parseTiles("234p 567p 234s 678s 99p"),
+      winningTile: parseTile("4p"),
+      winType: "tsumo",
+      blessing: "earth",
+    },
+  ],
+  [
+    "kokushi",
+    {
+      concealedTiles: parseTiles("119m 19p 19s 1234567z"),
+      winningTile: parseTile("1m"),
+      winType: "tsumo",
+    },
+  ],
+  [
+    "tsuuiisou",
+    {
+      concealedTiles: parseTiles("111z 222z 333z 555z 66z"),
+      winningTile: parseTile("6z"),
+      winType: "tsumo",
+    },
+  ],
+  [
+    "chinroutou",
+    {
+      concealedTiles: parseTiles("111m 999m 111p 999p 99s"),
+      winningTile: parseTile("9s"),
+      winType: "tsumo",
+    },
+  ],
+  [
+    "ryuuiisou",
+    {
+      concealedTiles: parseTiles("234s 234s 666s 888s 66z"),
+      winningTile: parseTile("6z"),
+      winType: "tsumo",
+    },
+  ],
+  [
+    "daisangen",
+    {
+      concealedTiles: parseTiles("555z 666z 777z 111p 99p"),
+      winningTile: parseTile("9p"),
+      winType: "tsumo",
+    },
+  ],
+  [
+    "shousuushii",
+    {
+      concealedTiles: parseTiles("111z 222z 333z 44z 999p"),
+      winningTile: parseTile("9p"),
+      winType: "tsumo",
+    },
+  ],
+  [
+    "suukantsu",
+    {
+      concealedTiles: parseTiles("99s"),
+      melds: [
+        closedKan("1111p"),
+        closedKan("9999p"),
+        closedKan("1111s"),
+        closedKan("2222s"),
+      ],
+      winningTile: parseTile("9s"),
+      winType: "tsumo",
+    },
+  ],
+];
+
+/**
+ * spec 3.0:96 が「ダブル役満は採用しない」と**名指しする 4 形**。
+ * 国士十三面・四暗刻単騎・大四喜・純正九蓮宝燈。
+ */
+const SINGLE_YAKUMAN_NAMED: [label: string, id: string, ctx: WinContext][] = [
+  [
+    "国士無双十三面待ち",
+    "kokushi",
+    {
+      concealedTiles: parseTiles("19m 19p 19s 1234567z 1m"),
+      winningTile: parseTile("1m"),
+      winType: "ron",
+    },
+  ],
+  [
+    "四暗刻単騎",
+    "suuankou",
+    {
+      concealedTiles: parseTiles("111p 333p 555s 777s 99p"),
+      winningTile: parseTile("9p"),
+      winType: "ron",
+    },
+  ],
+  [
+    // ツモだと 4 暗刻が揃って四暗刻と複合し、手の合計が 2 になる(役満どうしの複合であり
+    // 「大四喜そのものがダブル」ではない)。ここでは大四喜単独を見たいのでロンで和了し、
+    // 和了牌が完成させた刻子を明刻へ降格させて四暗刻を外す。
+    "大四喜",
+    "daisuushii",
+    {
+      concealedTiles: parseTiles("111z 222z 333z 444z 99p"),
+      winningTile: parseTile("1z"),
+      winType: "ron",
+    },
+  ],
+  [
+    "純正九蓮宝燈",
+    "chuuren",
+    {
+      concealedTiles: parseTiles("11123456789999p"),
+      winningTile: parseTile("9p"),
+      winType: "tsumo",
+    },
+  ],
+];
+
+describe("spec 3.0 役満は一律シングル (#391)", () => {
+  it.each(YAKUMAN_FIXTURES)("%s の yakuman は 1", (id, ctx) => {
+    const analysis = analyzeWin(ctx);
+    const yaku = analysis?.yaku.find((y) => y.id === id);
+    expect(yaku, `${id} が成立していない`).toBeDefined();
+    expect(yaku?.yakuman).toBe(1);
+  });
+
+  it.each(SINGLE_YAKUMAN_NAMED)(
+    "%s もシングル(spec 3.0 がダブル役満を採用しないと名指しする形)",
+    (_label, id, ctx) => {
+      const analysis = analyzeWin(ctx);
+      const yaku = analysis?.yaku.find((y) => y.id === id);
+      expect(yaku, `${id} が成立していない`).toBeDefined();
+      expect(yaku?.yakuman).toBe(1);
+      expect(analysis?.yakuman).toBe(1);
+    },
+  );
+});
