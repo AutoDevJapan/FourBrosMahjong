@@ -9,7 +9,7 @@
  * - {@link randomHand}: 山から k 枚を無作為抽出(向聴が深い手が多く「非和了」を厚く検証)。
  * - {@link randomStructuredHand}: 4面子1雀頭を組んでから 0〜3 枚を無作為置換
  *   (テンパイ〜低向聴の「和了に近い形」を厚く検証)。
- * - {@link randomMeldedHand}: 副露(ポン/明槓/暗槓)1〜3 組 + 対応枚数の門前手
+ * - {@link randomMeldedHand}: 副露(ポン/明槓/暗槓)1〜4 組 + 対応枚数の門前手
  *   (副露経路の分解・待ちを検証する / issue #390)。
  */
 
@@ -291,13 +291,21 @@ function buildAmbiguousConcealed(
   groupsNeeded: number,
   used: number[],
 ): number[] | null {
+  // 失敗して null を返す経路では `used` を呼び出し前の状態へ完全に戻す。
+  // 戻さないと後続の通常生成が「実際より牌が減っている山」で動き、
+  // カバレッジ閾値を守るジェネレータに意図しない偏りが乗る。
+  const snapshot = [...used];
+  const rollback = (): null => {
+    used.splice(0, used.length, ...snapshot);
+    return null;
+  };
   const base = rng() < 0.5 ? 9 : 18; // 筒子 / 索子
   const counts = new Array<number>(34).fill(0);
 
   if (groupsNeeded === 3) {
     const start = base + randInt(rng, 7); // start+2 が同一スート内に収まる
     for (const idx of [start, start + 1, start + 2]) {
-      if (used[idx] + 3 > 4) return null;
+      if (used[idx] + 3 > 4) return rollback();
       used[idx] += 3;
       counts[idx] += 3;
     }
@@ -310,20 +318,20 @@ function buildAmbiguousConcealed(
       counts[pair] += 2;
       return counts;
     }
-    return null;
+    return rollback();
   }
 
   if (groupsNeeded === 2) {
     const start = base + randInt(rng, 6); // start+3 が同一スート内に収まる
     for (const idx of [start, start + 1, start + 2, start + 3]) {
-      if (used[idx] + 2 > 4) return null;
+      if (used[idx] + 2 > 4) return rollback();
       used[idx] += 2;
       counts[idx] += 2;
     }
     return counts;
   }
 
-  return null;
+  return rollback();
 }
 
 /** `lo`..`hi`(両端含む)の 34-index 列。 */
@@ -380,15 +388,17 @@ function fallbackMeldedHand(
 /**
  * 副露あり手牌を生成する。
  *
- * - `structured = true`: 4面子1雀頭を組んでから `meldCount` 組を副露へ切り出し、
- *   門前部分を 0〜`maxSwaps` 枚置換する(和了・テンパイを厚く)。
+ * - `structured = true`: 副露を先に確定させたうえで門前部分を `4 - meldCount` 面子
+ *   + 雀頭で組み、内訳を3系統に振り分ける(和了・テンパイ・多重分解を厚く)。
+ *   1/4 は多重分解が確実に生じる決め打ち形、残りの半数は密集帯に閉じ込めた形、
+ *   後者はさらに 0〜3 枚を無作為置換する。
  * - `structured = false`: 副露だけ先に決め、門前部分は残り山から無作為抽出する
  *   (向聴が深い「非和了・非テンパイ」を厚く)。
  *
  * 1牌種の総枚数(門前 + 副露)は常に 4 枚以下になる。
  *
  * @param rng 決定的 PRNG。
- * @param meldCount 副露数(1..3)。
+ * @param meldCount 副露数(1..4)。
  * @param concealedSize 門前部分の枚数。`14 - 3 * meldCount`(和了形サイズ)または
  *   `13 - 3 * meldCount`(待ち判定サイズ)を渡す。
  * @param structured 構造化生成にするか。

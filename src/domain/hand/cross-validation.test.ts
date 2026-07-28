@@ -325,7 +325,11 @@ describe("クロス検証: 副露あり手の分解・和了・待ち (#390)", (
     (meldCount) => {
       const rng = makeRng(0x3900_0100 + meldCount);
       const groupsNeeded = 4 - meldCount;
-      const mismatches: string[] = [];
+      // 不一致は「件数カウンタ」と「表示用サンプル(上限8)」を分ける。
+      // 表示上限を検出条件に混ぜると、後で判定を緩めた瞬間に穴になる。
+      let decompMismatch = 0;
+      let completeMismatch = 0;
+      const samples: string[] = [];
       let completeCount = 0;
       let multiFormCount = 0;
       let kanCount = 0;
@@ -362,27 +366,34 @@ describe("クロス検証: 副露あり手の分解・和了・待ち (#390)", (
         );
 
         if (!setEqual(actual, expected)) {
-          if (mismatches.length < 8) {
-            mismatches.push(
+          decompMismatch += 1;
+          if (samples.length < 8) {
+            samples.push(
               `decomp ${describeMeldedHand(hand)} 本体=${[...actual].sort().join(" / ")} 定義ベース=${[...expected].sort().join(" / ")}`,
             );
           }
-          continue;
         }
+        // 分解が食い違った手でも和了判定は独立に照合する(道連れで落とさない)。
         const complete = isCompleteHand(concealedTiles, melds);
-        if (complete !== oracleForms.size > 0 && mismatches.length < 8) {
-          mismatches.push(
-            `complete ${describeMeldedHand(hand)} 本体=${complete} 定義ベース=${oracleForms.size > 0}`,
-          );
+        const oracleComplete = oracleForms.size > 0;
+        if (complete !== oracleComplete) {
+          completeMismatch += 1;
+          if (samples.length < 8) {
+            samples.push(
+              `complete ${describeMeldedHand(hand)} 本体=${complete} 定義ベース=${oracleComplete}`,
+            );
+          }
         }
-        if (oracleForms.size > 0) completeCount += 1;
+        if (oracleComplete) completeCount += 1;
         if (oracleForms.size > 1) multiFormCount += 1;
       }
 
+      if (samples.length) console.log(samples.join("\n"));
       console.log(
-        `[cross] melds=${meldCount} hands=${MELDED_HANDS} complete=${completeCount} multiForm=${multiFormCount} kan=${kanCount} ankan=${ankanCount}`,
+        `[cross] melds=${meldCount} hands=${MELDED_HANDS} complete=${completeCount} multiForm=${multiFormCount} kan=${kanCount} ankan=${ankanCount} decompMismatch=${decompMismatch} completeMismatch=${completeMismatch}`,
       );
-      expect(mismatches).toEqual([]);
+      expect(decompMismatch).toBe(0);
+      expect(completeMismatch).toBe(0);
       // 照合が「和了しない手ばかり」で空回りしていないことを固定する(vacuum 防止)。
       expect(completeCount).toBeGreaterThan(MELDED_HANDS * 0.1);
       expect(kanCount).toBeGreaterThan(0);
@@ -392,9 +403,9 @@ describe("クロス検証: 副露あり手の分解・和了・待ち (#390)", (
       // ジェネレータが密集帯を作らなくなったら即座に落ちるようにしておく。
       //
       // 副露3組(門前5枚 = 1面子+雀頭)・4組(門前2枚 = 雀頭のみ)は分解が**常に一意**。
-      // サンマ牌種で作れる5枚の和了形 1,080 通りを総当たりしたところ、2通り以上に
-      // 分解できるものは 0 件だった(刻子は同一牌3枚を要するため別の面子と両立せず、
-      // 順子は開始位置がずれた時点で牌が食い違うため)。よって 0 を積極的に固定する。
+      // これはジェネレータの都合ではなく構造的事実で、`oracle.test.ts` の
+      // 「1面子+雀頭 / 雀頭のみの和了形を総当たりすると分解は常に1通り」で固定してある。
+      // よってここでも 0 であることを積極的に固定する。
       if (meldCount <= 2) {
         expect(multiFormCount).toBeGreaterThan(MELDED_HANDS * 0.05);
       } else {
@@ -408,7 +419,8 @@ describe("クロス検証: 副露あり手の分解・和了・待ち (#390)", (
     (meldCount) => {
       const rng = makeRng(0x3900_0200 + meldCount);
       const groupsNeeded = 4 - meldCount;
-      const mismatches: string[] = [];
+      let waitMismatch = 0;
+      const samples: string[] = [];
       let tenpaiCount = 0;
       let multiWaitCount = 0;
 
@@ -435,19 +447,23 @@ describe("クロス検証: 副露あり手の分解・和了・待ち (#390)", (
           waitingTiles(concealedTiles, melds).map((t) => tileTo34Index(t)),
         );
 
-        if (!setEqualNum(actual, expected) && mismatches.length < 8) {
-          mismatches.push(
-            `waits ${describeMeldedHand(hand)} 本体=${[...actual].sort((x, y) => x - y)} 定義ベース=${[...expected].sort((x, y) => x - y)}`,
-          );
+        if (!setEqualNum(actual, expected)) {
+          waitMismatch += 1;
+          if (samples.length < 8) {
+            samples.push(
+              `waits ${describeMeldedHand(hand)} 本体=${[...actual].sort((x, y) => x - y)} 定義ベース=${[...expected].sort((x, y) => x - y)}`,
+            );
+          }
         }
         if (expected.size > 0) tenpaiCount += 1;
         if (expected.size > 1) multiWaitCount += 1;
       }
 
+      if (samples.length) console.log(samples.join("\n"));
       console.log(
-        `[cross] melds=${meldCount} hands=${MELDED_HANDS} tenpai=${tenpaiCount} multiWait=${multiWaitCount}`,
+        `[cross] melds=${meldCount} hands=${MELDED_HANDS} tenpai=${tenpaiCount} multiWait=${multiWaitCount} waitMismatch=${waitMismatch}`,
       );
-      expect(mismatches).toEqual([]);
+      expect(waitMismatch).toBe(0);
       // vacuum 防止: テンパイ手と多面待ちを実際に踏んでいることを固定する。
       expect(tenpaiCount).toBeGreaterThan(MELDED_HANDS * 0.1);
       // 副露4組は門前1枚の単騎のみで、待ちは常に1種類(多面待ちは構造上あり得ない)。
@@ -503,12 +519,14 @@ function joinSignature(parts: readonly string[]): string {
   return [...parts].sort().join("|");
 }
 
+/** 失敗メッセージ用。副露はポン/明槓/暗槓が読み分けられる形で書き出す。 */
 function describeMeldedHand(hand: MeldedHand): string {
+  const label = (m: GeneratedMeld): string => {
+    if (!m.isKan) return "ポン";
+    return m.concealed ? "暗槓" : "明槓";
+  };
   const melds = hand.melds
-    .map(
-      (m) =>
-        `[${m.tiles.map(tileNotation).join("")}${m.concealed ? "(暗)" : ""}]`,
-    )
+    .map((m) => `[${m.tiles.map(tileNotation).join("")}${label(m)}]`)
     .join("");
   return `${describeHand(hand.concealedTiles)} ${melds}`;
 }

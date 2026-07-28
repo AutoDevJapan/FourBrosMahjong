@@ -15,7 +15,7 @@ import {
   standardDecompositions34,
   waitingIndicesOracle34,
 } from "./agari-oracle";
-import { tilesToCount34, tileTo34Index } from "./counts34";
+import { SANMA_INDICES_34, tilesToCount34, tileTo34Index } from "./counts34";
 import {
   standardFormsByDefinition34,
   waitingIndicesByDefinition34,
@@ -194,7 +194,103 @@ describe("定義ベースの分解・待ちオラクル(副露経路 / #390)", (
   it("テンパイでなければ空", () => {
     expect(defWaits("1p 3p 5s 7s 9s 1z 3z", 2)).toEqual([]);
   });
+
+  // `cross-validation.test.ts` の副露3組・4組は `multiFormCount` が 0 であることを
+  // 積極的に固定している。その根拠が「ジェネレータが偶然作れていないだけ」ではなく
+  // **構造的事実**であることを、和了形の総当たりでここに固定する。
+  it("1面子+雀頭(5枚)の和了形は総当たりしても分解が常に1通り", () => {
+    let hands = 0;
+    let maxForms = 0;
+    for (const counts of allWinningCounts(1)) {
+      hands += 1;
+      maxForms = Math.max(
+        maxForms,
+        standardFormsByDefinition34(counts, 1).size,
+      );
+    }
+    expect(hands).toBeGreaterThan(1_000); // 空回り防止
+    expect(maxForms).toBe(1);
+  });
+
+  it("雀頭のみ(2枚)の和了形も分解が常に1通り", () => {
+    let hands = 0;
+    let maxForms = 0;
+    for (const counts of allWinningCounts(0)) {
+      hands += 1;
+      maxForms = Math.max(
+        maxForms,
+        standardFormsByDefinition34(counts, 0).size,
+      );
+    }
+    expect(hands).toBe(SANMA_INDICES_34.length);
+    expect(maxForms).toBe(1);
+  });
+
+  it("副露4組(門前1枚)の待ちは総当たりしても常に単騎1種以下", () => {
+    let maxWaits = 0;
+    for (const index of SANMA_INDICES_34) {
+      const concealed = new Array<number>(34).fill(0);
+      concealed[index] = 1;
+      const used = [...concealed];
+      maxWaits = Math.max(
+        maxWaits,
+        waitingIndicesByDefinition34(concealed, 0, used).size,
+      );
+    }
+    expect(maxWaits).toBe(1);
+  });
 });
+
+/**
+ * `groupsNeeded` 面子 + 雀頭で作れる和了形の 34-index カウントを重複なく全列挙する。
+ * 面子候補(刻子27種 + 順子14種)と雀頭候補の直積から作るため、
+ * 「和了形になる多重集合」を漏れなく覆う。
+ */
+function* allWinningCounts(groupsNeeded: number): Generator<number[]> {
+  const groups: number[][] = [];
+  for (const index of SANMA_INDICES_34) groups.push([index, index, index]);
+  for (const base of [9, 18]) {
+    for (let offset = 0; offset < 7; offset += 1) {
+      groups.push([base + offset, base + offset + 1, base + offset + 2]);
+    }
+  }
+  const seen = new Set<string>();
+  const emit = function* (
+    counts: number[],
+    start: number,
+    remaining: number,
+  ): Generator<number[]> {
+    if (remaining === 0) {
+      for (const pair of SANMA_INDICES_34) {
+        if (counts[pair] + 2 > 4) continue;
+        counts[pair] += 2;
+        const key = counts.join(",");
+        if (!seen.has(key)) {
+          seen.add(key);
+          yield [...counts];
+        }
+        counts[pair] -= 2;
+      }
+      return;
+    }
+    for (let g = start; g < groups.length; g += 1) {
+      const group = groups[g] as number[];
+      let pushed = 0;
+      let ok = true;
+      for (const i of group) {
+        if (counts[i] >= 4) {
+          ok = false;
+          break;
+        }
+        counts[i] += 1;
+        pushed += 1;
+      }
+      if (ok) yield* emit(counts, g, remaining - 1);
+      for (let k = pushed - 1; k >= 0; k -= 1) counts[group[k] as number] -= 1;
+    }
+  };
+  yield* emit(new Array<number>(34).fill(0), 0, groupsNeeded);
+}
 
 describe("4枚使いの理想化(本作 ai.ts と共通・参照とは既知の ±1 差・#143)", () => {
   it("全4枚が手牌の単騎/シャンポンは牌残量無視の理想化で 0(参照は 1)", () => {

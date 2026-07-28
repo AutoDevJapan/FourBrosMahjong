@@ -188,6 +188,12 @@ function canonicalSignature(blocks: readonly FormBlock[]): string {
  * @param groupsNeeded 門前部分で作るべき面子数(= 4 − 副露数)。
  * @param maxWaste 許容する「手牌に無い枚数」。0 なら完全一致、1 なら1枚不足まで。
  * @param visit 条件を満たす W ごとに呼ばれる。`work` は W のカウント配列。
+ *   ⚠️ `work` / `blocks` は探索中に**巻き戻される可変バッファ**。`visit` の外へ
+ *   保持してはならない(必要ならコピーを取ること)。
+ *
+ * なお `shantenByDefinition34` も同形の push/pop を持つが、あちらは枝刈りが無く
+ * `blocks` も追わないため、**意図的に別実装**にしてある(共通化すると片方の枝刈り条件が
+ * もう片方へ漏れる)。
  */
 function forEachCoveringForm(
   concealed: readonly number[],
@@ -334,7 +340,9 @@ export function standardFormsByDefinition34(
  * @param groupsNeeded 門前部分で作るべき面子数(= 4 − 副露数)。
  * @param used 手牌 + 副露を合わせた 34-index カウント配列。4枚使い切った牌種は待てない。
  * @returns 待ち牌の 34-index 集合。空ならテンパイでない。
- * @throws RangeError `groupsNeeded` が 0..4 の外、または枚数が噛み合わない場合。
+ * @throws RangeError `groupsNeeded` が 0..4 の外、枚数が噛み合わない、または
+ *   `used` が `concealed` を含まない(手牌より少ない)場合。`used` の取り違えを
+ *   静かに受け入れると、待ちが不当に絞られて false red になる。
  */
 export function waitingIndicesByDefinition34(
   concealed: readonly number[],
@@ -342,13 +350,19 @@ export function waitingIndicesByDefinition34(
   used: readonly number[],
 ): Set<number> {
   assertFormArity(concealed, groupsNeeded, 1);
+  for (let i = 0; i < COUNT34_LEN; i++) {
+    if ((used[i] ?? 0) < (concealed[i] ?? 0)) {
+      throw new RangeError(
+        `used は concealed を含む必要がある(index ${i}: used=${used[i] ?? 0} < concealed=${concealed[i] ?? 0})。`,
+      );
+    }
+  }
   const out = new Set<number>();
-  forEachCoveringForm(concealed, groupsNeeded, 1, (work, _blocks, waste) => {
-    // W は手牌より1枚多いので waste は必ず 1 以上。maxWaste=1 と併せて常に 1 になる。
-    if (waste !== 1) return;
+  forEachCoveringForm(concealed, groupsNeeded, 1, (work) => {
+    // W は手牌より1枚多く、枝刈りで waste ≤ 1 なので waste は常にちょうど 1。
+    // したがって超過している牌種はちょうど1種・1枚で、それが待ち牌。
     for (let i = 0; i < COUNT34_LEN; i++) {
       if (work[i] <= (concealed[i] ?? 0)) continue;
-      // 超過している牌種はちょうど1つ・1枚(waste === 1)。それが待ち牌。
       if ((used[i] ?? 0) < COPIES) out.add(i);
       return;
     }
