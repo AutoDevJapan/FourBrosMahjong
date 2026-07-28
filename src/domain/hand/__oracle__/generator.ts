@@ -437,6 +437,7 @@ export function randomMeldedHand(
     }
 
     // 待ち判定サイズ(1枚少ない)が要求されたら1枚落とす。
+    // ここから先で `used` は読まないので、枚数を減らしても同期は不要。
     for (let extra = fullSize; extra > concealedSize; extra -= 1) {
       const present: number[] = [];
       for (const idx of SANMA_INDICES_34) {

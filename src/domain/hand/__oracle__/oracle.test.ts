@@ -164,8 +164,15 @@ describe("定義ベースの分解・待ちオラクル(副露経路 / #390)", (
 
   it("和了形でない門前部分は空集合", () => {
     expect(forms("123p 457p 99s", 2)).toEqual([]);
-    // 枚数が groupsNeeded と噛み合わない入力も空(契約違反を静かに通さない)。
-    expect(forms("123p 456p 99s", 3)).toEqual([]);
+  });
+
+  it("枚数と groupsNeeded が噛み合わない呼び出しは失敗する(静かに0件にしない)", () => {
+    // 8枚を「3面子+雀頭(11枚)」として渡す契約違反。空集合を返すと
+    // 「和了形でない」と区別が付かず、照合が静かに空回りする。
+    expect(() => forms("123p 456p 99s", 3)).toThrow(RangeError);
+    expect(() => defWaits("123p 9s", 2)).toThrow(RangeError);
+    expect(() => forms("123p 456p 99s", 5)).toThrow(RangeError);
+    expect(() => forms("123p 456p 99s", -1)).toThrow(RangeError);
   });
 
   it("副露2組の三面張を列挙する(2面子+雀頭の1枚不足)", () => {

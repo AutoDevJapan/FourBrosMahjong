@@ -268,6 +268,34 @@ function totalOf(counts: readonly number[]): number {
 }
 
 /**
+ * 入力枚数と `groupsNeeded` の整合を検査する。
+ * `extra` は面子以外の枚数(和了形なら雀頭の 2、待ち判定ならその 1 枚不足で 1)。
+ */
+function assertFormArity(
+  concealed: readonly number[],
+  groupsNeeded: number,
+  extra: 1 | 2,
+): void {
+  if (!Number.isInteger(groupsNeeded) || groupsNeeded < 0) {
+    throw new RangeError(
+      `groupsNeeded は 0 以上の整数(受領: ${groupsNeeded})。`,
+    );
+  }
+  if (groupsNeeded > TOTAL_GROUPS) {
+    throw new RangeError(
+      `groupsNeeded は ${TOTAL_GROUPS} 以下(受領: ${groupsNeeded})。`,
+    );
+  }
+  const expected = groupsNeeded * 3 + extra;
+  const total = totalOf(concealed);
+  if (total !== expected) {
+    throw new RangeError(
+      `門前部分の枚数が groupsNeeded=${groupsNeeded} と噛み合わない(期待: ${expected} / 受領: ${total})。`,
+    );
+  }
+}
+
+/**
  * 副露手の**門前部分**が作る標準形(面子 + 雀頭)の全分解を、正規化シグネチャ集合で返す。
  *
  * 和了形の側を全列挙し「手牌と完全に一致する W」を拾うだけなので、
@@ -279,14 +307,16 @@ function totalOf(counts: readonly number[]): number {
  * @param concealed 門前部分の 34-index カウント配列(枚数は `groupsNeeded * 3 + 2`)。
  * @param groupsNeeded 門前部分で作るべき面子数(= 4 − 副露数)。
  * @returns 分解の正規化シグネチャ集合。空なら標準形にならない。
+ * @throws RangeError `groupsNeeded` が 0..4 の外、または枚数が噛み合わない場合。
+ *   「和了形でない」と「呼び出し側の契約違反」を空集合で同一視すると照合が静かに
+ *   空回りするため、後者は明示的に失敗させる。
  */
 export function standardFormsByDefinition34(
   concealed: readonly number[],
   groupsNeeded: number,
 ): Set<string> {
+  assertFormArity(concealed, groupsNeeded, 2);
   const out = new Set<string>();
-  if (groupsNeeded < 0 || groupsNeeded > TOTAL_GROUPS) return out;
-  if (totalOf(concealed) !== groupsNeeded * 3 + 2) return out;
   forEachCoveringForm(concealed, groupsNeeded, 0, (_work, blocks) => {
     out.add(canonicalSignature(blocks));
   });
@@ -304,17 +334,18 @@ export function standardFormsByDefinition34(
  * @param groupsNeeded 門前部分で作るべき面子数(= 4 − 副露数)。
  * @param used 手牌 + 副露を合わせた 34-index カウント配列。4枚使い切った牌種は待てない。
  * @returns 待ち牌の 34-index 集合。空ならテンパイでない。
+ * @throws RangeError `groupsNeeded` が 0..4 の外、または枚数が噛み合わない場合。
  */
 export function waitingIndicesByDefinition34(
   concealed: readonly number[],
   groupsNeeded: number,
   used: readonly number[],
 ): Set<number> {
+  assertFormArity(concealed, groupsNeeded, 1);
   const out = new Set<number>();
-  if (groupsNeeded < 0 || groupsNeeded > TOTAL_GROUPS) return out;
-  if (totalOf(concealed) !== groupsNeeded * 3 + 1) return out;
   forEachCoveringForm(concealed, groupsNeeded, 1, (work, _blocks, waste) => {
-    if (waste !== 1) return; // W が手牌と同枚数になることは無いが念のため
+    // W は手牌より1枚多いので waste は必ず 1 以上。maxWaste=1 と併せて常に 1 になる。
+    if (waste !== 1) return;
     for (let i = 0; i < COUNT34_LEN; i++) {
       if (work[i] <= (concealed[i] ?? 0)) continue;
       // 超過している牌種はちょうど1つ・1枚(waste === 1)。それが待ち牌。
