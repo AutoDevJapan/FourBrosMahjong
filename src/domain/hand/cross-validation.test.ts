@@ -29,6 +29,7 @@ import {
   tilesToCount34,
   tileTo34Index,
 } from "./__oracle__/counts34";
+import { shantenByDefinition34 } from "./__oracle__/definition-oracle";
 import {
   makeRng,
   randomHand,
@@ -36,7 +37,7 @@ import {
 } from "./__oracle__/generator";
 import { shantenOracle34 } from "./__oracle__/shanten-oracle";
 import { decomposeStandard, isCompleteHand } from "./decompose";
-import { tileNotation } from "./notation";
+import { parseTiles, tileNotation } from "./notation";
 import { waitingTiles } from "./tenpai";
 
 /**
@@ -235,3 +236,59 @@ function describeHand(tiles: readonly Tile[]): string {
   );
   return sorted.map(tileNotation).join("");
 }
+
+/**
+ * 列挙非依存の定義ベース照合(#392)。
+ *
+ * 上のクロス検証は `__oracle__/shanten-oracle.ts` と `src/domain/game/ai.ts` を
+ * 突き合わせているが、両者は「スート別に (面子, 塔子, 対子) を数え上げる」**同型の列挙**を
+ * 持つ(差分は最終式とパレート枝刈りの有無だけ)。そのため片側のリグレッションは検出できる
+ * 一方で、**列挙側の共通欠陥(ある塔子形の取りこぼし等)は両者で共有され素通りする**。
+ *
+ * ここでは塔子・面子候補の列挙を一切行わない
+ * {@link shantenByDefinition34}(和了形の側を全列挙し「手牌との最大重なり」から距離を直接
+ * 算出する)と突き合わせ、その欠陥クラスを初めて検出できるようにする。
+ *
+ * 副露数 1..3 に限定しているのは、門前 13 枚だと和了形が約 1,300 万通りに爆発して
+ * 現実的でないため(副露手は面子が固定されるぶん探索が激減する)。実測の内訳は
+ * meldCount=3 が 400 手で 23ms、2 が 200 手で 166ms、1 が 30 手で 325ms。
+ */
+describe("列挙非依存の定義ベース向聴オラクルとの照合 (#392)", () => {
+  it.each([
+    [3, 400],
+    [2, 200],
+    [1, 30],
+  ])("meldCount=%d の %d 手で shanten() と一致する", (meldCount, samples) => {
+    const rng = makeRng(0x39_2a + meldCount);
+    const mismatches: string[] = [];
+    for (let i = 0; i < samples; i++) {
+      const tiles = randomHand(rng, 13 - 3 * meldCount);
+      const actual = shanten(tiles, meldCount);
+      const expected = shantenByDefinition34(tilesToCount34(tiles), meldCount);
+      if (actual !== expected) {
+        mismatches.push(
+          `${tiles.map(tileNotation).join("")} → shanten=${actual} / 定義ベース=${expected}`,
+        );
+      }
+    }
+    expect(mismatches).toEqual([]);
+  });
+
+  it("定義ベースオラクル自身の既知手を固定する", () => {
+    const at = (notation: string, meldCount: number) =>
+      shantenByDefinition34(tilesToCount34(parseTiles(notation)), meldCount);
+    // 副露3 + 門前4枚(和了形は 1面子 + 雀頭 = 5枚)。
+    expect(at("123p 9s", 3)).toBe(0); // 順子完成 + 単騎 → テンパイ
+    expect(at("12p 99s", 3)).toBe(0); // 雀頭完成 + 両面 → テンパイ
+    expect(at("19p 28s", 3)).toBe(2); // 重なりは最大2枚 → 4 − 2 = 2
+    // 副露2 + 門前7枚(和了形は 2面子 + 雀頭 = 8枚)。
+    expect(at("123p 456p 9s", 2)).toBe(0);
+    expect(at("111p 222p 9s", 2)).toBe(0);
+  });
+
+  it("門前(meldCount=0)は対象外として明示的に拒否する", () => {
+    expect(() => shantenByDefinition34(new Array(34).fill(0), 0)).toThrow(
+      RangeError,
+    );
+  });
+});
