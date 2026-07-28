@@ -163,8 +163,16 @@ interface HandState {
   turn: SeatKey;
   /** 現在の手番がツモった牌(打牌待ち)。未ツモは null。 */
   drawn: Tile | null;
-  /** 現在の `drawn` が嶺上牌(カン)由来か(嶺上開花判定)。 */
+  /** 現在の `drawn` が**カンの**嶺上牌由来か(嶺上開花判定)。 */
   fromKan: boolean;
+  /**
+   * 現在の `drawn` が嶺上補充由来か(カン **または** 北抜き / #396)。
+   *
+   * 海底摸月は「ライブ壁の最後の1枚をツモった」ことが条件で、嶺上牌のツモは
+   * 対象外(`isHaiteiTsumo` の契約)。北抜きの嶺上補充も嶺上牌である以上ここに含める。
+   * 嶺上開花はカン限定(spec 3.2「槓の嶺上牌で和了」)なので `fromKan` と分離する。
+   */
+  fromReplacement: boolean;
   /** 席ごとのリーチ宣言済みフラグ。 */
   riichi: SeatFlags;
   /** 席ごとのダブルリーチ(初巡・鳴きなしでのリーチ)。 */
@@ -506,12 +514,17 @@ export function isHaitei(remainingLiveTiles: number): boolean {
   return remainingLiveTiles === 0;
 }
 
-/** 通常ツモが海底牌か。嶺上補充はライブ牌残数を0にしても海底摸月ではない。 */
+/**
+ * 通常ツモが海底牌か。嶺上補充(カン・北抜きのいずれも)はライブ牌残数を0にしても
+ * 海底摸月ではない(#396)。
+ *
+ * @param fromReplacement 現在のツモ牌が嶺上補充由来か(`HandState.fromReplacement`)。
+ */
 export function isHaiteiTsumo(
   remainingLiveTiles: number,
-  fromKan: boolean,
+  fromReplacement: boolean,
 ): boolean {
-  return isHaitei(remainingLiveTiles) && !fromKan;
+  return isHaitei(remainingLiveTiles) && !fromReplacement;
 }
 
 /**
@@ -633,6 +646,7 @@ function beginRound(state: EngineState): EngineState {
     turn: "east",
     drawn: null,
     fromKan: false,
+    fromReplacement: false,
     riichi: seatFlags(),
     doubleRiichi: seatFlags(),
     ippatsu: seatFlags(),
@@ -655,23 +669,40 @@ function beginRound(state: EngineState): EngineState {
   return pump(next);
 }
 
-/** 北抜き(ガリ)を自動処理し、最終的に手番が持つツモ牌を返す。 */
-function autoPullNorth(hand: HandState, seat: SeatKey, tile: Tile): Tile {
+/**
+ * 北抜き(ガリ)を自動処理し、最終的に手番が持つツモ牌を返す。
+ *
+ * `pulled` は**嶺上補充が1回でも走ったか**。返した牌が嶺上牌であることを意味し、
+ * 海底摸月の判定(`isHaiteiTsumo`)を抑止するために呼び出し側へ伝える(#396)。
+ * `false` になるのは**ライブ壁から引いた北をそのまま返した初回のみ**(嶺上が尽きて
+ * 1枚も補充できなかった場合)。一度でも補充できていれば返す牌は嶺上牌なので `true`。
+ */
+function autoPullNorth(
+  hand: HandState,
+  seat: SeatKey,
+  tile: Tile,
+): { tile: Tile; pulled: boolean } {
   let current = tile;
+  let pulled = false;
   // 北(字牌 rank=4)を引く限り抜いて嶺上補充する。王牌が尽きたら打ち切る。
   while (current.suit === "honor" && current.rank === HONOR.NORTH) {
-    hand.kita[seat] += 1;
+    let replacement: Tile;
     try {
-      current = hand.wall.drawReplacement();
+      replacement = hand.wall.drawReplacement();
     } catch (error) {
       if (error instanceof WallEmptyError) {
-        // 嶺上が尽きた極端ケース: 北をそのまま手に残す(実運用では非到達)。
-        return current;
+        // 嶺上が尽きた極端ケース(実運用では非到達): 補充できないので**抜かずに**
+        // 北を手へ残す。ここで `kita` を増やすと抜き北と手牌に二重計上される。
+        // `pulled` は直前までの補充結果を保つ(current が嶺上牌のことがある)。
+        return { tile: current, pulled };
       }
       throw error;
     }
+    hand.kita[seat] += 1;
+    current = replacement;
+    pulled = true;
   }
-  return current;
+  return { tile: current, pulled };
 }
 
 /**
@@ -683,7 +714,7 @@ function autoPullDealtNorths(hand: HandState): void {
     const concealed: Tile[] = [];
     for (const tile of hand.hands[seat]) {
       if (tile.suit === "honor" && tile.rank === HONOR.NORTH) {
-        concealed.push(autoPullNorth(hand, seat, tile));
+        concealed.push(autoPullNorth(hand, seat, tile).tile);
       } else {
         concealed.push(tile);
       }
@@ -692,7 +723,7 @@ function autoPullDealtNorths(hand: HandState): void {
   }
 }
 
-/** カン後の嶺上補充(北抜きも自動処理)。`drawn` と `fromKan` を更新する。 */
+/** カン後の嶺上補充(北抜きも自動処理)。`drawn` / `fromKan` / `fromReplacement` を更新する。 */
 function drawKanReplacement(hand: HandState, seat: SeatKey): void {
   let tile: Tile;
   try {
@@ -701,12 +732,14 @@ function drawKanReplacement(hand: HandState, seat: SeatKey): void {
     if (error instanceof WallEmptyError) {
       hand.drawn = null;
       hand.fromKan = false;
+      hand.fromReplacement = false;
       return;
     }
     throw error;
   }
-  hand.drawn = autoPullNorth(hand, seat, tile);
+  hand.drawn = autoPullNorth(hand, seat, tile).tile;
   hand.fromKan = true;
+  hand.fromReplacement = true;
   hand.tempMiss[seat] = false;
 }
 
@@ -1032,6 +1065,7 @@ function applyAiCall(
   hand.passedRonSeats = [];
   hand.drawn = null;
   hand.fromKan = false;
+  hand.fromReplacement = false;
   hand.turn = caller;
   if (kan) {
     const abortiveDraw = settleFourKanAbortiveDraw(state);
@@ -1086,13 +1120,19 @@ function pump(state: EngineState): EngineState {
         return settleDraw(s);
       }
       const raw = hand.wall.draw();
-      hand.drawn = autoPullNorth(hand, seat, raw);
+      const pull = autoPullNorth(hand, seat, raw);
+      hand.drawn = pull.tile;
       hand.fromKan = false;
+      // 北抜きの嶺上牌も嶺上補充由来。海底摸月を付けてはならない(#396)。
+      hand.fromReplacement = pull.pulled;
       hand.tempMiss[seat] = false; // 同巡内フリテンは次の自ツモで解消。
     }
 
     const wallExhausted = isHaitei(hand.wall.remainingLiveTiles);
-    const haitei = isHaiteiTsumo(hand.wall.remainingLiveTiles, hand.fromKan);
+    const haitei = isHaiteiTsumo(
+      hand.wall.remainingLiveTiles,
+      hand.fromReplacement,
+    );
 
     if (isHuman) {
       if (hand.riichi[seat]) {
@@ -1391,7 +1431,10 @@ function buildHumanPending(state: EngineState, seat: SeatKey): Pending {
   if (hand === null) return null;
   const drawn = hand.drawn;
   const wallExhausted = isHaitei(hand.wall.remainingLiveTiles);
-  const haitei = isHaiteiTsumo(hand.wall.remainingLiveTiles, hand.fromKan);
+  const haitei = isHaiteiTsumo(
+    hand.wall.remainingLiveTiles,
+    hand.fromReplacement,
+  );
   const canTsumo =
     drawn !== null && analyzeTsumo(state, seat, drawn, haitei) !== null;
 
@@ -1451,6 +1494,7 @@ function applyDiscard(
   hand.discardHistory[seat] = [...hand.discardHistory[seat], discarded];
   hand.drawn = null;
   hand.fromKan = false;
+  hand.fromReplacement = false;
   hand.ponnedKind = null; // 打牌で喰い替え禁止の窓(ポン直後の1打)を閉じる。
   hand.ippatsu[seat] = false; // 自分の打牌で一発の権利は消える。
   hand.pendingDiscard = { seat, tile: discarded };
@@ -2240,6 +2284,7 @@ export function declarePon(state: EngineState): EngineState {
   hand.passedRonSeats = [];
   hand.drawn = null;
   hand.fromKan = false;
+  hand.fromReplacement = false;
   hand.turn = seat;
   // 喰い替え禁止: 直後の打牌でこの牌種(ポンした牌)を切れないよう記録する(スペック1 1.4)。
   hand.ponnedKind = tile;
@@ -2279,6 +2324,9 @@ export function declareKan(state: EngineState): EngineState {
   hand.callsMade = true;
   hand.pendingDiscard = null;
   hand.passedRonSeats = [];
+  hand.drawn = null;
+  hand.fromKan = false;
+  hand.fromReplacement = false;
   hand.turn = seat;
   const abortiveDraw = settleFourKanAbortiveDraw(state);
   if (abortiveDraw !== null) return abortiveDraw;
@@ -2412,7 +2460,7 @@ export function declareTsumo(state: EngineState): EngineState {
   if (seat === null) return state;
   const haitei = isHaiteiTsumo(
     state.hand.wall.remainingLiveTiles,
-    state.hand.fromKan,
+    state.hand.fromReplacement,
   );
   const analysis = analyzeTsumo(state, seat, state.hand.drawn, haitei);
   if (analysis === null) return state;
