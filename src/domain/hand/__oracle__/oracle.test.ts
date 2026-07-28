@@ -15,7 +15,11 @@ import {
   standardDecompositions34,
   waitingIndicesOracle34,
 } from "./agari-oracle";
-import { tilesToCount34, tileTo34Index } from "./counts34";
+import { SANMA_INDICES_34, tilesToCount34, tileTo34Index } from "./counts34";
+import {
+  standardFormsByDefinition34,
+  waitingIndicesByDefinition34,
+} from "./definition-oracle";
 import { AGARI, shantenOracle34, TENPAI } from "./shanten-oracle";
 
 const sh = (notation: string): number =>
@@ -122,6 +126,171 @@ describe("waitingIndicesOracle34", () => {
     expect(waits("123p 456p 78p 13s 57s 9s")).toEqual([]);
   });
 });
+
+describe("定義ベースの分解・待ちオラクル(副露経路 / #390)", () => {
+  const forms = (notation: string, groupsNeeded: number): string[] =>
+    [
+      ...standardFormsByDefinition34(
+        tilesToCount34(parseTiles(notation)),
+        groupsNeeded,
+      ),
+    ].sort();
+  const defWaits = (
+    notation: string,
+    groupsNeeded: number,
+    meldNotation = "",
+  ): number[] => {
+    const concealed = tilesToCount34(parseTiles(notation));
+    const used = tilesToCount34([
+      ...parseTiles(notation),
+      ...parseTiles(meldNotation),
+    ]);
+    return [
+      ...waitingIndicesByDefinition34(concealed, groupsNeeded, used),
+    ].sort((a, b) => a - b);
+  };
+
+  it("副露1組(門前は3面子+雀頭の11枚)の多面分解を全通り列挙する", () => {
+    // 222333444p + 55p 雀頭 → [222][333][444] / [234]×3 / [234][345]… の3通り。
+    // 門前14枚のケース(standardDecompositions34)と同じ分解数になる。
+    expect(forms("222333444p 55p", 3)).toHaveLength(3);
+  });
+
+  it("副露2組(門前は2面子+雀頭の8枚)の分解を列挙する", () => {
+    expect(forms("123p 456p 99s", 2)).toEqual([
+      "pair:sou9|sequence:pin1|sequence:pin4",
+    ]);
+  });
+
+  it("和了形でない門前部分は空集合", () => {
+    expect(forms("123p 457p 99s", 2)).toEqual([]);
+  });
+
+  it("枚数と groupsNeeded が噛み合わない呼び出しは失敗する(静かに0件にしない)", () => {
+    // 8枚を「3面子+雀頭(11枚)」として渡す契約違反。空集合を返すと
+    // 「和了形でない」と区別が付かず、照合が静かに空回りする。
+    expect(() => forms("123p 456p 99s", 3)).toThrow(RangeError);
+    expect(() => defWaits("123p 9s", 2)).toThrow(RangeError);
+    expect(() => forms("123p 456p 99s", 5)).toThrow(RangeError);
+    expect(() => forms("123p 456p 99s", -1)).toThrow(RangeError);
+  });
+
+  it("副露2組の三面張を列挙する(2面子+雀頭の1枚不足)", () => {
+    // 23456p 99s(7枚)→ 1p(123+456) / 4p(234+456) / 7p(234+567)。
+    expect(defWaits("23456p 99s", 2)).toEqual(waitIndices("1p 4p 7p"));
+  });
+
+  it("副露3組の単騎待ちを列挙する(門前4枚)", () => {
+    expect(defWaits("123p 9s", 1)).toEqual(waitIndices("9s"));
+  });
+
+  it("副露牌で4枚使い切った牌種は待ちから除外する", () => {
+    // 門前 1p 単騎、副露に 1p が3枚(ポン)→ 1p は4枚使い切りで待ちにならない。
+    expect(defWaits("1p", 0, "111p")).toEqual([]);
+    // 副露が別牌種なら 1p 単騎が成立する。
+    expect(defWaits("1p", 0, "111z")).toEqual(waitIndices("1p"));
+  });
+
+  it("テンパイでなければ空", () => {
+    expect(defWaits("1p 3p 5s 7s 9s 1z 3z", 2)).toEqual([]);
+  });
+
+  // `cross-validation.test.ts` の副露3組・4組は `multiFormCount` が 0 であることを
+  // 積極的に固定している。その根拠が「ジェネレータが偶然作れていないだけ」ではなく
+  // **構造的事実**であることを、和了形の総当たりでここに固定する。
+  it("1面子+雀頭(5枚)の和了形は総当たりしても分解が常に1通り", () => {
+    let hands = 0;
+    let maxForms = 0;
+    for (const counts of allWinningCounts(1)) {
+      hands += 1;
+      maxForms = Math.max(
+        maxForms,
+        standardFormsByDefinition34(counts, 1).size,
+      );
+    }
+    expect(hands).toBeGreaterThan(1_000); // 空回り防止
+    expect(maxForms).toBe(1);
+  });
+
+  it("雀頭のみ(2枚)の和了形も分解が常に1通り", () => {
+    let hands = 0;
+    let maxForms = 0;
+    for (const counts of allWinningCounts(0)) {
+      hands += 1;
+      maxForms = Math.max(
+        maxForms,
+        standardFormsByDefinition34(counts, 0).size,
+      );
+    }
+    expect(hands).toBe(SANMA_INDICES_34.length);
+    expect(maxForms).toBe(1);
+  });
+
+  it("副露4組(門前1枚)の待ちは総当たりしても常に単騎1種以下", () => {
+    let maxWaits = 0;
+    for (const index of SANMA_INDICES_34) {
+      const concealed = new Array<number>(34).fill(0);
+      concealed[index] = 1;
+      const used = [...concealed];
+      maxWaits = Math.max(
+        maxWaits,
+        waitingIndicesByDefinition34(concealed, 0, used).size,
+      );
+    }
+    expect(maxWaits).toBe(1);
+  });
+});
+
+/**
+ * `groupsNeeded` 面子 + 雀頭で作れる和了形の 34-index カウントを重複なく全列挙する。
+ * 面子候補(刻子27種 + 順子14種)と雀頭候補の直積から作るため、
+ * 「和了形になる多重集合」を漏れなく覆う。
+ */
+function* allWinningCounts(groupsNeeded: number): Generator<number[]> {
+  const groups: number[][] = [];
+  for (const index of SANMA_INDICES_34) groups.push([index, index, index]);
+  for (const base of [9, 18]) {
+    for (let offset = 0; offset < 7; offset += 1) {
+      groups.push([base + offset, base + offset + 1, base + offset + 2]);
+    }
+  }
+  const seen = new Set<string>();
+  const emit = function* (
+    counts: number[],
+    start: number,
+    remaining: number,
+  ): Generator<number[]> {
+    if (remaining === 0) {
+      for (const pair of SANMA_INDICES_34) {
+        if (counts[pair] + 2 > 4) continue;
+        counts[pair] += 2;
+        const key = counts.join(",");
+        if (!seen.has(key)) {
+          seen.add(key);
+          yield [...counts];
+        }
+        counts[pair] -= 2;
+      }
+      return;
+    }
+    for (let g = start; g < groups.length; g += 1) {
+      const group = groups[g] as number[];
+      let pushed = 0;
+      let ok = true;
+      for (const i of group) {
+        if (counts[i] >= 4) {
+          ok = false;
+          break;
+        }
+        counts[i] += 1;
+        pushed += 1;
+      }
+      if (ok) yield* emit(counts, g, remaining - 1);
+      for (let k = pushed - 1; k >= 0; k -= 1) counts[group[k] as number] -= 1;
+    }
+  };
+  yield* emit(new Array<number>(34).fill(0), 0, groupsNeeded);
+}
 
 describe("4枚使いの理想化(本作 ai.ts と共通・参照とは既知の ±1 差・#143)", () => {
   it("全4枚が手牌の単騎/シャンポンは牌残量無視の理想化で 0(参照は 1)", () => {
