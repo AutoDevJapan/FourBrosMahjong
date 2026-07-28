@@ -368,6 +368,21 @@ describe("入力検証: spec 3.3 の前提(#394)", () => {
       expect(() => new SoshiiLedger(IDS).applyUma(broken)).toThrow(RangeError);
     });
 
+    it("合計違反で落ちても台帳は再利用できる(_finalPoints を汚さない)", () => {
+      // 合計チェックは `_finalPoints` への書き込みより前になければならない。
+      // 後ろだと棄却した持ち点がキャッシュへ残り、正しい持ち点での再試行が
+      // 「final points changed between settlement stages」で落ちる。
+      const l = new SoshiiLedger(IDS);
+      const broken = validPoints.map((p, i) =>
+        i === 0 ? { ...p, points: p.points - 1000 } : p,
+      );
+      expect(() => l.applyRawScore(broken)).toThrow(RangeError);
+      expect(l.balances()).toEqual({ A: 0, B: 0, C: 0, D: 0 });
+      expect(() => l.applyRawScore(validPoints)).not.toThrow();
+      expect(() => l.applyUma(validPoints)).not.toThrow();
+      expect(sum(l.balances())).toBe(0);
+    });
+
     it("合計が1点ずれるだけでゼロサムが崩れる(ガードが防いでいるもの)", () => {
       // ガードを外した場合に何が起きるかを、検証を通さない経路で示す。
       // 素点は `points − 返し` の総和なので、合計の不足はそのままソシー総和の
@@ -392,6 +407,9 @@ describe("入力検証: spec 3.3 の前提(#394)", () => {
       expect(sum(l.balances())).toBe(0);
     });
 
+    // 検証は加算より前に行う。後ろだと `add` が未知IDで落ちるまでに他の支払者へ
+    // 加算済みで、部分適用された残高が残る(#394)。`toThrow` だけでは
+    // 「加算前に落ちた」と「途中で落ちた」を区別できないため、残高と先着枠まで見る。
     it.each<[string, PlayerId[]]>([
       ["空配列", []],
       ["人数不足", ["B", "C"]],
@@ -399,22 +417,10 @@ describe("入力検証: spec 3.3 の前提(#394)", () => {
       ["重複", ["B", "B", "C"]],
       ["和了者自身を含む", ["A", "C", "D"]],
       ["未知のID", ["B", "C", "X"]],
-    ])("%s なら RangeError", (_label, loserIds) => {
+    ])("%s なら RangeError(残高も先着枠も書き換えない)", (_label, loserIds) => {
       const l = new SoshiiLedger(IDS);
       expect(() =>
         l.applyBonus({ winnerId: "A", loserIds, score: trueYakuman }),
-      ).toThrow(RangeError);
-    });
-
-    it("検証で落ちたときは残高も先着枠も書き換えない", () => {
-      // 検証前に加算していると、途中まで支払われた状態と「先着済み」フラグが残る。
-      const l = new SoshiiLedger(IDS);
-      expect(() =>
-        l.applyBonus({
-          winnerId: "A",
-          loserIds: ["B", "B", "C"],
-          score: trueYakuman,
-        }),
       ).toThrow(RangeError);
       expect(l.balances()).toEqual({ A: 0, B: 0, C: 0, D: 0 });
       expect(l.bonusAwarded).toBe(false);
@@ -428,12 +434,37 @@ describe("入力検証: spec 3.3 の前提(#394)", () => {
       ).toBe(true);
     });
 
-    it("空配列は先着枠を消費しない(以後の役満祝儀が消えない)", () => {
+    it("祝儀が付かない呼び出しでも支払者を検証する(先着済み・数え役満・非役満)", () => {
+      // 検証が早期 return の後ろにあると、壊れた `loserIds` はその場では素通りし、
+      // 「次に役満が出たとき」に初めて壊れる。契約違反は発生箇所で落とす。
+      const countedYakuman = computeScore(
+        { han: 13, yakumanMultiplier: 0 },
+        false,
+      );
+      const mangan = computeScore({ han: 5, yakumanMultiplier: 0 }, false);
+      for (const score of [countedYakuman, mangan]) {
+        expect(() =>
+          new SoshiiLedger(IDS).applyBonus({
+            winnerId: "A",
+            loserIds: ["B", "C"],
+            score,
+          }),
+        ).toThrow(RangeError);
+      }
+      // 先着済み(2件目)でも同様。
       const l = new SoshiiLedger(IDS);
+      l.applyBonus({
+        winnerId: "A",
+        loserIds: ["B", "C", "D"],
+        score: trueYakuman,
+      });
       expect(() =>
-        l.applyBonus({ winnerId: "A", loserIds: [], score: trueYakuman }),
+        l.applyBonus({
+          winnerId: "B",
+          loserIds: ["A", "C"],
+          score: trueYakuman,
+        }),
       ).toThrow(RangeError);
-      expect(l.bonusAwarded).toBe(false);
     });
 
     it("重複した支払者は ranking と applyUma の順位一致のマージンを食い潰す", () => {
@@ -473,7 +504,7 @@ describe("入力検証: spec 3.3 の前提(#394)", () => {
  * 前提: 一致が言えるのは **`applyRawScore` と `applyUma` を両方適用した後**(半荘終了時)
  * の残高についてであり、祝儀だけ反映された局中の `ranking()` はこの限りではない。
  * また `applyBonus` に渡す `loserIds` が「和了者以外の3兄弟・重複なし」であること
- * (engine `settleWin` が保証)も前提に含む。
+ * (`applyBonus` が加算前に検証して `RangeError` で落とす / #394)
  */
 describe("ranking と applyUma の基準一致(暗黙不変条件の固定)", () => {
   // 他の applyBonus 系 describe と同じく、実際の点数計算から役満区分を得る。

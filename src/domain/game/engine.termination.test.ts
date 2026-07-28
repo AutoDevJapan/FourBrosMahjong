@@ -186,7 +186,7 @@ describe("engine 終了条件(spec 2.8 / #114)", () => {
 
   describe("経路1: 南4 親3万超トップやめ(dealerContinues)", () => {
     it("南4・親和了・親>30,000かつトップ → gameEnd(親トップやめ)", () => {
-      // 親 p3=40000 が単独トップ。
+      // 親 p3=50000 が単独トップ。
       const s = finishRound(
         stateFor(roundAt("south", 4), {
           p0: 30000,

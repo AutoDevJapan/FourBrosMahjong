@@ -97,7 +97,12 @@ export class SoshiiLedger {
   }
 
   /**
-   * 最終持ち点が spec 3.3 の前提を満たすことを、加算前に検証する(#394)。
+   * 最終持ち点が spec 3.3 の前提を満たすことを検証し、**初回のみ記録**する(#394)。
+   *
+   * 名前のとおり検証だけでなく `_finalPoints` への**書き込み**という副作用を持つ。
+   * すべての検証は書き込みより**前**に置かなければならない。後ろに置くと、棄却した
+   * 不正な持ち点がキャッシュへ残り、正しい持ち点での再試行が
+   * 「final points changed between settlement stages」で落ちる。
    *
    * 登録プレイヤー全員を重複なく含み、各値が有限で、**合計が
    * `配給原点 × 人数`(= 140,000)** であること。合計が前提を外れると
@@ -107,7 +112,7 @@ export class SoshiiLedger {
    * 供託リーチ棒は場に残ったままだと合計が目減りするが、engine の `endGame` が
    * 残存分を最終持ち点へ畳み込んでから渡すため、この時点では常に一致する。
    */
-  private assertCompleteFinalPoints(
+  private validateAndCaptureFinalPoints(
     finalPoints: readonly PlayerPoints[],
   ): void {
     if (finalPoints.length !== this._balances.size) {
@@ -132,7 +137,7 @@ export class SoshiiLedger {
     const actualTotal = finalPoints.reduce((sum, p) => sum + p.points, 0);
     if (actualTotal !== expectedTotal) {
       throw new RangeError(
-        `final points must total ${expectedTotal} (${STARTING_POINTS} x ${this._balances.size}), received ${actualTotal}. Outstanding riichi sticks must be folded into the final points before settlement.`,
+        `final points must total ${expectedTotal} (${STARTING_POINTS} x ${this._balances.size}), received ${actualTotal} (e.g. outstanding riichi sticks must be folded into the final points before settlement).`,
       );
     }
     if (this._finalPoints === null) {
@@ -161,7 +166,7 @@ export class SoshiiLedger {
         "applyRawScore can only be applied once per ledger.",
       );
     }
-    this.assertCompleteFinalPoints(finalPoints);
+    this.validateAndCaptureFinalPoints(finalPoints);
     for (const { playerId, points } of finalPoints) {
       this.add(playerId, points - RETURN_POINTS);
     }
@@ -188,7 +193,7 @@ export class SoshiiLedger {
         `applyUma requires a four-player ledger, received ${this._balances.size}.`,
       );
     }
-    this.assertCompleteFinalPoints(finalPoints);
+    this.validateAndCaptureFinalPoints(finalPoints);
     const ranked = finalPoints
       .map((p, index) => ({ p, index }))
       .sort((a, b) => b.p.points - a.p.points || a.index - b.index);
@@ -219,15 +224,21 @@ export class SoshiiLedger {
    * 4,000 を超えて {@link ranking} と {@link applyUma} の順位一致が破れる。
    * どちらも例外にならず精算結果だけが静かに壊れるため、加算前に検証する。
    *
+   * 検証は**祝儀が付くかどうかに関わらず**行う(先着済み・数え役満・非役満の
+   * 呼び出しでも `RangeError`)。契約違反を発生箇所で落とすためである。
+   *
    * @returns 祝儀が確定したか(先着済み・数え役満・非役満なら false)。
    * @throws RangeError `loserIds` が上記の前提を満たさないとき。
    */
   applyBonus(input: BonusInput): boolean {
+    // 早期 return より前に検証する。祝儀が付かない呼び出し(先着済み・数え役満・
+    // 非役満)で壊れた `loserIds` を渡しても、その場では何も起きないまま
+    // 「次に役満が出たとき」に初めて壊れる。契約違反はその場で落とす(#394)。
+    this.assertBonusLosers(input);
     if (this._bonusAwarded) return false;
     if (!input.score.isTrueYakuman || input.score.isCountedYakuman)
       return false;
 
-    this.assertBonusLosers(input);
     for (const loserId of input.loserIds) {
       this.add(loserId, -YAKUMAN_BONUS);
       this.add(input.winnerId, YAKUMAN_BONUS);
