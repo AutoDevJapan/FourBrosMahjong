@@ -45,6 +45,20 @@ const outlineUtility = () =>
 const ringUtility = () =>
   /(?:has-\[:)?focus-visible\]?:(?:(?:ring|shadow)[\w[\]/.-]*|\[box-shadow:[^\]]*\])/g;
 
+/**
+ * 素の(接頭辞なしの)`ring-offset-*` を検出する(#399)。
+ *
+ * `focus-visible:` 接頭辞なしの `ring-*` は状態表示として正当な用途があるため一律には
+ * 禁止できない。ただし **`ring-offset-*` を伴うものだけは別**で、リングが border-box から
+ * 2〜4px の帯へ押し出され、グローバルの
+ * `:focus-visible { outline: 2px solid …; outline-offset: 2px }` と**同じ帯を奪い合う**。
+ * `outline` は外側 `box-shadow` より上に描画されるため、その要素にフォーカスした瞬間に
+ * 状態表示のリングが完全に隠れる(#399 の「リーチ可」リング)。
+ *
+ * 状態表示のリングは `ring-offset` なしの 0〜2px に収め、2〜4px の帯はフォーカスリング専用に空ける。
+ */
+const ringOffsetUtility = () => /(?<![\w:-])ring-offset-[\w[\]/.-]+/g;
+
 /** src 配下の .ts/.tsx を再帰列挙(テストファイル自身は除く)。 */
 function sourceFiles(dir: string, base = ""): string[] {
   const out: string[] = [];
@@ -121,6 +135,27 @@ describe("フォーカスリングの単一起点(#314)", () => {
       offenders,
       `focus-visible:ring-* / shadow-* は box-shadow で描画されるためグローバルの ` +
         `outline リングと二重になります。リングは --focus-ring に一本化してください。\n` +
+        offenders.join("\n"),
+    ).toEqual([]);
+  });
+
+  it("状態表示のリングは ring-offset-* でフォーカスリングの帯(2〜4px)へ食い込まない(#399)", () => {
+    // `focus-visible:` 接頭辞の有無に関わらず、`ring-offset-*` は必ずリングを 2〜4px の
+    // 帯へ押し出す。そこはグローバル `:focus-visible` の outline(offset 2px / 幅 2px)が
+    // 占める領域で、outline が上に描かれるためフォーカス時に状態表示が完全に消える。
+    const offenders: string[] = [];
+    for (const rel of sourceFiles(SRC)) {
+      const text = readFileSync(join(SRC, rel), "utf8");
+      for (const m of text.matchAll(ringOffsetUtility())) {
+        offenders.push(`${rel}: ${m[0]}`);
+      }
+    }
+    expect(
+      offenders,
+      `ring-offset-* はリングを 2〜4px の帯へ押し出し、グローバル :focus-visible の ` +
+        `outline(offset 2px)と同じ帯を占めます。outline が上に描かれるため、` +
+        `フォーカスした瞬間に状態表示のリングが完全に隠れます(#399)。` +
+        `状態表示のリングは ring-offset なしの 0〜2px に収めてください。\n` +
         offenders.join("\n"),
     ).toEqual([]);
   });

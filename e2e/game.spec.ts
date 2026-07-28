@@ -636,6 +636,48 @@ test.describe("対局画面(/game)", () => {
     ).toBeVisible();
   });
 
+  test("「リーチ可」リングはフォーカス中も見える(フォーカスリングと帯が重ならない / #399)", async ({
+    page,
+  }) => {
+    await page.goto("/game?seed=381");
+    const hand = page.getByRole("listbox", { name: "自家の手牌" }).first();
+    await armRiichi(page);
+
+    const eligible = hand.getByRole("option", { name: /リーチ可/ }).first();
+    await expect(eligible).toBeVisible();
+    await eligible.focus();
+    // `:focus-visible` はキーボード操作を経ないと一致しない(直前が click 由来だと
+    // グローバルの `:focus-visible` 規則が適用されず、UA 既定の outline を測ってしまう)。
+    // ロービングタブインデックスの矢印移動で往復し、キーボードモダリティにしてから測る。
+    await page.keyboard.press("ArrowRight");
+    await page.keyboard.press("ArrowLeft");
+    await expect(eligible).toBeFocused();
+
+    // グローバル `:focus-visible` の outline は offset 2px / 幅 2px = border-box から 2〜4px。
+    // 「リーチ可」のリング(box-shadow)がこの帯へ入ると outline に覆われて完全に消える。
+    const band = await eligible.evaluate((el) => {
+      const style = getComputedStyle(el);
+      // `ring-*` は `<spread> <color>` の box-shadow として描画される。外側リングの
+      // 最大到達距離(offset + spread)を取り出す。
+      const distances = [
+        ...style.boxShadow.matchAll(
+          /(-?\d+(?:\.\d+)?)px\s+(-?\d+(?:\.\d+)?)px\s+(-?\d+(?:\.\d+)?)px\s+(-?\d+(?:\.\d+)?)px/g,
+        ),
+      ].map((m) => Number(m[4]));
+      return {
+        boxShadow: style.boxShadow,
+        ringOuter: distances.length > 0 ? Math.max(...distances) : 0,
+        outlineWidth: Number.parseFloat(style.outlineWidth),
+        outlineOffset: Number.parseFloat(style.outlineOffset),
+      };
+    });
+
+    // リングが実際に描画されていること(状態表示が消えていない)。
+    expect(band.ringOuter).toBeGreaterThan(0);
+    // outline は 2〜4px を占める。リングの外縁がその開始位置以下なら覆われない。
+    expect(band.ringOuter).toBeLessThanOrEqual(band.outlineOffset);
+  });
+
   test("リーチ宣言候補と非候補をマウス・キーボード・SRへ明示し、同じ禁止理由も再通知する(#168 / #250)", async ({
     page,
   }) => {

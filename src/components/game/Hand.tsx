@@ -205,9 +205,13 @@ export default function Hand({
                 ? "cursor-not-allowed opacity-45 grayscale"
                 : "cursor-pointer hover:-translate-y-0.5"
             } ${
-              state?.highlighted
-                ? "ring-2 ring-turn-highlight ring-offset-2 ring-offset-background"
-                : ""
+              // 「リーチ可」のリングは 0〜2px のバンドに収める(#399)。
+              // `ring-offset-*` を付けると 2〜4px を占め、グローバルの
+              // `:focus-visible { outline: 2px; outline-offset: 2px }` と同じ帯に重なる。
+              // outline は外側 box-shadow より上に描かれるため、キーボードでその牌へ
+              // フォーカスした瞬間に状態表示が完全に隠れていた。選択状態(下段)と同じ
+              // バンドへ揃えてフォーカスリングと物理的に分離する。
+              state?.highlighted ? "ring-2 ring-turn-highlight" : ""
             } ${isSelected ? "-translate-y-1 ring-2 ring-turn-highlight" : ""}`}
           >
             <Tile tile={tile} decorative />
