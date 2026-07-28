@@ -29,14 +29,21 @@ import {
   tilesToCount34,
   tileTo34Index,
 } from "./__oracle__/counts34";
-import { shantenByDefinition34 } from "./__oracle__/definition-oracle";
 import {
+  shantenByDefinition34,
+  standardFormsByDefinition34,
+  waitingIndicesByDefinition34,
+} from "./__oracle__/definition-oracle";
+import {
+  type GeneratedMeld,
   makeRng,
+  type MeldedHand,
   randomHand,
+  randomMeldedHand,
   randomStructuredHand,
 } from "./__oracle__/generator";
 import { shantenOracle34 } from "./__oracle__/shanten-oracle";
-import { decomposeStandard, isCompleteHand } from "./decompose";
+import { decomposeStandard, isCompleteHand, type Mentsu } from "./decompose";
 import { parseTiles, tileNotation } from "./notation";
 import { waitingTiles } from "./tenpai";
 
@@ -292,3 +299,210 @@ describe("列挙非依存の定義ベース向聴オラクルとの照合 (#392)
     );
   });
 });
+
+/**
+ * 副露あり(`melds ≠ []`)の分解・和了・待ちの照合(#390)。
+ *
+ * 上のクロス検証は `melds` に常に `[]` を渡しており、`decomposeStandard` /
+ * `isCompleteHand` / `waitingTiles` の**副露経路が一度も照合されていなかった**
+ * (issue #390)。ここでは副露 1〜4 組を持つ手を生成して照合する。
+ *
+ * 照合相手は `__oracle__/agari-oracle.ts`(本体 `extractMentsuAll` と分岐順まで同型で、
+ * 共通欠陥に無力)ではなく、列挙非依存の
+ * {@link standardFormsByDefinition34} / {@link waitingIndicesByDefinition34}。
+ * これらは「和了形 W の側を全列挙して手牌との重なりを見る」だけで手牌の分解を行わないため、
+ * 本体とオラクルの**両方に同じ列挙欠陥を注入しても red になる**(→ PR に実測を記載)。
+ */
+describe("クロス検証: 副露あり手の分解・和了・待ち (#390)", () => {
+  /**
+   * 副露経路の照合手牌数(副露数ごと)。定義ベースオラクルは可容な枝刈りが効くため
+   * 1 手あたり 0.02ms 程度で、8 テスト合計でも 1 秒未満に収まる(→ PR に実測)。
+   */
+  const MELDED_HANDS = 2_000;
+
+  it.each([[1], [2], [3], [4]])(
+    "副露%d組: isCompleteHand と標準分解の集合が定義ベースオラクルと一致する",
+    (meldCount) => {
+      const rng = makeRng(0x3900_0100 + meldCount);
+      const groupsNeeded = 4 - meldCount;
+      const mismatches: string[] = [];
+      let completeCount = 0;
+      let multiFormCount = 0;
+      let kanCount = 0;
+      let ankanCount = 0;
+
+      for (let i = 0; i < MELDED_HANDS; i += 1) {
+        const hand = randomMeldedHand(
+          rng,
+          meldCount,
+          14 - 3 * meldCount,
+          i % 2 === 0,
+        );
+        const { concealedTiles, melds } = hand;
+        for (const meld of melds) {
+          if (meld.isKan) kanCount += 1;
+          if (meld.concealed) ankanCount += 1;
+        }
+
+        const oracleForms = standardFormsByDefinition34(
+          tilesToCount34(concealedTiles),
+          groupsNeeded,
+        );
+        const expected = new Set(
+          [...oracleForms].map((sig) =>
+            joinSignature([
+              ...sig.split("|").map((part) => `${part}@c`),
+              ...meldSignatureParts(melds),
+            ]),
+          ),
+        );
+        const forms = decomposeStandard(concealedTiles, melds);
+        const actual = new Set(
+          forms.map((form) => formFullSignature([...form.melds, form.pair])),
+        );
+
+        if (!setEqual(actual, expected)) {
+          if (mismatches.length < 8) {
+            mismatches.push(
+              `decomp ${describeMeldedHand(hand)} 本体=${[...actual].sort().join(" / ")} 定義ベース=${[...expected].sort().join(" / ")}`,
+            );
+          }
+          continue;
+        }
+        const complete = isCompleteHand(concealedTiles, melds);
+        if (complete !== oracleForms.size > 0 && mismatches.length < 8) {
+          mismatches.push(
+            `complete ${describeMeldedHand(hand)} 本体=${complete} 定義ベース=${oracleForms.size > 0}`,
+          );
+        }
+        if (oracleForms.size > 0) completeCount += 1;
+        if (oracleForms.size > 1) multiFormCount += 1;
+      }
+
+      console.log(
+        `[cross] melds=${meldCount} hands=${MELDED_HANDS} complete=${completeCount} multiForm=${multiFormCount} kan=${kanCount} ankan=${ankanCount}`,
+      );
+      expect(mismatches).toEqual([]);
+      // 照合が「和了しない手ばかり」で空回りしていないことを固定する(vacuum 防止)。
+      expect(completeCount).toBeGreaterThan(MELDED_HANDS * 0.1);
+      expect(kanCount).toBeGreaterThan(0);
+      expect(ankanCount).toBeGreaterThan(0);
+      // 「分解が一意に定まらない手」を踏んでいることも固定する。刻子3組 ⇔ 順子3組の
+      // 読み替え(222333444p 等)は副露経路の照合で最も価値が高いケースなので、
+      // ジェネレータが密集帯を作らなくなったら即座に落ちるようにしておく。
+      //
+      // 副露3組(門前5枚 = 1面子+雀頭)・4組(門前2枚 = 雀頭のみ)は分解が**常に一意**:
+      // 5枚で2通りの (面子, 雀頭) 分割は存在しない(刻子は同一牌3枚を要するため
+      // 別の刻子/順子と両立せず、順子2通りは開始位置がずれた時点で牌が食い違う)。
+      // よってここでは 0 であることを積極的に固定する。
+      if (meldCount <= 2) {
+        expect(multiFormCount).toBeGreaterThan(MELDED_HANDS * 0.05);
+      } else {
+        expect(multiFormCount).toBe(0);
+      }
+    },
+  );
+
+  it.each([[1], [2], [3], [4]])(
+    "副露%d組: waitingTiles が定義ベースの待ちオラクルと一致する",
+    (meldCount) => {
+      const rng = makeRng(0x3900_0200 + meldCount);
+      const groupsNeeded = 4 - meldCount;
+      const mismatches: string[] = [];
+      let tenpaiCount = 0;
+      let multiWaitCount = 0;
+
+      for (let i = 0; i < MELDED_HANDS; i += 1) {
+        const hand = randomMeldedHand(
+          rng,
+          meldCount,
+          13 - 3 * meldCount,
+          i % 2 === 0,
+        );
+        const { concealedTiles, melds } = hand;
+
+        // 4枚使い切りの判定には副露牌も数える(`tenpai.ts` の usedCounts と同じ定義)。
+        const used = tilesToCount34([
+          ...concealedTiles,
+          ...melds.flatMap((m) => [...m.tiles]),
+        ]);
+        const expected = waitingIndicesByDefinition34(
+          tilesToCount34(concealedTiles),
+          groupsNeeded,
+          used,
+        );
+        const actual = new Set(
+          waitingTiles(concealedTiles, melds).map((t) => tileTo34Index(t)),
+        );
+
+        if (!setEqualNum(actual, expected) && mismatches.length < 8) {
+          mismatches.push(
+            `waits ${describeMeldedHand(hand)} 本体=${[...actual].sort((x, y) => x - y)} 定義ベース=${[...expected].sort((x, y) => x - y)}`,
+          );
+        }
+        if (expected.size > 0) tenpaiCount += 1;
+        if (expected.size > 1) multiWaitCount += 1;
+      }
+
+      console.log(
+        `[cross] melds=${meldCount} hands=${MELDED_HANDS} tenpai=${tenpaiCount} multiWait=${multiWaitCount}`,
+      );
+      expect(mismatches).toEqual([]);
+      // vacuum 防止: テンパイ手と多面待ちを実際に踏んでいることを固定する。
+      expect(tenpaiCount).toBeGreaterThan(MELDED_HANDS * 0.1);
+      // 副露4組は門前1枚の単騎のみで、待ちは常に1種類(多面待ちは構造上あり得ない)。
+      if (meldCount <= 3) {
+        expect(multiWaitCount).toBeGreaterThan(MELDED_HANDS * 0.01);
+      } else {
+        expect(multiWaitCount).toBe(0);
+      }
+    },
+  );
+
+  it("副露牌で4枚使い切った牌種は待ちにならない(明槓の消費を数える)", () => {
+    // 東を明槓(4枚) + 111p 222p 333p、門前は 99s の単騎テンパイ。
+    // 東は既に4枚使い切りなので待ちになり得ない。
+    const melds: GeneratedMeld[] = [
+      { tiles: parseTiles("1111z"), isKan: true, concealed: false },
+      { tiles: parseTiles("111p"), isKan: false, concealed: false },
+      { tiles: parseTiles("222p"), isKan: false, concealed: false },
+      { tiles: parseTiles("333p"), isKan: false, concealed: false },
+    ];
+    const concealed = parseTiles("9s");
+    expect(waitingTiles(concealed, melds).map(tileNotation)).toEqual(["9s"]);
+  });
+});
+
+/** 分解1件(副露由来の面子を含む)の正規化シグネチャ。`@c` は暗、`@o` は明。 */
+function formFullSignature(groups: readonly Mentsu[]): string {
+  return joinSignature(
+    groups.map(
+      (g) =>
+        `${g.kind}:${g.suit}${g.startRank}@${g.concealed ? "c" : "o"}`,
+    ),
+  );
+}
+
+/** 生成された副露が分解結果に現れるべき姿(カンは quad・暗槓のみ concealed)。 */
+function meldSignatureParts(melds: readonly GeneratedMeld[]): string[] {
+  return melds.map((meld) => {
+    const tile = meld.tiles[0];
+    return `${meld.isKan ? "quad" : "triplet"}:${tile.suit}${tile.rank}@${
+      meld.concealed ? "c" : "o"
+    }`;
+  });
+}
+
+function joinSignature(parts: readonly string[]): string {
+  return [...parts].sort().join("|");
+}
+
+function describeMeldedHand(hand: MeldedHand): string {
+  const melds = hand.melds
+    .map(
+      (m) =>
+        `[${m.tiles.map(tileNotation).join("")}${m.concealed ? "(暗)" : ""}]`,
+    )
+    .join("");
+  return `${describeHand(hand.concealedTiles)} ${melds}`;
+}

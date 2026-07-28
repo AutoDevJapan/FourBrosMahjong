@@ -16,6 +16,10 @@ import {
   waitingIndicesOracle34,
 } from "./agari-oracle";
 import { tilesToCount34, tileTo34Index } from "./counts34";
+import {
+  standardFormsByDefinition34,
+  waitingIndicesByDefinition34,
+} from "./definition-oracle";
 import { AGARI, shantenOracle34, TENPAI } from "./shanten-oracle";
 
 const sh = (notation: string): number =>
@@ -120,6 +124,68 @@ describe("waitingIndicesOracle34", () => {
 
   it("テンパイでなければ空", () => {
     expect(waits("123p 456p 78p 13s 57s 9s")).toEqual([]);
+  });
+});
+
+describe("定義ベースの分解・待ちオラクル(副露経路 / #390)", () => {
+  const forms = (notation: string, groupsNeeded: number): string[] =>
+    [
+      ...standardFormsByDefinition34(
+        tilesToCount34(parseTiles(notation)),
+        groupsNeeded,
+      ),
+    ].sort();
+  const defWaits = (
+    notation: string,
+    groupsNeeded: number,
+    meldNotation = "",
+  ): number[] => {
+    const concealed = tilesToCount34(parseTiles(notation));
+    const used = tilesToCount34([
+      ...parseTiles(notation),
+      ...parseTiles(meldNotation),
+    ]);
+    return [
+      ...waitingIndicesByDefinition34(concealed, groupsNeeded, used),
+    ].sort((a, b) => a - b);
+  };
+
+  it("副露1組(門前は3面子+雀頭の11枚)の多面分解を全通り列挙する", () => {
+    // 222333444p + 55p 雀頭 → [222][333][444] / [234]×3 / [234][345]… の3通り。
+    // 門前14枚のケース(standardDecompositions34)と同じ分解数になる。
+    expect(forms("222333444p 55p", 3)).toHaveLength(3);
+  });
+
+  it("副露2組(門前は2面子+雀頭の8枚)の分解を列挙する", () => {
+    expect(forms("123p 456p 99s", 2)).toEqual([
+      "pair:sou9|sequence:pin1|sequence:pin4",
+    ]);
+  });
+
+  it("和了形でない門前部分は空集合", () => {
+    expect(forms("123p 457p 99s", 2)).toEqual([]);
+    // 枚数が groupsNeeded と噛み合わない入力も空(契約違反を静かに通さない)。
+    expect(forms("123p 456p 99s", 3)).toEqual([]);
+  });
+
+  it("副露2組の三面張を列挙する(2面子+雀頭の1枚不足)", () => {
+    // 23456p 99s(7枚)→ 1p(123+456) / 4p(234+456) / 7p(234+567)。
+    expect(defWaits("23456p 99s", 2)).toEqual(waitIndices("1p 4p 7p"));
+  });
+
+  it("副露3組の単騎待ちを列挙する(門前4枚)", () => {
+    expect(defWaits("123p 9s", 1)).toEqual(waitIndices("9s"));
+  });
+
+  it("副露牌で4枚使い切った牌種は待ちから除外する", () => {
+    // 門前 1p 単騎、副露に 1p が3枚(ポン)→ 1p は4枚使い切りで待ちにならない。
+    expect(defWaits("1p", 0, "111p")).toEqual([]);
+    // 副露が別牌種なら 1p 単騎が成立する。
+    expect(defWaits("1p", 0, "111z")).toEqual(waitIndices("1p"));
+  });
+
+  it("テンパイでなければ空", () => {
+    expect(defWaits("1p 3p 5s 7s 9s 1z 3z", 2)).toEqual([]);
   });
 });
 
