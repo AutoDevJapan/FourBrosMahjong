@@ -357,7 +357,10 @@ function swapOne(rng: () => number, counts: number[], used: number[]): void {
 }
 
 /** 決定的フォールバック(乱択が規定回数で成立しなかった場合のみ使用)。 */
-function fallbackMeldedHand(meldCount: number, concealedSize: number): MeldedHand {
+function fallbackMeldedHand(
+  meldCount: number,
+  concealedSize: number,
+): MeldedHand {
   const melds: GeneratedMeld[] = [];
   for (let i = 0; i < meldCount; i += 1) {
     const idx = 27 + i; // 東・南・西

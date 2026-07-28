@@ -36,8 +36,8 @@ import {
 } from "./__oracle__/definition-oracle";
 import {
   type GeneratedMeld,
-  makeRng,
   type MeldedHand,
+  makeRng,
   randomHand,
   randomMeldedHand,
   randomStructuredHand,
@@ -459,17 +459,24 @@ describe("クロス検証: 副露あり手の分解・和了・待ち (#390)", (
     },
   );
 
-  it("副露牌で4枚使い切った牌種は待ちにならない(明槓の消費を数える)", () => {
-    // 東を明槓(4枚) + 111p 222p 333p、門前は 99s の単騎テンパイ。
-    // 東は既に4枚使い切りなので待ちになり得ない。
-    const melds: GeneratedMeld[] = [
-      { tiles: parseTiles("1111z"), isKan: true, concealed: false },
-      { tiles: parseTiles("111p"), isKan: false, concealed: false },
-      { tiles: parseTiles("222p"), isKan: false, concealed: false },
-      { tiles: parseTiles("333p"), isKan: false, concealed: false },
-    ];
-    const concealed = parseTiles("9s");
-    expect(waitingTiles(concealed, melds).map(tileNotation)).toEqual(["9s"]);
+  it("副露牌で4枚使い切った牌種は単騎待ちにならない(副露の消費を数える)", () => {
+    // 4副露 + 門前1枚の単騎テンパイ。単騎の牌種が副露で3枚消費済みなら、
+    // 5枚目は存在しないので待ちは空になる。`tenpai.ts` の `usedCounts` が
+    // 副露牌を数えなくなると、この手が「東単騎テンパイ」として通ってしまう。
+    const pon = (notation: string): GeneratedMeld => ({
+      tiles: parseTiles(notation),
+      isKan: false,
+      concealed: false,
+    });
+    const base = [pon("111p"), pon("222p"), pon("333p")];
+    const concealed = parseTiles("1z");
+
+    // 東を3枚ポン済み → 門前の東と合わせて4枚使い切り。待ちなし。
+    expect(waitingTiles(concealed, [pon("111z"), ...base])).toEqual([]);
+    // 対照: 副露が南なら東は残り3枚あるので単騎待ちが成立する。
+    expect(
+      waitingTiles(concealed, [pon("222z"), ...base]).map(tileNotation),
+    ).toEqual(["1z"]);
   });
 });
 
@@ -477,8 +484,7 @@ describe("クロス検証: 副露あり手の分解・和了・待ち (#390)", (
 function formFullSignature(groups: readonly Mentsu[]): string {
   return joinSignature(
     groups.map(
-      (g) =>
-        `${g.kind}:${g.suit}${g.startRank}@${g.concealed ? "c" : "o"}`,
+      (g) => `${g.kind}:${g.suit}${g.startRank}@${g.concealed ? "c" : "o"}`,
     ),
   );
 }
