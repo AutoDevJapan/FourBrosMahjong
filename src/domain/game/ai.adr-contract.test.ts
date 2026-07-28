@@ -211,6 +211,25 @@ describe("ADR-0002 契約: 第3キー = 打点温存価値は加算(#393)", () =
     const tiles = menzenHand(RED_FIVE_SYMMETRY);
     expect(tileKey(chooseDiscard({ tiles }))).toBe("pin-5");
   });
+
+  /**
+   * 4面子 + 赤5筒 / 素の4索。どちらを切っても「4面子 + 単騎待ち」のテンパイで、
+   * 受け入れ(残り3枚1種)・現物・外側度まで同点。差が付くのは赤5の +2 だけ。
+   *
+   * 既存 `ai.test.ts` の「同効率なら赤5を温存して素牌を切る」は第2キー(受け入れ)で
+   * 決着してしまい赤5成分を測れていないため、ここで別に固定する(#393)。
+   */
+  const RED_FIVE_VS_PLAIN = "123p 789p 5p 111s 999s 4s";
+
+  it("赤5(価値2)は素牌(価値0)より優先して残す", () => {
+    const tiles = menzenHand(RED_FIVE_VS_PLAIN);
+    // 前提: 赤は5筒のみ(4索は素牌)。
+    expect(tiles.filter((t) => t.isRed).map(tileKey)).toEqual(["pin-5"]);
+
+    // 素牌の4索を切る。赤5の +2 を消すと両者0で同点になり、
+    // 第6キーの辞書順で "pin-5" < "sou-4" となって赤5を切ってしまう。
+    expect(tileKey(chooseDiscard({ tiles }))).toBe("sou-4");
+  });
 });
 
 describe("ADR-0002 契約: 門前では七対子・国士も向聴・受け入れの対象(#368 / #393)", () => {
