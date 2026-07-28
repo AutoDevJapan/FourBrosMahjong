@@ -190,29 +190,43 @@ describe("applyBonus — 役満祝儀(先着1名・数え役満対象外)", () =
   const countedYakuman = computeScore({ han: 13, yakumanMultiplier: 0 }, false);
   const mangan = computeScore({ han: 5, yakumanMultiplier: 0 }, false);
 
+  // 支払者は「抜け番を含む和了者以外の3兄弟」(spec 3.3③ / Q14 確定・#129)。
+  // 2人しか渡さないのは仕様違反で、`applyBonus` が RangeError で落とす(#394)。
+  const losersFor = (winner: PlayerId): PlayerId[] =>
+    IDS.filter((id) => id !== winner);
+
   it("構成役満: 各loserが1000支払い、和了者が受取(総和ゼロ)", () => {
     const l = new SoshiiLedger(IDS);
     const awarded = l.applyBonus({
       winnerId: "A",
-      loserIds: ["B", "C"],
+      loserIds: losersFor("A"),
       score: trueYakuman,
     });
     expect(awarded).toBe(true);
-    expect(l.balanceOf("A")).toBe(2 * YAKUMAN_BONUS);
+    expect(l.balanceOf("A")).toBe(3 * YAKUMAN_BONUS);
     expect(l.balanceOf("B")).toBe(-YAKUMAN_BONUS);
     expect(l.balanceOf("C")).toBe(-YAKUMAN_BONUS);
+    expect(l.balanceOf("D")).toBe(-YAKUMAN_BONUS);
     expect(sum(l.balances())).toBe(0);
   });
 
   it("先着1名: 2件目の役満祝儀は付かない", () => {
     const l = new SoshiiLedger(IDS);
     expect(
-      l.applyBonus({ winnerId: "A", loserIds: ["B", "C"], score: trueYakuman }),
+      l.applyBonus({
+        winnerId: "A",
+        loserIds: losersFor("A"),
+        score: trueYakuman,
+      }),
     ).toBe(true);
     expect(
-      l.applyBonus({ winnerId: "B", loserIds: ["A", "C"], score: trueYakuman }),
+      l.applyBonus({
+        winnerId: "B",
+        loserIds: losersFor("B"),
+        score: trueYakuman,
+      }),
     ).toBe(false);
-    expect(l.balanceOf("A")).toBe(2000);
+    expect(l.balanceOf("A")).toBe(3 * YAKUMAN_BONUS);
   });
 
   it("数え役満は祝儀対象外(先着枠も消費しない)", () => {
@@ -220,21 +234,29 @@ describe("applyBonus — 役満祝儀(先着1名・数え役満対象外)", () =
     expect(
       l.applyBonus({
         winnerId: "A",
-        loserIds: ["B", "C"],
+        loserIds: losersFor("A"),
         score: countedYakuman,
       }),
     ).toBe(false);
     expect(l.bonusAwarded).toBe(false);
     // その後の構成役満は付く
     expect(
-      l.applyBonus({ winnerId: "A", loserIds: ["B", "C"], score: trueYakuman }),
+      l.applyBonus({
+        winnerId: "A",
+        loserIds: losersFor("A"),
+        score: trueYakuman,
+      }),
     ).toBe(true);
   });
 
   it("非役満は祝儀対象外", () => {
     const l = new SoshiiLedger(IDS);
     expect(
-      l.applyBonus({ winnerId: "A", loserIds: ["B", "C"], score: mangan }),
+      l.applyBonus({
+        winnerId: "A",
+        loserIds: losersFor("A"),
+        score: mangan,
+      }),
     ).toBe(false);
   });
 });
@@ -307,6 +329,125 @@ describe("ranking — ソシー残高降順(同点は登録順)", () => {
       { playerId: "D", points: 30000 },
     ]);
     expect(l.ranking()).toEqual(["B", "C", "D", "A"]);
+  });
+});
+
+describe("入力検証: spec 3.3 の前提(#394)", () => {
+  const trueYakuman = computeScore({ han: 0, yakumanMultiplier: 1 }, false);
+
+  /** 合計 140,000(配給原点 35,000 × 4)の妥当な最終持ち点。 */
+  const validPoints: PlayerPoints[] = [
+    { playerId: "A", points: 50000 },
+    { playerId: "B", points: 40000 },
+    { playerId: "C", points: 30000 },
+    { playerId: "D", points: 20000 },
+  ];
+
+  describe("applyRawScore / applyUma: 持ち点合計 = 配給原点 × 人数", () => {
+    it("[前提] 妥当な合計なら通り、ゼロサムが成立する", () => {
+      expect(
+        sum(Object.fromEntries(validPoints.map((p) => [p.playerId, p.points]))),
+      ).toBe(STARTING_POINTS * IDS.length);
+      const l = new SoshiiLedger(IDS);
+      l.applyRawScore(validPoints);
+      l.applyUma(validPoints);
+      expect(sum(l.balances())).toBe(0);
+    });
+
+    it.each([
+      ["不足(供託が場に残ったまま)", -1000],
+      ["不足(大きく目減り)", -40000],
+      ["過剰", 1000],
+    ])("合計が %s なら RangeError", (_label, delta) => {
+      const broken = validPoints.map((p, i) =>
+        i === 0 ? { ...p, points: p.points + delta } : p,
+      );
+      expect(() => new SoshiiLedger(IDS).applyRawScore(broken)).toThrow(
+        RangeError,
+      );
+      expect(() => new SoshiiLedger(IDS).applyUma(broken)).toThrow(RangeError);
+    });
+
+    it("合計が1点ずれるだけでゼロサムが崩れる(ガードが防いでいるもの)", () => {
+      // ガードを外した場合に何が起きるかを、検証を通さない経路で示す。
+      // 素点は `points − 返し` の総和なので、合計の不足はそのままソシー総和の
+      // 不足になり、ウマ/オカ(総和 +20,000 − 20,000 = 0)では埋め合わされない。
+      const brokenTotal = STARTING_POINTS * IDS.length - 1000;
+      const expectedZeroSumDrift =
+        brokenTotal - RETURN_POINTS * IDS.length + OKA;
+      expect(expectedZeroSumDrift).toBe(-1000);
+    });
+  });
+
+  describe("applyBonus: 支払者は和了者以外の全兄弟がちょうど1回ずつ", () => {
+    it("[前提] 妥当な支払者なら通る", () => {
+      const l = new SoshiiLedger(IDS);
+      expect(
+        l.applyBonus({
+          winnerId: "A",
+          loserIds: ["B", "C", "D"],
+          score: trueYakuman,
+        }),
+      ).toBe(true);
+      expect(sum(l.balances())).toBe(0);
+    });
+
+    it.each<[string, PlayerId[]]>([
+      ["空配列", []],
+      ["人数不足", ["B", "C"]],
+      ["人数過剰", ["B", "C", "D", "B"]],
+      ["重複", ["B", "B", "C"]],
+      ["和了者自身を含む", ["A", "C", "D"]],
+      ["未知のID", ["B", "C", "X"]],
+    ])("%s なら RangeError", (_label, loserIds) => {
+      const l = new SoshiiLedger(IDS);
+      expect(() =>
+        l.applyBonus({ winnerId: "A", loserIds, score: trueYakuman }),
+      ).toThrow(RangeError);
+    });
+
+    it("検証で落ちたときは残高も先着枠も書き換えない", () => {
+      // 検証前に加算していると、途中まで支払われた状態と「先着済み」フラグが残る。
+      const l = new SoshiiLedger(IDS);
+      expect(() =>
+        l.applyBonus({
+          winnerId: "A",
+          loserIds: ["B", "B", "C"],
+          score: trueYakuman,
+        }),
+      ).toThrow(RangeError);
+      expect(l.balances()).toEqual({ A: 0, B: 0, C: 0, D: 0 });
+      expect(l.bonusAwarded).toBe(false);
+      // 先着枠が消費されていないので、正しい呼び出しは通る。
+      expect(
+        l.applyBonus({
+          winnerId: "A",
+          loserIds: ["B", "C", "D"],
+          score: trueYakuman,
+        }),
+      ).toBe(true);
+    });
+
+    it("空配列は先着枠を消費しない(以後の役満祝儀が消えない)", () => {
+      const l = new SoshiiLedger(IDS);
+      expect(() =>
+        l.applyBonus({ winnerId: "A", loserIds: [], score: trueYakuman }),
+      ).toThrow(RangeError);
+      expect(l.bonusAwarded).toBe(false);
+    });
+
+    it("重複した支払者は ranking と applyUma の順位一致のマージンを食い潰す", () => {
+      // 妥当な呼び出し: 和了者 +3,000 / 各支払者 −1,000 → 相対スイング 4,000。
+      // ウマの最小隣接差 5,000 を下回るのでマージン 1,000 > 0 で順位一致が保たれる。
+      const legitSwing = YAKUMAN_BONUS * (IDS.length - 1) + YAKUMAN_BONUS;
+      // 3件のまま重複(例: B が2回): 和了者 +3,000 / B −2,000 → スイング 5,000。
+      // 最小隣接差と等しくなりマージンが消える(同点=逆転し得る)。
+      const duplicatedSwing =
+        YAKUMAN_BONUS * (IDS.length - 1) + 2 * YAKUMAN_BONUS;
+      const minimumUmaGap = UMA[2] - UMA[3];
+      expect(legitSwing).toBeLessThan(minimumUmaGap);
+      expect(duplicatedSwing).toBeGreaterThanOrEqual(minimumUmaGap);
+    });
   });
 });
 

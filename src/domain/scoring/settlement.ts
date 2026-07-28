@@ -96,7 +96,17 @@ export class SoshiiLedger {
     this._balances.set(id, current + amount);
   }
 
-  /** 最終持ち点が登録プレイヤー全員を重複なく含むことを、加算前に検証する。 */
+  /**
+   * 最終持ち点が spec 3.3 の前提を満たすことを、加算前に検証する(#394)。
+   *
+   * 登録プレイヤー全員を重複なく含み、各値が有限で、**合計が
+   * `配給原点 × 人数`(= 140,000)** であること。合計が前提を外れると
+   * 「素点(返し基準)+ ウマ + オカ の総和がゼロ」というゼロサム不変条件が
+   * 例外を出さずに破れ、結果画面の精算表が合わなくなる。
+   *
+   * 供託リーチ棒は場に残ったままだと合計が目減りするが、engine の `endGame` が
+   * 残存分を最終持ち点へ畳み込んでから渡すため、この時点では常に一致する。
+   */
   private assertCompleteFinalPoints(
     finalPoints: readonly PlayerPoints[],
   ): void {
@@ -117,6 +127,13 @@ export class SoshiiLedger {
         throw new RangeError(`points must be finite, received ${points}.`);
       }
       seen.add(playerId);
+    }
+    const expectedTotal = STARTING_POINTS * this._balances.size;
+    const actualTotal = finalPoints.reduce((sum, p) => sum + p.points, 0);
+    if (actualTotal !== expectedTotal) {
+      throw new RangeError(
+        `final points must total ${expectedTotal} (${STARTING_POINTS} x ${this._balances.size}), received ${actualTotal}. Outstanding riichi sticks must be folded into the final points before settlement.`,
+      );
     }
     if (this._finalPoints === null) {
       this._finalPoints = new Map(
@@ -196,19 +213,56 @@ export class SoshiiLedger {
    * パオ(責任払い)は点数側({@link "./win-payment"})の話で、祝儀は
    * spec 通り「全員から1,000」を維持する(パオでも祝儀の支払者は変わらない)。
    *
+   * `loserIds` は spec 3.3③ / Q14 の前提(**和了者以外の全兄弟がちょうど1回ずつ**)を
+   * 満たさなければならない(#394)。空配列を渡すと授受ゼロのまま先着枠だけを消費して
+   * 以後その半荘で祝儀が一切付かなくなり、重複を渡すと和了者と支払者の相対スイングが
+   * 4,000 を超えて {@link ranking} と {@link applyUma} の順位一致が破れる。
+   * どちらも例外にならず精算結果だけが静かに壊れるため、加算前に検証する。
+   *
    * @returns 祝儀が確定したか(先着済み・数え役満・非役満なら false)。
+   * @throws RangeError `loserIds` が上記の前提を満たさないとき。
    */
   applyBonus(input: BonusInput): boolean {
     if (this._bonusAwarded) return false;
     if (!input.score.isTrueYakuman || input.score.isCountedYakuman)
       return false;
 
+    this.assertBonusLosers(input);
     for (const loserId of input.loserIds) {
       this.add(loserId, -YAKUMAN_BONUS);
       this.add(input.winnerId, YAKUMAN_BONUS);
     }
     this._bonusAwarded = true;
     return true;
+  }
+
+  /**
+   * 役満祝儀の支払者が「和了者以外の全兄弟がちょうど1回ずつ」であることを検証する(#394)。
+   * 残高を1つも書き換える前に落とし、途中まで加算された状態を残さない。
+   */
+  private assertBonusLosers(input: BonusInput): void {
+    if (!this._balances.has(input.winnerId)) {
+      throw new RangeError(`unknown playerId: ${input.winnerId}`);
+    }
+    const expected = this._balances.size - 1;
+    if (input.loserIds.length !== expected) {
+      throw new RangeError(
+        `loserIds must contain exactly ${expected} players (everyone but the winner), received ${input.loserIds.length}.`,
+      );
+    }
+    const seen = new Set<PlayerId>();
+    for (const loserId of input.loserIds) {
+      if (!this._balances.has(loserId)) {
+        throw new RangeError(`unknown playerId: ${loserId}`);
+      }
+      if (loserId === input.winnerId) {
+        throw new RangeError(`winner cannot be a bonus loser: ${loserId}`);
+      }
+      if (seen.has(loserId)) {
+        throw new RangeError(`duplicate loserId: ${loserId}`);
+      }
+      seen.add(loserId);
+    }
   }
 
   /** 現在のソシー残高スナップショット。 */
@@ -239,8 +293,9 @@ export class SoshiiLedger {
    * ウマは1位分」という不整合を生む。マージンは `settlement.test.ts`
    * 「ranking と applyUma の基準一致」で定数から算出・固定済み。
    *
-   * 前提: {@link applyBonus} に渡す `loserIds` が「和了者以外の3兄弟・重複なし」であること
-   * (engine `settleWin` が保証)。重複した支払者を渡すとスイングが 4,000 を超え得る。
+   * 前提: {@link applyBonus} に渡す `loserIds` が「和了者以外の3兄弟・重複なし」であること。
+   * 重複した支払者を渡すとスイングが 4,000 を超えてこの一致が破れるため、
+   * `applyBonus` が加算前に検証して `RangeError` で落とす(#394)。
    * また局中(素点・ウマ未適用)の呼び出しはこの一致の対象外。
    */
   ranking(): PlayerId[] {
