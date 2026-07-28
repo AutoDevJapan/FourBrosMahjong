@@ -147,6 +147,37 @@ test.describe("自動 a11y 監査(axe-core)", () => {
     }
   }
 
+  /**
+   * ランドマーク構造(#409)。
+   *
+   * `landmark-one-main` と `region` は axe の **`best-practice` タグ**に属し、`WCAG_TAGS`
+   * (A/AA)だけを渡している上の全画面監査には**一切入らない**。そのため `/game` と
+   * `/game/result` だけ `<main>` を持たず、盤面・結果本文がランドマーク外に取り残されていた
+   * のに、`disableRules` を使っていないのに素通りしていた。
+   *
+   * 全 best-practice を A/AA と同列に必須化すると本 issue の範囲を超えるため、
+   * ランドマーク関連の 2 ルールだけを明示的に有効化して回帰を固定する。
+   */
+  const LANDMARK_RULES = ["landmark-one-main", "region"] as const;
+
+  for (const screen of SCREENS) {
+    test(`${screen.name}(${screen.path})は本文が単一の <main> に収まる(#409)`, async ({
+      page,
+    }) => {
+      await openScreen(page, screen, "ライト");
+
+      // `<main>` はちょうど 1 つ(0 個=ランドマーク無し / 2 個以上=どれが本文か曖昧)。
+      await expect(page.locator("main")).toHaveCount(1);
+
+      const results = await new AxeBuilder({ page })
+        .withRules([...LANDMARK_RULES])
+        .analyze();
+      expect(results.violations, formatViolations(results.violations)).toEqual(
+        [],
+      );
+    });
+  }
+
   test("卓情報の generic 要素を aria-label で命名しない(#204)", async ({
     page,
   }) => {
