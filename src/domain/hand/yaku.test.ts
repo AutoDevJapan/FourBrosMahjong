@@ -138,6 +138,48 @@ describe("北刻子の役牌除外(spec 3.0 #83-3・明示ガード)", () => {
     expect(got).toContain("honitsu");
   });
 
+  it("誤って場風/自風に北を渡しても北雀頭は平和を否定しない(雀頭側ガード・#400)", () => {
+    // 刻子側の上のテストと対になる雀頭側の契約。北は役牌ではないので、
+    // 北雀頭は「役牌雀頭」として平和を否定してはならない(spec 3.0 #83-3)。
+    // ガードが無いと `pairIsValue` が真になり平和が落ち、平和が唯一の役である
+    // この手は「役なし」で和了不可(analyzeWin が null)になる。
+    const base: WinContext = {
+      concealedTiles: parseTiles("234p 567p 234s 678s 44z"),
+      winningTile: parseTile("4p"),
+      winType: "ron",
+    };
+    const withNorthWind = analyzeWin({
+      ...base,
+      roundWind: HONOR.NORTH,
+      seatWind: HONOR.NORTH,
+    });
+    expect(withNorthWind).not.toBeNull();
+    expect(withNorthWind?.yaku.map((y) => y.id)).toContain("pinfu");
+    // 風を渡さない場合と同じ結果になる(北を風として渡しても影響が出ない)。
+    expect(withNorthWind?.yaku.map((y) => y.id)).toEqual(
+      analyzeWin(base)?.yaku.map((y) => y.id),
+    );
+  });
+
+  it("北雀頭でも三元牌雀頭は従来どおり平和を否定する(ガードの効き過ぎ防止)", () => {
+    // 雀頭側ガードが北以外まで無効化していないことを対照で固定する。
+    const got = ids({
+      concealedTiles: parseTiles("234p 567p 234s 678s 55z"),
+      winningTile: parseTile("4p"),
+      winType: "ron",
+    });
+    expect(got).not.toContain("pinfu");
+    // 場風/自風雀頭も同様に平和を否定する(東=HONOR.EAST)。
+    const eastPair = ids({
+      concealedTiles: parseTiles("234p 567p 234s 678s 11z"),
+      winningTile: parseTile("4p"),
+      winType: "ron",
+      roundWind: HONOR.EAST,
+      seatWind: HONOR.EAST,
+    });
+    expect(eastPair).not.toContain("pinfu");
+  });
+
   it("北刻子は字一色(役満)の構成要素になり得る", () => {
     // 全字牌: 北(444z)刻子 + 白發中刻子 + 東雀頭 → 字一色。
     const analysis = analyzeWin({

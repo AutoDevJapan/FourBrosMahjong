@@ -94,9 +94,18 @@ function groupHasYaochu(m: Mentsu): boolean {
   return isYaochu({ suit: m.suit, rank: m.startRank });
 }
 
-/** 雀頭が役牌(三元牌・場風・自風)か(平和の否定条件)。 */
+/**
+ * 雀頭が役牌(三元牌・場風・自風)か(平和の否定条件)。
+ *
+ * 北(ガリ)は抜きドラ専用の字牌であり役牌として扱わない(spec 3.0 #83-3)。
+ * 刻子側({@link standardFormYaku} の役牌ループ)と同じガードを雀頭側にも置く。
+ * 現行 engine は `roundWind`/`seatWind` に北を渡さないため観測可能な差は無いが、
+ * 「北は役牌にならない」という契約を片側だけ守る非対称は、風の値域が変わった
+ * 瞬間に無音で破れる(→ 北雀頭の平和が否定され、平和のみの手が和了不可になる)。
+ */
 function pairIsValue(pair: Mentsu, input: YakuInput): boolean {
   if (pair.suit !== "honor") return false;
+  if (pair.startRank === HONOR.NORTH) return false;
   return (
     isDragon({ suit: "honor", rank: pair.startRank }) ||
     pair.startRank === input.roundWind ||
