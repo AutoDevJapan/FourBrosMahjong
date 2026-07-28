@@ -378,4 +378,59 @@ test.describe("非テキストコントラスト(WCAG 1.4.11 / #388)", () => {
       });
     }
   }
+  /**
+   * 監査自身の自己検査(#388)。
+   *
+   * この監査の最大の失敗モードは「壊れていても常に緑」= 静かな取りこぼしである
+   * (実際、最初の実装は `getComputedStyle` の `color(srgb …)` を読めず、修正前でも
+   * 18 件すべて緑だった)。そこで **意図的に 3:1 未満の枠を注入し、それを検出できること**
+   * を同じ経路で確認する。この検査が落ちたら、他の全ケースの緑は信用できない。
+   */
+  test("自己検査: 3:1 未満の枠を注入すると検出できる", async ({ page }) => {
+    await openScreen(page, SCREENS[0], "ライト");
+    await expect(await collectOffenders(page, MIN_RATIO)).toEqual([]);
+
+    // ページ背景(白)に対し 1.2:1 程度しかない枠を持つボタンを差し込む。
+    await page.evaluate(() => {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.textContent = "注入されたコントロール";
+      button.style.border = "1px solid #eeeeee";
+      button.style.background = "transparent";
+      document.body.append(button);
+    });
+
+    const offenders = await collectOffenders(page, MIN_RATIO);
+    expect(offenders.map((o) => o.label)).toContain(
+      "<button> 注入されたコントロール",
+    );
+    expect(offenders[0]?.ratio).toBeLessThan(MIN_RATIO);
+  });
+
+  /**
+   * 初期局面だけでは走査外になる局面依存の描画(段階②のコンパクト帯・全体盤面モーダル)も
+   * 監査する(`e2e/a11y.spec.ts` の状態駆動シナリオと同じ考え方)。モーダル内は Portal 配下で
+   * 背景も別なので、静的監査では一度も測られていない経路になる。
+   */
+  test("状態駆動: 段階②(320px)と全体盤面モーダルでも 3:1 以上", async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 320, height: 800 });
+    await openScreen(page, SCREENS[4], "ライト");
+
+    const opener = page.getByRole("button", { name: "全体盤面" });
+    await expect(opener).toBeVisible();
+    expect(await collectOffenders(page, MIN_RATIO)).toEqual([]);
+
+    await opener.click();
+    await expect(page.getByRole("dialog", { name: "全体盤面" })).toBeVisible();
+    const offenders = await collectOffenders(page, MIN_RATIO);
+    expect(
+      offenders,
+      `全体盤面モーダルで ${MIN_RATIO}:1 未満:\n` +
+        offenders
+          .map((o) => `  ${o.label} — 枠 ${o.border} / 地 ${o.background}`)
+          .join("\n"),
+    ).toEqual([]);
+  });
 });
