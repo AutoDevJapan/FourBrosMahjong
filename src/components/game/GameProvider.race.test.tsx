@@ -2,10 +2,10 @@
 
 import { fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import type { GameViewState } from "./types";
-import { selectView } from "./gameView";
-import { loadJournal, replayJournal } from "./gamePersistence";
 import { GameProvider, useGame } from "./GameProvider";
+import { loadJournal, replayJournal } from "./gamePersistence";
+import { selectView } from "./gameView";
+import type { GameViewState } from "./types";
 
 function DoubleActionProbe() {
   const { controls, view } = useGame();

@@ -41,8 +41,8 @@ pnpm test:e2e:pwa   # production build + Service Worker / オフライン専用E
 pnpm test:e2e:ui    # Playwright UI モード(テストの選択実行・トレース確認向け)
 
 pnpm format         # Biome: フォーマット適用
-pnpm format:check   # Biome: フォーマットチェックのみ
-pnpm check          # Biome: check(format + assist)
+pnpm check          # Biome: format + assist チェック(CI の必須ゲート)
+pnpm format:check   # Biome: フォーマットのみ(`check` に包含)
 pnpm knip           # 未使用ファイル/エクスポート/依存の検出
 pnpm depcruise      # dependency-cruiser による依存関係ルールチェック(src配下)
 pnpm docs           # TypeDoc → docs/api(gitignore対象)

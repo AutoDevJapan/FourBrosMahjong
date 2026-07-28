@@ -24,6 +24,8 @@ import {
   useRef,
   useState,
 } from "react";
+import { localStorageOrNull } from "@/components/common/browserStorage";
+import { loadPlayerNames } from "@/components/settings/playerNames";
 import {
   createGame,
   DEFAULT_NAMES,
@@ -33,10 +35,7 @@ import {
   type PlayerNames,
   type RoundSummary,
 } from "@/domain/game/engine";
-import { localStorageOrNull } from "@/components/common/browserStorage";
-import { loadPlayerNames } from "@/components/settings/playerNames";
 import type { Tile } from "@/domain/tiles/tile";
-import { selectView, toTile } from "./gameView";
 import {
   applyGameAction,
   type GameAction,
@@ -45,6 +44,7 @@ import {
   replayJournal,
   saveJournal,
 } from "./gamePersistence";
+import { selectView, toTile } from "./gameView";
 import { notifyHistoryChanged, persistHistoryAcrossTabs } from "./matchHistory";
 import type { GameViewState, TileData } from "./types";
 

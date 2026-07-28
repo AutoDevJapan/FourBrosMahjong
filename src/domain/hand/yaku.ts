@@ -19,9 +19,9 @@
 import { HONOR, type Tile } from "../tiles/tile";
 import {
   type Mentsu,
+  mentsuContainsKind,
   type StandardForm,
   type WinForm,
-  mentsuContainsKind,
 } from "./decompose";
 import {
   isDragon,

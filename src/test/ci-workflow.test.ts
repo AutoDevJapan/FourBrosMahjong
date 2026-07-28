@@ -103,6 +103,53 @@ describe("CI workflow job timeouts", () => {
 });
 
 /**
+ * ドキュメント(CLAUDE.md / README / `docs/品質ツール運用方針.md`)が「必須ゲート」と
+ * 書いているスクリプトが、実際に CI で実行されていることを固定する。
+ *
+ * #418 の実態: CI のゲートは `pnpm format:check`(= `biome format .`)だけで、
+ * その上位互換である `pnpm check`(= `biome check .` = 整形 + assist)は誰も走らせて
+ * いなかった。結果として assist(organizeImports)の違反が 38 件たまり、
+ * **ドキュメントに載っているのに main で一度も緑にならないコマンド**が生まれた。
+ * ゲートの「実行されているか」は、スクリプト自体のテストでは検出できない。
+ */
+describe("CI が必須ゲートを実際に実行している (#418)", () => {
+  /** `ci` job で実行されていなければならない pnpm スクリプト。 */
+  const REQUIRED_GATES = [
+    "pnpm lint",
+    "pnpm typecheck",
+    "pnpm check",
+    "pnpm test",
+    "pnpm knip",
+    "pnpm depcruise",
+    "pnpm build",
+  ] as const;
+
+  /** `ci` job の全ステップの `run` を 1 本の文字列に連結する。 */
+  function ciRunCommands(): string {
+    const workflow = readWorkflow();
+    const steps = workflow.jobs?.ci?.steps ?? [];
+    return steps.map((step) => step.run ?? "").join("\n");
+  }
+
+  it.each(REQUIRED_GATES)("ci job が %s を実行している", (gate) => {
+    // 単語境界で見る。`pnpm check` が `pnpm check:foo` に化けても検出できるようにする。
+    const pattern = new RegExp(`${gate.replace(/\s+/g, "\\s+")}(\\s|$)`, "m");
+    expect(
+      pattern.test(ciRunCommands()),
+      `ci job に ${gate} を実行するステップが無い(必須ゲートが強制されていない)`,
+    ).toBe(true);
+  });
+
+  it("format:check ではなく上位互換の check をゲートにしている", () => {
+    const commands = ciRunCommands();
+    expect(
+      /pnpm\s+format:check(\s|$)/m.test(commands),
+      "pnpm format:check は pnpm check に包含されるため、両方を走らせる必要はない",
+    ).toBe(false);
+  });
+});
+
+/**
  * 複数 job が同じ `~/.cache/ms-playwright` を異なるブラウザ集合で使うため、キャッシュキーが
  * ブラウザ集合を含まないと、先に保存した job の内容(例: chromium のみ)がキーを占有し、
  * webkit を要求する job は exact hit で保存もスキップされたまま毎回再ダウンロードになる。

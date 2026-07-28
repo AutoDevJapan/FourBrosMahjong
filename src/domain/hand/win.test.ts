@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { HONOR } from "../tiles/tile";
 import type { Meld, MeldType } from "./meld";
 import { parseTile, parseTiles } from "./notation";
-import { type WinContext, analyzeWin, isWinningHand } from "./win";
+import { analyzeWin, isWinningHand, type WinContext } from "./win";
 
 function ids(ctx: WinContext): string[] {
   const analysis = analyzeWin(ctx);

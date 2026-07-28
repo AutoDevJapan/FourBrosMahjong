@@ -20,8 +20,8 @@
  * `gameView` 写像からは生成されず、開示配列を優先して描く。
  */
 import { useId } from "react";
-import type { DoraData } from "./types";
 import Tile from "../common/Tile";
+import type { DoraData } from "./types";
 
 export interface DoraIndicatorProps {
   dora: DoraData;

@@ -85,8 +85,12 @@ jobs:
       - name: Typecheck (tsc --noEmit)
         run: pnpm typecheck
 
-      - name: Format check (biome)
-        run: pnpm format:check
+      # `biome check` は `biome format` の上位互換(整形 + assist。linter は
+      # biome.json で無効)。`format:check` だけをゲートにしていた間に assist
+      # (organizeImports) の違反が 38 件たまり、`pnpm check` が main で一度も
+      # 緑にならない状態になっていた (#418)。ステップは増やさず check へ寄せる。
+      - name: Format & assist check (biome)
+        run: pnpm check
 
       - name: Test (vitest)
         run: pnpm test

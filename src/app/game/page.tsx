@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import GameBoard from "@/components/game/GameBoard";
 import { socialMetadata } from "@/app/_lib/metadata";
+import GameBoard from "@/components/game/GameBoard";
 
 const description =
   "関西式三人打ちをベースにした四人回しの四兄弟麻雀をプレイする対局画面です。";

@@ -11,9 +11,9 @@
  */
 
 import type { Tile } from "../tiles/tile";
-import { type MeldInput, type WinForm, decomposeAll } from "./decompose";
-import { type Meld, isConcealedHand } from "./meld";
-import { type PaoYaku, type Yaku, type YakuInput, detectYaku } from "./yaku";
+import { decomposeAll, type MeldInput, type WinForm } from "./decompose";
+import { isConcealedHand, type Meld } from "./meld";
+import { detectYaku, type PaoYaku, type Yaku, type YakuInput } from "./yaku";
 
 /** 和了判定の入力(手牌+文脈)。席割り当て(Q9)・ドラ(#64)には依存しない。 */
 export interface WinContext {

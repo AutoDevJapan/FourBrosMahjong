@@ -3,9 +3,10 @@
  * 内包する。felt(緑地)背景はセマンティックトークン `--color-table-felt` 経由で参照する
  * (スペック5 5.4.2)。値渡しのみの純表示コンポーネント(スペック6 6.6)。
  */
-import type { DoraData, TableInfoData } from "./types";
+
 import DoraIndicator from "./DoraIndicator";
 import TableInfo from "./TableInfo";
+import type { DoraData, TableInfoData } from "./types";
 
 export interface TableProps {
   info: TableInfoData;

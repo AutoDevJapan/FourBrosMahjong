@@ -7,7 +7,7 @@
  */
 
 import { createTile, type Tile } from "../tiles/tile";
-import { type MeldInput, isCompleteHand } from "./decompose";
+import { isCompleteHand, type MeldInput } from "./decompose";
 import { SANMA_TILE_KINDS, tileKey } from "./tile-identity";
 
 /** 牌種ごとの現在枚数(手牌+副露)。1牌種は最大4枚まで。 */

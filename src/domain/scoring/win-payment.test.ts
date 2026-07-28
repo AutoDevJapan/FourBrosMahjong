@@ -1,10 +1,10 @@
 import { describe, expect, it } from "vitest";
 import { computeScore } from "./points";
 import {
-  type SeatedPlayerRef,
-  type WinPaymentInput,
   chomboPenalty,
   resolveWinPayment,
+  type SeatedPlayerRef,
+  type WinPaymentInput,
 } from "./win-payment";
 
 const D: SeatedPlayerRef = { id: "dealer", isDealer: true };

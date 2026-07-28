@@ -1,9 +1,9 @@
 import { describe, expect, it } from "vitest";
 import { computeScore } from "./points";
 import {
+  resolveWinPayment,
   type SeatedPlayerRef,
   type WinPaymentInput,
-  resolveWinPayment,
 } from "./win-payment";
 
 const D: SeatedPlayerRef = { id: "dealer", isDealer: true };

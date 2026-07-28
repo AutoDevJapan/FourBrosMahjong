@@ -16,7 +16,7 @@ import {
   waitingIndicesOracle34,
 } from "./agari-oracle";
 import { tilesToCount34, tileTo34Index } from "./counts34";
-import { AGARI, TENPAI, shantenOracle34 } from "./shanten-oracle";
+import { AGARI, shantenOracle34, TENPAI } from "./shanten-oracle";
 
 const sh = (notation: string): number =>
   shantenOracle34(tilesToCount34(parseTiles(notation)));

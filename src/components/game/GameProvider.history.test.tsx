@@ -13,8 +13,8 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { useSyncExternalStore } from "react";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { walkToGameEnd } from "./finishedGameFixture";
-import type { GameAction } from "./gamePersistence";
 import { GameProvider, useGame } from "./GameProvider";
+import type { GameAction } from "./gamePersistence";
 import {
   getHistorySnapshot,
   getServerHistorySnapshot,

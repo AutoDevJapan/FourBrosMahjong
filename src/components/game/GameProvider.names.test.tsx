@@ -9,8 +9,8 @@
 
 import { cleanup, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
-import { DEFAULT_NAMES } from "@/domain/game/engine";
 import { PLAYER_NAMES_STORAGE_KEY } from "@/components/settings/playerNames";
+import { DEFAULT_NAMES } from "@/domain/game/engine";
 import { GameProvider, useGame } from "./GameProvider";
 
 const SAVED_NAMES = ["自分", "龍二", "下ちゃん", "翔生"] as const;
