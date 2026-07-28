@@ -69,6 +69,20 @@ function expectRiverIsSubsequenceOfHistory(state: EngineState): void {
   }
 }
 
+/**
+ * ツモ牌が無いときの供給元が常に既定値であることを検証する(#415)。
+ *
+ * `drawSource` は `drawn` に付随する情報なので、`drawn` を `null` にする経路
+ * (打牌・ポン/カンによる手番移動・嶺上枯渇)はすべて `"live"` へ戻さなければならない。
+ * 戻し忘れると、次の通常ツモが嶺上由来と誤認されて海底摸月が消えたり、嶺上開花が
+ * 誤って付いたりする。型では「値が古いまま」を防げないのでここで固定する。
+ */
+function expectDrawSourceResetWhenNoDraw(state: EngineState): void {
+  const hand = state.hand;
+  if (hand === null || hand.drawn !== null) return;
+  expect(hand.drawSource).toBe("live");
+}
+
 /** 自家は合法牌を切り、鳴き/ロンを見送ってAIの自動判断を観測する決定的ドライバ。 */
 function observeAiActions(
   seed: number,
@@ -80,6 +94,7 @@ function observeAiActions(
   for (let guard = 0; guard < 3000 && state.phase !== "gameEnd"; guard++) {
     expectTileConservation(state);
     expectRiverIsSubsequenceOfHistory(state);
+    expectDrawSourceResetWhenNoDraw(state);
     const before = state.hand
       ? {
           riichi: { ...state.hand.riichi },
@@ -159,6 +174,7 @@ function observeAiActions(
   expect([...observed]).toEqual(expect.arrayContaining([...wanted]));
   expectTileConservation(state);
   expectRiverIsSubsequenceOfHistory(state);
+  expectDrawSourceResetWhenNoDraw(state);
   return state;
 }
 

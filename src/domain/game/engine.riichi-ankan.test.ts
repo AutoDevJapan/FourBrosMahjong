@@ -215,7 +215,7 @@ function setupRinshanWin(): {
     hand.riichi[seat] = true;
     hand.turn = seat;
     hand.drawn = ankanTile;
-    hand.fromKan = false;
+    hand.drawSource = "live";
 
     const state: EngineState = {
       ...s0,
@@ -249,8 +249,8 @@ describe("declareAnkan: リーチ後暗槓の結線(Q18 / #116)", () => {
     expect(kan.tiles).toHaveLength(4);
     expect(kan.tiles.every((t2) => sameKind(t2, ankanTile))).toBe(true);
 
-    // 嶺上ツモ: fromKan=true、ツモ牌は王牌末尾の嶺上牌 T。
-    expect(s1.hand.fromKan).toBe(true);
+    // 嶺上ツモ: drawSource="kanReplacement"、ツモ牌は王牌末尾の嶺上牌 T。
+    expect(s1.hand.drawSource).toBe("kanReplacement");
     expect(s1.hand.drawn).not.toBeNull();
     expect(s1.hand.drawn && sameKind(s1.hand.drawn, rinshanTile)).toBe(true);
 
@@ -319,7 +319,7 @@ describe("declareAnkan: リーチ後暗槓の結線(Q18 / #116)", () => {
     while (hand.wall.remainingLiveTiles > 1) hand.wall.draw();
     const afterKan = declareAnkan(state, ankanTile);
     expect(afterKan.hand?.wall.remainingLiveTiles).toBe(0);
-    expect(afterKan.hand?.fromKan).toBe(true);
+    expect(afterKan.hand?.drawSource).toBe("kanReplacement");
     expect(afterKan.pending?.kind).toBe("humanDiscard");
     if (afterKan.pending?.kind !== "humanDiscard") return;
     expect(afterKan.pending.canTsumo).toBe(true);
@@ -360,7 +360,7 @@ describe("declareAnkan: リーチ後暗槓の結線(Q18 / #116)", () => {
     hand.riichi[seat] = true;
     hand.turn = seat;
     hand.drawn = createTile("pin", 1);
-    hand.fromKan = false;
+    hand.drawSource = "live";
 
     // ankanTiles を空(=pump が提示しない)にした状態で暗槓要求 → no-op。
     const state: EngineState = { ...s0, pending: riichiPending([], true) };

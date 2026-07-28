@@ -51,16 +51,18 @@ describe("isHaitei(ライブ牌0 = 海底)", () => {
 
 describe("isHaiteiTsumo(海底摸月の文脈)", () => {
   it("通常ツモでライブ牌0なら海底摸月", () => {
-    expect(isHaiteiTsumo(0, false)).toBe(true);
+    expect(isHaiteiTsumo(0, "live")).toBe(true);
   });
 
-  it("嶺上補充でライブ牌0になっても海底摸月ではない", () => {
-    expect(isHaiteiTsumo(0, true)).toBe(false);
+  it("嶺上補充でライブ牌0になっても海底摸月ではない(カン・北抜きのいずれも)", () => {
+    expect(isHaiteiTsumo(0, "kanReplacement")).toBe(false);
+    expect(isHaiteiTsumo(0, "kitaReplacement")).toBe(false);
   });
 
   it("ライブ牌が残っていれば通常ツモ・嶺上とも海底摸月ではない", () => {
-    expect(isHaiteiTsumo(1, false)).toBe(false);
-    expect(isHaiteiTsumo(1, true)).toBe(false);
+    expect(isHaiteiTsumo(1, "live")).toBe(false);
+    expect(isHaiteiTsumo(1, "kanReplacement")).toBe(false);
+    expect(isHaiteiTsumo(1, "kitaReplacement")).toBe(false);
   });
 });
 

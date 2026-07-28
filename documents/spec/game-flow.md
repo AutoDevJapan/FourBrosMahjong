@@ -43,7 +43,7 @@ stateDiagram-v2
     state 自ツモ {
         [*] --> ツモ牌取得
         ツモ牌取得 --> 北抜き: 北をツモ(自動・ガリ)
-        北抜き --> ツモ牌取得: 嶺上補充
+        北抜き --> ツモ牌取得: 嶺上補充(drawSource=kitaReplacement)
         ツモ牌取得 --> [*]
     }
 
@@ -58,7 +58,7 @@ stateDiagram-v2
 
     state カン宣言 {
         [*] --> 槍槓判定
-        槍槓判定 --> [*]: 槍槓なし → 嶺上ツモ(fromKan / fromReplacement)
+        槍槓判定 --> [*]: 槍槓なし → 嶺上ツモ(drawSource=kanReplacement)
     }
     カン宣言 --> 自ツモ: 加槓/暗槓成立 → 嶺上ツモ
     カン宣言 --> 和了: 槍槓ロン(加槓=全役 / 暗槓=国士のみ・chankan)
