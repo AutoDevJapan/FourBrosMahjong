@@ -256,9 +256,12 @@ export interface RoundSummary {
     /** 帰属先(Q15 = 最終持ち点最高 / Q20 = 同点最高は席順上位)。 */
     readonly recipientId: PlayerId;
     readonly recipientName: string;
-    /** 残存本数。 */
+    /** 残存本数(**リーチ棒の本数**。供託種別を足すときは表示側の拡張が要る → `POT_SOURCES`)。 */
     readonly sticks: number;
-    /** 加算点(= sticks × 1,000)。 */
+    /**
+     * 加算点(**場に残っていた供託の合計** = `potTotal`)。現状は供託種別がリーチ棒だけなので
+     * `sticks × 1,000` に一致するが、種別が増えると一致しなくなる(#430)。
+     */
     readonly points: number;
   };
   /** 和了時点で固定した、GUI検算用の表示スナップショット。 */
@@ -2076,15 +2079,19 @@ export function finishRound(
  *
  * `Σ持ち点 + 場の供託 = 140,000`(spec 3.3「精算入力の前提」)を保つため、**プレイヤーの
  * 持ち点から場へ移した点棒はすべてここに列挙されていなければならない**。列挙漏れがあると
- * `endGame` の畳み込みから外れ、精算入口({@link SoshiiLedger.applyRawScore})が
- * `RangeError` を投げて対局中にクラッシュする(#430)。
+ * `endGame` の畳み込みから外れ、精算入口({@link SoshiiLedger.applyUma} /
+ * {@link SoshiiLedger.applyRawScore})が `RangeError` を投げて対局中にクラッシュする(#430)。
  */
 interface PotSource {
-  /** 種別名(デバッグ・将来の内訳表示用)。 */
-  readonly kind: string;
   /** 現在この種別で場に残っている点数(残存なしなら 0)。 */
   readonly points: (state: EngineState) => number;
-  /** この種別の供託を場から下ろした状態(点数の帰属先への加算は呼び出し側の責務)。 */
+  /**
+   * この種別の供託を場から下ろした状態。
+   *
+   * **自分のカウンタ以外を変えてはならない**。特に `points`(持ち点)と `lastRound` は
+   * `endGame` が畳み込み後の値で明示的に上書きするため、ここでの変更は黙って捨てられる。
+   * 下ろした点数を帰属先の持ち点へ加算するのは呼び出し側(`endGame`)の責務。
+   */
   readonly withdraw: (state: EngineState) => EngineState;
 }
 
@@ -2092,19 +2099,25 @@ interface PotSource {
  * 場に残る供託の全種別レジストリ(**単一の「供託」概念**)。
  *
  * 現状で場に残り得るのはリーチ棒だけだが、`質問リスト.md` Q29(チョンボ罰符)が
- * 「供託方式」で確定した場合など**新しい供託種別はここへ1エントリ追加するだけ**でよい。
- * {@link potTotal} / `withdrawPot` を経由する `endGame` の畳み込みと、
- * `engine.pot-invariant.test.ts` の不変条件テストが自動的に新種別を対象に含める(#430)。
+ * 「供託方式」で確定した場合など、**保存則と畳み込みに関しては新しい供託種別を
+ * ここへ1エントリ追加するだけ**でよい。{@link potTotal} / `withdrawPot` を経由する
+ * `endGame` の畳み込みと、`engine.pot-invariant.test.ts` の不変条件テストが
+ * 自動的に新種別を対象に含める(#430)。決着表示の内訳
+ * (`RoundSummary.residualSticks`)は自動では追随しない(`endGame` 内の注記を参照)。
  *
  * **帰属先について**: `endGame` は集約した供託を {@link residualPotRecipient}
  * (Q15 = 1位取得 / Q20 = 同点最高は席順上位)へまとめて渡す。この帰属規則は spec 3.4 で
  * **リーチ棒について**確定したものなので、これと異なる帰属規則を持つ種別を追加するときは
  * 規則の裁定(→ `質問リスト.md`)と本レジストリの拡張(種別ごとの帰属先)が併せて必要になる。
  * ただし**合計の保存(= クラッシュしないこと)は帰属先によらず本レジストリだけで担保される**。
+ *
+ * **局中の回収・卓上表示について**: 和了時の供託回収(`settleWin` の `stickPayout`)と
+ * 卓上の供託表示(`gameView` → `TableInfo`)はリーチ棒固有の経路で、本レジストリを
+ * 経由しない。新種別を和了者の回収対象に含めるか・卓上に出すかは種別ごとの判断であり、
+ * 含めなくても供託は場に残り続けて終局時に畳み込まれるため**保存則は破れない**(安全側)。
  */
 const POT_SOURCES: readonly PotSource[] = [
   {
-    kind: "riichi",
     points: (state) => state.riichiSticks * RIICHI_STICK_POINTS,
     withdraw: (state) =>
       state.riichiSticks === 0 ? state : { ...state, riichiSticks: 0 },
@@ -2120,7 +2133,12 @@ export function potTotal(state: EngineState): number {
   return POT_SOURCES.reduce((sum, source) => sum + source.points(state), 0);
 }
 
-/** 全種別の供託を場から下ろす(点数は呼び出し側が帰属先の持ち点へ移す)。 */
+/**
+ * 全種別の供託を場から下ろす(点数は呼び出し側が帰属先の持ち点へ移す)。
+ *
+ * 残存 0 の種別は `withdraw` 側が状態をそのまま返すため、合計 0 でも無条件に呼んでよい
+ * (「点数換算 0 だがカウンタは残っている」種別を将来足しても取りこぼさない)。
+ */
 function withdrawPot(state: EngineState): EngineState {
   return POT_SOURCES.reduce((acc, source) => source.withdraw(acc), state);
 }
@@ -2161,7 +2179,7 @@ function endGame(state: EngineState): EngineState {
   // 新しい供託種別を追加しても `potTotal`/`withdrawPot` 経由で自動的に畳み込まれ、
   // 精算入口の `Σ持ち点 = 140,000` 検証が破れない(#430)。
   const residual = potTotal(state);
-  const withdrawn = residual > 0 ? withdrawPot(state) : state;
+  const withdrawn = withdrawPot(state);
   const points: Record<PlayerId, number> = { ...state.points };
   let lastRound = state.lastRound;
   if (residual > 0) {

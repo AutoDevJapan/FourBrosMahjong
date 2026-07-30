@@ -5,7 +5,9 @@
  * **精算入口ではなく engine の全過程**で固定する。`src/domain/scoring/settlement.test.ts` は
  * `SoshiiLedger` の入口(= 供託を畳み込んだ後の最終持ち点)しか見ないため、engine 側で
  * 新しい供託種別を足しても入口に届くまで無言で破れる。ここでは供託レジストリの集約
- * {@link potTotal} を使って半荘のあらゆる時点で保存則を確認する。
+ * {@link potTotal} を使い、**公開アクションの各遷移直後**(= UI から観測し得るすべての
+ * 状態。1回の公開アクションの内部で AI の手番が複数進むため、AI の手番境界は含まない)で
+ * 保存則を確認する。
  *
  * **なぜ `potTotal` を使うか**: 個別種別(`state.riichiSticks`)ではなく集約を参照することで、
  * 供託レジストリ `POT_SOURCES` へ新種別を登録すれば本テストは**自動的に**その種別を含む。
@@ -162,7 +164,7 @@ const OORASU_DRAW: RoundConclusion = {
 };
 
 describe("engine 不変条件: Σ持ち点 + 場の供託 = 140,000(#430)", () => {
-  it("半荘のあらゆる時点で保存則が成立し、終局時には供託が場に残らない", () => {
+  it("公開アクションの各遷移直後で保存則が成立し、終局時には供託が場に残らない", () => {
     let totalSteps = 0;
     let maxPotSeen = 0;
     let potIn = 0;
@@ -184,13 +186,15 @@ describe("engine 不変条件: Σ持ち点 + 場の供託 = 140,000(#430)", () =
       totalSteps += steps;
       maxPotSeen = Math.max(maxPotSeen, potSeen);
     }
-    // 空振り防止: 多数の遷移を走査し、**持ち点 → 場**(リーチ宣言)と
-    // **場 → 持ち点**(和了時の回収・終局時の畳み込み)の双方向の点棒移動を
-    // 実際に跨いで保存則を検査している。
-    expect(totalSteps).toBeGreaterThan(100);
-    expect(maxPotSeen).toBeGreaterThan(0);
-    expect(potIn).toBeGreaterThan(0);
-    expect(potOut).toBeGreaterThan(0);
+    // 空振り防止。閾値は実測値(6半荘で totalSteps=531 / maxPotSeen=3,000 / potIn=35 /
+    // potOut=28)に対して十分低く取り、AI 方策(`documents/adr/0002-ai-policy.md`)や
+    // 配牌側の調整で不安定にならない範囲で「走査が実質的である」ことだけを固定する。
+    expect(totalSteps, "遷移数(走査が実質的か)").toBeGreaterThan(200);
+    // **持ち点 → 場**(リーチ宣言)と **場 → 持ち点**(和了時の回収・終局時の畳み込み)の
+    // 双方向の点棒移動を実際に跨いで保存則を検査していること。
+    expect(maxPotSeen, "場に載った供託の最大額").toBeGreaterThan(0);
+    expect(potIn, "供託が増えた遷移(リーチ宣言)の数").toBeGreaterThan(0);
+    expect(potOut, "供託が減った遷移(回収・畳み込み)の数").toBeGreaterThan(0);
   });
 
   it("終局時の畳み込みは供託の集約に対して行われる(残存あり → 場は 0・合計は 140,000)", () => {

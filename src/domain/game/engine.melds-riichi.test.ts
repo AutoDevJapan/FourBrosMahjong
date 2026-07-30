@@ -11,6 +11,7 @@ import {
   discard,
   type EngineState,
   passRon,
+  potTotal,
   proceedToNextRound,
   seatOfPlayer,
   tsumogiri,
@@ -122,13 +123,13 @@ describe("engine: 鳴き・リーチ・裏ドラ・一発(#97)", () => {
       expect(s.phase, `seed=${seed}`).toBe("gameEnd");
       expect(s.result).toHaveLength(4);
 
-      // 持ち点総和 === 140,000 − 場に残る供託(未回収リーチ棒 × 1,000)。
-      // 半荘終了時の残存供託は単独1位の素点へ加算する(Q15 確定・1位取得 / #130)。
-      // 単独1位が取得したときは供託が素点へ移り `riichiSticks` が 0 になる(総和=140,000)。
-      // 同点最高で単独1位が無い場合のみ暫定で据え置く(Q20/#131 → 総和=140,000−供託ぶん)。
-      // どちらの分岐でも本式は成立する(残存供託の帰属詳細は engine.residual-riichi.test.ts)。
+      // 保存則: 持ち点総和 + 場に残る供託 = 140,000。供託は種別ごとの本数ではなく
+      // 集約 `potTotal` で数える(#430)。半荘終了時は残存供託の帰属先が一意に定まる
+      // (Q15 = 1位取得 / #130、Q20 = 同点最高は席順上位 / #131)ため全額が素点へ移り、
+      // 実際には `potTotal(s) === 0`(帰属の詳細は engine.residual-riichi.test.ts、
+      // 保存則そのものは engine.pot-invariant.test.ts)。
       const total = Object.values(s.points).reduce((a, b) => a + b, 0);
-      expect(total).toBe(140000 - 1000 * s.riichiSticks);
+      expect(total + potTotal(s), `seed=${seed}`).toBe(140000);
       // 持ち点はすべて整数(端数処理の破綻がない)。
       for (const p of Object.values(s.points)) {
         expect(Number.isInteger(p)).toBe(true);

@@ -27,10 +27,13 @@ const PLAYER_COUNT = 4;
 /**
  * 卓の点棒総量 = 配給原点 × 人数 = 140,000(spec 3.3「精算入力の前提」)。
  *
- * **`Σ持ち点 + 場に残る供託` は半荘中を通じてこの値で不変**であり、精算入口
- * ({@link SoshiiLedger.applyRawScore} / {@link SoshiiLedger.applyUma})は
- * 「供託を畳み込んだ後の持ち点合計」がこの値であることを要求する。
- * engine 側の不変条件テストは `src/domain/game/engine.pot-invariant.test.ts`。
+ * **`Σ持ち点 + 場に残る供託` は半荘中を通じてこの値で不変**。engine 側の不変条件テストは
+ * `src/domain/game/engine.pot-invariant.test.ts`。
+ *
+ * 精算入口({@link SoshiiLedger.applyRawScore} / {@link SoshiiLedger.applyUma})の検証は
+ * 台帳の登録人数から `配給原点 × 人数` を都度求める(人数可変のまま扱えるようにするため)。
+ * 4人台帳 — 本作で唯一成立する構成({@link SoshiiLedger.applyUma} が強制する) — では
+ * その期待値が本定数と一致する。
  */
 export const TOTAL_POINTS = STARTING_POINTS * PLAYER_COUNT;
 /** 返し(オカ算出の基準点)。 */
