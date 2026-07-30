@@ -167,21 +167,23 @@ describe("北の役牌除外(刻子・雀頭)(spec 3.0 #83-3・明示ガード)"
   it("北以外の役牌雀頭(三元牌・場風・自風)は従来どおり平和を否定する(ガードの効き過ぎ防止)", () => {
     // 雀頭側ガードが北以外まで無効化していないことを対照で固定する
     // (このテストは回帰ガードではなく、過剰な修正を検出するための対照)。
-    const got = ids({
+    // 平和が唯一の役候補の手なので、否定されれば「役なし」で和了不可(null)まで固定する
+    // — `ids` は null のとき [] を返すため、not.toContain だけでは vacuous に通り得る。
+    const dragonPair = analyzeWin({
       concealedTiles: parseTiles("234p 567p 234s 678s 55z"),
       winningTile: parseTile("4p"),
       winType: "ron",
     });
-    expect(got).not.toContain("pinfu");
+    expect(dragonPair).toBeNull();
     // 場風/自風雀頭も同様に平和を否定する(東=HONOR.EAST)。
-    const eastPair = ids({
+    const eastPair = analyzeWin({
       concealedTiles: parseTiles("234p 567p 234s 678s 11z"),
       winningTile: parseTile("4p"),
       winType: "ron",
       roundWind: HONOR.EAST,
       seatWind: HONOR.EAST,
     });
-    expect(eastPair).not.toContain("pinfu");
+    expect(eastPair).toBeNull();
   });
 
   it("北刻子は字一色(役満)の構成要素になり得る", () => {
