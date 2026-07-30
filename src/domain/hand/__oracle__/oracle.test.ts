@@ -255,12 +255,12 @@ describe("定義ベースの門前オラクル(標準形 + 七対子・国士 / 
     );
 
   it("門前14枚(groupsNeeded=4)の多面分解を全通り列挙する", () => {
+    const hand = "222333444p 55p 678s";
     // `standardDecompositions34` と同じ 3 通り(222/333/444 ⇔ 234×3 ⇔ 234+345+345…)。
-    expect(forms("222333444p 55p 678s")).toHaveLength(3);
+    const actual = forms(hand);
+    expect(actual).toHaveLength(3);
     // 列挙構造が独立でも結果は一致する。
-    expect(forms("222333444p 55p 678s")).toEqual(
-      [...standardDecompositions34(counts("222333444p 55p 678s"))].sort(),
-    );
+    expect(actual).toEqual([...standardDecompositions34(counts(hand))].sort());
   });
 
   it("門前13枚の標準形の待ちを列挙する(三面張)", () => {

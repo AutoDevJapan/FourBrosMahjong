@@ -9,6 +9,8 @@
  * - {@link randomHand}: 山から k 枚を無作為抽出(向聴が深い手が多く「非和了」を厚く検証)。
  * - {@link randomStructuredHand}: 4面子1雀頭を組んでから 0〜3 枚を無作為置換
  *   (テンパイ〜低向聴の「和了に近い形」を厚く検証)。
+ * - {@link randomAmbiguousMenzenHand}: 多重分解が**構造的に保証された**門前14枚
+ *   (刻子 ⇔ 順子の読み替えを確実に踏む / issue #429)。
  * - {@link randomMeldedHand}: 副露(ポン/明槓/暗槓)1〜4 組 + 対応枚数の門前手
  *   (副露経路の分解・待ちを検証する / issue #390)。
  */
@@ -53,6 +55,11 @@ function indexToTile(idx: number): Tile {
 /**
  * 34-index カウント配列 → `Tile[]`(決定的な牌種順)。
  * 特殊形(七対子・国士)の決め打ち手を組み立てるテストからも使う(issue #429)。
+ *
+ * カウント → 牌の逆写像なので `counts34.ts` に置きたくなるが、こちらは赤5判定
+ * ({@link RED_FIVE_SUITS})を持つ。`counts34.ts` は「`isRed` は構造に影響しないので
+ * 種別のみで数える」と宣言しているモジュールなので、赤5ポリシーを持ち込まずに済む
+ * 本ファイルに置く。
  */
 export function count34ToTiles(counts34: readonly number[]): Tile[] {
   const tiles: Tile[] = [];
@@ -179,12 +186,18 @@ export function randomStructuredHand(rng: () => number, maxSwaps = 3): Tile[] {
  * 分解が一意に定まらない**門前14枚**を意図的に組む(issue #429)。
  *
  * 同一スートの連続3牌種を各3枚(`111222333p` 型 = 刻子3組 ⇔ 順子3組)+ 面子1組
- * + 雀頭1組。帯の9枚だけで既に2通りの読みが成立するので、生成される手は**必ず**
- * 多重分解になる。
+ * + 雀頭1組。
  *
- * {@link randomStructuredHand} の乱択では多重分解の手が 20,000 手に 100 件強しか
- * 現れず、「刻子が取れたら順子を試さない」型の列挙欠陥を踏むかどうかが運任せになる。
- * 副露経路で `buildAmbiguousConcealed` を用意したのと同じ理由で、門前にも決め打ち形を置く。
+ * **多重分解が保証される根拠**: 4組目の面子と雀頭を帯と**牌種が交わらない**位置から
+ * 取るため、帯の9枚は必ず「帯の中だけで3面子」に分解される。その分け方は
+ * 刻子3組 / 順子3組 の2通りあるので、全体の分解も必ず2通り以上になる。
+ * (「帯をまたぐ面子が作れない」という意味ではない。帯の外にも牌がある以上
+ * `345p` のような跨ぎ面子自体は組めるが、残りが余って和了形にならない。)
+ *
+ * {@link randomStructuredHand} の乱択では多重分解の手が 20,000 手に 100 件前後
+ * (1% 未満)しか現れず、「刻子が取れたら順子を試さない」型の列挙欠陥を踏むかどうかが
+ * 運任せになる。副露経路で `buildAmbiguousConcealed` を用意したのと同じ理由で、
+ * 門前にも決め打ち形を置く。
  */
 export function randomAmbiguousMenzenHand(rng: () => number): Tile[] {
   for (let attempt = 0; attempt < 200; attempt += 1) {
@@ -193,8 +206,8 @@ export function randomAmbiguousMenzenHand(rng: () => number): Tile[] {
     const start = base + randInt(rng, 7); // start+2 が同一スート内に収まる
     for (const idx of [start, start + 1, start + 2]) counts[idx] += 3;
 
-    // 4組目の面子と雀頭は帯の**外**から取る。帯の9枚が帯内でしか面子を作れない状態を
-    // 保つことで「刻子3組 ⇔ 順子3組」の2通りが必ず残る(多重分解を構造的に保証する)。
+    // 4組目の面子と雀頭は帯の**外**(牌種が交わらない位置)から取る。これにより
+    // 帯の9枚は帯内だけで3面子に分かれ、「刻子3組 ⇔ 順子3組」の2通りが必ず残る。
     const outside = (idx: number): boolean => idx < start || idx > start + 2;
     if (rng() < 0.5) {
       const seq = SEQUENCE_STARTS[randInt(rng, SEQUENCE_STARTS.length)];

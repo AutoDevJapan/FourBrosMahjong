@@ -1,5 +1,6 @@
 /**
- * 定義ベースの向聴オラクル(テスト専用 / issue #392)。
+ * 定義ベースの検証オラクル: 向聴 / 分解 / 待ち / 特殊形
+ * (テスト専用 / issue #392・#390・#429)。
  *
  * ⚠️ **本番コードから import しない**検証用オラクル。
  *
@@ -399,6 +400,22 @@ const SEVEN_PAIRS_BLOCKS = 7;
 const WINNING_HAND_SIZE = 14;
 
 /**
+ * 特殊形の列挙が受け付ける `waste`。
+ *
+ * `visit` へ渡す `excess`(W が手牌を超過している牌)を **34-index 1つ**でしか
+ * 表現していないため、`waste ≤ 1` でないと一意に定まらない。2 以上を許すと
+ * 「複数ある超過牌の最後の1つ」が静かに渡り、待ちが誤って狭まる/広がる。
+ * 用途は「完全一致(0)」と「1枚不足(1)」だけなので、**型で** 0 | 1 に固定する
+ * (実行時ガードだと到達不能な死んだ分岐になる)。
+ */
+type SpecialFormWaste = 0 | 1;
+
+/** 特殊形の待ちを取るときの `waste`(和了形まで1枚不足)。 */
+const ONE_TILE_SHORT: SpecialFormWaste = 1;
+/** 特殊形が手牌と完全一致するときの `waste`。 */
+const EXACT_MATCH: SpecialFormWaste = 0;
+
+/**
  * 門前手の枚数を検査する。
  *
  * 標準形側の {@link assertFormArity} と同じ方針で、枚数の取り違えを `false` /
@@ -429,11 +446,12 @@ function assertMenzenSize(
  * 牌種ごとの不足数は `2 − min(2, hand[i])` で独立に決まるため、`waste` 予算を
  * 超える牌種を弾くだけで列挙は数十通りに収まる(C(27,7) の全探索にはならない)。
  *
+ * @param maxWaste 0(完全一致)または 1(1枚不足)。→ {@link SpecialFormWaste}
  * @param visit `excess` は W が手牌を超過している牌の 34-index(`waste = 0` なら null)。
  */
 function forEachSevenPairsForm(
   concealed: readonly number[],
-  maxWaste: number,
+  maxWaste: SpecialFormWaste,
   visit: (excess: number | null) => void,
 ): void {
   const kinds = SANMA_INDICES_34;
@@ -465,12 +483,14 @@ function forEachSevenPairsForm(
 /**
  * 国士無双の和了形 W(么九 13 種すべて + そのうち 1 種を雀頭)を、手牌を `maxWaste`
  * 以内で覆うものだけ訪問する。W は雀頭の選び方だけで決まるので候補は 13 通り。
+ * 么九以外を含む手は overlap に寄与しないぶん `waste` が増え、自動的に落ちる。
  *
+ * @param maxWaste 0(完全一致)または 1(1枚不足)。→ {@link SpecialFormWaste}
  * @param visit `excess` は W が手牌を超過している牌の 34-index(`waste = 0` なら null)。
  */
 function forEachThirteenOrphansForm(
   concealed: readonly number[],
-  maxWaste: number,
+  maxWaste: SpecialFormWaste,
   visit: (excess: number | null) => void,
 ): void {
   for (const doubled of TERMINAL_AND_HONOR_INDICES_34) {
@@ -499,7 +519,7 @@ export function isSevenPairsByDefinition34(
 ): boolean {
   assertMenzenSize(concealed, WINNING_HAND_SIZE);
   let found = false;
-  forEachSevenPairsForm(concealed, 0, () => {
+  forEachSevenPairsForm(concealed, EXACT_MATCH, () => {
     found = true;
   });
   return found;
@@ -516,7 +536,7 @@ export function isThirteenOrphansByDefinition34(
 ): boolean {
   assertMenzenSize(concealed, WINNING_HAND_SIZE);
   let found = false;
-  forEachThirteenOrphansForm(concealed, 0, () => {
+  forEachThirteenOrphansForm(concealed, EXACT_MATCH, () => {
     found = true;
   });
   return found;
@@ -536,10 +556,13 @@ export function menzenWaitingIndicesByDefinition34(
 ): Set<number> {
   assertMenzenSize(concealed, WINNING_HAND_SIZE - 1);
   const out = waitingIndicesByDefinition34(concealed, TOTAL_GROUPS, concealed);
+  // 標準形側と違い、特殊形側に「4枚使い切りは待てない」フィルタは要らない。
+  // excess になる牌は不足数 > 0 の牌、すなわち七対子なら `hand[i] ≤ 1`・
+  // 国士なら `hand[i] ≤ 1`(雀頭候補でも ≤ 1)なので、`hand[i] < 4` が自明に成立する。
   const add = (excess: number | null): void => {
     if (excess !== null) out.add(excess);
   };
-  forEachSevenPairsForm(concealed, 1, add);
-  forEachThirteenOrphansForm(concealed, 1, add);
+  forEachSevenPairsForm(concealed, ONE_TILE_SHORT, add);
+  forEachThirteenOrphansForm(concealed, ONE_TILE_SHORT, add);
   return out;
 }

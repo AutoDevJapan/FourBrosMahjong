@@ -19,8 +19,9 @@
 | `shanten-oracle.ts` の七対子・国士の向聴式 | `game/ai.ts` | **完全同一** |
 | `definition-oracle.ts` の `shantenByDefinition34` | `game/ai.ts` の `shanten()` | **列挙を一切行わない**(和了形の側を全列挙し「手牌との最大重なり」から距離を直接算出) |
 | `definition-oracle.ts` の `standardFormsByDefinition34` | `hand/decompose.ts` の `decomposeStandard()` | **列挙を一切行わない**(和了形の側を列挙し「手牌と完全一致する形」を集める) |
-| `definition-oracle.ts` の `waitingIndicesByDefinition34` | `hand/tenpai.ts` の `waitingTiles()` | **列挙を一切行わない**(「手牌をちょうど1枚超過して覆う和了形」の超過牌が待ち) |
-| `definition-oracle.ts` の `isSevenPairsByDefinition34` / `isThirteenOrphansByDefinition34` | `hand/decompose.ts` の `decomposeSevenPairs()` / `decomposeThirteenOrphans()` | **向きが逆**(本体は手牌側を走査して枚数を数える。こちらは特殊形の側を列挙して手牌との重なりを見る) |
+| `definition-oracle.ts` の `waitingIndicesByDefinition34` | `hand/tenpai.ts` の `waitingTiles()` の**標準形部分** | **列挙を一切行わない**(「手牌をちょうど1枚超過して覆う和了形」の超過牌が待ち)。特殊形は含まない |
+| `definition-oracle.ts` の `isSevenPairsByDefinition34` / `isThirteenOrphansByDefinition34` | `hand/decompose.ts` の `decomposeSevenPairs()` / `decomposeThirteenOrphans()` | **向きが逆**(本体は手牌側を走査して枚数を数える。こちらは特殊形の側を列挙して手牌との重なりを見る)。照合しているのは**和了形かどうかの boolean** だけで、対子の内訳や `pairKey` は対象外 |
+| `definition-oracle.ts` の `menzenWaitingIndicesByDefinition34` | `hand/tenpai.ts` の `waitingTiles(concealed, [])` | 上3つの**和**。門前手を `waitingTiles` と 1:1 で突き合わせられる唯一の入口 |
 
 したがって:
 
@@ -50,10 +51,11 @@
   `groupsNeeded = 4`(門前 13/14 枚)にも適用範囲を広げました。
 - ただし上記2つは**標準形(4面子1雀頭)のみ**を扱います。門前手では七対子・国士も
   成立し得るため、それらは `isSevenPairsByDefinition34` /
-  `isThirteenOrphansByDefinition34` /`menzenWaitingIndicesByDefinition34`
+  `isThirteenOrphansByDefinition34` / `menzenWaitingIndicesByDefinition34`
   が別途カバーします(#429)。前者2つは「特殊形の側を列挙して手牌との重なりを見る」
   ため、本体の「手牌側を走査して枚数を数える」実装とは向きが逆で、
-  `agari-oracle.ts` の `isSevenPairs`(本体と完全同一)の死角を埋めます。
+  `agari-oracle.ts` の `isSevenPairs`(本体と完全同一)の死角を
+  **和了判定の boolean については**埋めます(対子の内訳・`pairKey` は照合対象外)。
 
 ## 副露(`melds ≠ []`)経路のカバレッジ(#390)
 
@@ -81,20 +83,34 @@
 副露経路の定義ベース照合だけが検出しました。
 
 #429 でこの空白を埋め、門前 13/14 枚も定義ベースオラクルと照合しています
-(`cross-validation.test.ts` の「クロス検証: 門前手の分解・待ち(定義ベース / #429)」)。
+(`cross-validation.test.ts` の「クロス検証: 門前手の分解・和了・待ち(定義ベース / #429)」)。
 
-- 手牌の 1/4 は `generator.ts` の `randomAmbiguousMenzenHand`(`111222333p` 型 =
-  刻子3組 ⇔ 順子3組)。乱択(`randomStructuredHand`)だけでは多重分解の手が
-  20,000 手に 100 件強しか現れず、刻子 ⇔ 順子の読み替えを踏むかどうかが運任せになるため。
+- 手牌の 1/4(`AMBIGUOUS_MENZEN_EVERY`)は `generator.ts` の
+  `randomAmbiguousMenzenHand`(`111222333p` 型 = 刻子3組 ⇔ 順子3組)。乱択
+  (`randomStructuredHand`)だけでは多重分解の手が **1% 未満**しか現れず、
+  刻子 ⇔ 順子の読み替えを踏むかどうかが運任せになるためです。この形は
+  「和了形かつ多重分解」が構造的に保証されるので、カバレッジ下限アサーションは
+  固定シードではなく**この生成比から導いて**います。
+  同じジェネレータは冒頭のクロス検証(`agari-oracle` 相手 = 片側リグレッションを
+  捕まえる網)にも回しており、あちらの多重分解率も同時に上がります。
 - 七対子・国士はランダム生成では事実上出ないので、和了形とその1枚不足を
   **決め打ちで総当たり**して照合しています(七対子 27×(1+7) 手 / 国士 13×(1+13) 手)。
+  加えて「七対子**かつ**標準形」(`22334455667788p` 型)を1手だけ決め打ちで踏み、
+  和了判定の OR と待ちの和が両辺同時に非空の状態で評価されることを固定しています。
 
-欠陥注入の実測(両側に同じ欠陥を入れた場合):
+欠陥注入の実測(本体 `extractMentsuAll` と `agari-oracle.ts` の `decomposeMeldsOnly` の
+**両方**に同じ欠陥を入れた場合):
 
 | 注入した共通欠陥 | 既存の門前照合(`agari-oracle` 相手) | #429 の定義ベース門前照合 |
 | --- | --- | --- |
 | 刻子が取れたら順子を試さない | 14枚・13枚とも**緑**(素通り) | 14枚が **red** |
 | 順子の開始位置から 7 を落とす(789 を作らない) | 14枚・13枚とも**緑**(素通り) | 14枚・13枚とも **red** |
+
+1つ目で13枚(待ち)が緑のままなのは、待ちが「分解の**存在**」だけを見るためです。
+最小牌 x が3枚あるとき `extractMentsuAll` の選択肢は「刻子」か「x 始まりの順子3本」しか
+無く、後者が成立するなら x+1・x+2 も各3枚あるので刻子読みでも必ず完成します。
+つまり和了判定の boolean はこの欠陥で変わらず、分解**集合**を比べる14枚だけが落ちます。
+待ち側の非空回りは2つ目の注入が示しています。
 
 ## 参照ライブラリとのアンカー(再現手順)
 

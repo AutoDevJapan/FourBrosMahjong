@@ -18,8 +18,15 @@
  * **再帰の分岐順(刻子 → 順子 → 対子 → 両面塔子 → 嵌張塔子 → 浮き牌)まで同型**であり、
  * `isSevenPairs` に至っては本体と**完全同一**である。したがってこの照合が検出できるのは
  * 「片側だけのリグレッション」であって、**列挙側の共通欠陥は素通りする**。
- * その死角は列挙非依存の {@link "./definition-oracle".shantenByDefinition34} との照合が
- * 補う(`cross-validation.test.ts` / #392)。
+ * その死角は列挙非依存の `definition-oracle.ts` との照合が補う
+ * (`cross-validation.test.ts`)。担当は経路ごとに分かれている:
+ *
+ * - 向聴(副露数 1..3): {@link "./definition-oracle".shantenByDefinition34}(#392)。
+ *   `shantenByDefinition34` は門前を `RangeError` で拒否するので、**門前の死角は見ていない**。
+ * - 分解・待ち(副露 1..4 組 / 門前 13・14 枚):
+ *   {@link "./definition-oracle".standardFormsByDefinition34} /
+ *   {@link "./definition-oracle".waitingIndicesByDefinition34} /
+ *   {@link "./definition-oracle".menzenWaitingIndicesByDefinition34}(#390 / #429)。
  *
  * サンマ制約: 萬子 2-8 は実在しないため萬子の順子は自然に生じない。赤5・北ガリは
  * 構造に影響しないため種別(suit+rank)のみで扱う。純関数・決定的。
