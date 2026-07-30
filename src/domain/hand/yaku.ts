@@ -16,7 +16,7 @@
  * 純関数・決定的・React/DOM 非依存。
  */
 
-import { HONOR, type Tile } from "../tiles/tile";
+import type { Tile } from "../tiles/tile";
 import {
   type Mentsu,
   mentsuContainsKind,
@@ -29,6 +29,7 @@ import {
   isHonor,
   isTerminalNumber,
   isWind,
+  isYakuhaiCandidate,
   isYaochu,
   sameKind,
 } from "./tile-identity";
@@ -97,15 +98,13 @@ function groupHasYaochu(m: Mentsu): boolean {
 /**
  * 雀頭が役牌(三元牌・場風・自風)か(平和の否定条件)。
  *
- * 北(ガリ)は抜きドラ専用の字牌であり役牌として扱わない(spec 3.0 #83-3)。
- * 刻子側({@link standardFormYaku} の役牌ループ)と同じガードを雀頭側にも置く。
- * 現行 engine は `roundWind`/`seatWind` に北を渡さないため観測可能な差は無いが、
- * 「北は役牌にならない」という契約を片側だけ守る非対称は、風の値域が変わった
- * 瞬間に無音で破れる(→ 北雀頭の平和が否定され、平和のみの手が和了不可になる)。
+ * 北(ガリ)の除外は刻子側({@link standardFormYaku} の役牌ループ)と
+ * {@link isYakuhaiCandidate} を共有し、片側だけ守る非対称を作らない(#400)。
  */
 function pairIsValue(pair: Mentsu, input: YakuInput): boolean {
-  if (pair.suit !== "honor") return false;
-  if (pair.startRank === HONOR.NORTH) return false;
+  if (!isYakuhaiCandidate({ suit: pair.suit, rank: pair.startRank })) {
+    return false;
+  }
   return (
     isDragon({ suit: "honor", rank: pair.startRank }) ||
     pair.startRank === input.roundWind ||
@@ -217,13 +216,11 @@ function standardFormYaku(form: StandardForm, input: YakuInput): RawYaku[] {
 
   // --- 役牌(三元牌・場風・自風) ---
   for (const m of triplets) {
-    if (m.suit !== "honor") continue;
-    // 北(ガリ)は抜きドラ専用の字牌であり、手牌に残した刻子でも役牌1翻としない
-    // (spec 3.0 #83-3「手牌に残した北刻子で役牌翻が発生しない」)。北は三元牌でない
-    // ため現行の風割り当てでは元々役牌翻は付かないが、四人回し(北家=抜け番)で風の
-    // 割り当てを誤って `roundWind`/`seatWind` に北(HONOR.NORTH)を渡した場合でも
-    // 北刻子に役牌翻が付かないよう、ここで明示的に除外する(挙動非破壊のガード)。
-    if (m.startRank === HONOR.NORTH) continue;
+    // 字牌以外と、抜きドラ専用の北(ガリ)を除外する(spec 3.0 #83-3)。北は三元牌で
+    // ないため現行の風割り当てでは元々役牌翻は付かないが、四人回し(北家=抜け番)で
+    // `roundWind`/`seatWind` に誤って北を渡された場合でも役牌翻が付かないよう、
+    // 雀頭側({@link pairIsValue})と同じ述語で守る(挙動非破壊のガード)。
+    if (!isYakuhaiCandidate({ suit: m.suit, rank: m.startRank })) continue;
     const completedByAgari =
       m.concealed && w.suit === "honor" && w.rank === m.startRank;
     if (isDragon({ suit: "honor", rank: m.startRank })) {

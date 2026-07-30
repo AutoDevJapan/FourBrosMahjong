@@ -105,7 +105,7 @@ describe("役満成立時の通常役吸収(#339)", () => {
 // 北(ガリ)役牌除外の明示ガード(spec 3.0 #83-3)
 // ---------------------------------------------------------------------------
 
-describe("北刻子の役牌除外(spec 3.0 #83-3・明示ガード)", () => {
+describe("北の役牌除外(刻子・雀頭)(spec 3.0 #83-3・明示ガード)", () => {
   it("北刻子は役牌0翻(対々和・混一色には寄与する)", () => {
     // 444z(北)刻子 + 筒子刻子3つ → 混一色 + 対々和。北は役牌にならない。
     const ctx: WinContext = {
@@ -156,13 +156,17 @@ describe("北刻子の役牌除外(spec 3.0 #83-3・明示ガード)", () => {
     expect(withNorthWind).not.toBeNull();
     expect(withNorthWind?.yaku.map((y) => y.id)).toContain("pinfu");
     // 風を渡さない場合と同じ結果になる(北を風として渡しても影響が出ない)。
+    // 両辺が null で vacuous に通らないよう、比較相手も非 null を明示する。
+    const withoutWind = analyzeWin(base);
+    expect(withoutWind).not.toBeNull();
     expect(withNorthWind?.yaku.map((y) => y.id)).toEqual(
-      analyzeWin(base)?.yaku.map((y) => y.id),
+      withoutWind?.yaku.map((y) => y.id),
     );
   });
 
-  it("北雀頭でも三元牌雀頭は従来どおり平和を否定する(ガードの効き過ぎ防止)", () => {
-    // 雀頭側ガードが北以外まで無効化していないことを対照で固定する。
+  it("北以外の役牌雀頭(三元牌・場風・自風)は従来どおり平和を否定する(ガードの効き過ぎ防止)", () => {
+    // 雀頭側ガードが北以外まで無効化していないことを対照で固定する
+    // (このテストは回帰ガードではなく、過剰な修正を検出するための対照)。
     const got = ids({
       concealedTiles: parseTiles("234p 567p 234s 678s 55z"),
       winningTile: parseTile("4p"),
@@ -190,6 +194,9 @@ describe("北刻子の役牌除外(spec 3.0 #83-3・明示ガード)", () => {
     expect(analysis?.isYakuman).toBe(true);
     expect(analysis?.yaku.map((y) => y.id)).toContain("tsuuiisou");
   });
+
+  // 北雀頭が小四喜の風牌雀頭として数えられること(役牌ではないが風牌ではある)は
+  // 役満群の describe「小四喜(風牌3刻子+風牌雀頭)」で固定済み。
 
   it("北刻子は大四喜(役満)の四風牌の一つになり得る", () => {
     const analysis = analyzeWin({
@@ -518,6 +525,8 @@ describe("文脈役の成立(spec 3.0)", () => {
 
 describe("役満群の成立(spec 3.0・一律シングル)", () => {
   it("小四喜(風牌3刻子+風牌雀頭)", () => {
+    // 雀頭 44z = 北。「北は役牌にならないが風牌ではある」という spec 3.0 #83-3 の
+    // 非対称の対句(→ 上の「北の役牌除外(刻子・雀頭)」describe)。
     const analysis = analyzeWin({
       concealedTiles: parseTiles("111z 222z 333z 234p 44z"),
       winningTile: parseTile("2p"),
