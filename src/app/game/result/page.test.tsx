@@ -106,6 +106,7 @@ describe("/game/result page (spec 6.2 / 6.6)", () => {
     // SSR 出力(= 読み込み中分岐)。開始タグの数で数える。
     expect(loadingHtml).toContain("対局結果を読み込んでいます…");
     expect(loadingHtml.match(/<main[\s>]/g) ?? []).toHaveLength(1);
+    expect(loadingHtml).not.toContain('role="main"');
 
     for (const [branch, game] of [
       ["確定", finishedGame()],
@@ -120,8 +121,9 @@ describe("/game/result page (spec 6.2 / 6.6)", () => {
         container.querySelectorAll("main"),
         `${branch}分岐の <main> がちょうど 1 つでない`,
       ).toHaveLength(1);
-      // `role="main"` での代替も禁止する(ランドマークは重複するが `<main>` の数は 1 のまま
-      // になり、`querySelectorAll("main")` だけでは通ってしまう)。
+      // `role="main"` の**併記**も禁止する。`<main>` の数は 1 のままなので上の数え方では
+      // 通ってしまうが、main ランドマークとしては重複する(`role` での**置き換え**なら上が
+      // 0 件になって落ちる)。
       expect(container.querySelectorAll('[role="main"]')).toHaveLength(0);
       unmount();
     }

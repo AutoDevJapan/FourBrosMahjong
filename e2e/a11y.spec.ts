@@ -1,6 +1,12 @@
 import AxeBuilder from "@axe-core/playwright";
 import { expect, type Locator, type Page, test } from "@playwright/test";
 import { advanceUntil, declareRiichi } from "./helpers/gameDriver";
+import {
+  LANDMARK_RULES,
+  LANDMARK_SCREENS,
+  SCREENS,
+  type Screen,
+} from "./screens";
 
 /**
  * 自動アクセシビリティ監査 E2E(スペック5 5.5 / #70)。
@@ -29,91 +35,6 @@ import { advanceUntil, declareRiichi } from "./helpers/gameDriver";
 const WCAG_TAGS = ["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"] as const;
 
 type Theme = "ライト" | "OSダーク" | "手動ダーク";
-
-interface Screen {
-  readonly path: string;
-  readonly name: string;
-  /** 描画完了の目印。監査前にこの要素の可視化を待ち、未ペイント状態での誤検知を避ける。 */
-  readonly heading: string;
-  /**
-   * 監査から除外する CSS セレクタ(既知の src 側 a11y バグで、本 PR のスコープ外のもの)。
-   * 全ルール無効化は行わず、該当ノードだけを外して他は監査対象のまま残す。
-   */
-  readonly axeExclude?: readonly string[];
-  /**
-   * クライアントアイランドの描画完了を待つロケータ(#409)。
-   *
-   * `heading` は SSR 済みの殻に載るため **hydration 前でも可視**になる。そのため
-   * `heading` の可視化だけでは**クライアント部分が未描画のまま**監査へ進み得る
-   * (`/game` は `[data-phase]` が生えるまで「対局を準備しています…」のプレースホルダで、
-   * 盤面の要素が 1 つも無い)。本文そのものが未描画だと**無音で pass** してしまう。
-   *
-   * **必ず正のアンカー**(hydration 後にだけ現れる要素)を指すこと。プレースホルダ文言の
-   * 消失を待つ負のアンカーは、文言を変えた瞬間に最初から 0 件になって無音 pass するため、
-   * ここで塞ぎたい欠陥と同型になる。
-   *
-   * 同じ設計は `e2e/non-text-contrast.spec.ts` の `Screen.ready` が先行して持っている。
-   * 画面を足すときは両者を揃えること(片方だけに足すと監査の穴が非対称に残る)。
-   */
-  readonly clientReady?: (page: Page) => Locator;
-  /**
-   * `openScreen` が `query` 無しで呼ばれたときに既定で付けるクエリ。
-   *
-   * `/game` は `?seed` を渡さないと `freshSeed()`(crypto 乱数)で配牌が決まる。`clientReady`
-   * を入れて盤面が確実に描画されるようになった結果、静的監査は**毎回異なる配牌**を走査する
-   * ようになった。再現不能な flake を避けるため、実盤面を監査する箇所は seed を固定する
-   * (`non-text-contrast.spec.ts` も同じ理由で `/game?seed=0` を使う)。
-   */
-  readonly baseQuery?: string;
-}
-
-const SCREENS: readonly Screen[] = [
-  { path: "/", name: "ロビー", heading: "四兄弟麻雀" },
-  { path: "/rules", name: "ルール説明", heading: "ルール説明" },
-  { path: "/settings", name: "設定", heading: "設定" },
-  {
-    path: "/history",
-    name: "戦績",
-    heading: "戦績",
-    // `MatchHistoryList`(Client)の描画完了。空状態と一覧の**両分岐に共通**する文言を指す
-    // (ヘッダのリンクはサーバ側の殻にあり待ちにならない)。
-    clientReady: (page) =>
-      page.getByText(/保存された戦績はまだありません|新しい順に表示/).first(),
-  },
-  {
-    path: "/game",
-    name: "対局画面",
-    heading: "対局画面",
-    clientReady: (page) => page.locator("[data-phase]").first(),
-    baseQuery: "?seed=0",
-  },
-  {
-    path: "/game/result",
-    name: "対局結果",
-    heading: "対局結果",
-    // `ResultPageClient` の hydration 後は「未確定」「確定」に割れるため、両分岐の目印を
-    // `or` で束ねる(「読み込み中」プレースホルダにはどちらも現れない)。
-    clientReady: (page) =>
-      page
-        .getByRole("link", { name: "対局画面へ" })
-        .or(page.getByRole("heading", { name: "最終順位" }))
-        .first(),
-  },
-];
-
-/**
- * ランドマーク監査(#409)の対象。実在ルートに加えて 404 も見る。
- * 404 は `not-found.tsx` という独立した実装で、他のルートの規約が波及しない
- * (実際 `<main>` の中に `<h1>` を置く形で、`/history` 系とは構造が異なる)。
- *
- * 404 を `SCREENS` 側(WCAG A/AA 監査・3 テーマ)へは**意図的に入れていない**。#409 の
- * 範囲はランドマーク構造であり、404 の A/AA 違反まで同時に必須化すると切り分けが濁る。
- * 404 を全 a11y ゲートへ広げるかは別途判断する(現状 `non-text-contrast.spec.ts` も未対象)。
- */
-const LANDMARK_SCREENS: readonly Screen[] = [
-  ...SCREENS,
-  { path: "/no-such-page-409", name: "404", heading: "ページが見つかりません" },
-];
 
 const THEMES: readonly Theme[] = ["ライト", "OSダーク", "手動ダーク"];
 
@@ -164,7 +85,9 @@ async function openScreen(
   page: Page,
   screen: Screen,
   theme: Theme,
-  query = "",
+  // 省略時のみ `screen.baseQuery` を使う。`""` を明示した呼び出しは「クエリ無し」の意味に
+  // なるよう既定値を置かない(`||` だと空文字が既定へ差し替わってしまう)。
+  query?: string,
 ): Promise<void> {
   if (theme === "OSダーク") {
     await page.emulateMedia({ colorScheme: "dark" });
@@ -178,7 +101,7 @@ async function openScreen(
     });
   }
 
-  await page.goto(screen.path + (query || (screen.baseQuery ?? "")));
+  await page.goto(screen.path + (query ?? screen.baseQuery ?? ""));
   await expect(
     page.getByRole("heading", { level: 1, name: screen.heading }),
   ).toBeVisible();
@@ -222,27 +145,14 @@ test.describe("自動 a11y 監査(axe-core)", () => {
   /**
    * ランドマーク構造(#409)。
    *
-   * `landmark-one-main` と `region` は axe の **`best-practice` タグ**に属し、`WCAG_TAGS`
+   * `LANDMARK_RULES` の 3 つはいずれも axe の **`best-practice` タグ**に属し、`WCAG_TAGS`
    * (A/AA)だけを渡している上の全画面監査には**一切入らない**。そのため `/game` と
    * `/game/result` だけ `<main>` を持たず、盤面・結果本文がランドマーク外に取り残されていた
    * のに、`disableRules` を使っていないのに素通りしていた。
    *
-   * 全 best-practice を A/AA と同列に必須化すると本 issue の範囲を超えるため、
-   * ランドマーク関連の 3 ルールだけを明示的に有効化して回帰を固定する。
-   *
-   * 3 ルール + `toHaveCount(1)` の分担(axe-core 4.12.1 で実測 / spec 5.2.6 の表と対応):
-   * - `landmark-one-main` は `page-has-main` チェック 1 つだけで、**main が 0 個**しか見ない。
-   *   `<main>` + `<div role="main">` の重複は素通りする
-   * - 重複は `landmark-no-duplicate-main` の担当
-   * - `<div role="main">` **だけ**で代替した形は axe の 3 ルールすべてが通る。これを落とすのは
-   *   下の `toHaveCount(1)` だけなので、axe とロケータの併用が必須
+   * ルールの分担と `toHaveCount(1)` との併用が必須な理由は `e2e/screens.ts` の
+   * `LANDMARK_RULES` の doc コメント(spec 5.2.6 の表と対応)を参照。
    */
-  const LANDMARK_RULES = [
-    "landmark-one-main",
-    "landmark-no-duplicate-main",
-    "region",
-  ] as const;
-
   for (const screen of LANDMARK_SCREENS) {
     test(`${screen.name}(${screen.path})は本文が単一の <main> に収まる(#409)`, async ({
       page,
@@ -705,7 +615,11 @@ test.describe("キーボードのみ操作(a11y 補強)", () => {
   test("/game の手牌はキーボードのみで到達・打牌でき、ロービングタブインデックスに従う(5.2.2)", async ({
     page,
   }) => {
-    await page.goto("/game");
+    // seed を固定する。`?seed` 無しだと `freshSeed()`(crypto 乱数)で配牌が決まり、下の
+    // 打牌が局を終わらせる配牌を引いた回に手牌 listbox が消えて落ちる(30 回中 1 回で再現)。
+    // ロービングタブインデックスの検証に配牌のばらつきは不要なので、他の実盤面テストと
+    // 同じく seed を固定する(`Screen.baseQuery` と同じ方針)。
+    await page.goto("/game?seed=0");
 
     const hand = page.getByRole("listbox", { name: "自家の手牌" });
     const firstTile: Locator = hand.getByRole("option").first();
@@ -727,7 +641,8 @@ test.describe("キーボードのみ操作(a11y 補強)", () => {
   test("/game は手番をライブリージョンで通知し、打牌をキーボードのみで実行できる(5.2.2 / 5.2.3)", async ({
     page,
   }) => {
-    await page.goto("/game");
+    // 上と同じ理由で seed を固定する(実盤面を触るテストは配牌を固定する)。
+    await page.goto("/game?seed=0");
 
     // 進行通知(色非依存)は polite ライブリージョンへ反映される(sr-only だが DOM 常駐)。
     await expect(page.locator('[aria-live="polite"]').first()).toHaveText(

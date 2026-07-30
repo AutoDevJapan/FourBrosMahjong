@@ -102,7 +102,9 @@ Tailwind v4 preflight は `ul { list-style: none }` を全リストへ適用す�
 
 `<main>` を使わず `<div role="main">` だけで代替した場合、**axe の 3 ルールはすべて通る**(実測)。これを落とすのは `toHaveCount(1)` だけなので、axe とロケータの併用が必須。
 
-適用済み: 全ルート(**「単一の `<main>` を持つ」という意味で**。`<h1>` の内外は上記のとおり統一していない)。`/game` と `/game/result` は #409 で追補し、それ以外の 5 ルートは当初から `<main>` を持っていた。
+適用済み: 全ルート(**「単一の `<main>` を持つ」という意味で**。`<h1>` の内外は上記のとおり統一していない)。`/game` と `/game/result` は #409 で追補し、それ以外の 4 ルート(`/`・`/rules`・`/settings`・`/history`)と 404 は当初から `<main>` を持っていた。
+
+**この「全ルート」は主張ではなくゲートで守る**。`src/test/a11y-landmark-screens.test.ts` が `src/app/**/page.tsx` から実ルートを導出し、ランドマーク監査の画面一覧(`e2e/screens.ts` の `LANDMARK_SCREENS`)と過不足なく一致することを検査する。ルートを新設して一覧へ足し忘れると、この node テストが落ちる。
 
 ## 5.3 レスポンシブ方針
 
