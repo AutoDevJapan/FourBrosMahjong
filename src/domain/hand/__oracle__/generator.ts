@@ -183,10 +183,28 @@ export function randomStructuredHand(rng: () => number, maxSwaps = 3): Tile[] {
 }
 
 /**
+ * 分解が一意に定まらない門前14枚のうち、**連続7牌種を各2枚**の族(issue #429)。
+ *
+ * 例: `11223344556677p`。`[123][123][456][456][77]` と `[11][234][234][567][567]`
+ * の2通り以上に必ず読めるので多重分解が保証され、同時に**七対子でもある**。
+ * 帯3枚族(`111222333p` 型)だけだと「七対子かつ標準形」の手が corpus に現れず、
+ * `isCompleteHand` の OR を両辺同時に真の状態で評価できないため、この族を混ぜる。
+ */
+function ambiguousSevenPairRun(rng: () => number): Tile[] {
+  const base = rng() < 0.5 ? 9 : 18; // 筒子 / 索子
+  const start = base + randInt(rng, 3); // start+6 が同一スート内に収まる(1..3 始まり)
+  const counts = new Array<number>(34).fill(0);
+  for (let offset = 0; offset < 7; offset += 1) counts[start + offset] = 2;
+  return count34ToTiles(counts);
+}
+
+/**
  * 分解が一意に定まらない**門前14枚**を意図的に組む(issue #429)。
  *
- * 同一スートの連続3牌種を各3枚(`111222333p` 型 = 刻子3組 ⇔ 順子3組)+ 面子1組
- * + 雀頭1組。
+ * 半々で2族から選ぶ。1つ目は同一スートの連続3牌種を各3枚
+ * (`111222333p` 型 = 刻子3組 ⇔ 順子3組)+ 面子1組 + 雀頭1組。
+ * 2つ目は {@link ambiguousSevenPairRun}(連続7牌種を各2枚 = 七対子かつ標準形)。
+ * 以下は1つ目の族の説明。
  *
  * **多重分解が保証される根拠**: 4組目の面子と雀頭を帯と**牌種が交わらない**位置から
  * 取るため、帯の9枚は必ず「帯の中だけで3面子」に分解される。その分け方は
@@ -200,6 +218,7 @@ export function randomStructuredHand(rng: () => number, maxSwaps = 3): Tile[] {
  * 門前にも決め打ち形を置く。
  */
 export function randomAmbiguousMenzenHand(rng: () => number): Tile[] {
+  if (rng() < 0.5) return ambiguousSevenPairRun(rng);
   for (let attempt = 0; attempt < 200; attempt += 1) {
     const counts = new Array<number>(34).fill(0);
     const base = rng() < 0.5 ? 9 : 18; // 筒子 / 索子

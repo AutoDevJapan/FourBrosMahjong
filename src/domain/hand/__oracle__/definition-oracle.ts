@@ -164,6 +164,23 @@ export function shantenByDefinition34(
 // ---------------------------------------------------------------------------
 
 /**
+ * 「和了形 W が手牌をどれだけ超過してよいか」の上限。
+ *
+ * 分解・待ちの列挙はどれも `excess`(W が手牌を超過している牌)を **34-index 1つ**
+ * でしか扱わない(`waitingIndicesByDefinition34` は最初に見つけた超過牌で `return`
+ * し、特殊形の列挙は `excess` を1変数で持つ)。2 以上を許すと「複数ある超過牌の
+ * 最後の1つ」が静かに使われ、待ちが誤って狭まる/広がる。
+ * 用途は「完全一致(0)」と「1枚不足(1)」だけなので、**型で** 0 | 1 に固定する
+ * (実行時ガードだと到達不能な死んだ分岐になる)。
+ */
+type CoveringWaste = 0 | 1;
+
+/** 和了形が手牌と完全一致するときの `waste`。 */
+const EXACT_MATCH: CoveringWaste = 0;
+/** 和了形まで1枚不足しているときの `waste`(その1枚が待ち)。 */
+const ONE_TILE_SHORT: CoveringWaste = 1;
+
+/**
  * 和了形 W の構成ブロック1件(雀頭を含む)。
  * `standardFormsByDefinition34` のシグネチャ生成にのみ使う。
  */
@@ -199,7 +216,7 @@ function canonicalSignature(blocks: readonly FormBlock[]): string {
  *
  * @param concealed 門前部分の 34-index カウント配列。
  * @param groupsNeeded 門前部分で作るべき面子数(= 4 − 副露数)。
- * @param maxWaste 許容する「手牌に無い枚数」。0 なら完全一致、1 なら1枚不足まで。
+ * @param maxWaste 許容する「手牌に無い枚数」。→ {@link CoveringWaste}
  * @param visit 条件を満たす W ごとに呼ばれる。`work` は W のカウント配列。
  *   ⚠️ `work` / `blocks` は探索中に**巻き戻される可変バッファ**。`visit` の外へ
  *   保持してはならない(必要ならコピーを取ること)。
@@ -211,7 +228,7 @@ function canonicalSignature(blocks: readonly FormBlock[]): string {
 function forEachCoveringForm(
   concealed: readonly number[],
   groupsNeeded: number,
-  maxWaste: number,
+  maxWaste: CoveringWaste,
   visit: (
     work: readonly number[],
     blocks: readonly FormBlock[],
@@ -339,7 +356,7 @@ export function standardFormsByDefinition34(
 ): Set<string> {
   assertFormArity(concealed, groupsNeeded, 2);
   const out = new Set<string>();
-  forEachCoveringForm(concealed, groupsNeeded, 0, (_work, blocks) => {
+  forEachCoveringForm(concealed, groupsNeeded, EXACT_MATCH, (_work, blocks) => {
     out.add(canonicalSignature(blocks));
   });
   return out;
@@ -378,7 +395,7 @@ export function waitingIndicesByDefinition34(
     }
   }
   const out = new Set<number>();
-  forEachCoveringForm(concealed, groupsNeeded, 1, (work) => {
+  forEachCoveringForm(concealed, groupsNeeded, ONE_TILE_SHORT, (work) => {
     // W は手牌より1枚多く、枝刈りで waste ≤ 1 なので waste は常にちょうど 1。
     // したがって超過している牌種はちょうど1種・1枚で、それが待ち牌。
     for (let i = 0; i < COUNT34_LEN; i++) {
@@ -398,22 +415,6 @@ export function waitingIndicesByDefinition34(
 const SEVEN_PAIRS_BLOCKS = 7;
 /** 和了形の総枚数(門前・4面子1雀頭 / 七対子 / 国士のいずれも 14 枚)。 */
 const WINNING_HAND_SIZE = 14;
-
-/**
- * 特殊形の列挙が受け付ける `waste`。
- *
- * `visit` へ渡す `excess`(W が手牌を超過している牌)を **34-index 1つ**でしか
- * 表現していないため、`waste ≤ 1` でないと一意に定まらない。2 以上を許すと
- * 「複数ある超過牌の最後の1つ」が静かに渡り、待ちが誤って狭まる/広がる。
- * 用途は「完全一致(0)」と「1枚不足(1)」だけなので、**型で** 0 | 1 に固定する
- * (実行時ガードだと到達不能な死んだ分岐になる)。
- */
-type SpecialFormWaste = 0 | 1;
-
-/** 特殊形の待ちを取るときの `waste`(和了形まで1枚不足)。 */
-const ONE_TILE_SHORT: SpecialFormWaste = 1;
-/** 特殊形が手牌と完全一致するときの `waste`。 */
-const EXACT_MATCH: SpecialFormWaste = 0;
 
 /**
  * 門前手の枚数を検査する。
@@ -446,12 +447,12 @@ function assertMenzenSize(
  * 牌種ごとの不足数は `2 − min(2, hand[i])` で独立に決まるため、`waste` 予算を
  * 超える牌種を弾くだけで列挙は数十通りに収まる(C(27,7) の全探索にはならない)。
  *
- * @param maxWaste 0(完全一致)または 1(1枚不足)。→ {@link SpecialFormWaste}
+ * @param maxWaste 0(完全一致)または 1(1枚不足)。→ {@link CoveringWaste}
  * @param visit `excess` は W が手牌を超過している牌の 34-index(`waste = 0` なら null)。
  */
 function forEachSevenPairsForm(
   concealed: readonly number[],
-  maxWaste: SpecialFormWaste,
+  maxWaste: CoveringWaste,
   visit: (excess: number | null) => void,
 ): void {
   const kinds = SANMA_INDICES_34;
@@ -485,12 +486,12 @@ function forEachSevenPairsForm(
  * 以内で覆うものだけ訪問する。W は雀頭の選び方だけで決まるので候補は 13 通り。
  * 么九以外を含む手は overlap に寄与しないぶん `waste` が増え、自動的に落ちる。
  *
- * @param maxWaste 0(完全一致)または 1(1枚不足)。→ {@link SpecialFormWaste}
+ * @param maxWaste 0(完全一致)または 1(1枚不足)。→ {@link CoveringWaste}
  * @param visit `excess` は W が手牌を超過している牌の 34-index(`waste = 0` なら null)。
  */
 function forEachThirteenOrphansForm(
   concealed: readonly number[],
-  maxWaste: SpecialFormWaste,
+  maxWaste: CoveringWaste,
   visit: (excess: number | null) => void,
 ): void {
   for (const doubled of TERMINAL_AND_HONOR_INDICES_34) {
