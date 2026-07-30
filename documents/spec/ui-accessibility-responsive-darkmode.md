@@ -81,9 +81,10 @@ Tailwind v4 preflight は `ul { list-style: none }` を全リストへ適用す�
 スクリーンリーダ利用者はランドマークジャンプ(VoiceOver のローター / NVDA の `D` キー等)で本文へ直行する。**全ルートは本文を単一の `<main>` に収める**(#409)。
 
 - **規約**: ページの本文は `<main>` で包む。1 ページに `<main>` は**ちょうど 1 つ**(0 個=ランドマーク無し / 2 個以上=どれが本文か曖昧)
-- **`<h1>`・ページヘッダーを `<main>` の内側に置くか外側に置くかは統一していない**。現状 `/`・`/rules`・`/settings`・404 は内側、`/history`・`/game`・`/game/result` は外側(外側に置くと `<header>` が banner ランドマークになるため、ランドマーク構成に差が出る)。**この統一は本規約の範囲外**で、別 issue で扱う。ゲートが強制するのは「単一の `<main>` が存在し、その外に本文が漏れないこと」だけ
+- **`<h1>`・ページヘッダーを `<main>` の内側に置くか外側に置くかは統一していない**。現状 `/`・`/rules`・`/settings`・404 は内側、`/history`・`/game`・`/game/result` は外側(外側に置くと `<header>` が banner ランドマークになるため、ランドマーク構成に差が出る)。**この統一は本規約の範囲外**で、#431 で扱う。ゲートが強制するのは「単一の `<main>` が存在し、その外に本文が漏れないこと」だけ
 - クライアント側の分岐(読み込み中 / 未確定 / 確定)がある画面では、**分岐の外側**で `<main>` を作る。分岐ごとに書くと、どれか 1 つに付け忘れた状態が無音で残る
-- **なぜ既存ゲートで落ちなかったか**: axe の `landmark-one-main` / `region` は **`best-practice` タグ**に属し、`e2e/a11y.spec.ts` が `withTags` に渡している WCAG A/AA タグには入らない。`disableRules` を使っていないのに素通りしていた。ランドマーク関連の 2 ルールだけを `withRules` で明示的に有効化し、`<main>` の個数と併せて `e2e/a11y.spec.ts` が全画面で回帰固定する
+- **なぜ既存ゲートで落ちなかったか**: axe の `landmark-one-main` / `landmark-no-duplicate-main` / `region` は **`best-practice` タグ**に属し、`e2e/a11y.spec.ts` が `withTags` に渡している WCAG A/AA タグには入らない。`disableRules` を使っていないのに素通りしていた。ランドマーク関連の 3 ルールだけを `withRules` で明示的に有効化し、`<main>` の個数と併せて `e2e/a11y.spec.ts` が全画面で回帰固定する
+- **ゲートの分担**(いずれか 1 つでは穴が空く): `landmark-one-main` は `page-has-main` チェック(`<main>` が **0 個**)しか見ない / `<main>` の重複は `landmark-no-duplicate-main` の担当 / `<main>` そのものの個数は `expect(page.locator("main")).toHaveCount(1)` が見る(このロケータは `<div role="main">` を数えないため、`role` 属性での代替は上の 2 ルールが捕捉する)
 
 適用済み: 全ルート(**「単一の `<main>` を持つ」という意味で**。`<h1>` の内外は上記のとおり統一していない)。`/game` と `/game/result` は #409 で追補し、それ以外の 5 ルートは当初から `<main>` を持っていた。
 

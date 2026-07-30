@@ -42,10 +42,16 @@ interface Screen {
   /**
    * クライアントアイランドの描画完了を待つセレクタ(#409)。
    *
-   * `heading` は Server shell 側にあるため、可視化しても**クライアント部分は未描画**の
-   * ことがある(`/game` は `[data-phase]` が生えるまで「対局を準備しています…」の
-   * プレースホルダで、盤面の要素が 1 つも無い)。ランドマーク監査は「本文がランドマーク外に
-   * 出ていないか」を見るので、本文そのものが未描画だと**無音で pass** してしまう。
+   * `heading` は SSR 済み HTML に載るため **hydration 前でも可視**になる。そのため
+   * `heading` の可視化だけでは**クライアント部分が未描画のまま**監査へ進み得る
+   * (`/game` は `[data-phase]` が生えるまで「対局を準備しています…」のプレースホルダで、
+   * 盤面の要素が 1 つも無い)。本文そのものが未描画だと**無音で pass** してしまう。
+   *
+   * 未設定の画面(`/game/result` の「対局結果を読み込んでいます…」/ `/history` の
+   * 「戦績を読み込んでいます…」)も同じ race を持つが、hydration 後の分岐に共通する
+   * **正の**アンカーが無い(プレースホルダ文言の消失を待つ負のアンカーは、文言を変えた
+   * 瞬間に最初から 0 件で無音 pass になり、塞ぎたい欠陥と同型)。src 側マーカーの追加は
+   * #436 で扱う。両画面とも `<main>` は分岐の外側にあるため現時点の実害は無い。
    */
   readonly clientReady?: string;
 }
@@ -141,6 +147,13 @@ async function openScreen(
   await expect(
     page.getByRole("heading", { level: 1, name: screen.heading }),
   ).toBeVisible();
+  // `heading` は SSR 済み HTML に載るため hydration 前でも可視になる。クライアント
+  // アイランドの描画完了はここで待たないと、**本文がプレースホルダのまま監査**され得る
+  // (CPU を 20 倍スロットルすると `/game` は 8/8 で `[data-phase]` 未生成、axe の走査
+  // ノードが 16 対 436 まで落ちることを実測)。全呼び出し元へ効くようここで待つ。
+  if (screen.clientReady) {
+    await expect(page.locator(screen.clientReady).first()).toBeAttached();
+  }
 
   // 手動ダークは data-theme 適用経路が実際に効いていることを確認してから監査する。
   if (theme === "手動ダーク") {
@@ -180,22 +193,27 @@ test.describe("自動 a11y 監査(axe-core)", () => {
    * のに、`disableRules` を使っていないのに素通りしていた。
    *
    * 全 best-practice を A/AA と同列に必須化すると本 issue の範囲を超えるため、
-   * ランドマーク関連の 2 ルールだけを明示的に有効化して回帰を固定する。
+   * ランドマーク関連の 3 ルールだけを明示的に有効化して回帰を固定する。
+   *
+   * `landmark-no-duplicate-main` が要るのは、**`landmark-one-main` が「main が 0 個」しか
+   * 見ない**ため。`<main>` + `<div role="main">` は下の `toHaveCount(1)` も axe も素通りする
+   * (axe-core 4.12.1 で実測)。重複の検出は専用ルールの担当。
    */
-  const LANDMARK_RULES = ["landmark-one-main", "region"] as const;
+  const LANDMARK_RULES = [
+    "landmark-one-main",
+    "landmark-no-duplicate-main",
+    "region",
+  ] as const;
 
   for (const screen of LANDMARK_SCREENS) {
     test(`${screen.name}(${screen.path})は本文が単一の <main> に収まる(#409)`, async ({
       page,
     }) => {
       await openScreen(page, screen, "ライト");
-      // 本文が未描画のまま監査して無音 pass になるのを防ぐ(#409)。
-      if (screen.clientReady) {
-        await expect(page.locator(screen.clientReady).first()).toBeAttached();
-      }
 
       // `<main>` はちょうど 1 つ(0 個=ランドマーク無し / 2 個以上=どれが本文か曖昧)。
-      // `<div role="main">` は数えないが、その形は `landmark-one-main` 側が捕捉する。
+      // このロケータは `<div role="main">` を数えない。単体で使われた場合は 0 件になって
+      // ここが落ち、`<main>` との混在・重複は `landmark-no-duplicate-main` が捕捉する。
       await expect(page.locator("main")).toHaveCount(1);
 
       const results = await new AxeBuilder({ page })
