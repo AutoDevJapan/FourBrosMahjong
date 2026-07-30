@@ -22,12 +22,23 @@ export type { PlayerId };
 
 /** 配給原点(各プレイヤーの半荘開始持ち点)。 */
 export const STARTING_POINTS = 35000;
+/** 四兄弟麻雀の参加人数(着席3人 + 抜け番1人)。 */
+const PLAYER_COUNT = 4;
+/**
+ * 卓の点棒総量 = 配給原点 × 人数 = 140,000(spec 3.3「精算入力の前提」)。
+ *
+ * **`Σ持ち点 + 場に残る供託` は半荘中を通じてこの値で不変**であり、精算入口
+ * ({@link SoshiiLedger.applyRawScore} / {@link SoshiiLedger.applyUma})は
+ * 「供託を畳み込んだ後の持ち点合計」がこの値であることを要求する。
+ * engine 側の不変条件テストは `src/domain/game/engine.pot-invariant.test.ts`。
+ */
+export const TOTAL_POINTS = STARTING_POINTS * PLAYER_COUNT;
 /** 返し(オカ算出の基準点)。 */
 export const RETURN_POINTS = 40000;
 /**
  * オカ(1位が受け取る額)= (返し − 配給原点) × 人数 = (40,000 − 35,000) × 4 = 20,000。
  */
-export const OKA = (RETURN_POINTS - STARTING_POINTS) * 4;
+export const OKA = (RETURN_POINTS - STARTING_POINTS) * PLAYER_COUNT;
 /** 順位ウマ(千ソシー単位、順位 0=1位 … 3=4位)。総和ゼロ。 */
 export const UMA: readonly [number, number, number, number] = [
   10000, 5000, -5000, -10000,
@@ -109,8 +120,11 @@ export class SoshiiLedger {
    * 「素点(返し基準)+ ウマ + オカ の総和がゼロ」というゼロサム不変条件が
    * 例外を出さずに破れ、結果画面の精算表が合わなくなる。
    *
-   * 供託リーチ棒は場に残ったままだと合計が目減りするが、engine の `endGame` が
-   * 残存分を最終持ち点へ畳み込んでから渡すため、この時点では常に一致する。
+   * **場に残る供託**(点棒)は場にある間この合計から抜けるが、engine の `endGame` が
+   * 残存分をすべて最終持ち点へ畳み込んでから渡すため、この時点では常に一致する。
+   * 畳み込みは供託種別ごとの個別処理ではなく engine の供託レジストリ(`POT_SOURCES` /
+   * `potTotal`)に対する一括処理なので、**新しい供託種別**(例: Q29 のチョンボ罰符)を
+   * 追加してもここが破れることはない(#430)。
    */
   private validateAndCaptureFinalPoints(
     finalPoints: readonly PlayerPoints[],
@@ -137,7 +151,7 @@ export class SoshiiLedger {
     const actualTotal = finalPoints.reduce((sum, p) => sum + p.points, 0);
     if (actualTotal !== expectedTotal) {
       throw new RangeError(
-        `final points must total ${expectedTotal} (${STARTING_POINTS} x ${this._balances.size}), received ${actualTotal} (e.g. outstanding riichi sticks must be folded into the final points before settlement).`,
+        `final points must total ${expectedTotal} (${STARTING_POINTS} x ${this._balances.size}), received ${actualTotal} (any pot left on the table, e.g. outstanding riichi sticks, must be folded into the final points before settlement).`,
       );
     }
     if (this._finalPoints === null) {
@@ -188,7 +202,7 @@ export class SoshiiLedger {
     if (this._umaApplied) {
       throw new RangeError("applyUma can only be applied once per ledger.");
     }
-    if (this._balances.size !== 4) {
+    if (this._balances.size !== PLAYER_COUNT) {
       throw new RangeError(
         `applyUma requires a four-player ledger, received ${this._balances.size}.`,
       );
