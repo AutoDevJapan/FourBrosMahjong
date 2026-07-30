@@ -91,6 +91,42 @@ describe("/game/result page (spec 6.2 / 6.6)", () => {
     }
   });
 
+  /**
+   * spec 5.2.6: 本文は単一の `<main>` に収める。`ResultPageClient` は読み込み中 / 未確定 /
+   * 確定の 3 分岐を持ち、分岐ごとに `<main>` を書くと**どれか 1 つへの付け忘れが無音で残る**
+   * (静的 a11y 監査が踏むのは未確定分岐だけ)。3 分岐すべてをここで数秒で固定する
+   * — E2E 側は `e2e/a11y.spec.ts`(未確定)と `e2e/game.spec.ts`(確定・半荘完走)が担う。
+   */
+  it("読み込み中・未確定・確定のどの分岐でも <main> はちょうど 1 つ(spec 5.2.6 / #409)", () => {
+    const loadingHtml = renderToString(
+      <GameProvider initialGame={finishedGame()}>
+        <ResultPage />
+      </GameProvider>,
+    );
+    // SSR 出力(= 読み込み中分岐)。開始タグの数で数える。
+    expect(loadingHtml).toContain("対局結果を読み込んでいます…");
+    expect(loadingHtml.match(/<main[\s>]/g) ?? []).toHaveLength(1);
+
+    for (const [branch, game] of [
+      ["確定", finishedGame()],
+      ["未確定", createGame({ seed: 1 })],
+    ] as const) {
+      const { container, unmount } = render(
+        <GameProvider initialGame={game}>
+          <ResultPage />
+        </GameProvider>,
+      );
+      expect(
+        container.querySelectorAll("main"),
+        `${branch}分岐の <main> がちょうど 1 つでない`,
+      ).toHaveLength(1);
+      // `role="main"` での代替も禁止する(ランドマークは重複するが `<main>` の数は 1 のまま
+      // になり、`querySelectorAll("main")` だけでは通ってしまう)。
+      expect(container.querySelectorAll('[role="main"]')).toHaveLength(0);
+      unmount();
+    }
+  });
+
   it("結果未確定(対局中に直接アクセス)ではフォールバックを表示する", () => {
     render(
       <GameProvider initialGame={createGame({ seed: 1 })}>

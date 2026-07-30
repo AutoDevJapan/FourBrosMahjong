@@ -7,8 +7,9 @@ import { advanceUntil, declareRiichi } from "./helpers/gameDriver";
  *
  * spec 5 5.5 は `@axe-core/playwright` による自動 a11y 監査を「主要画面の
  * アクセシビリティ違反を自動検知するシナリオ」として必須化している。本ファイルは
- * 実装済みの全画面(`/`・`/rules`・`/settings`・`/game`・`/game/result`)に対して
- * axe-core を実行し、WCAG 2.1 A/AA の重大違反ゼロを検証する。
+ * 実装済みの全画面(`/`・`/rules`・`/settings`・`/history`・`/game`・`/game/result`)に
+ * 対して axe-core を実行し、WCAG 2.1 A/AA の重大違反ゼロを検証する。
+ * ランドマーク監査(#409)だけは 404 を加えた 7 画面で回す(`LANDMARK_SCREENS`)。
  *
  * ダークモード(スペック5 5.4 / 5.5「ダークモードシナリオ」):
  * 各画面をライト・OS ダーク(`prefers-color-scheme: dark`)・手動ダーク
@@ -40,40 +41,74 @@ interface Screen {
    */
   readonly axeExclude?: readonly string[];
   /**
-   * クライアントアイランドの描画完了を待つセレクタ(#409)。
+   * クライアントアイランドの描画完了を待つロケータ(#409)。
    *
-   * `heading` は SSR 済み HTML に載るため **hydration 前でも可視**になる。そのため
+   * `heading` は SSR 済みの殻に載るため **hydration 前でも可視**になる。そのため
    * `heading` の可視化だけでは**クライアント部分が未描画のまま**監査へ進み得る
    * (`/game` は `[data-phase]` が生えるまで「対局を準備しています…」のプレースホルダで、
    * 盤面の要素が 1 つも無い)。本文そのものが未描画だと**無音で pass** してしまう。
    *
-   * 未設定の画面(`/game/result` の「対局結果を読み込んでいます…」/ `/history` の
-   * 「戦績を読み込んでいます…」)も同じ race を持つが、hydration 後の分岐に共通する
-   * **正の**アンカーが無い(プレースホルダ文言の消失を待つ負のアンカーは、文言を変えた
-   * 瞬間に最初から 0 件で無音 pass になり、塞ぎたい欠陥と同型)。src 側マーカーの追加は
-   * #436 で扱う。両画面とも `<main>` は分岐の外側にあるため現時点の実害は無い。
+   * **必ず正のアンカー**(hydration 後にだけ現れる要素)を指すこと。プレースホルダ文言の
+   * 消失を待つ負のアンカーは、文言を変えた瞬間に最初から 0 件になって無音 pass するため、
+   * ここで塞ぎたい欠陥と同型になる。
+   *
+   * 同じ設計は `e2e/non-text-contrast.spec.ts` の `Screen.ready` が先行して持っている。
+   * 画面を足すときは両者を揃えること(片方だけに足すと監査の穴が非対称に残る)。
    */
-  readonly clientReady?: string;
+  readonly clientReady?: (page: Page) => Locator;
+  /**
+   * `openScreen` が `query` 無しで呼ばれたときに既定で付けるクエリ。
+   *
+   * `/game` は `?seed` を渡さないと `freshSeed()`(crypto 乱数)で配牌が決まる。`clientReady`
+   * を入れて盤面が確実に描画されるようになった結果、静的監査は**毎回異なる配牌**を走査する
+   * ようになった。再現不能な flake を避けるため、実盤面を監査する箇所は seed を固定する
+   * (`non-text-contrast.spec.ts` も同じ理由で `/game?seed=0` を使う)。
+   */
+  readonly baseQuery?: string;
 }
 
 const SCREENS: readonly Screen[] = [
   { path: "/", name: "ロビー", heading: "四兄弟麻雀" },
   { path: "/rules", name: "ルール説明", heading: "ルール説明" },
   { path: "/settings", name: "設定", heading: "設定" },
-  { path: "/history", name: "戦績", heading: "戦績" },
+  {
+    path: "/history",
+    name: "戦績",
+    heading: "戦績",
+    // `MatchHistoryList`(Client)の描画完了。空状態と一覧の**両分岐に共通**する文言を指す
+    // (ヘッダのリンクはサーバ側の殻にあり待ちにならない)。
+    clientReady: (page) =>
+      page.getByText(/保存された戦績はまだありません|新しい順に表示/).first(),
+  },
   {
     path: "/game",
     name: "対局画面",
     heading: "対局画面",
-    clientReady: "[data-phase]",
+    clientReady: (page) => page.locator("[data-phase]").first(),
+    baseQuery: "?seed=0",
   },
-  { path: "/game/result", name: "対局結果", heading: "対局結果" },
+  {
+    path: "/game/result",
+    name: "対局結果",
+    heading: "対局結果",
+    // `ResultPageClient` の hydration 後は「未確定」「確定」に割れるため、両分岐の目印を
+    // `or` で束ねる(「読み込み中」プレースホルダにはどちらも現れない)。
+    clientReady: (page) =>
+      page
+        .getByRole("link", { name: "対局画面へ" })
+        .or(page.getByRole("heading", { name: "最終順位" }))
+        .first(),
+  },
 ];
 
 /**
  * ランドマーク監査(#409)の対象。実在ルートに加えて 404 も見る。
  * 404 は `not-found.tsx` という独立した実装で、他のルートの規約が波及しない
  * (実際 `<main>` の中に `<h1>` を置く形で、`/history` 系とは構造が異なる)。
+ *
+ * 404 を `SCREENS` 側(WCAG A/AA 監査・3 テーマ)へは**意図的に入れていない**。#409 の
+ * 範囲はランドマーク構造であり、404 の A/AA 違反まで同時に必須化すると切り分けが濁る。
+ * 404 を全 a11y ゲートへ広げるかは別途判断する(現状 `non-text-contrast.spec.ts` も未対象)。
  */
 const LANDMARK_SCREENS: readonly Screen[] = [
   ...SCREENS,
@@ -143,16 +178,16 @@ async function openScreen(
     });
   }
 
-  await page.goto(screen.path + query);
+  await page.goto(screen.path + (query || (screen.baseQuery ?? "")));
   await expect(
     page.getByRole("heading", { level: 1, name: screen.heading }),
   ).toBeVisible();
-  // `heading` は SSR 済み HTML に載るため hydration 前でも可視になる。クライアント
+  // `heading` は SSR 済みの殻に載るため hydration 前でも可視になる。クライアント
   // アイランドの描画完了はここで待たないと、**本文がプレースホルダのまま監査**され得る
-  // (CPU を 20 倍スロットルすると `/game` は 8/8 で `[data-phase]` 未生成、axe の走査
-  // ノードが 16 対 436 まで落ちることを実測)。全呼び出し元へ効くようここで待つ。
+  // (本番ビルドの `/game` の SSR HTML は `<h1>` と「対局を準備しています…」を含む一方
+  // `data-phase` を含まないことを実測)。全呼び出し元へ効くようここで待つ。
   if (screen.clientReady) {
-    await expect(page.locator(screen.clientReady).first()).toBeAttached();
+    await expect(screen.clientReady(page)).toBeAttached();
   }
 
   // 手動ダークは data-theme 適用経路が実際に効いていることを確認してから監査する。
@@ -195,9 +230,12 @@ test.describe("自動 a11y 監査(axe-core)", () => {
    * 全 best-practice を A/AA と同列に必須化すると本 issue の範囲を超えるため、
    * ランドマーク関連の 3 ルールだけを明示的に有効化して回帰を固定する。
    *
-   * `landmark-no-duplicate-main` が要るのは、**`landmark-one-main` が「main が 0 個」しか
-   * 見ない**ため。`<main>` + `<div role="main">` は下の `toHaveCount(1)` も axe も素通りする
-   * (axe-core 4.12.1 で実測)。重複の検出は専用ルールの担当。
+   * 3 ルール + `toHaveCount(1)` の分担(axe-core 4.12.1 で実測 / spec 5.2.6 の表と対応):
+   * - `landmark-one-main` は `page-has-main` チェック 1 つだけで、**main が 0 個**しか見ない。
+   *   `<main>` + `<div role="main">` の重複は素通りする
+   * - 重複は `landmark-no-duplicate-main` の担当
+   * - `<div role="main">` **だけ**で代替した形は axe の 3 ルールすべてが通る。これを落とすのは
+   *   下の `toHaveCount(1)` だけなので、axe とロケータの併用が必須
    */
   const LANDMARK_RULES = [
     "landmark-one-main",
@@ -212,8 +250,8 @@ test.describe("自動 a11y 監査(axe-core)", () => {
       await openScreen(page, screen, "ライト");
 
       // `<main>` はちょうど 1 つ(0 個=ランドマーク無し / 2 個以上=どれが本文か曖昧)。
-      // このロケータは `<div role="main">` を数えない。単体で使われた場合は 0 件になって
-      // ここが落ち、`<main>` との混在・重複は `landmark-no-duplicate-main` が捕捉する。
+      // このロケータは `<div role="main">` を数えないため、`role` 属性だけで代替した形は
+      // ここが 0 件で落ちる(axe の 3 ルールはその形を通してしまう)。
       await expect(page.locator("main")).toHaveCount(1);
 
       const results = await new AxeBuilder({ page })

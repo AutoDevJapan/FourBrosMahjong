@@ -162,11 +162,10 @@ test.describe("対局画面(/game)", () => {
     // 確定済みの結果本文もランドマーク外へ出ない(#409)。`ResultPageClient` は
     // 読み込み中/未確定/確定の 3 分岐を持ち、静的監査が踏むのは未確定分岐だけなので、
     // 最大の本文(最終順位・ソシー内訳・導線 nav)を持つこの分岐はここで固定する。
+    // 個数と包含の両方を見る(個数だけでは本文が `<main>` の外でも通ってしまう)。
     await expect(page.locator("main")).toHaveCount(1);
     await expect(
-      page
-        .getByRole("heading", { name: "最終順位" })
-        .locator("xpath=ancestor::main"),
+      page.locator("main").getByRole("heading", { name: "最終順位" }),
     ).toHaveCount(1);
 
     // 「もう一半荘」で新規半荘を生成し対局画面へ戻る。
