@@ -186,6 +186,9 @@ interface HandState {
    * `fromKan` / `fromReplacement` の2つの boolean で表していた。片方だけを書き換える
    * 不正状態(`fromKan && !fromReplacement`)が型で表現できてしまい、代入箇所すべてで
    * 両方を並べる必要があったため、1つの直和型へ集約した。
+   *
+   * `drawn` との対も同じ理由で崩れうるため、ツモ牌を手放す側は {@link clearDrawn} に
+   * 集約している(不変条件: `drawn === null ⇒ drawSource === "live"`)。
    */
   drawSource: DrawSource;
   /** 席ごとのリーチ宣言済みフラグ。 */
@@ -738,10 +741,23 @@ function autoPullDealtNorths(hand: HandState): void {
 }
 
 /**
+ * ツモ牌を手放す(打牌・鳴きによる手番移動・カン成立・嶺上枯渇)。
+ *
+ * `drawSource` は `drawn` に付随する情報なので、必ず対で更新して
+ * `drawn === null ⇒ drawSource === "live"` を保つ(#415)。片方だけ書き換えると
+ * 次の通常ツモが嶺上由来と誤認され、海底摸月が消えたり嶺上開花が誤って付いたりする。
+ */
+function clearDrawn(hand: HandState): void {
+  hand.drawn = null;
+  hand.drawSource = "live";
+}
+
+/**
  * カン後の嶺上補充(北抜きも自動処理)。`drawn` / `drawSource` を更新する。
  *
  * 嶺上牌が北で続けて抜かれた場合も `"kanReplacement"` のままにする(カンを起点とした
- * 一連の補充なので嶺上開花の対象)。
+ * 一連の補充なので嶺上開花の対象)。この解釈は #396 以前からの既存挙動で、spec 3.2 の
+ * 「北抜きの嶺上牌では付かない」との境界は未確定(→ #437)。
  */
 function drawKanReplacement(hand: HandState, seat: SeatKey): void {
   let tile: Tile;
@@ -749,8 +765,7 @@ function drawKanReplacement(hand: HandState, seat: SeatKey): void {
     tile = hand.wall.drawReplacement();
   } catch (error) {
     if (error instanceof WallEmptyError) {
-      hand.drawn = null;
-      hand.drawSource = "live";
+      clearDrawn(hand);
       return;
     }
     throw error;
@@ -965,7 +980,7 @@ function completeAiAnkan(
   const { taken, rest } = takeKind(pool, tile, 4);
   if (taken.length < 4) return state;
   hand.hands[seat] = rest;
-  hand.drawn = null;
+  clearDrawn(hand);
   hand.melds[seat] = [
     ...hand.melds[seat],
     { type: "kan", tiles: taken, concealed: true },
@@ -995,7 +1010,7 @@ function completeAiKakan(
   if (taken.length < 1) return state;
   const kakanTile = taken[0];
   hand.hands[seat] = rest;
-  hand.drawn = null;
+  clearDrawn(hand);
   hand.melds[seat] = hand.melds[seat].map((meld) =>
     meld === target
       ? {
@@ -1080,8 +1095,7 @@ function applyAiCall(
   hand.callsMade = true;
   hand.pendingDiscard = null;
   hand.passedRonSeats = [];
-  hand.drawn = null;
-  hand.drawSource = "live";
+  clearDrawn(hand);
   hand.turn = caller;
   if (kan) {
     const abortiveDraw = settleFourKanAbortiveDraw(state);
@@ -1501,8 +1515,7 @@ function applyDiscard(
   hand.hands[seat] = pool;
   hand.discards[seat] = [...hand.discards[seat], discarded];
   hand.discardHistory[seat] = [...hand.discardHistory[seat], discarded];
-  hand.drawn = null;
-  hand.drawSource = "live";
+  clearDrawn(hand);
   hand.ponnedKind = null; // 打牌で喰い替え禁止の窓(ポン直後の1打)を閉じる。
   hand.ippatsu[seat] = false; // 自分の打牌で一発の権利は消える。
   hand.pendingDiscard = { seat, tile: discarded };
@@ -2290,8 +2303,7 @@ export function declarePon(state: EngineState): EngineState {
   hand.callsMade = true;
   hand.pendingDiscard = null;
   hand.passedRonSeats = [];
-  hand.drawn = null;
-  hand.drawSource = "live";
+  clearDrawn(hand);
   hand.turn = seat;
   // 喰い替え禁止: 直後の打牌でこの牌種(ポンした牌)を切れないよう記録する(スペック1 1.4)。
   hand.ponnedKind = tile;
@@ -2331,8 +2343,7 @@ export function declareKan(state: EngineState): EngineState {
   hand.callsMade = true;
   hand.pendingDiscard = null;
   hand.passedRonSeats = [];
-  hand.drawn = null;
-  hand.drawSource = "live";
+  clearDrawn(hand);
   hand.turn = seat;
   const abortiveDraw = settleFourKanAbortiveDraw(state);
   if (abortiveDraw !== null) return abortiveDraw;
@@ -2378,7 +2389,7 @@ export function declareAnkan(state: EngineState, tile: Tile): EngineState {
   if (chankan !== null) return chankan;
 
   hand.hands[seat] = rest;
-  hand.drawn = null;
+  clearDrawn(hand);
   hand.melds[seat] = [
     ...hand.melds[seat],
     { type: "kan", tiles: taken, concealed: true },
@@ -2437,7 +2448,7 @@ export function declareKakan(state: EngineState, tile: Tile): EngineState {
 
   // 槍槓なし → 加槓成立。嶺上ツモへ進む。
   hand.hands[seat] = rest;
-  hand.drawn = null;
+  clearDrawn(hand);
   hand.melds[seat] = hand.melds[seat].map((m) =>
     m === target
       ? { type: "kan", tiles: [...m.tiles, kakanTile], concealed: false }

@@ -185,6 +185,30 @@ describe("engine: 四槓散了(#183)", () => {
     expect(after.hand?.melds.east.at(-1)?.type).toBe("pon");
   });
 
+  it("嶺上牌での連続カンが四槓散了になっても drawSource は既定へ戻る(#415)", () => {
+    // カンの嶺上牌でさらにカンした場合、`drawn` は消えるのに `drawSource` が
+    // `"kanReplacement"` のまま残ると「ツモ牌が無いのに嶺上由来」という不整合な
+    // 局状態が残る。四槓散了は嶺上補充の**前**に打ち切るため、`drawKanReplacement`
+    // による上書きが起きない唯一の経路になっている。
+    const state = baseWithThreeKans(9);
+    const hand = state.hand;
+    if (!hand) throw new Error("hand required");
+    hand.hands.east = parseTiles("1m 1m 1m 2s 3s 4s");
+    hand.drawn = parseTile("1m");
+    hand.drawSource = "kanReplacement"; // 直前のカンの嶺上牌を持っている状態。
+    hand.turn = "east";
+    const armed = {
+      ...state,
+      pending: discardPending({ ankanTiles: [parseTile("1m")] }),
+    };
+
+    const after = declareAnkan(armed, parseTile("1m"));
+
+    expect(after.lastRound?.label).toBe("四槓散了");
+    expect(after.hand?.drawn).toBeNull();
+    expect(after.hand?.drawSource).toBe("live");
+  });
+
   it("AIの大明槓経路も共通判定で途中流局する", () => {
     const state = baseWithThreeKans(5);
     const hand = state.hand;
