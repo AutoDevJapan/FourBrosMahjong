@@ -1,5 +1,7 @@
+import AxeBuilder from "@axe-core/playwright";
 import { expect, type Page, test } from "@playwright/test";
 import { advanceUntil, armRiichi, visibleHand } from "./helpers/gameDriver";
+import { LANDMARK_RULES } from "./screens";
 
 /**
  * wheel を送った後、スクロール適用が終わるまで 2 フレーム進める。
@@ -159,6 +161,23 @@ test.describe("対局画面(/game)", () => {
       page.getByRole("heading", { level: 1, name: "対局結果" }),
     ).toBeVisible();
     await expect(page.getByRole("heading", { name: "最終順位" })).toBeVisible();
+    // 確定済みの結果本文もランドマーク外へ出ない(#409)。`ResultPageClient` は
+    // 読み込み中/未確定/確定の 3 分岐を持ち、静的監査(`e2e/a11y.spec.ts`)が踏むのは
+    // 未確定分岐だけなので、最大の本文(最終順位・ソシー内訳・導線 nav)を持つこの分岐は
+    // ここで固定する。個数と包含の両方を見る(個数だけでは本文が `<main>` の外でも通る)。
+    await expect(page.locator("main")).toHaveCount(1);
+    await expect(
+      page.locator("main").getByRole("heading", { name: "最終順位" }),
+    ).toHaveCount(1);
+    // spec 5.2.6 の強制点(2)「全コンテンツが何らかのランドマークに属する」もこの分岐で見る。
+    // ここを省くと、確定分岐にだけランドマーク外の要素を足しても何も落ちない。
+    const landmark = await new AxeBuilder({ page })
+      .withRules([...LANDMARK_RULES])
+      .analyze();
+    expect(
+      landmark.violations.map((violation) => violation.id),
+      JSON.stringify(landmark.violations, null, 2),
+    ).toEqual([]);
 
     // 「もう一半荘」で新規半荘を生成し対局画面へ戻る。
     await page.getByRole("button", { name: "もう一半荘" }).click();

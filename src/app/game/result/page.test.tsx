@@ -91,6 +91,59 @@ describe("/game/result page (spec 6.2 / 6.6)", () => {
     }
   });
 
+  /**
+   * spec 5.2.6: 本文は単一の `<main>` に収める。`ResultPageClient` は読み込み中 / 未確定 /
+   * 確定の 3 分岐を持ち、分岐ごとに `<main>` を書くと**どれか 1 つへの付け忘れが無音で残る**
+   * (静的 a11y 監査が踏むのは未確定分岐だけ)。3 分岐すべてをここで数秒で固定する
+   * — E2E 側は `e2e/a11y.spec.ts`(未確定)と `e2e/game.spec.ts`(確定・半荘完走)が担う。
+   */
+  it("読み込み中・未確定・確定のどの分岐でも <main> はちょうど 1 つ(spec 5.2.6 / #409)", () => {
+    const loadingHtml = renderToString(
+      <GameProvider initialGame={finishedGame()}>
+        <ResultPage />
+      </GameProvider>,
+    );
+    // SSR 出力(= 読み込み中分岐)。開始タグの数で数える。
+    expect(loadingHtml).toContain("対局結果を読み込んでいます…");
+    expect(loadingHtml.match(/<main[\s>]/g) ?? []).toHaveLength(1);
+    expect(loadingHtml).not.toContain('role="main"');
+
+    // 分岐を**一意に**指す文言。`最終順位` は未確定分岐の案内文にも出る
+    //(「…ここに最終順位とソシー内訳が表示されます」)ので目印に使えない。
+    const CONFIRMED_ONLY = "もう一半荘";
+    const PENDING_ONLY = "まだ半荘の結果が確定していません";
+
+    for (const [branch, game, own, other] of [
+      ["確定", finishedGame(), CONFIRMED_ONLY, PENDING_ONLY],
+      ["未確定", createGame({ seed: 1 }), PENDING_ONLY, CONFIRMED_ONLY],
+    ] as const) {
+      const { container, unmount } = render(
+        <GameProvider initialGame={game}>
+          <ResultPage />
+        </GameProvider>,
+      );
+      // 狙った分岐が実際に描かれたことを先に確かめる。これが無いと、例えば `finishedGame()`
+      // が確定結果を作らなくなったとき、未確定分岐を 2 回数えているのに失敗メッセージだけ
+      // 「確定分岐の…」と名乗る(<main> の数え方は通るので無音になる)。
+      // 「他方が出ていない」まで見て、目印が両分岐に共通の文言へ育つ事故も防ぐ。
+      const text = container.textContent ?? "";
+      expect(text, `${branch}分岐が描画されていない`).toContain(own);
+      expect(
+        text,
+        `${branch}分岐のはずが別の分岐が描画されている`,
+      ).not.toContain(other);
+      expect(
+        container.querySelectorAll("main"),
+        `${branch}分岐の <main> がちょうど 1 つでない`,
+      ).toHaveLength(1);
+      // 別要素の `role="main"` を足す形も禁止する。`<main>` の数は 1 のままなので上の
+      // 数え方では通ってしまうが、main ランドマークとしては重複する(`role` で
+      // **置き換え**た場合は上が 0 件になって落ちる)。
+      expect(container.querySelectorAll('[role="main"]')).toHaveLength(0);
+      unmount();
+    }
+  });
+
   it("結果未確定(対局中に直接アクセス)ではフォールバックを表示する", () => {
     render(
       <GameProvider initialGame={createGame({ seed: 1 })}>

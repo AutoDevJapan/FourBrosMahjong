@@ -1,14 +1,21 @@
 import AxeBuilder from "@axe-core/playwright";
 import { expect, type Locator, type Page, test } from "@playwright/test";
 import { advanceUntil, declareRiichi } from "./helpers/gameDriver";
+import {
+  LANDMARK_RULES,
+  LANDMARK_SCREENS,
+  SCREENS,
+  type Screen,
+} from "./screens";
 
 /**
  * 自動アクセシビリティ監査 E2E(スペック5 5.5 / #70)。
  *
  * spec 5 5.5 は `@axe-core/playwright` による自動 a11y 監査を「主要画面の
  * アクセシビリティ違反を自動検知するシナリオ」として必須化している。本ファイルは
- * 実装済みの全画面(`/`・`/rules`・`/settings`・`/game`・`/game/result`)に対して
- * axe-core を実行し、WCAG 2.1 A/AA の重大違反ゼロを検証する。
+ * 実装済みの全画面(`/`・`/rules`・`/settings`・`/history`・`/game`・`/game/result`)に
+ * 対して axe-core を実行し、WCAG 2.1 A/AA の重大違反ゼロを検証する。
+ * ランドマーク監査(#409)だけは 404 を加えた 7 画面で回す(`LANDMARK_SCREENS`)。
  *
  * ダークモード(スペック5 5.4 / 5.5「ダークモードシナリオ」):
  * 各画面をライト・OS ダーク(`prefers-color-scheme: dark`)・手動ダーク
@@ -28,27 +35,6 @@ import { advanceUntil, declareRiichi } from "./helpers/gameDriver";
 const WCAG_TAGS = ["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"] as const;
 
 type Theme = "ライト" | "OSダーク" | "手動ダーク";
-
-interface Screen {
-  readonly path: string;
-  readonly name: string;
-  /** 描画完了の目印。監査前にこの要素の可視化を待ち、未ペイント状態での誤検知を避ける。 */
-  readonly heading: string;
-  /**
-   * 監査から除外する CSS セレクタ(既知の src 側 a11y バグで、本 PR のスコープ外のもの)。
-   * 全ルール無効化は行わず、該当ノードだけを外して他は監査対象のまま残す。
-   */
-  readonly axeExclude?: readonly string[];
-}
-
-const SCREENS: readonly Screen[] = [
-  { path: "/", name: "ロビー", heading: "四兄弟麻雀" },
-  { path: "/rules", name: "ルール説明", heading: "ルール説明" },
-  { path: "/settings", name: "設定", heading: "設定" },
-  { path: "/history", name: "戦績", heading: "戦績" },
-  { path: "/game", name: "対局画面", heading: "対局画面" },
-  { path: "/game/result", name: "対局結果", heading: "対局結果" },
-];
 
 const THEMES: readonly Theme[] = ["ライト", "OSダーク", "手動ダーク"];
 
@@ -99,7 +85,9 @@ async function openScreen(
   page: Page,
   screen: Screen,
   theme: Theme,
-  query = "",
+  // 省略時のみ `screen.baseQuery` を使う。`""` を明示した呼び出しは「クエリ無し」の意味に
+  // なるよう既定値を置かない(`||` だと空文字が既定へ差し替わってしまう)。
+  query?: string,
 ): Promise<void> {
   if (theme === "OSダーク") {
     await page.emulateMedia({ colorScheme: "dark" });
@@ -113,10 +101,17 @@ async function openScreen(
     });
   }
 
-  await page.goto(screen.path + query);
+  await page.goto(screen.path + (query ?? screen.baseQuery ?? ""));
   await expect(
     page.getByRole("heading", { level: 1, name: screen.heading }),
   ).toBeVisible();
+  // `heading` は SSR 済みの殻に載るため hydration 前でも可視になる。クライアント
+  // アイランドの描画完了はここで待たないと、**本文がプレースホルダのまま監査**され得る
+  // (本番ビルドの `/game` の SSR HTML は `<h1>` と「対局を準備しています…」を含む一方
+  // `data-phase` を含まないことを実測)。全呼び出し元へ効くようここで待つ。
+  if (screen.clientReady) {
+    await expect(screen.clientReady(page)).toBeAttached();
+  }
 
   // 手動ダークは data-theme 適用経路が実際に効いていることを確認してから監査する。
   if (theme === "手動ダーク") {
@@ -145,6 +140,42 @@ test.describe("自動 a11y 監査(axe-core)", () => {
         ).toEqual([]);
       });
     }
+  }
+
+  /**
+   * ランドマーク構造(#409)。
+   *
+   * `LANDMARK_RULES` の 3 つはいずれも axe の **`best-practice` タグ**に属し、`WCAG_TAGS`
+   * (A/AA)だけを渡している上の全画面監査には**一切入らない**。そのため `/game` と
+   * `/game/result` だけ `<main>` を持たず、盤面・結果本文がランドマーク外に取り残されていた
+   * のに、`disableRules` を使っていないのに素通りしていた。
+   *
+   * ルールの分担と `toHaveCount(1)` との併用が必須な理由は `e2e/screens.ts` の
+   * `LANDMARK_RULES` の doc コメント(spec 5.2.6 の表と対応)を参照。
+   *
+   * 上の A/AA 監査と違い `screen.axeExclude` は**意図的に適用しない**。ランドマーク構造は
+   * ページ全体の性質(`<main>` の個数 / 全コンテンツがランドマークに属するか)なので、
+   * 一部ノードを外すと検査の意味が変わってしまう。個別の a11y バグを避けるための除外を
+   * ここへ効かせたくなった場合は、除外ではなく構造側を直すこと。
+   */
+  for (const screen of LANDMARK_SCREENS) {
+    test(`${screen.name}(${screen.path})は本文が単一の <main> に収まる(#409)`, async ({
+      page,
+    }) => {
+      await openScreen(page, screen, "ライト");
+
+      // `<main>` はちょうど 1 つ(0 個=ランドマーク無し / 2 個以上=どれが本文か曖昧)。
+      // このロケータは `<div role="main">` を数えないため、`role` 属性だけで代替した形は
+      // ここが 0 件で落ちる(axe の 3 ルールはその形を通してしまう)。
+      await expect(page.locator("main")).toHaveCount(1);
+
+      const results = await new AxeBuilder({ page })
+        .withRules([...LANDMARK_RULES])
+        .analyze();
+      expect(results.violations, formatViolations(results.violations)).toEqual(
+        [],
+      );
+    });
   }
 
   test("卓情報の generic 要素を aria-label で命名しない(#204)", async ({
@@ -589,7 +620,11 @@ test.describe("キーボードのみ操作(a11y 補強)", () => {
   test("/game の手牌はキーボードのみで到達・打牌でき、ロービングタブインデックスに従う(5.2.2)", async ({
     page,
   }) => {
-    await page.goto("/game");
+    // seed を固定する。`?seed` 無しだと `freshSeed()`(crypto 乱数)で配牌が決まり、下の
+    // 打牌が局を終わらせる配牌を引いた回に手牌 listbox が消えて落ちる(30 回中 1 回で再現)。
+    // ロービングタブインデックスの検証に配牌のばらつきは不要なので、他の実盤面テストと
+    // 同じく seed を固定する(`Screen.baseQuery` と同じ方針)。
+    await page.goto("/game?seed=0");
 
     const hand = page.getByRole("listbox", { name: "自家の手牌" });
     const firstTile: Locator = hand.getByRole("option").first();
@@ -611,7 +646,8 @@ test.describe("キーボードのみ操作(a11y 補強)", () => {
   test("/game は手番をライブリージョンで通知し、打牌をキーボードのみで実行できる(5.2.2 / 5.2.3)", async ({
     page,
   }) => {
-    await page.goto("/game");
+    // 上と同じ理由で seed を固定する(実盤面を触るテストは配牌を固定する)。
+    await page.goto("/game?seed=0");
 
     // 進行通知(色非依存)は polite ライブリージョンへ反映される(sr-only だが DOM 常駐)。
     await expect(page.locator('[aria-live="polite"]').first()).toHaveText(
