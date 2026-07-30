@@ -50,8 +50,11 @@ function indexToTile(idx: number): Tile {
   return { suit, rank, isRed: rank === 5 && RED_FIVE_SUITS.has(suit) };
 }
 
-/** 34-index カウント配列 → `Tile[]`(決定的な牌種順)。 */
-function count34ToTiles(counts34: readonly number[]): Tile[] {
+/**
+ * 34-index カウント配列 → `Tile[]`(決定的な牌種順)。
+ * 特殊形(七対子・国士)の決め打ち手を組み立てるテストからも使う(issue #429)。
+ */
+export function count34ToTiles(counts34: readonly number[]): Tile[] {
   const tiles: Tile[] = [];
   for (const idx of SANMA_INDICES_34) {
     for (let c = 0; c < counts34[idx]; c += 1) tiles.push(indexToTile(idx));
@@ -170,6 +173,52 @@ export function randomStructuredHand(rng: () => number, maxSwaps = 3): Tile[] {
     }
   }
   return count34ToTiles(counts);
+}
+
+/**
+ * 分解が一意に定まらない**門前14枚**を意図的に組む(issue #429)。
+ *
+ * 同一スートの連続3牌種を各3枚(`111222333p` 型 = 刻子3組 ⇔ 順子3組)+ 面子1組
+ * + 雀頭1組。帯の9枚だけで既に2通りの読みが成立するので、生成される手は**必ず**
+ * 多重分解になる。
+ *
+ * {@link randomStructuredHand} の乱択では多重分解の手が 20,000 手に 100 件強しか
+ * 現れず、「刻子が取れたら順子を試さない」型の列挙欠陥を踏むかどうかが運任せになる。
+ * 副露経路で `buildAmbiguousConcealed` を用意したのと同じ理由で、門前にも決め打ち形を置く。
+ */
+export function randomAmbiguousMenzenHand(rng: () => number): Tile[] {
+  for (let attempt = 0; attempt < 200; attempt += 1) {
+    const counts = new Array<number>(34).fill(0);
+    const base = rng() < 0.5 ? 9 : 18; // 筒子 / 索子
+    const start = base + randInt(rng, 7); // start+2 が同一スート内に収まる
+    for (const idx of [start, start + 1, start + 2]) counts[idx] += 3;
+
+    // 4組目の面子と雀頭は帯の**外**から取る。帯の9枚が帯内でしか面子を作れない状態を
+    // 保つことで「刻子3組 ⇔ 順子3組」の2通りが必ず残る(多重分解を構造的に保証する)。
+    const outside = (idx: number): boolean => idx < start || idx > start + 2;
+    if (rng() < 0.5) {
+      const seq = SEQUENCE_STARTS[randInt(rng, SEQUENCE_STARTS.length)];
+      if (![seq, seq + 1, seq + 2].every(outside)) continue;
+      for (const idx of [seq, seq + 1, seq + 2]) counts[idx] += 1;
+    } else {
+      const idx = SANMA_INDICES_34[randInt(rng, SANMA_INDICES_34.length)];
+      if (!outside(idx)) continue;
+      counts[idx] += 3;
+    }
+
+    const pair = SANMA_INDICES_34[randInt(rng, SANMA_INDICES_34.length)];
+    if (!outside(pair) || counts[pair] > 2) continue;
+    counts[pair] += 2;
+    return count34ToTiles(counts);
+  }
+  // フォールバック(実際上到達しない): 111222333p 444p 55p(帯 1-3p + 刻子 + 雀頭)。
+  const fallback = new Array<number>(34).fill(0);
+  fallback[9] = 3; // 111p
+  fallback[10] = 3; // 222p
+  fallback[11] = 3; // 333p
+  fallback[12] = 3; // 444p
+  fallback[13] = 2; // 55p 雀頭
+  return count34ToTiles(fallback);
 }
 
 // ---------------------------------------------------------------------------

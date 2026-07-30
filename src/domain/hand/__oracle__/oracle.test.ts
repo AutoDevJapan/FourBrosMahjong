@@ -17,6 +17,9 @@ import {
 } from "./agari-oracle";
 import { SANMA_INDICES_34, tilesToCount34, tileTo34Index } from "./counts34";
 import {
+  isSevenPairsByDefinition34,
+  isThirteenOrphansByDefinition34,
+  menzenWaitingIndicesByDefinition34,
   standardFormsByDefinition34,
   waitingIndicesByDefinition34,
 } from "./definition-oracle";
@@ -238,6 +241,86 @@ describe("定義ベースの分解・待ちオラクル(副露経路 / #390)", (
       );
     }
     expect(maxWaits).toBe(1);
+  });
+});
+
+describe("定義ベースの門前オラクル(標準形 + 七対子・国士 / #429)", () => {
+  const counts = (notation: string): number[] =>
+    tilesToCount34(parseTiles(notation));
+  const forms = (notation: string): string[] =>
+    [...standardFormsByDefinition34(counts(notation), 4)].sort();
+  const menzenWaits = (notation: string): number[] =>
+    [...menzenWaitingIndicesByDefinition34(counts(notation))].sort(
+      (a, b) => a - b,
+    );
+
+  it("門前14枚(groupsNeeded=4)の多面分解を全通り列挙する", () => {
+    // `standardDecompositions34` と同じ 3 通り(222/333/444 ⇔ 234×3 ⇔ 234+345+345…)。
+    expect(forms("222333444p 55p 678s")).toHaveLength(3);
+    // 列挙構造が独立でも結果は一致する。
+    expect(forms("222333444p 55p 678s")).toEqual(
+      [...standardDecompositions34(counts("222333444p 55p 678s"))].sort(),
+    );
+  });
+
+  it("門前13枚の標準形の待ちを列挙する(三面張)", () => {
+    // 234567p は 1p/4p/7p の三面張。
+    expect(menzenWaits("23456p 789p 111s 99s")).toEqual(
+      waitIndices("1p 4p 7p"),
+    );
+  });
+
+  it("七対子は相異なる7対子のみ成立し、4枚使いは弾く", () => {
+    expect(
+      isSevenPairsByDefinition34(counts("11p 33p 55p 77p 99p 22s 44s")),
+    ).toBe(true);
+    // 2枚+4枚の「6種」は 7 対子にならない。
+    expect(
+      isSevenPairsByDefinition34(counts("1111p 33p 55p 77p 99p 22s")),
+    ).toBe(false);
+    // 標準形の和了(4面子1雀頭)は七対子ではない。
+    expect(isSevenPairsByDefinition34(counts("123p 456p 789p 111s 99s"))).toBe(
+      false,
+    );
+  });
+
+  it("七対子テンパイの単騎待ちを待ち集合に含める", () => {
+    // 6対子 + 4s 単騎。標準形では和了れないので待ちは 4s のみ。
+    expect(menzenWaits("11p 33p 55p 77p 99p 22s 4s")).toEqual(
+      waitIndices("4s"),
+    );
+  });
+
+  it("国士は么九13種+1雀頭で成立し、么九以外が混ざれば不成立", () => {
+    expect(
+      isThirteenOrphansByDefinition34(counts("19m 19p 19s 11234567z")),
+    ).toBe(true);
+    // 么九以外(5p)が混ざれば不成立。
+    expect(
+      isThirteenOrphansByDefinition34(counts("19m 159p 19s 1234567z")),
+    ).toBe(false);
+    // 全て么九でも 12 種しかない(1m と 9p が対子・9s 欠け)なら不成立。
+    expect(
+      isThirteenOrphansByDefinition34(counts("119m 199p 1s 1234567z")),
+    ).toBe(false);
+  });
+
+  it("国士十三面待ちを待ち集合に含める", () => {
+    expect(menzenWaits("19m 19p 19s 1234567z")).toEqual(
+      waitIndices("19m 19p 19s 1234567z"),
+    );
+  });
+
+  it("門前の枚数が噛み合わない呼び出しは失敗する(静かに false / 空集合にしない)", () => {
+    expect(() => isSevenPairsByDefinition34(counts("11p 33p 55p"))).toThrow(
+      RangeError,
+    );
+    expect(() =>
+      isThirteenOrphansByDefinition34(counts("19m 19p 19s 1234567z")),
+    ).toThrow(RangeError); // 13枚を14枚判定へ渡した
+    expect(() =>
+      menzenWaitingIndicesByDefinition34(counts("19m 19p 19s 11234567z")),
+    ).toThrow(RangeError); // 14枚を13枚判定へ渡した
   });
 });
 

@@ -20,6 +20,7 @@
 | `definition-oracle.ts` の `shantenByDefinition34` | `game/ai.ts` の `shanten()` | **列挙を一切行わない**(和了形の側を全列挙し「手牌との最大重なり」から距離を直接算出) |
 | `definition-oracle.ts` の `standardFormsByDefinition34` | `hand/decompose.ts` の `decomposeStandard()` | **列挙を一切行わない**(和了形の側を列挙し「手牌と完全一致する形」を集める) |
 | `definition-oracle.ts` の `waitingIndicesByDefinition34` | `hand/tenpai.ts` の `waitingTiles()` | **列挙を一切行わない**(「手牌をちょうど1枚超過して覆う和了形」の超過牌が待ち) |
+| `definition-oracle.ts` の `isSevenPairsByDefinition34` / `isThirteenOrphansByDefinition34` | `hand/decompose.ts` の `decomposeSevenPairs()` / `decomposeThirteenOrphans()` | **向きが逆**(本体は手牌側を走査して枚数を数える。こちらは特殊形の側を列挙して手牌との重なりを見る) |
 
 したがって:
 
@@ -44,8 +45,15 @@
 - `standardFormsByDefinition34`(分解)と `waitingIndicesByDefinition34`(待ち)は
   「手牌と一致する形 / 1枚だけ足りない形」しか要らないため、可容な枝刈り
   (`waste = Σ max(0, W[i] − hand[i])` が上限を超えた枝を捨てる)が効き、
-  副露数に依存せず 1 手あたり 0.02ms 程度で終わります(#390)。標準形のみを扱うため、
-  七対子・国士が成立し得る門前手には使いません。
+  **副露数にも門前かどうかにも依存せず** 1 手あたり 0.01〜0.02ms 程度で終わります
+  (#390 / #429)。当初は「副露経路向け」と限定していましたが、#429 で
+  `groupsNeeded = 4`(門前 13/14 枚)にも適用範囲を広げました。
+- ただし上記2つは**標準形(4面子1雀頭)のみ**を扱います。門前手では七対子・国士も
+  成立し得るため、それらは `isSevenPairsByDefinition34` /
+  `isThirteenOrphansByDefinition34` /`menzenWaitingIndicesByDefinition34`
+  が別途カバーします(#429)。前者2つは「特殊形の側を列挙して手牌との重なりを見る」
+  ため、本体の「手牌側を走査して枚数を数える」実装とは向きが逆で、
+  `agari-oracle.ts` の `isSevenPairs`(本体と完全同一)の死角を埋めます。
 
 ## 副露(`melds ≠ []`)経路のカバレッジ(#390)
 
@@ -63,6 +71,30 @@
 
 なお副露3組(門前5枚)・4組(門前2枚)は分解が**構造上常に一意**、副露4組の待ちは
 **常に単騎1種**であるため、これらは「0であること」を積極的に固定しています。
+
+## 門前(`melds = []`)経路のカバレッジ(#429)
+
+#390 の時点では、門前 13/14 枚の分解・待ちは依然 `agari-oracle.ts` とだけ突き合わせて
+いました。`decomposeMeldsOnly` は本体 `extractMentsuAll` と分岐順まで同型なので、
+**列挙側の共通欠陥は素通り**します。実際 PR #427 で両方に同じ
+「刻子が取れたら順子を試さない」欠陥を注入したところ、門前14枚の分解照合は緑のまま通り、
+副露経路の定義ベース照合だけが検出しました。
+
+#429 でこの空白を埋め、門前 13/14 枚も定義ベースオラクルと照合しています
+(`cross-validation.test.ts` の「クロス検証: 門前手の分解・待ち(定義ベース / #429)」)。
+
+- 手牌の 1/4 は `generator.ts` の `randomAmbiguousMenzenHand`(`111222333p` 型 =
+  刻子3組 ⇔ 順子3組)。乱択(`randomStructuredHand`)だけでは多重分解の手が
+  20,000 手に 100 件強しか現れず、刻子 ⇔ 順子の読み替えを踏むかどうかが運任せになるため。
+- 七対子・国士はランダム生成では事実上出ないので、和了形とその1枚不足を
+  **決め打ちで総当たり**して照合しています(七対子 27×(1+7) 手 / 国士 13×(1+13) 手)。
+
+欠陥注入の実測(両側に同じ欠陥を入れた場合):
+
+| 注入した共通欠陥 | 既存の門前照合(`agari-oracle` 相手) | #429 の定義ベース門前照合 |
+| --- | --- | --- |
+| 刻子が取れたら順子を試さない | 14枚・13枚とも**緑**(素通り) | 14枚が **red** |
+| 順子の開始位置から 7 を落とす(789 を作らない) | 14枚・13枚とも**緑**(素通り) | 14枚・13枚とも **red** |
 
 ## 参照ライブラリとのアンカー(再現手順)
 

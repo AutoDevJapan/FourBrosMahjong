@@ -26,18 +26,24 @@ import {
 } from "./__oracle__/agari-oracle";
 import {
   SANMA_INDICES_34,
+  TERMINAL_AND_HONOR_INDICES_34,
   tilesToCount34,
   tileTo34Index,
 } from "./__oracle__/counts34";
 import {
+  isSevenPairsByDefinition34,
+  isThirteenOrphansByDefinition34,
+  menzenWaitingIndicesByDefinition34,
   shantenByDefinition34,
   standardFormsByDefinition34,
   waitingIndicesByDefinition34,
 } from "./__oracle__/definition-oracle";
 import {
+  count34ToTiles,
   type GeneratedMeld,
   type MeldedHand,
   makeRng,
+  randomAmbiguousMenzenHand,
   randomHand,
   randomMeldedHand,
   randomStructuredHand,
@@ -495,6 +501,227 @@ describe("クロス検証: 副露あり手の分解・和了・待ち (#390)", (
     ).toEqual(["1z"]);
   });
 });
+
+/**
+ * 門前手(`melds = []`)の分解・待ちの定義ベース照合(#429)。
+ *
+ * 冒頭の「クロス検証: 和了・分解・待ち」は門前手を `__oracle__/agari-oracle.ts` と
+ * だけ突き合わせている。しかし `agari-oracle.ts` の `decomposeMeldsOnly` は本体
+ * `hand/decompose.ts` の `extractMentsuAll` と**再帰の分岐順まで同型**なので、
+ * **列挙側の共通欠陥は素通りする**。実際 PR #427 では、両方に同じ
+ * 「刻子が取れたら順子を試さない」欠陥を注入しても門前14枚の分解照合は緑のまま通り、
+ * 副露経路の定義ベース照合だけが検出した(#429 の起票理由)。
+ *
+ * ここでは #390 で副露経路に用意した列挙非依存のオラクルを `groupsNeeded = 4` で
+ * 門前にも適用し、その空白を埋める。門前は七対子・国士も成立し得るため、
+ * 定義ベース側に両特殊形を追加して `isCompleteHand` / `waitingTiles` と同じ粒度で
+ * 突き合わせる(issue #429 の提案2の後者)。
+ */
+describe("クロス検証: 門前手の分解・待ち(定義ベース / #429)", () => {
+  /**
+   * 門前照合の手牌数。定義ベースオラクル自体は門前でも 1 手あたり 0.01〜0.02ms だが、
+   * 突き合わせ相手の `waitingTiles()` が 1 手につき 27 牌種ぶん `isCompleteHand` を
+   * 回すため、13枚側の実行時間はそちらに支配される。冒頭のクロス検証(20,000 手)と
+   * 重複する部分があるので、CI 時間とのバランスでここは半分に絞る(→ PR に実測)。
+   */
+  const MENZEN_HANDS = 10_000;
+
+  it("門前14枚: 標準分解の集合と和了判定が定義ベースオラクルと一致する", () => {
+    const rng = makeRng(0x4290_0014);
+    let decompMismatch = 0;
+    let completeMismatch = 0;
+    const samples: string[] = [];
+    let completeCount = 0;
+    let multiFormCount = 0;
+
+    for (let i = 0; i < MENZEN_HANDS; i += 1) {
+      const tiles = menzen14(rng, i);
+      const counts = tilesToCount34(tiles);
+
+      const oracleForms = standardFormsByDefinition34(counts, 4);
+      const actual = new Set(
+        decomposeStandard(tiles, []).map((f) => formSignature(f.melds, f.pair)),
+      );
+      if (!setEqual(actual, oracleForms)) {
+        decompMismatch += 1;
+        if (samples.length < 8) {
+          samples.push(
+            `decomp ${describeHand(tiles)} 本体=${[...actual].sort().join(" / ")} 定義ベース=${[...oracleForms].sort().join(" / ")}`,
+          );
+        }
+      }
+
+      // `isCompleteHand` は特殊形も含むので、定義ベース側も同じ和を取る。
+      const oracleComplete =
+        oracleForms.size > 0 ||
+        isSevenPairsByDefinition34(counts) ||
+        isThirteenOrphansByDefinition34(counts);
+      const complete = isCompleteHand(tiles, []);
+      if (complete !== oracleComplete) {
+        completeMismatch += 1;
+        if (samples.length < 8) {
+          samples.push(
+            `complete ${describeHand(tiles)} 本体=${complete} 定義ベース=${oracleComplete}`,
+          );
+        }
+      }
+      if (oracleComplete) completeCount += 1;
+      if (oracleForms.size > 1) multiFormCount += 1;
+    }
+
+    if (samples.length) console.log(samples.join("\n"));
+    console.log(
+      `[cross] menzen 14-tile hands=${MENZEN_HANDS} complete=${completeCount} multiForm=${multiFormCount} decompMismatch=${decompMismatch} completeMismatch=${completeMismatch}`,
+    );
+    expect(decompMismatch).toBe(0);
+    expect(completeMismatch).toBe(0);
+    // vacuum 防止: 和了手と多重分解手を実際に踏んでいることを固定する。
+    expect(completeCount).toBeGreaterThan(MENZEN_HANDS * 0.1);
+    expect(multiFormCount).toBeGreaterThan(MENZEN_HANDS * 0.2);
+  });
+
+  it("門前13枚: waitingTiles が定義ベースの待ちオラクルと一致する", () => {
+    const rng = makeRng(0x4290_0013);
+    let waitMismatch = 0;
+    const samples: string[] = [];
+    let tenpaiCount = 0;
+    let multiWaitCount = 0;
+
+    for (let i = 0; i < MENZEN_HANDS; i += 1) {
+      const tiles = dropOne(rng, menzen14(rng, i));
+      const counts = tilesToCount34(tiles);
+
+      const expected = menzenWaitingIndicesByDefinition34(counts);
+      const actual = new Set(
+        waitingTiles(tiles, []).map((t) => tileTo34Index(t)),
+      );
+      if (!setEqualNum(actual, expected)) {
+        waitMismatch += 1;
+        if (samples.length < 8) {
+          samples.push(
+            `waits ${describeHand(tiles)} 本体=${[...actual].sort((x, y) => x - y)} 定義ベース=${[...expected].sort((x, y) => x - y)}`,
+          );
+        }
+      }
+      if (expected.size > 0) tenpaiCount += 1;
+      if (expected.size > 1) multiWaitCount += 1;
+    }
+
+    if (samples.length) console.log(samples.join("\n"));
+    console.log(
+      `[cross] menzen 13-tile hands=${MENZEN_HANDS} tenpai=${tenpaiCount} multiWait=${multiWaitCount} waitMismatch=${waitMismatch}`,
+    );
+    expect(waitMismatch).toBe(0);
+    expect(tenpaiCount).toBeGreaterThan(MENZEN_HANDS * 0.1);
+    expect(multiWaitCount).toBeGreaterThan(MENZEN_HANDS * 0.05);
+  });
+
+  /**
+   * ランダム生成では七対子・国士は事実上出ない(`randomStructuredHand` は
+   * 4面子1雀頭から作る)。定義ベース側に足した特殊形が空回りしないよう、
+   * 特殊形の手を**決め打ちで総当たり**して照合する。
+   */
+  it("七対子: 相異なる7対子の和了形とその1枚不足を総当たりで照合する", () => {
+    let hands = 0;
+    let tenpaiHands = 0;
+    for (let offset = 0; offset < SANMA_INDICES_34.length; offset += 1) {
+      // 27 牌種から stride 2 で 7 種を選ぶ(相異なることが保証される)。
+      const kinds = Array.from(
+        { length: 7 },
+        (_, k) =>
+          SANMA_INDICES_34[
+            (offset + 2 * k) % SANMA_INDICES_34.length
+          ] as number,
+      );
+      if (new Set(kinds).size !== 7) continue;
+      const counts = new Array<number>(34).fill(0);
+      for (const index of kinds) counts[index] = 2;
+
+      const tiles14 = count34ToTiles(counts);
+      hands += 1;
+      expect(isSevenPairsByDefinition34(counts), describeHand(tiles14)).toBe(
+        true,
+      );
+      expect(isCompleteHand(tiles14, []), describeHand(tiles14)).toBe(true);
+
+      // 1枚落とすと七対子テンパイ(その牌の単騎待ち)。標準形の待ちが加わることも
+      // あるので、集合そのものを本体と突き合わせる。
+      for (const dropped of kinds) {
+        counts[dropped] = 1;
+        const tiles13 = count34ToTiles(counts);
+        const expectedWaits = menzenWaitingIndicesByDefinition34(counts);
+        const actualWaits = new Set(
+          waitingTiles(tiles13, []).map((t) => tileTo34Index(t)),
+        );
+        expect(expectedWaits.has(dropped), describeHand(tiles13)).toBe(true);
+        expect(
+          setEqualNum(actualWaits, expectedWaits),
+          `${describeHand(tiles13)} 本体=${[...actualWaits].sort((x, y) => x - y)} 定義ベース=${[...expectedWaits].sort((x, y) => x - y)}`,
+        ).toBe(true);
+        tenpaiHands += 1;
+        counts[dropped] = 2;
+      }
+    }
+    expect(hands).toBe(SANMA_INDICES_34.length);
+    expect(tenpaiHands).toBe(SANMA_INDICES_34.length * 7);
+  });
+
+  it("国士無双: 雀頭13通りの和了形と、単騎・十三面のテンパイを照合する", () => {
+    const orphans = TERMINAL_AND_HONOR_INDICES_34;
+    for (const doubled of orphans) {
+      const counts = new Array<number>(34).fill(0);
+      for (const index of orphans) counts[index] = index === doubled ? 2 : 1;
+      const tiles14 = count34ToTiles(counts);
+      expect(
+        isThirteenOrphansByDefinition34(counts),
+        describeHand(tiles14),
+      ).toBe(true);
+      expect(isCompleteHand(tiles14, []), describeHand(tiles14)).toBe(true);
+
+      // 雀頭の1枚を落とすと単騎待ち、他の1種を落とすとその牌の待ち。
+      for (const dropped of orphans) {
+        counts[dropped] -= 1;
+        const tiles13 = count34ToTiles(counts);
+        const expectedWaits = menzenWaitingIndicesByDefinition34(counts);
+        const actualWaits = new Set(
+          waitingTiles(tiles13, []).map((t) => tileTo34Index(t)),
+        );
+        expect(expectedWaits.has(dropped), describeHand(tiles13)).toBe(true);
+        expect(
+          setEqualNum(actualWaits, expectedWaits),
+          `${describeHand(tiles13)} 本体=${[...actualWaits].sort((x, y) => x - y)} 定義ベース=${[...expectedWaits].sort((x, y) => x - y)}`,
+        ).toBe(true);
+        counts[dropped] += 1;
+      }
+    }
+
+    // 么九13種を1枚ずつ(13枚)= 十三面待ち。
+    const thirteenSided = new Array<number>(34).fill(0);
+    for (const index of orphans) thirteenSided[index] = 1;
+    expect(
+      [...menzenWaitingIndicesByDefinition34(thirteenSided)].sort(
+        (a, b) => a - b,
+      ),
+    ).toEqual([...orphans].sort((a, b) => a - b));
+  });
+});
+
+/**
+ * 門前14枚を生成する。1/4 は多重分解が**構造的に保証された**形
+ * (`randomAmbiguousMenzenHand`)。乱択だけだと多重分解の手が 20,000 手に 100 件強しか
+ * 現れず、刻子 ⇔ 順子の読み替えを踏むかどうかが運任せになるため。
+ */
+function menzen14(rng: () => number, index: number): Tile[] {
+  return index % 4 === 0
+    ? randomAmbiguousMenzenHand(rng)
+    : randomStructuredHand(rng);
+}
+
+/** 14枚から1枚を無作為に抜いて13枚にする。 */
+function dropOne(rng: () => number, tiles: readonly Tile[]): Tile[] {
+  const drop = Math.floor(rng() * tiles.length);
+  return [...tiles.slice(0, drop), ...tiles.slice(drop + 1)];
+}
 
 /** 分解1件(副露由来の面子を含む)の正規化シグネチャ。`@c` は暗、`@o` は明。 */
 function formFullSignature(groups: readonly Mentsu[]): string {
