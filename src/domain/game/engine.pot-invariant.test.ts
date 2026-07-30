@@ -1,8 +1,9 @@
 /**
  * engine レベルの点棒保存則 **`Σ持ち点 + 場に残る供託 = 140,000`** の不変条件テスト(#430)。
  *
- * spec `documents/spec/scoring-and-settlement.md` 3.3「精算入力の前提」の前提を、
- * **精算入口ではなく engine の全過程**で固定する。`src/domain/scoring/settlement.test.ts` は
+ * spec `documents/spec/scoring-and-settlement.md` 3.3「供託の集約と保存則」の保存則を、
+ * **精算入口ではなく engine の公開アクション境界すべて**で固定する。
+ * `src/domain/scoring/settlement.test.ts` は
  * `SoshiiLedger` の入口(= 供託を畳み込んだ後の最終持ち点)しか見ないため、engine 側で
  * 新しい供託種別を足しても入口に届くまで無言で破れる。ここでは供託レジストリの集約
  * {@link potTotal} を使い、**公開アクションの各遷移直後**(= UI から観測し得るすべての

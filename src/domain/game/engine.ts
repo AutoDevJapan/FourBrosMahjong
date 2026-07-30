@@ -2077,7 +2077,7 @@ export function finishRound(
 /**
  * 場に残る供託(点棒)1種別の記述子。
  *
- * `Σ持ち点 + 場の供託 = 140,000`(spec 3.3「精算入力の前提」)を保つため、**プレイヤーの
+ * `Σ持ち点 + 場の供託 = 140,000`(spec 3.3「供託の集約と保存則」)を保つため、**プレイヤーの
  * 持ち点から場へ移した点棒はすべてここに列挙されていなければならない**。列挙漏れがあると
  * `endGame` の畳み込みから外れ、精算入口({@link SoshiiLedger.applyUma} /
  * {@link SoshiiLedger.applyRawScore})が `RangeError` を投げて対局中にクラッシュする(#430)。
@@ -2091,6 +2091,10 @@ interface PotSource {
    * **自分のカウンタ以外を変えてはならない**。特に `points`(持ち点)と `lastRound` は
    * `endGame` が畳み込み後の値で明示的に上書きするため、ここでの変更は黙って捨てられる。
    * 下ろした点数を帰属先の持ち点へ加算するのは呼び出し側(`endGame`)の責務。
+   *
+   * **残存が無いときは受け取った `state` をそのまま(同一参照で)返すこと**。呼び出し側は
+   * 合計が 0 でも無条件に呼ぶ({@link withdrawPot})ため、この要求が満たされないと
+   * 供託が場に無いだけで新しいオブジェクトが生成され、参照等価に依存する箇所を壊す。
    */
   readonly withdraw: (state: EngineState) => EngineState;
 }
@@ -2117,6 +2121,7 @@ interface PotSource {
  * 含めなくても供託は場に残り続けて終局時に畳み込まれるため**保存則は破れない**(安全側)。
  */
 const POT_SOURCES: readonly PotSource[] = [
+  // 供託リーチ棒(`state.riichiSticks` 本 × 1,000点)。
   {
     points: (state) => state.riichiSticks * RIICHI_STICK_POINTS,
     withdraw: (state) =>
@@ -2136,8 +2141,9 @@ export function potTotal(state: EngineState): number {
 /**
  * 全種別の供託を場から下ろす(点数は呼び出し側が帰属先の持ち点へ移す)。
  *
- * 残存 0 の種別は `withdraw` 側が状態をそのまま返すため、合計 0 でも無条件に呼んでよい
- * (「点数換算 0 だがカウンタは残っている」種別を将来足しても取りこぼさない)。
+ * 合計 0 でも**無条件に呼んでよい**({@link PotSource.withdraw} が残存 0 のとき同一参照を
+ * 返す契約のため)。逆に呼び出し側で `potTotal > 0` を条件にすると、「点数換算は 0 だが
+ * カウンタは残っている」種別を将来足したときに場から下ろし損ねる。
  */
 function withdrawPot(state: EngineState): EngineState {
   return POT_SOURCES.reduce((acc, source) => source.withdraw(acc), state);

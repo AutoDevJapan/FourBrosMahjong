@@ -27,8 +27,8 @@ const PLAYER_COUNT = 4;
 /**
  * 卓の点棒総量 = 配給原点 × 人数 = 140,000(spec 3.3「精算入力の前提」)。
  *
- * **`Σ持ち点 + 場に残る供託` は半荘中を通じてこの値で不変**。engine 側の不変条件テストは
- * `src/domain/game/engine.pot-invariant.test.ts`。
+ * **`Σ持ち点 + 場に残る供託` は半荘中を通じてこの値で不変**(spec 3.3「供託の集約と保存則」)。
+ * engine 側の不変条件テストは `src/domain/game/engine.pot-invariant.test.ts`。
  *
  * 精算入口({@link SoshiiLedger.applyRawScore} / {@link SoshiiLedger.applyUma})の検証は
  * 台帳の登録人数から `配給原点 × 人数` を都度求める(人数可変のまま扱えるようにするため)。
@@ -126,8 +126,10 @@ export class SoshiiLedger {
    * **場に残る供託**(点棒)は場にある間この合計から抜けるが、engine の `endGame` が
    * 残存分をすべて最終持ち点へ畳み込んでから渡すため、この時点では常に一致する。
    * 畳み込みは供託種別ごとの個別処理ではなく engine の供託レジストリ(`POT_SOURCES` /
-   * `potTotal`)に対する一括処理なので、**新しい供託種別**(例: Q29 のチョンボ罰符)を
-   * 追加してもここが破れることはない(#430)。
+   * `potTotal`)に対する一括処理なので、**そのレジストリへ登録した供託種別**(例: Q29 の
+   * チョンボ罰符)であれば追加してもここが破れることはない。逆に**登録し忘れた種別**は
+   * その点棒だけが合計から抜け、ここで `RangeError` になる(#430 が防ごうとしている失敗
+   * モードそのもの。engine の保存則テストが先に落ちるようにしてある)。
    */
   private validateAndCaptureFinalPoints(
     finalPoints: readonly PlayerPoints[],
