@@ -19,11 +19,20 @@ import { LANDMARK_SCREENS, NOT_FOUND_SCREEN_NAME } from "../../e2e/screens";
 const APP_DIR = resolve(process.cwd(), "src/app");
 
 /**
- * App Router の `page.tsx` 群から公開ルートパスを導出する。
+ * App Router がページとして解釈するファイル名。
  *
- * URL に現れないセグメントは落とす:
- * - ルートグループ `(name)`
- * - プライベートフォルダ `_name`(ルーティング対象外)
+ * `.tsx` だけを見ると、`page.jsx` / `page.js` で足されたルートが**この検査をすり抜ける**
+ * (このテストが塞ごうとしている失敗モードそのもの)。拡張子は Next.js が受け付ける形を
+ * 網羅する。先頭の `/` ごと消してディレクトリ部分だけを残す。
+ */
+const PAGE_FILE = /(?:^|\/)page\.(?:tsx|ts|jsx|js|mjs|cjs)$/;
+
+/**
+ * App Router のページファイル群から公開ルートパスを導出する。
+ *
+ * - ルートグループ `(name)` は URL に現れないのでセグメントごと落とす
+ * - プライベートフォルダ `_name` 配下は**ルーティングされない**ので**エントリごと**除外する
+ *   (セグメントだけ落とすと `_drafts/preview/page.tsx` が `/preview` に化ける)
  *
  * 一方、**監査すべき具体的な URL を機械的に決められない**形は推測せず落とす:
  * - 動的セグメント `[param]`
@@ -34,30 +43,35 @@ const APP_DIR = resolve(process.cwd(), "src/app");
 function appRoutes(): string[] {
   const pages = readdirSync(APP_DIR, { recursive: true, encoding: "utf8" })
     .map((entry) => entry.replaceAll("\\", "/"))
-    .filter((entry) => entry === "page.tsx" || entry.endsWith("/page.tsx"));
+    .filter((entry) => PAGE_FILE.test(entry));
 
-  expect(pages.length, "src/app に page.tsx が 1 つも無い").toBeGreaterThan(0);
+  expect(
+    pages.length,
+    "src/app にページファイルが 1 つも無い(PAGE_FILE の想定が崩れた可能性)",
+  ).toBeGreaterThan(0);
 
-  return pages
-    .map((entry) => {
-      const segments = entry
-        .slice(0, -"page.tsx".length)
-        .split("/")
-        .filter((segment) => segment !== "");
+  const routes: string[] = [];
+  for (const entry of pages) {
+    const segments = entry
+      .replace(PAGE_FILE, "")
+      .split("/")
+      .filter((segment) => segment !== "");
 
-      for (const segment of segments) {
-        expect(
-          segment.startsWith("[") || segment.startsWith("@"),
-          `${entry}: 動的セグメント/パラレルルート ${segment} は未対応。監査対象の具体 URL を決めてこのテストを更新すること`,
-        ).toBe(false);
-      }
+    for (const segment of segments) {
+      expect(
+        segment.startsWith("[") || segment.startsWith("@"),
+        `${entry}: 動的セグメント/パラレルルート ${segment} は未対応。監査対象の具体 URL を決めてこのテストを更新すること`,
+      ).toBe(false);
+    }
 
-      const visible = segments.filter(
-        (segment) => !segment.startsWith("(") && !segment.startsWith("_"),
-      );
-      return visible.length === 0 ? "/" : `/${visible.join("/")}`;
-    })
-    .sort();
+    // プライベートフォルダ配下はルートを持たない。
+    if (segments.some((segment) => segment.startsWith("_"))) continue;
+
+    const visible = segments.filter((segment) => !segment.startsWith("("));
+    routes.push(visible.length === 0 ? "/" : `/${visible.join("/")}`);
+  }
+
+  return routes.sort();
 }
 
 /** ランドマーク監査の対象のうち、実在ルートを指すもの(404 の番兵を除く)。 */

@@ -108,22 +108,37 @@ describe("/game/result page (spec 6.2 / 6.6)", () => {
     expect(loadingHtml.match(/<main[\s>]/g) ?? []).toHaveLength(1);
     expect(loadingHtml).not.toContain('role="main"');
 
-    for (const [branch, game] of [
-      ["確定", finishedGame()],
-      ["未確定", createGame({ seed: 1 })],
+    // 分岐を**一意に**指す文言。`最終順位` は未確定分岐の案内文にも出る
+    //(「…ここに最終順位とソシー内訳が表示されます」)ので目印に使えない。
+    const CONFIRMED_ONLY = "もう一半荘";
+    const PENDING_ONLY = "まだ半荘の結果が確定していません";
+
+    for (const [branch, game, own, other] of [
+      ["確定", finishedGame(), CONFIRMED_ONLY, PENDING_ONLY],
+      ["未確定", createGame({ seed: 1 }), PENDING_ONLY, CONFIRMED_ONLY],
     ] as const) {
       const { container, unmount } = render(
         <GameProvider initialGame={game}>
           <ResultPage />
         </GameProvider>,
       );
+      // 狙った分岐が実際に描かれたことを先に確かめる。これが無いと、例えば `finishedGame()`
+      // が確定結果を作らなくなったとき、未確定分岐を 2 回数えているのに失敗メッセージだけ
+      // 「確定分岐の…」と名乗る(<main> の数え方は通るので無音になる)。
+      // 「他方が出ていない」まで見て、目印が両分岐に共通の文言へ育つ事故も防ぐ。
+      const text = container.textContent ?? "";
+      expect(text, `${branch}分岐が描画されていない`).toContain(own);
+      expect(
+        text,
+        `${branch}分岐のはずが別の分岐が描画されている`,
+      ).not.toContain(other);
       expect(
         container.querySelectorAll("main"),
         `${branch}分岐の <main> がちょうど 1 つでない`,
       ).toHaveLength(1);
-      // `role="main"` の**併記**も禁止する。`<main>` の数は 1 のままなので上の数え方では
-      // 通ってしまうが、main ランドマークとしては重複する(`role` での**置き換え**なら上が
-      // 0 件になって落ちる)。
+      // 別要素の `role="main"` を足す形も禁止する。`<main>` の数は 1 のままなので上の
+      // 数え方では通ってしまうが、main ランドマークとしては重複する(`role` で
+      // **置き換え**た場合は上が 0 件になって落ちる)。
       expect(container.querySelectorAll('[role="main"]')).toHaveLength(0);
       unmount();
     }

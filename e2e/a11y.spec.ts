@@ -152,6 +152,11 @@ test.describe("自動 a11y 監査(axe-core)", () => {
    *
    * ルールの分担と `toHaveCount(1)` との併用が必須な理由は `e2e/screens.ts` の
    * `LANDMARK_RULES` の doc コメント(spec 5.2.6 の表と対応)を参照。
+   *
+   * 上の A/AA 監査と違い `screen.axeExclude` は**意図的に適用しない**。ランドマーク構造は
+   * ページ全体の性質(`<main>` の個数 / 全コンテンツがランドマークに属するか)なので、
+   * 一部ノードを外すと検査の意味が変わってしまう。個別の a11y バグを避けるための除外を
+   * ここへ効かせたくなった場合は、除外ではなく構造側を直すこと。
    */
   for (const screen of LANDMARK_SCREENS) {
     test(`${screen.name}(${screen.path})は本文が単一の <main> に収まる(#409)`, async ({

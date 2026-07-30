@@ -37,6 +37,7 @@ export interface Screen {
    *
    * 同じ設計は `e2e/non-text-contrast.spec.ts` の `Screen.ready` が先行して持っている。
    * 画面を足すときは両者を揃えること(片方だけに足すと監査の穴が非対称に残る)。
+   * この手運用にゲートは無い — インベントリの一本化は #445 で扱う。
    */
   readonly clientReady?: (page: Page) => Locator;
   /**
