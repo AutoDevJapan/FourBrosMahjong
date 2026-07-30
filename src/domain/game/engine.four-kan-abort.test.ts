@@ -63,6 +63,9 @@ function expectFourKanDraw(
   // 四槓散了は嶺上補充の**前**に局を打ち切るため、カン成立時に `drawn` を消す各経路が
   // `drawSource` も戻さないと「ツモ牌が無いのに嶺上由来」という不整合が局に残る
   // (`drawKanReplacement` による上書きが起きない唯一の経路 / #415)。
+  // 実際に退行を捕まえるのは、カンの直前に `drawSource !== "live"` を持ち込む4テスト
+  // (人間の暗槓・人間の加槓・AIが嶺上牌で連続ankan/kakan)。大明槓の2テストでは
+  // カン前から `"live"` なので、ここでは不変条件の再確認にとどまる。
   expect(after.hand?.drawn).toBeNull();
   expect(after.hand?.drawSource).toBe("live");
 }
@@ -91,7 +94,7 @@ function setupAiKanChain(kind: "ankan" | "kakan"): {
   armed: EngineState;
   humanDiscard: Tile;
   live: number;
-} | null {
+} {
   const isNorth = (t: Tile) => t.suit === "honor" && t.rank === HONOR.NORTH;
   for (let seed = 1; seed <= 300; seed++) {
     const state = createGame({ seed });
@@ -112,7 +115,15 @@ function setupAiKanChain(kind: "ankan" | "kakan"): {
     hand.hands.west = parseTiles(JUNK);
     if (kind === "ankan") {
       hand.melds.south = [];
-      hand.hands.south = [first, first, first, rinshan, rinshan, rinshan];
+      hand.hands.south = [
+        first,
+        first,
+        first,
+        rinshan,
+        rinshan,
+        rinshan,
+        ...junk.slice(0, 7),
+      ];
     } else {
       hand.melds.south = [pon(first), pon(rinshan)];
       hand.hands.south = junk.slice(0, 7);
@@ -127,7 +138,7 @@ function setupAiKanChain(kind: "ankan" | "kakan"): {
       live: hand.wall.remainingLiveTiles,
     };
   }
-  return null;
+  throw new Error("no seed satisfies the kan-chain shape requirements");
 }
 
 describe("engine: 四槓散了(#183)", () => {
@@ -268,9 +279,9 @@ describe("engine: 四槓散了(#183)", () => {
       // AI が「通常ツモでカン → 嶺上牌でさらにカン」と連鎖し、2回目で四槓散了になる局面。
       // 2回目のカンは嶺上補充の前に打ち切られるため、`drawSource` の取り残しが露出する。
       const setup = setupAiKanChain(kind);
-      expect(setup).not.toBeNull();
-      if (setup === null) return;
 
+      // ライブ牌は通常ツモ1枚 + 1回目のカンの嶺上補充による王牌への補填1枚で 2 減る
+      // (2回目のカンは嶺上補充の前に打ち切られるため減らない)。
       expectFourKanDraw(
         setup.armed,
         discard(setup.armed, setup.humanDiscard),
