@@ -143,7 +143,7 @@ describe("engine: 海底での暗槓禁止(#128)", () => {
     expect(kan?.type).toBe("kan");
     expect(kan?.concealed).toBe(true);
     expect(kan?.tiles).toHaveLength(4);
-    expect(after.hand?.fromKan).toBe(true); // 嶺上ツモ済み
+    expect(after.hand?.drawSource).toBe("kanReplacement"); // 嶺上ツモ済み
     expect(after.pending?.kind).toBe("humanDiscard");
   });
 });

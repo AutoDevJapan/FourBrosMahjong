@@ -69,6 +69,24 @@ function expectRiverIsSubsequenceOfHistory(state: EngineState): void {
   }
 }
 
+/**
+ * ツモ牌が無いときの供給元が常に既定値であることを検証する(#415)。
+ *
+ * `drawSource` は `drawn` に付随する情報なので、`drawn` を `null` にする経路はすべて
+ * `"live"` へ戻さなければならない。戻し忘れると、次の通常ツモが嶺上由来と誤認されて
+ * 海底摸月が消えたり、嶺上開花が誤って付いたりする。型では「値が古いまま」を防げない。
+ *
+ * ここで観測できるのは自動進行の**各ステップ境界**、すなわち打牌・ポン/カンによる
+ * 手番移動・嶺上枯渇の経路のみ。カン成立時に `drawn` を消す4経路は直後の嶺上補充で
+ * 上書きされるため観測点に露出せず、**四槓散了で打ち切られる場合だけ**が唯一の露出
+ * 経路になる。そちらは `engine.four-kan-abort.test.ts` が決定的に固定している。
+ */
+function expectDrawSourceResetWhenNoDraw(state: EngineState): void {
+  const hand = state.hand;
+  if (hand === null || hand.drawn !== null) return;
+  expect(hand.drawSource).toBe("live");
+}
+
 /** 自家は合法牌を切り、鳴き/ロンを見送ってAIの自動判断を観測する決定的ドライバ。 */
 function observeAiActions(
   seed: number,
@@ -80,6 +98,7 @@ function observeAiActions(
   for (let guard = 0; guard < 3000 && state.phase !== "gameEnd"; guard++) {
     expectTileConservation(state);
     expectRiverIsSubsequenceOfHistory(state);
+    expectDrawSourceResetWhenNoDraw(state);
     const before = state.hand
       ? {
           riichi: { ...state.hand.riichi },
@@ -159,6 +178,7 @@ function observeAiActions(
   expect([...observed]).toEqual(expect.arrayContaining([...wanted]));
   expectTileConservation(state);
   expectRiverIsSubsequenceOfHistory(state);
+  expectDrawSourceResetWhenNoDraw(state);
   return state;
 }
 
