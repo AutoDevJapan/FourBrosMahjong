@@ -182,13 +182,11 @@ interface HandState {
    *   ツモった」ことが条件で、嶺上牌のツモは**カン・北抜きのいずれも**対象外
    *   (`isHaiteiTsumo` の契約 / #396)。
    *
-   * この2条件は包含関係(カン嶺上 ⊂ 嶺上補充)にあるため、以前は
-   * `fromKan` / `fromReplacement` の2つの boolean で表していた。片方だけを書き換える
-   * 不正状態(`fromKan && !fromReplacement`)が型で表現できてしまい、代入箇所すべてで
-   * 両方を並べる必要があったため、1つの直和型へ集約した。
+   * この2条件は包含関係(カン嶺上 ⊂ 嶺上補充)にあるため、2つの boolean ではなく
+   * 直和型1つで表す(不正な組み合わせを表現不能にする / #415)。
    *
-   * `drawn` との対も同じ理由で崩れうるため、ツモ牌を手放す側は {@link clearDrawn} に
-   * 集約している(不変条件: `drawn === null ⇒ drawSource === "live"`)。
+   * **不変条件**: `drawn === null ⇒ drawSource === "live"`。維持のため、未ツモへ戻す
+   * 側は {@link resetDrawState} に集約している。
    */
   drawSource: DrawSource;
   /** 席ごとのリーチ宣言済みフラグ。 */
@@ -741,13 +739,14 @@ function autoPullDealtNorths(hand: HandState): void {
 }
 
 /**
- * ツモ牌を手放す(打牌・鳴きによる手番移動・カン成立・嶺上枯渇)。
+ * ツモ状態(`drawn` と `drawSource`)を未ツモへ戻す。
+ * 呼ばれるのは打牌・鳴きによる手番移動・カン成立・嶺上枯渇の各経路。
  *
  * `drawSource` は `drawn` に付随する情報なので、必ず対で更新して
  * `drawn === null ⇒ drawSource === "live"` を保つ(#415)。片方だけ書き換えると
  * 次の通常ツモが嶺上由来と誤認され、海底摸月が消えたり嶺上開花が誤って付いたりする。
  */
-function clearDrawn(hand: HandState): void {
+function resetDrawState(hand: HandState): void {
   hand.drawn = null;
   hand.drawSource = "live";
 }
@@ -765,7 +764,7 @@ function drawKanReplacement(hand: HandState, seat: SeatKey): void {
     tile = hand.wall.drawReplacement();
   } catch (error) {
     if (error instanceof WallEmptyError) {
-      clearDrawn(hand);
+      resetDrawState(hand);
       return;
     }
     throw error;
@@ -980,7 +979,7 @@ function completeAiAnkan(
   const { taken, rest } = takeKind(pool, tile, 4);
   if (taken.length < 4) return state;
   hand.hands[seat] = rest;
-  clearDrawn(hand);
+  resetDrawState(hand);
   hand.melds[seat] = [
     ...hand.melds[seat],
     { type: "kan", tiles: taken, concealed: true },
@@ -1010,7 +1009,7 @@ function completeAiKakan(
   if (taken.length < 1) return state;
   const kakanTile = taken[0];
   hand.hands[seat] = rest;
-  clearDrawn(hand);
+  resetDrawState(hand);
   hand.melds[seat] = hand.melds[seat].map((meld) =>
     meld === target
       ? {
@@ -1095,7 +1094,7 @@ function applyAiCall(
   hand.callsMade = true;
   hand.pendingDiscard = null;
   hand.passedRonSeats = [];
-  clearDrawn(hand);
+  resetDrawState(hand);
   hand.turn = caller;
   if (kan) {
     const abortiveDraw = settleFourKanAbortiveDraw(state);
@@ -1515,7 +1514,7 @@ function applyDiscard(
   hand.hands[seat] = pool;
   hand.discards[seat] = [...hand.discards[seat], discarded];
   hand.discardHistory[seat] = [...hand.discardHistory[seat], discarded];
-  clearDrawn(hand);
+  resetDrawState(hand);
   hand.ponnedKind = null; // 打牌で喰い替え禁止の窓(ポン直後の1打)を閉じる。
   hand.ippatsu[seat] = false; // 自分の打牌で一発の権利は消える。
   hand.pendingDiscard = { seat, tile: discarded };
@@ -2303,7 +2302,7 @@ export function declarePon(state: EngineState): EngineState {
   hand.callsMade = true;
   hand.pendingDiscard = null;
   hand.passedRonSeats = [];
-  clearDrawn(hand);
+  resetDrawState(hand);
   hand.turn = seat;
   // 喰い替え禁止: 直後の打牌でこの牌種(ポンした牌)を切れないよう記録する(スペック1 1.4)。
   hand.ponnedKind = tile;
@@ -2343,7 +2342,7 @@ export function declareKan(state: EngineState): EngineState {
   hand.callsMade = true;
   hand.pendingDiscard = null;
   hand.passedRonSeats = [];
-  clearDrawn(hand);
+  resetDrawState(hand);
   hand.turn = seat;
   const abortiveDraw = settleFourKanAbortiveDraw(state);
   if (abortiveDraw !== null) return abortiveDraw;
@@ -2389,7 +2388,7 @@ export function declareAnkan(state: EngineState, tile: Tile): EngineState {
   if (chankan !== null) return chankan;
 
   hand.hands[seat] = rest;
-  clearDrawn(hand);
+  resetDrawState(hand);
   hand.melds[seat] = [
     ...hand.melds[seat],
     { type: "kan", tiles: taken, concealed: true },
@@ -2448,7 +2447,7 @@ export function declareKakan(state: EngineState, tile: Tile): EngineState {
 
   // 槍槓なし → 加槓成立。嶺上ツモへ進む。
   hand.hands[seat] = rest;
-  clearDrawn(hand);
+  resetDrawState(hand);
   hand.melds[seat] = hand.melds[seat].map((m) =>
     m === target
       ? { type: "kan", tiles: [...m.tiles, kakanTile], concealed: false }
