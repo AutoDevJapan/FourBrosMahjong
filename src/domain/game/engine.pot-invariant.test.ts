@@ -11,12 +11,15 @@
  * 供託レジストリ `POT_SOURCES` へ新種別を登録すれば本テストは**自動的に**その種別を含む。
  * 逆に「場へ点棒を移すのにレジストリへ登録しない」実装は本テストで red になる。
  *
- * **両方向の欠陥注入(実測 / #430 の PR で実施)**: 仮の供託種別(満貫罰符 8,000点 =
- * `chomboSticks` 8本)を `EngineState` へ注入して確認した。
- * - `POT_SOURCES` へ登録した場合 … 本テストと `endGame` は緑のまま(畳み込み・精算とも成立)。
- * - 登録しなかった場合 … 保存則テストが red、さらに `endGame` の精算入口
- *   (`SoshiiLedger.applyRawScore`)が `RangeError`(= issue #430 が指摘する対局中クラッシュ)。
- * 注入は検証後に完全に復元済み(本ファイル・engine とも残骸なし)。
+ * **両方向の欠陥注入(実測 / #430 の PR で実施)**: 仮の供託種別(チョンボ満貫罰符 8,000点 =
+ * `chomboSticks` 8本)を `EngineState` へ足し、リーチ棒2本と同時に場へ残して終局させた。
+ * - **`POT_SOURCES` へ登録した場合** … 保存則も `endGame` も緑のまま。畳み込み後に
+ *   `potTotal = 0` / `Σ持ち点 = 140,000` へ復し、単独最高が残存供託 10,000 を取得して
+ *   ソシー精算も zero-sum(= 種別を足すだけで自動的に畳み込まれる)。
+ * - **登録しなかった場合** … 保存則が red(132,000 ≠ 140,000)になり、`endGame` は精算入口
+ *   `SoshiiLedger.applyUma` で `RangeError: final points must total 140000 … received 132000`
+ *   を投げる(= issue #430 が指摘する対局中クラッシュ)。
+ * 注入は検証後に完全に復元済み(engine 側に残骸なし)。
  */
 
 import { describe, expect, it } from "vitest";
