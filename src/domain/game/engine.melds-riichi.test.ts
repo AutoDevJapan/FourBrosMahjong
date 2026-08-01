@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { TOTAL_POINTS } from "../scoring/settlement";
 import {
   createGame,
   declareAnkan,
@@ -129,7 +130,7 @@ describe("engine: 鳴き・リーチ・裏ドラ・一発(#97)", () => {
       // 実際には `potTotal(s) === 0`(帰属の詳細は engine.residual-riichi.test.ts、
       // 保存則そのものは engine.pot-invariant.test.ts)。
       const total = Object.values(s.points).reduce((a, b) => a + b, 0);
-      expect(total + potTotal(s), `seed=${seed}`).toBe(140000);
+      expect(total + potTotal(s), `seed=${seed}`).toBe(TOTAL_POINTS);
       expect(potTotal(s), `seed=${seed} pot at gameEnd`).toBe(0);
       // 持ち点はすべて整数(端数処理の破綻がない)。
       for (const p of Object.values(s.points)) {

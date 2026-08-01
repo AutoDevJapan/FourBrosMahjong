@@ -141,7 +141,11 @@ const ALL_ACTIONS: readonly ActionKind[] = [
  *   常にポンへ吸われる。
  *
  * 残る9種は `aggressive` 単独でも到達する(`tsumogiri` も `declareRiichi` → `locked` 経由で
- * 到達する。ただし実測1回と薄いため `riichiFirst` で頻度を上げている)。
+ * 到達する)。ただし `tsumogiri` は1方策あたり実測1回と薄いため、**独立した3方策
+ * (`aggressive` / `kanFirst` / `riichiFirst`)が各1回ずつ踏む形で冗長化**している。
+ * なお `riichiFirst` は `declareRiichi` を 10 → 36 に増やすが `tsumogiri` は 1 のままである
+ * (`locked` の pending はリーチ後に**ツモ和了できる**か**送り槓でない暗槓が打てる**局面でしか
+ * 出ず、それ以外は `pump` が pending 無しで自動ツモ切りするため。リーチ頻度では増えない)。
  */
 const POLICIES = [
   /** 常に最大限鳴く(ロン > ポン > 明槓)。 */
@@ -151,9 +155,9 @@ const POLICIES = [
   /** 一切鳴かず・リーチせず(**`passRon` の到達経路**と、流局 → 供託持ち越しの生成用)。 */
   "passive",
   /**
-   * 鳴かないが必ずリーチする。門前を保ってリーチ頻度を上げ、`declareRiichi` →
-   * `tsumogiri` の到達を安定させる(網羅そのものは上の3方策で足りるが、`aggressive` の
-   * `tsumogiri` は実測1回しかなく、AI 方策の変更で 0 になりやすいため冗長化している)。
+   * 鳴かないが必ずリーチする。門前を保って `declareRiichi` を厚くする(網羅そのものは
+   * 上の3方策で足りるが、`tsumogiri` はどの方策でも実測1回しかなく AI 方策の変更で 0 に
+   * なりやすいため、独立した経路をもう1本持たせて冗長化している)。
    */
   "riichiFirst",
 ] as const;
@@ -263,8 +267,6 @@ interface SweepTotals {
   potIn: number;
   /** 供託が減った遷移の数(和了時の回収・終局時の畳み込み = 場 → 持ち点)。 */
   potOut: number;
-  /** 完走した半荘の数。 */
-  games: number;
   /** **終局時に供託が場に残っていて `endGame` が畳み込んだ**半荘の数。 */
   endGameFolds: number;
   /** 公開アクション種別ごとの実行回数。 */
@@ -293,8 +295,8 @@ function playChecked(
     if (afterPot < beforePot) totals.potOut += 1;
     expectPointsConserved(s, `${policy} seed=${seed} step=${step}`);
   }
-  totals.games += 1;
-  // `endGame` が残存供託を畳み込んだ半荘か(内訳が記録されるのは残存があったときだけ)。
+  // `endGame` が残存供託を畳み込んだ半荘か(内訳が記録されるのは残存があり、かつ
+  // `lastRound` が非 null のときだけ。終局時の `lastRound` は常に非 null なので一致する)。
   if (s.lastRound?.residualSticks != null) totals.endGameFolds += 1;
   return s;
 }
@@ -351,7 +353,6 @@ describe("engine 不変条件: Σ持ち点 + 場の供託 = 140,000(#430)", () =
     maxPotSeen: 0,
     potIn: 0,
     potOut: 0,
-    games: 0,
     endGameFolds: 0,
     actions: new Map(),
   };
@@ -372,7 +373,7 @@ describe("engine 不変条件: Σ持ち点 + 場の供託 = 140,000(#430)", () =
     }
   }, 60_000);
 
-  it("各遷移の直後で保存則が成立し、終局時には供託が場に残らない", () => {
+  it("終局時には供託が場に残らない(各遷移の保存則は beforeAll の走査で検査)", () => {
     expect(ends).toHaveLength(POLICIES.length * SEEDS.length);
     for (const { policy, seed, end } of ends) {
       const label = `${policy} seed=${seed}`;
@@ -409,8 +410,8 @@ describe("engine 不変条件: Σ持ち点 + 場の供託 = 140,000(#430)", () =
   it("走査が実質的である(空振り防止の下限)", () => {
     // 閾値は実測値(下記)に対して十分低く取り、AI 方策(`documents/adr/0002-ai-policy.md`)や
     // 配牌側の調整で不安定にならない範囲で「走査が実質的である」ことだけを固定する。
-    //   steps=2,348 / maxPotSeen=4,000 / potIn=167 / potOut=131 / games=24 / endGameFolds=6
-    // (完走数は上の `ends` の件数で固定済みなのでここでは数えない。)
+    //   steps=2,348 / maxPotSeen=4,000 / potIn=167 / potOut=131 / endGameFolds=6
+    // (完走した半荘数は上の `ends` の件数で固定済みなのでここでは数えない。)
     expect(totals.steps, "遷移数").toBeGreaterThan(1000);
     // **持ち点 → 場**(リーチ宣言)と **場 → 持ち点**(和了時の回収・終局時の畳み込み)の
     // 双方向の点棒移動を実際に跨いで保存則を検査していること。単なる `> 0` だと
