@@ -186,9 +186,8 @@ describe("クロス検証: 和了・分解・待ち(decompose/tenpai ⇔ オラ�
       // 乱択だけだと多重分解の手が 1% 未満しか出ず、刻子 ⇔ 順子の読み替え
       // (片側リグレッションで最も壊れやすい箇所)をほとんど踏まない(#429)。
       const tiles = menzen14(rng, i);
-      // 既存ブロックのこの「静かに skip」は #444 で明示的な失敗へ揃える予定
-      // (#429 で追加した門前ブロックは既に `toHaveLength` で hard fail させている)。
-      if (tiles.length !== 14) continue;
+      // `menzen14` の契約(必ず14枚)。破れたら静かに skip せず落とす(#444)。
+      expect(tiles).toHaveLength(14);
       const counts = tilesToCount34(tiles);
 
       const aComplete = isCompleteHand(tiles, []);
@@ -244,8 +243,9 @@ describe("クロス検証: 和了・分解・待ち(decompose/tenpai ⇔ オラ�
     for (let i = 0; i < STRUCTURED_HANDS; i += 1) {
       const tiles =
         i % 2 === 1 ? randomHand(rng, 13) : dropOne(rng, menzen14(rng, i));
-      // 上と同じく #444 で明示的な失敗へ揃える。
-      if (tiles.length !== 13) continue;
+      // `randomHand(13)` / `menzen14`(14枚)から1枚落とした手はどちらも必ず13枚。
+      // 破れたら静かに skip せず落とす(#444)。
+      expect(tiles).toHaveLength(13);
       const counts = tilesToCount34(tiles);
 
       const aWaits = new Set(
@@ -274,10 +274,17 @@ describe("クロス検証: 和了・分解・待ち(decompose/tenpai ⇔ オラ�
   });
 });
 
-/** 構造化13枚(完成形から1枚除去 → テンパイを厚く)。 */
+/**
+ * 構造化13枚(完成形から1枚除去 → テンパイを厚く)。
+ *
+ * 枚数が14でなければ先頭13枚を切り出して**辻褄を合わせる**実装だったが、それでは
+ * ジェネレータの契約違反(1枚足りない手)が「別の手牌」に化けて静かに紛れ込む。
+ * 契約は `expect` で明示的に落とす(#444)。
+ */
 function structured13(rng: () => number): Tile[] {
   const tiles = randomStructuredHand(rng);
-  return tiles.length !== 14 ? tiles.slice(0, 13) : dropOne(rng, tiles);
+  expect(tiles).toHaveLength(14);
+  return dropOne(rng, tiles);
 }
 
 function setEqual(a: Set<string>, b: Set<string>): boolean {
