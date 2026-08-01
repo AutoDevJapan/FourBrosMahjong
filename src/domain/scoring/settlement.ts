@@ -129,7 +129,14 @@ export class SoshiiLedger {
    * `potTotal`)に対する一括処理なので、**そのレジストリへ登録した供託種別**(例: Q29 の
    * チョンボ罰符)であれば追加してもここが破れることはない。逆に**登録し忘れた種別**は
    * その点棒だけが合計から抜け、ここで `RangeError` になる(#430 が防ごうとしている失敗
-   * モードそのもの。engine の保存則テストが先に落ちるようにしてある)。
+   * モードそのもの)。
+   *
+   * 登録漏れは engine の保存則テスト(`src/domain/game/engine.pot-invariant.test.ts`)が
+   * 先に落ちて教えてくれる — ただし**そのテストのドライバが踏む経路で場へ点棒を移す種別に
+   * 限る**。現状 engine から到達不能な経路(`chomboPenalty` は engine に呼び出し元が無い)
+   * に足した種別は保存則テストをすり抜け、実際にチョンボが成立するようになった時点で
+   * 初めてここが対局中に `RangeError` を投げる。結線時のレビューで `POT_SOURCES` への
+   * 登録を確認すること。
    */
   private validateAndCaptureFinalPoints(
     finalPoints: readonly PlayerPoints[],

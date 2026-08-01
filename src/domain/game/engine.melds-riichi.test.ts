@@ -130,6 +130,7 @@ describe("engine: 鳴き・リーチ・裏ドラ・一発(#97)", () => {
       // 保存則そのものは engine.pot-invariant.test.ts)。
       const total = Object.values(s.points).reduce((a, b) => a + b, 0);
       expect(total + potTotal(s), `seed=${seed}`).toBe(140000);
+      expect(potTotal(s), `seed=${seed} pot at gameEnd`).toBe(0);
       // 持ち点はすべて整数(端数処理の破綻がない)。
       for (const p of Object.values(s.points)) {
         expect(Number.isInteger(p)).toBe(true);
