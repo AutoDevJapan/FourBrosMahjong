@@ -177,8 +177,16 @@ describe("Modal (spec 5.2.2 dialog / focus trap / Escape)", () => {
     const fallbackRef = useRef<HTMLDivElement>(null);
     return (
       <div>
-        {/* モーダルが補完している領域のルート。タブ順には入れずプログラム的復帰先にする。 */}
-        <div ref={fallbackRef} tabIndex={-1} data-testid="fallback">
+        {/* モーダルが補完している領域のルート。タブ順には入れずプログラム的復帰先にする。
+            着地点はロールとアクセシブル名を持つ規約(スペック5 5.2.2 / #405)に合わせ、
+            参照実装としてもその形にしておく。 */}
+        <div
+          ref={fallbackRef}
+          tabIndex={-1}
+          role="group"
+          aria-label="盤面ルート"
+          data-testid="fallback"
+        >
           盤面ルート
         </div>
         <button

@@ -40,6 +40,9 @@ export interface ModalProps {
    * トリガーにも開く前の activeElement にも到達できないときの最終復帰先(スペック5 5.2.2)。
    * WAI-ARIA APG が求める「論理的な作業の流れを提供する要素」を呼び出し元が指定する。
    * モーダルが補完している領域のルート要素に `tabindex="-1"` を与えて渡す。
+   * その要素には**ロールとアクセシブル名**も持たせること(既定は `role="group"` +
+   * `aria-label`)。名前が無いとフォーカスが移ったことをスクリーンリーダへ伝えられない
+   * (スペック5 5.2.2 / #405)。
    */
   fallbackFocusRef?: RefObject<HTMLElement | null>;
   children: React.ReactNode;
