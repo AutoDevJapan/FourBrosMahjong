@@ -297,11 +297,21 @@ export interface RoundSummary {
     readonly yakuman: number;
     readonly category: string;
     readonly honba: number;
+    /**
+     * 和了者が回収した供託の**本数**(= リーチ棒の本数)。
+     *
+     * `stickPayout`(点数)と対で `WinDetails` が「供託回収 N本(N,000点)」と描画するが、
+     * 両者はリーチ棒固有の別ソースであり供託レジストリ(`POT_SOURCES`)を経由しない。
+     * `RoundSummary.residualSticks` の `sticks`/`points` と同型の組で、局中の回収を
+     * 新しい供託種別へ広げる(spec 3.3 の (a))と本数と点数が食い違うため、
+     * そのときは表示側の拡張も要る(#430)。
+     */
     readonly riichiSticks: number;
     readonly payments: readonly {
       readonly name: string;
       readonly amount: number;
     }[];
+    /** 和了者が回収した供託の**点数**({@link riichiSticks} の注記を参照)。 */
     readonly stickPayout: number;
   };
 }
@@ -2082,7 +2092,7 @@ export function finishRound(
  * `endGame` の畳み込みから外れ、精算入口({@link SoshiiLedger.applyUma} /
  * {@link SoshiiLedger.applyRawScore})が `RangeError` を投げて対局中にクラッシュする(#430)。
  */
-interface PotSource {
+export interface PotSource {
   /** 現在この種別で場に残っている点数(残存なしなら 0)。 */
   readonly points: (state: EngineState) => number;
   /**
@@ -2095,8 +2105,9 @@ interface PotSource {
    * **自種別のカウンタが 0 のときは受け取った `state` をそのまま(同一参照で)返すこと**
    * (判定は「点数換算が 0 か」ではなく「カウンタが 0 か」で行う。点数換算 0 でもカウンタが
    * 残る種別を将来足したときに下ろし損ねないため)。呼び出し側は合計が 0 でも無条件に呼ぶ
-   * ({@link withdrawPot})ので、この要求により no-op が no-op のまま保たれ、供託が場に
-   * 無いだけで無駄な状態オブジェクトが生成されることもない。
+   * ({@link withdrawPot})ので、この要求により **no-op が no-op のまま保たれる** — つまり
+   * `withdrawPot(s) === s` が「場に供託が無い」ことの判定に使える。この契約は
+   * `engine.pot-invariant.test.ts`(「供託レジストリの契約」)が全種別に対して検査する。
    */
   readonly withdraw: (state: EngineState) => EngineState;
 }
@@ -2117,12 +2128,19 @@ interface PotSource {
  * 規則の裁定(→ `質問リスト.md`)と本レジストリの拡張(種別ごとの帰属先)が併せて必要になる。
  * ただし**合計の保存(= クラッシュしないこと)は帰属先によらず本レジストリだけで担保される**。
  *
- * **局中の回収・卓上表示について**: 和了時の供託回収(`settleWin` の `stickPayout`)と
- * 卓上の供託表示(`gameView` → `TableInfo`)はリーチ棒固有の経路で、本レジストリを
- * 経由しない。新種別を和了者の回収対象に含めるか・卓上に出すかは種別ごとの判断であり、
- * 含めなくても供託は場に残り続けて終局時に畳み込まれるため**保存則は破れない**(安全側)。
+ * **局中の回収・表示について**: 和了時の供託回収(`settleWin` → `resolveWinPayment` の
+ * `stickPayout`)、卓上の供託表示(`gameView` → `TableInfo`)、和了表示の内訳
+ * ({@link RoundSummary.winDetails} の `riichiSticks`/`stickPayout`)はいずれもリーチ棒固有の
+ * 経路で、本レジストリを経由しない。新種別を和了者の回収対象に含めるか・表示に出すかは
+ * 種別ごとの判断であり、含めなくても供託は場に残り続けて終局時に畳み込まれるため
+ * **保存則は破れない**(安全側)。詳細は spec 3.3「供託の集約と保存則」。
+ *
+ * **本レジストリで自動化されるのは「保存則」と「終局時の畳み込み」だけ**である点に注意
+ * (レジストリの存在が登録忘れそのものを防ぐわけではない。登録漏れは
+ * `engine.pot-invariant.test.ts` の走査が**踏む経路であれば** red になるが、
+ * 現状 engine から到達不能な経路(Q29 のチョンボ罰符など)は検出できない)。
  */
-const POT_SOURCES: readonly PotSource[] = [
+export const POT_SOURCES: readonly PotSource[] = [
   // 供託リーチ棒(`state.riichiSticks` 本 × 1,000点)。
   {
     points: (state) => state.riichiSticks * RIICHI_STICK_POINTS,
@@ -2135,6 +2153,10 @@ const POT_SOURCES: readonly PotSource[] = [
  * いま場に残っている供託の合計点(全種別の総和)。
  *
  * 半荘中を通じて `Σ持ち点 + potTotal(state) = 140,000`(`TOTAL_POINTS`)が成立する(#430)。
+ *
+ * 描画・進行はどれも個別カウンタ(`state.riichiSticks`)を直接読むため production の
+ * 呼び出し元は `endGame` のみ。**保存則を検査するテストのために公開**している
+ * (`finishRound` と同じ扱い)。
  */
 export function potTotal(state: EngineState): number {
   return POT_SOURCES.reduce((sum, source) => sum + source.points(state), 0);
@@ -2146,8 +2168,11 @@ export function potTotal(state: EngineState): number {
  * 合計 0 でも**無条件に呼んでよい**({@link PotSource.withdraw} がカウンタ 0 のとき同一参照を
  * 返す契約のため)。逆に呼び出し側で `potTotal > 0` を条件にすると、「点数換算は 0 だが
  * カウンタは残っている」種別を将来足したときに場から下ろし損ねる。
+ *
+ * production の呼び出し元は `endGame` のみ。**レジストリの契約を検査するテストのために公開**
+ * している({@link potTotal} と同じ扱い)。
  */
-function withdrawPot(state: EngineState): EngineState {
+export function withdrawPot(state: EngineState): EngineState {
   return POT_SOURCES.reduce((acc, source) => source.withdraw(acc), state);
 }
 
