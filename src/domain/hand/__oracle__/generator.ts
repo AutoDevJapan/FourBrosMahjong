@@ -46,6 +46,15 @@ function randInt(rng: () => number, n: number): number {
   return Math.floor(rng() * n);
 }
 
+/**
+ * 「別の牌を1枚置く場所」を乱択で探す試行回数の上限(有界化のため)。
+ *
+ * 打ち切ったときは**必ず呼び出し前の状態へ戻す**(枚数を減らしたまま抜けない)。
+ * 戻さないと生成手が規定枚数に満たなくなり、クロス検証側は「照合対象が1手減った」
+ * ことに気づけないまま緑で通る(issue #444)。
+ */
+export const PLACEMENT_TRIES = 20;
+
 /** 34-index → ドメイン `Tile`(5筒/5索は赤)。 */
 function indexToTile(idx: number): Tile {
   const { suit, rank } = index34ToKind(idx);
@@ -159,6 +168,9 @@ function buildCompleteCounts(rng: () => number): number[] {
 /**
  * 構造化手牌: 完成形(14枚)を組み、0〜`maxSwaps` 枚を無作為に別牌へ置換する。
  * 置換により向聴が上下し、テンパイ〜低向聴の形を厚く生成する。
+ *
+ * **必ず14枚を返す**(置換に失敗しても枚数は減らない)。呼び出し側のクロス検証は
+ * この契約を `expect(...).toHaveLength(14)` で明示的に固定している(issue #444)。
  */
 export function randomStructuredHand(rng: () => number, maxSwaps = 3): Tile[] {
   const counts = buildCompleteCounts(rng);
@@ -171,13 +183,17 @@ export function randomStructuredHand(rng: () => number, maxSwaps = 3): Tile[] {
     }
     const remove = present[randInt(rng, present.length)];
     counts[remove] -= 1;
-    for (let tries = 0; tries < 20; tries += 1) {
+    let placed = false;
+    for (let tries = 0; tries < PLACEMENT_TRIES && !placed; tries += 1) {
       const add = SANMA_INDICES_34[randInt(rng, SANMA_INDICES_34.length)];
       if (counts[add] < 4) {
         counts[add] += 1;
-        break;
+        placed = true;
       }
     }
+    // 追加先が見つからない(実際上到達しない)場合は元に戻す。`swapOne` と同じ方針で、
+    // 「1枚減った手」を返して照合対象を静かに減らさない(issue #444)。
+    if (!placed) counts[remove] += 1;
   }
   return count34ToTiles(counts);
 }
@@ -391,7 +407,7 @@ function buildAmbiguousConcealed(
       counts[idx] += 3;
     }
     // 雀頭は帯の外から(帯内は既に3枚使用で、雀頭を足すと5枚になる)。
-    for (let tries = 0; tries < 20; tries += 1) {
+    for (let tries = 0; tries < PLACEMENT_TRIES; tries += 1) {
       const pair = SANMA_INDICES_34[randInt(rng, SANMA_INDICES_34.length)];
       if (pair >= start && pair <= start + 2) continue;
       if (used[pair] + 2 > 4) continue;
@@ -432,7 +448,7 @@ function swapOne(rng: () => number, counts: number[], used: number[]): void {
   const remove = present[randInt(rng, present.length)];
   counts[remove] -= 1;
   used[remove] -= 1;
-  for (let tries = 0; tries < 20; tries += 1) {
+  for (let tries = 0; tries < PLACEMENT_TRIES; tries += 1) {
     const add = SANMA_INDICES_34[randInt(rng, SANMA_INDICES_34.length)];
     if (used[add] < 4) {
       counts[add] += 1;

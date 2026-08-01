@@ -23,6 +23,7 @@ import {
   standardFormsByDefinition34,
   waitingIndicesByDefinition34,
 } from "./definition-oracle";
+import { makeRng, PLACEMENT_TRIES, randomStructuredHand } from "./generator";
 import { AGARI, shantenOracle34, TENPAI } from "./shanten-oracle";
 
 const sh = (notation: string): number =>
@@ -380,5 +381,97 @@ describe("4枚使いの理想化(本作 ai.ts と共通・参照とは既知の 
     // 444p 8888p 789s 東東東: 888p+浮き8p の単騎待ちは5枚目が引けず本来デッド。
     // 本作 ai.ts と同じ理想化(牌残量を見ない)により向聴 0 として扱う。
     expect(sh("444p 8888p 789s 111z")).toBe(TENPAI);
+  });
+});
+
+/**
+ * ジェネレータの枚数契約(issue #444)。
+ *
+ * `randomStructuredHand` の置換は「1枚除いてから別の1牌種へ1枚足す」二段構えで、
+ * 足す先の探索は {@link PLACEMENT_TRIES} 回で打ち切られる。打ち切り時に除去を戻し
+ * 忘れると **13枚の手**が返り、クロス検証側は照合対象が1手減ったことに気づけない。
+ *
+ * 通常のシードでこの経路に入る確率は約 (3/27)^20 ≈ 1e-20 で実際には踏めないため、
+ * **台本化した RNG** で決定的に踏ませる。乱択の反復回数を増やしても到達しないので、
+ * ここを乱数任せにするとテストは永久に空回りする。
+ */
+describe("ジェネレータの枚数契約(randomStructuredHand / #444)", () => {
+  /**
+   * 台本の値を順に返し、尽きたら `tail` を返し続ける RNG。
+   * `tailDraws()` で「台本を使い切ったあとに何回引かれたか」を観測でき、
+   * 置換の探索ループが**実際に打ち切りまで走った**ことを結果とは独立に固定できる。
+   */
+  function scriptedRng(
+    script: readonly number[],
+    tail: number,
+  ): { rng: () => number; tailDraws: () => number } {
+    let cursor = 0;
+    let tailDraws = 0;
+    return {
+      rng: () => {
+        if (cursor < script.length) {
+          const value = script[cursor] as number;
+          cursor += 1;
+          return value;
+        }
+        tailDraws += 1;
+        return tail;
+      },
+      tailDraws: () => tailDraws,
+    };
+  }
+
+  /**
+   * `buildCompleteCounts` に「1p を4枚含む完成形」を組ませ、続く置換で 1p 以外を
+   * 除去させる台本。各値の意味はコメントのとおり(`randInt(rng, n) = ⌊rng()*n⌋`)。
+   * 完成形は `11p + 123p + 123p + 123s + 東東東` の14枚。
+   */
+  const FORCED_FAILURE_SCRIPT: readonly number[] = [
+    0.08, // 雀頭 = SANMA_INDICES_34[⌊0.08*27⌋=2] = 9 (1p) → 1p が2枚
+    0.1,
+    0.0, // 面子1: 順子(coin<0.5)/ SEQUENCE_STARTS[0] = 9 (123p) → 1p が3枚
+    0.1,
+    0.0, // 面子2: 順子 123p → 1p が4枚(以後 1p は足せない)
+    0.1,
+    0.51, // 面子3: 順子 SEQUENCE_STARTS[⌊0.51*14⌋=7] = 18 (123s)
+    0.6,
+    0.75, // 面子4: 刻子(coin>=0.5)/ SANMA_INDICES_34[⌊0.75*27⌋=20] = 27 (東)
+    0.9, // 置換回数 = ⌊0.9*2⌋ = 1(maxSwaps=1 で呼ぶ)
+    0.9, // 除去牌 = present[⌊0.9*7⌋=6] = 27 (東) ← 1p 以外を減らす
+  ];
+
+  /** 追加先の抽選値。常に 1p(既に4枚)を引くので置換は必ず失敗する。 */
+  const ALWAYS_PICK_1P = 0.08;
+
+  it("置換先が見つからなくても14枚を返す(除去した1枚を戻す)", () => {
+    const { rng, tailDraws } = scriptedRng(
+      FORCED_FAILURE_SCRIPT,
+      ALWAYS_PICK_1P,
+    );
+    const tiles = randomStructuredHand(rng, 1);
+
+    // 台本が意図どおりの状況を作れていること。ここが崩れると「置換に失敗する手」を
+    // 一度も踏まないまま下の 14枚アサーションだけが通る空回りになる。
+    expect(tailDraws()).toBe(PLACEMENT_TRIES);
+    const counts = tilesToCount34(tiles);
+    expect(counts[tileTo34Index({ suit: "pin", rank: 1 })]).toBe(4);
+
+    // 本題: 打ち切っても枚数は減らない。
+    expect(tiles).toHaveLength(14);
+    // 除去した東は戻っているので、和了形(4面子1雀頭)のまま。
+    expect(isCompleteOracle34(counts)).toBe(true);
+  });
+
+  it("通常のシードでは常に14枚・1牌種4枚以内(正常入力はガードに掛からない)", () => {
+    const rng = makeRng(0x4440_0001);
+    const sizes = new Set<number>();
+    let overFour = 0;
+    for (let i = 0; i < 2_000; i += 1) {
+      const tiles = randomStructuredHand(rng);
+      sizes.add(tiles.length);
+      if (Math.max(...tilesToCount34(tiles)) > 4) overFour += 1;
+    }
+    expect([...sizes]).toEqual([14]);
+    expect(overFour).toBe(0);
   });
 });
