@@ -643,7 +643,7 @@ test.describe("キーボードのみ操作(a11y 補強)", () => {
     await expect(updatedHand.locator('[role="option"]:focus')).toHaveCount(1);
   });
 
-  test("/game は手番をライブリージョンで通知し、打牌をキーボードのみで実行できる(5.2.2 / 5.2.3)", async ({
+  test("/game は手番をライブリージョンで通知し、打牌をキーボードのみで実行でき、復帰先の着地点が名前を持つ(5.2.2 / 5.2.3 / #405)", async ({
     page,
   }) => {
     // 上と同じ理由で seed を固定する(実盤面を触るテストは配牌を固定する)。
@@ -659,8 +659,10 @@ test.describe("キーボードのみ操作(a11y 補強)", () => {
     // 手牌の現行 option をフォーカスして操作可能であることを検証する。
     await expect(page.getByRole("group", { name: "操作パネル" })).toBeVisible();
     // モーダル復帰先の着地点(盤面ルート)は名前付きの group として静的にも露出している
-    // (5.2.2 / #405)。復帰の連鎖そのものは e2e/modal-focus.spec.ts が担保するため、
-    // ここは「名前付き group が /game に存在し、上の axe 監査と共存する」ことだけを見る。
+    // (5.2.2 / #405)。復帰の連鎖そのものは e2e/modal-focus.spec.ts が担保するので、
+    // ここが足すのは「監査と同じ既定ビューポート・同じファイルで名前付き group が
+    // /game に存在する」ことだけ。ランドマーク構造との共存は同ファイルの #409 の
+    // ランドマーク監査テストが別途固定する。
     await expect(page.getByRole("group", { name: "対局盤面" })).toBeVisible();
     const activeOption = page
       .getByRole("listbox", { name: "自家の手牌" })

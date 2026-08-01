@@ -214,7 +214,7 @@ describe("GameBoard (spec 6.6 client island / engine-driven)", () => {
     // 卓幅が 360px 以上へ変わり、トリガーがコンテナクエリの display:none で隠れた状態
     // (#377)を模す。jsdom はコンテナクエリを評価せず、インラインの display:none でも
     // focus() を no-op にしないため、到達不能の代替として disabled を使う判断は
-    // Modal.test.tsx:163-166 と同じ。ただし機構は違い、あちらは React が持つ prop、
+    // Modal.test.tsx の UnreachableTriggerHarness と同じ。ただし機構は違い、あちらは prop、
     // ここは GameBoard が JSX で与えていない属性を直接立てる(与えていない以上、
     // 以降の再描画で React に上書きされない)。
     opener.setAttribute("disabled", "");
