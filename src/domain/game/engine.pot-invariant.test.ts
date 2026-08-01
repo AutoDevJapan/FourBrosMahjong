@@ -285,6 +285,11 @@ function roundAt(
 /**
  * オーラス(南4)親流れ流局で `finishRound` → `endGame` を発火させる状態。
  *
+ * **まず `withdrawPot` で全種別を場から下ろしてから** `overrides` で必要な供託だけを置く。
+ * こうしないと「供託はリーチ棒だけ」を暗黙に仮定した固定値(`potTotal === 2000` など)に
+ * なり、`POT_SOURCES` へ種別を1つ足しただけでこのファイルが red になる — つまり本 PR の
+ * 主張(「1エントリ足すだけでよい」)を、テスト側が自分で反証してしまう。
+ *
  * 供託カウンタは `overrides` で個別に差し替える(`{ riichiSticks: 2 }` など)。位置引数では
  * 供託種別が増えるたびに引数が増えるため、`Partial<EngineState>` で受ける。
  */
@@ -292,7 +297,7 @@ function endGameStateWith(
   points: Record<PlayerId, number>,
   overrides: Partial<EngineState> = {},
 ): EngineState {
-  const base = createGame({ seed: 430 });
+  const base = withdrawPot(createGame({ seed: 430 }));
   return { ...base, round: roundAt("south", 4), points, ...overrides };
 }
 
