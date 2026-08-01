@@ -177,6 +177,11 @@ test.describe("自動 a11y 監査(axe-core)", () => {
       // 主ゲートは `src/test/a11y-heading-placement.test.tsx`(全ルート + 404 を jsdom で
       // 数秒で回す)。ここは実ブラウザのロール計算で `<header>` → banner の実マッピングを
       // 裏取りする役目に絞る。
+      //
+      // banner 0 個は「現状サイト共通ヘッダーが無い」ことの裏返しでもある。将来
+      // `src/app/layout.tsx` へ共通ヘッダーを置く場合は、ここを 0 個から**ちょうど 1 つ**へ
+      // 更新する(spec 5.2.6: banner は 1 ページに 1 つ)。ページ側の `<header>` を外へ
+      // 戻す変更は、そのときも引き続きこの行と `main h1` が落とす。
       await expect(page.locator("h1")).toHaveCount(1);
       await expect(page.locator("main h1")).toHaveCount(1);
       await expect(page.getByRole("banner")).toHaveCount(0);
