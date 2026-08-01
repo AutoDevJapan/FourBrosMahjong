@@ -21,7 +21,7 @@
 | `definition-oracle.ts` の `standardFormsByDefinition34` | `hand/decompose.ts` の `decomposeStandard()` | **列挙を一切行わない**(和了形の側を列挙し「手牌と完全一致する形」を集める) |
 | `definition-oracle.ts` の `waitingIndicesByDefinition34` | `hand/tenpai.ts` の `waitingTiles()` の**標準形部分** | **列挙を一切行わない**(「手牌をちょうど1枚超過して覆う和了形」の超過牌が待ち)。特殊形は含まない |
 | `definition-oracle.ts` の `isSevenPairsByDefinition34` / `isThirteenOrphansByDefinition34` | `hand/decompose.ts` の `decomposeSevenPairs()` / `decomposeThirteenOrphans()` | **向きが逆**(本体は手牌側を走査して枚数を数える。こちらは特殊形の側を列挙して手牌との重なりを見る)。照合しているのは**和了形かどうかの boolean** だけで、対子の内訳や `pairKey` は対象外 |
-| `definition-oracle.ts` の `menzenWaitingIndicesByDefinition34` | `hand/tenpai.ts` の `waitingTiles(concealed, [])` | 上3つの**和**。門前手を `waitingTiles` と 1:1 で突き合わせられる唯一の入口 |
+| `definition-oracle.ts` の `menzenWaitingIndicesByDefinition34` | `hand/tenpai.ts` の `waitingTiles(concealed, [])` | `waitingIndicesByDefinition34`(標準形の待ち)+ 七対子・国士の**1枚不足形**の和。上2行の 14 枚述語そのものは呼ばず、同じ列挙を `maxWaste = 1` で回す。門前手を `waitingTiles` と 1:1 で突き合わせられる唯一の入口 |
 
 したがって:
 
@@ -46,9 +46,13 @@
 - `standardFormsByDefinition34`(分解)と `waitingIndicesByDefinition34`(待ち)は
   「手牌と一致する形 / 1枚だけ足りない形」しか要らないため、可容な枝刈り
   (`waste = Σ max(0, W[i] − hand[i])` が上限を超えた枝を捨てる)が効き、
-  **副露数にも門前かどうかにも依存せず** 1 手あたり 0.01〜0.02ms 程度で終わります
-  (#390 / #429)。当初は「副露経路向け」と限定していましたが、#429 で
+  **副露数にも門前かどうかにも依存せず**実用速度で終わります(#390 / #429)。
+  当初は「副露経路向け」と限定していましたが、#429 で
   `groupsNeeded = 4`(門前 13/14 枚)にも適用範囲を広げました。
+  実測(10,000 手・マシン依存の目安)は `standardFormsByDefinition34`(門前14枚)が
+  約 0.011ms/手、`menzenWaitingIndicesByDefinition34`(門前13枚・特殊形込み)が
+  約 0.035ms/手。後者は突き合わせ相手の `waitingTiles()`(約 0.049ms/手)と
+  同オーダーで、13枚ブロックの実行時間は概ね 4:6 で分け合います。
 - ただし上記2つは**標準形(4面子1雀頭)のみ**を扱います。門前手では七対子・国士も
   成立し得るため、それらは `isSevenPairsByDefinition34` /
   `isThirteenOrphansByDefinition34` / `menzenWaitingIndicesByDefinition34`
@@ -93,12 +97,23 @@
   族は2つ: `111222333p` 型(刻子3組 ⇔ 順子3組)と `11223344556677p` 型
   (連続7牌種を各2枚 = **七対子かつ標準形**)。後者があることで
   `isCompleteHand` の OR が両辺同時に真の状態でも評価されます。
+  なお和了判定の3項は `||` に直接並べず一度ローカルへ束縛しています。直接並べると
+  標準形が成立した時点で短絡し、まさにこの族で特殊形の述語が呼ばれなくなるためです。
+  さらに七対子・国士は**和を取る前に本体(`decomposeSevenPairs` /
+  `decomposeThirteenOrphans`)と個別に**突き合わせています。和だけを見ると、
+  標準形が成立している手では特殊形の偽陽性・偽陰性が和に吸収されて見えません。
 - 同じジェネレータは冒頭のクロス検証(`agari-oracle` 相手 = **片側リグレッション**を
   捕まえる唯一の網)にも回しており、あちらの多重分解率も 1% 未満 → 25% に上がります
-  (下限アサーションも同じ生成比から入れてあります)。ただし冒頭の13枚ブロックは
-  `randomHand` とのコイン判定が先に立つため、曖昧形の比率は 1/8 になります。
+  (下限アサーションも同じ生成比から入れてあります)。13枚ブロックの振り分けは
+  乱数コインではなく `i` の偶奇で行い(奇数を `randomHand` に割り当て)、曖昧形
+  (= 必ず偶数 `i`)が全数 `dropOne` 側へ回るようにしてあります。これで13枚側でも
+  テンパイ数の下限を生成比から構造的に導けます。
 - 七対子・国士はランダム生成では事実上出ないので、和了形とその1枚不足を
   **決め打ちで総当たり**して照合しています(七対子 27×(1+7) 手 / 国士 13×(1+13) 手)。
+  この総当たりの価値は「**標準形が成立しない**手で特殊形の項だけを踏む」ことにあるため、
+  各手で `standardFormsByDefinition34(...).size === 0` を**前提として明示的に固定**して
+  います(牌種の並びが変わって標準形が成立すると、`isCompleteHand` は true のままなのに
+  特殊形の寄与が静かに消えるため)。
   加えて「七対子**かつ**標準形」(`11223344556677p`)を決め打ちで踏み、14枚の
   和了判定の OR が両辺同時に真の状態で評価されることを固定しています。
   なお13枚の待ちについては、標準形テンパイと七対子テンパイが同時に成立する手では

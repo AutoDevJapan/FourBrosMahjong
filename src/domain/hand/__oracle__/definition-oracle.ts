@@ -26,9 +26,11 @@
  * - {@link standardFormsByDefinition34}(分解)と
  *   {@link waitingIndicesByDefinition34}(待ち)は「手牌と一致する W / 1枚だけ足りない W」
  *   しか要らないため、可容な枝刈り(`waste > maxWaste` で打ち切り)が効き、
- *   **副露数にも門前かどうかにも依存せず** 1 手あたり 0.02ms 程度で終わる
- *   (issue #390 / #429)。`groupsNeeded = 4`(門前 13/14 枚)でも 20,000 手を
- *   0.2〜0.5 秒で完走する。
+ *   **副露数にも門前かどうかにも依存せず**実用速度で終わる(issue #390 / #429)。
+ *   `groupsNeeded = 4`(門前 14 枚)でも 1 手あたり 0.01ms 程度。
+ *   {@link menzenWaitingIndicesByDefinition34}(門前 13 枚・特殊形込み)は
+ *   1 手あたり 0.035ms 程度とやや重いが、突き合わせ相手の `waitingTiles()`
+ *   (≈ 0.05ms/手)と同オーダーに収まる。いずれもマシン依存の目安。
  * - ただし上記2つは**標準形(4面子1雀頭)のみ**を扱う。門前手では七対子・国士も
  *   成立し得るため、それらは {@link isSevenPairsByDefinition34} /
  *   {@link isThirteenOrphansByDefinition34} /
@@ -229,11 +231,7 @@ function forEachCoveringForm(
   concealed: readonly number[],
   groupsNeeded: number,
   maxWaste: CoveringWaste,
-  visit: (
-    work: readonly number[],
-    blocks: readonly FormBlock[],
-    waste: number,
-  ) => void,
+  visit: (work: readonly number[], blocks: readonly FormBlock[]) => void,
 ): void {
   const work = new Array<number>(COUNT34_LEN).fill(0);
   const blocks: FormBlock[] = [];
@@ -259,7 +257,7 @@ function forEachCoveringForm(
 
   const chooseGroups = (start: number, remaining: number): void => {
     if (remaining === 0) {
-      visit(work, blocks, waste);
+      visit(work, blocks);
       return;
     }
     for (let g = start; g < GROUPS.length; g++) {
