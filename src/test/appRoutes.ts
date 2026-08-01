@@ -17,6 +17,9 @@ import { resolve } from "node:path";
  */
 const APP_DIR = resolve(process.cwd(), "src/app");
 
+/** 既定の走査対象(`src/app`)。テストからフィクスチャを差し込めるよう引数の既定値にする。 */
+export const DEFAULT_APP_DIR = APP_DIR;
+
 /**
  * App Router がページとして解釈するファイル名。
  *
@@ -39,16 +42,21 @@ const PAGE_FILE = /(?:^|\/)page\.(?:tsx|ts|jsx|js|mjs|cjs)$/;
  *
  * 追加した時点で呼び出し側のテストが失敗し、監査対象の決め方を明示的に更新させる。
  *
+ * 既知の割り切り: インターセプトルート `(.)foo` / `(..)bar` も `(` 始まりなのでルートグループ
+ * として落ちる(セグメントが消える)。これらはパラレルルート `@slot` の配下にしか置かれず、
+ * そちらが先に例外になるため実際には到達しない。単独で使われる形が出たらここを分岐させること。
+ *
+ * @param appDir 走査するディレクトリ。既定は `src/app`(テストはフィクスチャを渡す)
  * @returns 昇順にソートしたルートパス(例: `["/", "/game", "/game/result", …]`)
  */
-export function appRoutes(): string[] {
-  const pages = readdirSync(APP_DIR, { recursive: true, encoding: "utf8" })
+export function appRoutes(appDir: string = DEFAULT_APP_DIR): string[] {
+  const pages = readdirSync(appDir, { recursive: true, encoding: "utf8" })
     .map((entry) => entry.replaceAll("\\", "/"))
     .filter((entry) => PAGE_FILE.test(entry));
 
   if (pages.length === 0) {
     throw new Error(
-      "src/app にページファイルが 1 つも無い(PAGE_FILE の想定が崩れた可能性)",
+      `${appDir} にページファイルが 1 つも無い(PAGE_FILE の想定が崩れた可能性)`,
     );
   }
 

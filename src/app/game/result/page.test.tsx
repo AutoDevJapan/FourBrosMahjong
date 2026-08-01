@@ -107,6 +107,12 @@ describe("/game/result page (spec 6.2 / 6.6)", () => {
     expect(loadingHtml).toContain("対局結果を読み込んでいます…");
     expect(loadingHtml.match(/<main[\s>]/g) ?? []).toHaveLength(1);
     expect(loadingHtml).not.toContain('role="main"');
+    // ページヘッダーは `<main>` の内側(spec 5.2.6 / #431)。`<main>` の開始タグより後に
+    // `<h1>` が現れることで確かめる(SSR 出力は文字列なので DOM 照会が使えない)。
+    expect(
+      loadingHtml.indexOf("<h1"),
+      "読み込み中分岐の <h1> が <main> より前にある",
+    ).toBeGreaterThan(loadingHtml.search(/<main[\s>]/));
 
     // 分岐を**一意に**指す文言。`最終順位` は未確定分岐の案内文にも出る
     //(「…ここに最終順位とソシー内訳が表示されます」)ので目印に使えない。
@@ -135,6 +141,12 @@ describe("/game/result page (spec 6.2 / 6.6)", () => {
       expect(
         container.querySelectorAll("main"),
         `${branch}分岐の <main> がちょうど 1 つでない`,
+      ).toHaveLength(1);
+      // ページヘッダーは `<main>` の内側(spec 5.2.6 / #431)。`<header>` は現状 3 分岐の
+      // 外側に 1 つだけ置いてあるが、分岐ごとに書き直された場合に付け忘れを無音にしない。
+      expect(
+        container.querySelectorAll("main h1"),
+        `${branch}分岐の <h1> が <main> の内側にちょうど 1 つ無い`,
       ).toHaveLength(1);
       // 別要素の `role="main"` を足す形も禁止する。`<main>` の数は 1 のままなので上の
       // 数え方では通ってしまうが、main ランドマークとしては重複する(`role` で

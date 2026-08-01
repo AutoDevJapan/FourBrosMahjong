@@ -27,7 +27,7 @@ export const metadata: Metadata = {
 
 export default function GamePage() {
   return (
-    <div className="mx-auto flex min-h-screen w-full max-w-5xl flex-col p-4 sm:p-6">
+    <div className="mx-auto min-h-screen w-full max-w-5xl p-4 sm:p-6">
       {/* 本文は単一の <main> に収める(スペック5 5.2.6)。盤面はランドマーク外に置かない。
           ページヘッダー(<h1>)も <main> の内側に置く。外に出すと <header> が banner
           ランドマークになり、ルートごとにランドマーク構成が割れる(#431)。 */}

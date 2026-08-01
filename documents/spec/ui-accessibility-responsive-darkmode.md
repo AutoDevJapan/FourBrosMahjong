@@ -89,7 +89,7 @@ Tailwind v4 preflight は `ul { list-style: none }` を全リストへ適用す�
 スクリーンリーダ利用者はランドマークジャンプ(VoiceOver のローター / NVDA の `D` キー等)で本文へ直行する。**全ルートは本文を単一の `<main>` に収める**(#409)。さらに**ページヘッダー(`<h1>`)も `<main>` の内側に置き、ランドマーク構成をルート間で一定に保つ**(#431)。ページ間で構造が変わると、利用者が学習した操作手順がルートごとに崩れる。
 
 - **規約**: ページの本文は `<main>` で包む。1 ページに `<main>` は**ちょうど 1 つ**(0 個=ランドマーク無し / 2 個以上=どれが本文か曖昧)
-- **規約**: `<h1>` を含むページヘッダーは **`<main>` の内側**に置く(#431)。結果として**どのルートも banner ランドマークを公開しない**。ランドマーク構成は全ルートで `main`(+ ページ内の `nav` 等)に揃う
+- **規約**: `<h1>` を含むページヘッダーは **`<main>` の内側**に置く(#431)。結果として**現時点ではどのルートも banner ランドマークを公開しない**(将来サイト共通ヘッダーを置く場合は後述のとおり全ルート共通の banner が 1 つになる)。ランドマーク構成は全ルートで `main`(+ ページ内の `nav` 等)に揃う
 - クライアント側の分岐(読み込み中 / 未確定 / 確定)がある画面では、**分岐の外側**で `<main>` を作る。分岐ごとに書くと、どれか 1 つに付け忘れた状態が無音で残る
 - **なぜ既存ゲートで落ちなかったか**: axe の `landmark-one-main` / `landmark-no-duplicate-main` / `region` は **`best-practice` タグ**に属し、`e2e/a11y.spec.ts` が `withTags` に渡している WCAG A/AA タグには入らない。`disableRules` を使っていないのに素通りしていた。ランドマーク関連の 3 ルールだけを `withRules` で明示的に有効化し、`<main>` の個数と併せて `e2e/a11y.spec.ts` が全画面で回帰固定する
 
@@ -112,7 +112,7 @@ Tailwind v4 preflight は `ul { list-style: none }` を全リストへ適用す�
 
 適用済み: 全ルート。`/game` と `/game/result` は #409 で `<main>` を追補し、それ以外の 4 ルート(`/`・`/rules`・`/settings`・`/history`)と 404 は当初から `<main>` を持っていた。ページヘッダーの内側への統一は #431 で `/history`・`/game`・`/game/result` の 3 ルートを移した。
 
-**この「全ルート」は主張ではなくゲートで守る**。`src/test/a11y-landmark-screens.test.ts` が `src/app/**/page.tsx` から実ルートを導出し、ランドマーク監査の画面一覧(`e2e/screens.ts` の `LANDMARK_SCREENS`)と過不足なく一致することを検査する。ルートを新設して一覧へ足し忘れると、この node テストが落ちる。
+**この「全ルート」は主張ではなくゲートで守る**。`src/test/a11y-landmark-screens.test.ts` が `src/test/appRoutes.ts` 経由で `src/app/**/page.{tsx,ts,jsx,js,mjs,cjs}` から実ルートを導出し(`.tsx` だけを見ると `page.js` で足されたルートがすり抜ける)、ランドマーク監査の画面一覧(`e2e/screens.ts` の `LANDMARK_SCREENS`)と過不足なく一致することを検査する。ルートを新設して一覧へ足し忘れると、この node テストが落ちる。
 
 #### ページヘッダーを `<main>` の内側に置く理由(#431)
 
@@ -130,14 +130,32 @@ Tailwind v4 preflight は `ul { list-style: none }` を全リストへ適用す�
 
 **引き換えに失うもの**: ランドマークジャンプでページヘッダーだけへ直行する導線。ただしヘッダーの中身(`<h1>`・戻りリンク)は `main` の先頭にあり、見出しジャンプ(`H` キー / ローター)とタブ順の先頭で到達できるため、実害は小さいと判断した。
 
-`<header>` 要素自体は残す。`<main>`(および `article` / `aside` / `nav` / `section`)の子孫にある `<header>` は暗黙ロールが generic になり、**ランドマークを増やさない**(`GameBoard` 配下の `PlayerArea` / `BenchArea` の `<header>` も同じ理由でランドマークではない)。
+**`<header>` 要素自体は残す**(`<div>` へ置換しない)。`<main>`(および `article` / `aside` / `nav` / `section`)の子孫にある `<header>` は暗黙ロールが generic になり、**ランドマークを増やさない**(`GameBoard` 配下の `PlayerArea` / `BenchArea` の `<header>` も同じ理由でランドマークではない)。残す理由は 2 つ。
+
+- `<header>` は「直近の祖先セクションの導入部」という**文書構造上の意味**を持ち、それはこの要素の中身(ページタイトル + 戻り導線)そのもの。ランドマークにならないことと、要素の意味が無くなることは別
+- **置換してもゲートは要らなくならない**。`PlayerArea` / `BenchArea` は `<header>` を使い続けるし、将来のルートが `<header>` を `<main>` の外へ置く形で規約を破ることも変わらない。判定を持たない選択肢は無いので、「置換すれば判定式が不要になる」という節約は成立しない
+
+#### banner 判定の依拠する規則(#431)
+
+`<header>` が banner になる条件は、参照する仕様で**文言が違う**。この規約はブラウザ実装に合わせる。
+
+| 出典 | `<header>` が banner でなくなる条件 |
+|---|---|
+| WHATWG HTML | 最も近い祖先の**セクショニングコンテンツ / セクショニングルート**が `body` でない。`<main>` は**そのどちらでもない**ため、字面どおりなら `<main>` の中でも banner のまま |
+| W3C ARIA in HTML | `article` / `aside` / `main` / `nav` / `section` の子孫なら generic |
+| axe-core 4.12.1 | `article, aside, main, nav, section`(ARIA in HTML と同じ) |
+| Blink / WebKit / Playwright | 上記に加えて**ロール上書きを見る**(`article:not([role])` … + `[role=article]` / `[role=complementary]` / `[role=main]` / `[role=navigation]` / `[role=region]`) |
+
+本規約は **ARIA in HTML / ブラウザ実装**に依拠する(WHATWG の字面は実装が追随しておらず、実測でも `<main>` 内の `<header>` は banner にならない)。ゲート側は**最も厳密なブラウザ実装の式**を使う。
 
 **規約の強制**:
 
-- 主ゲートは `src/test/a11y-heading-placement.test.tsx`(jsdom / ブラウザ不要)。`src/app/**/page.*` から導出した全ルート + 404 を実際に描画し、「`<main>` ちょうど 1 つ」「`<h1>` ちょうど 1 つ」「`<h1>` が `<main>` の内側」「banner ランドマーク 0 個」を固定する。ルートを新設すると描画ケースの一覧と実ルートが食い違って落ちるため、規約の適用漏れが無音にならない
-- banner の判定は `<header>` の祖先条件(HTML-AAM: `article` / `aside` / `main` / `nav` / `section` の子孫なら generic)をテスト側に明示して行う。`getByRole("banner")` に委ねると `dom-accessibility-api` の実装差でゲートの意味が変わる
+- 主ゲートは `src/test/a11y-heading-placement.test.tsx`(jsdom / ブラウザ不要)。`src/app/**/page.*` から導出した全ルート + 404 の**ページコンポーネント**を描画し、「`<main>` ちょうど 1 つ」「`<h1>` ちょうど 1 つ」「`<h1>` が `<main>` の内側」「`<h1>` の文言が `e2e/screens.ts` の `Screen.heading` と一致(ルートとページの取り違え検出)」「banner ランドマーク 0 個」を固定する。ルートを新設すると描画ケースの一覧と実ルートが食い違って落ちるため、規約の適用漏れが無音にならない
+  - **ルートレイアウトはツリーに入らない**(`src/app/layout.tsx` / `src/app/game/layout.tsx`)。レイアウト由来のランドマークはここでは見えず、E2E 側が見る
+- banner の判定は**テスト側に式を書く**。Testing Library の `getByRole("banner")` は使えない — ロール解決が `aria-query` の「scoped to the body element」制約を評価しないため、**`<main>` の内側の `<header>` まで banner として返す**(実測。テスト内にカナリアを置いて、この挙動が変わったら気づけるようにしてある)。式は Playwright の `kAncestorPreventingLandmark` を写し、裏取り役の E2E と**同じ述語**にする(単純な `article, aside, main, nav, section` はロール上書きを見ないぶん緩く、両ゲートが食い違う)
+- 判定関数そのものにも回帰を置く。全ルートの期待値が `[]` なので、**判定が壊れて常に `[]` を返しても全件緑**になる。外側/内側の `<header>`、明示 `role`、トークン並記、空 `role`、ロール上書き祖先の 5 形を両方向で固定する
 - `e2e/a11y.spec.ts` のランドマーク監査(7 画面)にも同じ 3 点を置き、**実ブラウザのロール計算**で `<header>` → banner の実マッピングを裏取りする(新規 spec は作らず CI 時間を増やさない)
-- ルートの導出は `src/test/appRoutes.ts` へ一本化し、`a11y-landmark-screens.test.ts` と共有する。導出を複製すると、片方のゲートだけが新しいルート表現に気づく非対称な穴が残る
+- ルートの導出は `src/test/appRoutes.ts` へ一本化し、`a11y-landmark-screens.test.ts` と共有する。導出を複製すると、片方のゲートだけが新しいルート表現に気づく非対称な穴が残る。導出自体の分岐(ルートグループ / プライベートフォルダ / 動的セグメント / パラレルルート / `.tsx` 以外の拡張子)は本リポジトリの `src/app` に実在しないため呼び出し側からは一度も実行されない — `src/test/appRoutes.test.ts` がフィクスチャディレクトリで個別に固定する
 
 **「banner 0 個」は現状にサイト共通ヘッダーが無いことの裏返し**でもある。将来ルートレイアウト(`src/app/layout.tsx`)へ共通ヘッダーを置くなら、そのときは両ゲートの banner 期待値を 0 個から**ちょうど 1 つ**へ更新する(banner は 1 ページに 1 つ)。ページ側の `<header>` を `<main>` の外へ戻す変更は、そのあとも `<h1>` の内側判定が落とす。
 

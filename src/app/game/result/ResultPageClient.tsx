@@ -34,7 +34,7 @@ export default function ResultPageClient() {
   };
 
   return (
-    <div className="mx-auto flex min-h-screen w-full max-w-3xl flex-col p-4 sm:p-6">
+    <div className="mx-auto min-h-screen w-full max-w-3xl p-4 sm:p-6">
       {/* 本文は単一の <main> に収める(スペック5 5.2.6)。読み込み中・未確定・確定の
           いずれの分岐でも本文がランドマーク外に取り残されないよう、分岐の外側で包む。
           ページヘッダー(<h1>)も内側に置く。外に出すと <header> が banner ランドマークに

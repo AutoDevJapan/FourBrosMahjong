@@ -28,7 +28,7 @@ export const metadata: Metadata = {
 
 export default function HistoryPage() {
   return (
-    <div className="mx-auto flex min-h-screen w-full max-w-3xl flex-col p-4 sm:p-6">
+    <div className="mx-auto min-h-screen w-full max-w-3xl p-4 sm:p-6">
       {/* ページヘッダーは <main> の内側に置く(スペック5 5.2.6)。外に出すと <header> が
           banner ランドマークになり、ルートごとにランドマーク構成が割れる(#431)。 */}
       <main className="flex flex-col gap-6">
