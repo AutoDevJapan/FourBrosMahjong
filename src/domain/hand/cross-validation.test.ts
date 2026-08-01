@@ -186,6 +186,8 @@ describe("クロス検証: 和了・分解・待ち(decompose/tenpai ⇔ オラ�
       // 乱択だけだと多重分解の手が 1% 未満しか出ず、刻子 ⇔ 順子の読み替え
       // (片側リグレッションで最も壊れやすい箇所)をほとんど踏まない(#429)。
       const tiles = menzen14(rng, i);
+      // 既存ブロックのこの「静かに skip」は #444 で明示的な失敗へ揃える予定
+      // (#429 で追加した門前ブロックは既に `toHaveLength` で hard fail させている)。
       if (tiles.length !== 14) continue;
       const counts = tilesToCount34(tiles);
 
@@ -242,6 +244,7 @@ describe("クロス検証: 和了・分解・待ち(decompose/tenpai ⇔ オラ�
     for (let i = 0; i < STRUCTURED_HANDS; i += 1) {
       const tiles =
         i % 2 === 1 ? randomHand(rng, 13) : dropOne(rng, menzen14(rng, i));
+      // 上と同じく #444 で明示的な失敗へ揃える。
       if (tiles.length !== 13) continue;
       const counts = tilesToCount34(tiles);
 
@@ -624,6 +627,9 @@ describe("クロス検証: 門前手の分解・和了・待ち(定義ベース 
 
       // 特殊形は本体側とも**個別に**突き合わせる。和(`oracleComplete`)だけを見ると、
       // 標準形が成立している手では特殊形の偽陽性/偽陰性が和に吸収されて見えない。
+      // ⚠️ この乱択 corpus では七対子は実際に出る(`sevenPairs` を計上している)が、
+      // 国士は構造上まず出ない。したがって `thirteenOrphansMismatch` がここで守るのは
+      // **偽陽性のみ**で、「国士を国士と認める」側は下の総当たりブロックが固定する。
       const actualSevenPairs = decomposeSevenPairs(tiles, []) !== null;
       const actualThirteenOrphans =
         decomposeThirteenOrphans(tiles, []) !== null;
@@ -901,9 +907,11 @@ describe("クロス検証: 門前手の分解・和了・待ち(定義ベース 
     expect(waitingTiles(notSpecial, [])).toEqual([]);
 
     // 対照2: 4枚使いを含む「6種」は七対子にならない。オラクル側だけでなく
-    // 本体(`decomposeSevenPairs`)とも突き合わせる。
+    // 本体(`decomposeSevenPairs`)とも突き合わせる。`isCompleteHand` は和なので、
+    // 七対子の否定を名指しで固定するには本体の分解関数を直接呼ぶ必要がある。
     const fourCopies = parseTiles("1111p 33p 55p 77p 99p 22s");
     expect(isSevenPairsByDefinition34(tilesToCount34(fourCopies))).toBe(false);
+    expect(decomposeSevenPairs(fourCopies, [])).toBeNull();
     expect(isCompleteHand(fourCopies, [])).toBe(false);
   });
 });

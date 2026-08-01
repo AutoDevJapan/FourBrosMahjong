@@ -212,7 +212,9 @@ function canonicalSignature(blocks: readonly FormBlock[]): string {
  * **可容(admissible)** であり、列挙結果は無枝刈りの全列挙と一致する。
  *
  * この枝刈りにより探索は「手牌にほぼ含まれる面子の組合せ」だけに絞られ、
- * `groupsNeeded = 4`(門前 13/14 枚)でも 1 手あたり 0.02ms 程度で終わる。
+ * `groupsNeeded = 4`(門前)でも実用速度に収まる。実測(マシン依存の目安)は
+ * 14枚(`maxWaste = 0`)で約 0.010ms/手、13枚(`maxWaste = 1`)で約 0.030ms/手。
+ * 1枚不足を許すぶん 13 枚側は枝が広がるので、両者には 3 倍程度の開きがある。
  * 向聴({@link shantenByDefinition34})が門前で爆発するのは「最も近い W」を求めるため
  * **全 W を見る**必要があるからで、こちらは枝刈りが効くぶん門前でも実用速度になる。
  *
