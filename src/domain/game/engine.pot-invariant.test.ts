@@ -21,7 +21,8 @@
  *   踏んでいない種別がある = その経路の保存則が未検査、なのでこれは空振り検出そのものである。
  * - 同様に、終局時の畳み込み分岐(`endGame` の `residual > 0`)も旧シードでは一度も
  *   踏んでおらず `potTotal(end) === 0` が空振りで通っていた。最終局が流局で供託が残る
- *   シード(12 / 14 / 37)を混ぜ、`endGameFolds` で実際に踏んだ回数を固定する。
+ *   (方策 × シードの)組が出るようシード 12 / 14 / 37 を混ぜ、`endGameFolds` で実際に
+ *   踏んだ回数を固定する。
  * - それでも本テストが保証するのは「**踏んだ経路**で保存則が成立すること」に限られる。
  *   現状 engine から到達不能な経路(`質問リスト.md` Q29 のチョンボ罰符 = `chomboPenalty` は
  *   engine に呼び出し元が無い)に供託を足しても本テストは緑のままなので、**新種別の
@@ -68,6 +69,7 @@ import {
   potTotal,
   proceedToNextRound,
   type RoundConclusion,
+  type RoundSummary,
   seatOfPlayer,
   tsumogiri,
   withdrawPot,
@@ -107,7 +109,12 @@ type ActionKind =
   | "passRon"
   | "proceedToNextRound";
 
-/** 網羅を要求する公開アクション(= 点棒を動かし得る `engine.ts` の export)。 */
+/**
+ * 網羅を要求する公開アクション。
+ *
+ * `engine.ts` の「公開アクション(UI から呼ぶ操作)」節が export する**全11種**と一致する
+ * (`finishRound` / `withdrawPot` / `createGame` などは UI が直接呼ぶ操作ではないので対象外)。
+ */
 const ALL_ACTIONS: readonly ActionKind[] = [
   "discard",
   "tsumogiri",
@@ -125,29 +132,45 @@ const ALL_ACTIONS: readonly ActionKind[] = [
 /**
  * ドライバの方策。合法手の**選び方**だけを変える(engine には手を入れない)。
  *
- * 貪欲な `aggressive` 単独では `passRon`(鳴かずに流す)・`declareKan`(ポンより先に大明槓)・
- * `tsumogiri`(リーチ後の自動ツモ切り)へ構造的に到達できない。優先順位を変えた方策を
- * 併走させることで全公開アクションを踏む。
+ * 貪欲な `aggressive` 単独では次の2つへ**構造的に**到達できない(配牌運ではなく engine の
+ * 契約から従う)。
+ * - `passRon` … `humanReact` は `canRon` / `canPon` / `canKan` のどれかが立つときしか
+ *   提示されないため、常に鳴く方策ではスルーの枝に入らない。
+ * - `declareKan`(大明槓) … `canPon`(need 2)と `canKan`(need 3)はガードが同一で
+ *   **`canKan ⇒ canPon`**(engine.ts の `resolveDiscard` 内の注記)。ポンを先に見る方策では
+ *   常にポンへ吸われる。
+ *
+ * 残る9種は `aggressive` 単独でも到達する(`tsumogiri` も `declareRiichi` → `locked` 経由で
+ * 到達する。ただし実測1回と薄いため `riichiFirst` で頻度を上げている)。
  */
 const POLICIES = [
   /** 常に最大限鳴く(ロン > ポン > 明槓)。 */
   "aggressive",
-  /** ポンより明槓を優先し、加槓より暗槓を優先する(大明槓・暗槓の到達用)。 */
+  /** ポンより明槓を優先し、加槓より暗槓を優先する(**大明槓の唯一の到達経路**)。 */
   "kanFirst",
-  /** 一切鳴かず・リーチせず(`passRon` と流局→供託持ち越しの到達用)。 */
+  /** 一切鳴かず・リーチせず(**`passRon` の到達経路**と、流局 → 供託持ち越しの生成用)。 */
   "passive",
-  /** 鳴かないが必ずリーチする(門前を保ち `declareRiichi` → `tsumogiri` の到達用)。 */
+  /**
+   * 鳴かないが必ずリーチする。門前を保ってリーチ頻度を上げ、`declareRiichi` →
+   * `tsumogiri` の到達を安定させる(網羅そのものは上の3方策で足りるが、`aggressive` の
+   * `tsumogiri` は実測1回しかなく、AI 方策の変更で 0 になりやすいため冗長化している)。
+   */
   "riichiFirst",
 ] as const;
 
 type Policy = (typeof POLICIES)[number];
 
 /**
- * 自家の打牌を選ぶ。**AI と同じ `chooseDiscard`(向聴/受け入れ)を使う**。
+ * 自家の打牌を選ぶ。**AI と同じ `chooseDiscard` を使う**(ただし向聴/受け入れのみ)。
  *
  * ツモ切り固定にすると自家の手が配牌から一切前進せず、テンパイ由来の公開アクション
  * (`declareRiichi` → `tsumogiri`、`declareTsumo`、`declareRon`)へ実質的に到達できない。
  * 打牌の巧拙は本テストの関心事ではないので、既存の AI 方策をそのまま借りる。
+ *
+ * engine 本体の呼び出し(`chooseAiDiscard`)と違い `opponentDiscards`(危険牌回避)と
+ * `doraKinds`(打点温存)は渡さない — どちらも省略可で、本テストは打牌の質ではなく
+ * 「手が前進して合法手が出揃うこと」だけを必要とするため(ADR-0002 の優先度 3/4 は
+ * 走査されない)。`tiles` / `meldCount` / `forbiddenDiscards` は engine と同じ組み立て。
  */
 function humanDiscardTile(
   s: EngineState,
@@ -183,6 +206,8 @@ function advance(
     if (policy === "kanFirst" && pending.canKan)
       return { next: declareKan(s), action: "declareKan" };
     if (pending.canPon) return { next: declarePon(s), action: "declarePon" };
+    // 以下2行は `canKan ⇒ canPon` と「humanReact は必ず何か1つ立つ」により
+    // aggressive/kanFirst では到達しない。契約が変わったときに黙って壊れないための防御。
     if (pending.canKan) return { next: declareKan(s), action: "declareKan" };
     return { next: passRon(s), action: "passRon" };
   }
@@ -314,9 +339,12 @@ const OORASU_DRAW: RoundConclusion = {
 
 describe("engine 不変条件: Σ持ち点 + 場の供託 = 140,000(#430)", () => {
   // 4方策 × 6シード = 24半荘を1度だけ走らせ、以降の it で集計値を検査する。
-  // 12 / 14 / 37 は**最終局が流局で供託が場に残る**シード(= `endGame` の残存供託の
-  // 畳み込み分岐を実際に踏む)。他のシードはいずれも最終局が和了決着になり、この分岐へ
-  // 入らないため、意図的に混ぜてある(空振り防止 / 下の `endGameFolds` を参照)。
+  // 12 / 14 / 37 は**方策との組合せで最終局が流局になり供託が場に残る**シード
+  // (= `endGame` の残存供託の畳み込み分岐を実際に踏む)。踏むのは実測で次の6組:
+  // aggressive/14・kanFirst/14・passive/12・passive/37・riichiFirst/12・riichiFirst/37。
+  // シード単独ではなく方策との組で決まる(14 は passive/riichiFirst では和了決着、
+  // 12 と 37 は aggressive/kanFirst では和了決着)。1 / 8 / 99 はどの方策でも踏まない。
+  // 意図的に混ぜてある(空振り防止 / 下の `endGameFolds` を参照)。
   const SEEDS = [1, 8, 12, 14, 37, 99] as const;
   const totals: SweepTotals = {
     steps: 0,
@@ -331,6 +359,11 @@ describe("engine 不変条件: Σ持ち点 + 場の供託 = 140,000(#430)", () =
 
   // 既定の hookTimeout(10s)では CI の並列実行下で不安定になり得るため明示的に伸ばす
   // (`vitest.config.ts` の unit プロジェクトが testTimeout を伸ばしているのと同じ理由 / #262)。
+  //
+  // 走査中に保存則が破れると**この hook が投げる**。その場合 vitest は本 describe の
+  // 各 it を「skipped」と数える(緑ではなく `Failed Suites 1` + 終了コード 1)ので
+  // 見逃しはしないが、件数だけを見ると「通った」ように読めるので注意。
+  // 下の「供託レジストリの契約」describe は本 hook に依存せず独立に走る。
   beforeAll(() => {
     for (const policy of POLICIES) {
       for (const seed of SEEDS) {
@@ -356,6 +389,12 @@ describe("engine 不変条件: Σ持ち点 + 場の供託 = 140,000(#430)", () =
   });
 
   it("公開アクション種別の網羅(踏んでいない経路は保存則が未検査になる)", () => {
+    // 種別ごとの実測: discard 1,821 / proceedToNextRound 222 / passRon 110 / declarePon 74 /
+    // declareRiichi 56 / declareRon 29 / declareTsumo 22 / declareAnkan 5 / declareKakan 4 /
+    // tsumogiri 3 / declareKan 2。**末尾4種は希少**で、AI 方策・配牌・`chooseDiscard` の
+    // タイブレークが変わると 0 に落ち得る(決定的なので flake ではなく、変更に対して red)。
+    // その場合は方策側では作れない(engine の合法手提示に依存する)ため、`SEEDS` を
+    // 足す/差し替えて再度網羅させること。失敗メッセージに実測の内訳が出る。
     const missing = ALL_ACTIONS.filter(
       (a) => (totals.actions.get(a) ?? 0) === 0,
     );
@@ -371,7 +410,7 @@ describe("engine 不変条件: Σ持ち点 + 場の供託 = 140,000(#430)", () =
     // 閾値は実測値(下記)に対して十分低く取り、AI 方策(`documents/adr/0002-ai-policy.md`)や
     // 配牌側の調整で不安定にならない範囲で「走査が実質的である」ことだけを固定する。
     //   steps=2,348 / maxPotSeen=4,000 / potIn=167 / potOut=131 / games=24 / endGameFolds=6
-    expect(totals.games, "完走した半荘数").toBe(POLICIES.length * SEEDS.length);
+    // (完走数は上の `ends` の件数で固定済みなのでここでは数えない。)
     expect(totals.steps, "遷移数").toBeGreaterThan(1000);
     // **持ち点 → 場**(リーチ宣言)と **場 → 持ち点**(和了時の回収・終局時の畳み込み)の
     // 双方向の点棒移動を実際に跨いで保存則を検査していること。単なる `> 0` だと
@@ -466,13 +505,20 @@ describe("供託レジストリの契約(#430)", () => {
   it("withdrawPot 後は全種別が 0 になり、持ち点と lastRound は変えない", () => {
     // 下ろした点数を帰属先の持ち点へ移すのは呼び出し側(`endGame`)の責務であり、
     // `withdraw` は自分のカウンタ以外に触れてはならない。
-    const state = endGameStateWith(points, { riichiSticks: 3 });
+    // `lastRound` は**非 null を置いて**検査する(`createGame` 直後の null のままだと
+    // 「`lastRound` を書き換えた」変更は捕まえられても「消した」変更を捕まえられない)。
+    const lastRound: RoundSummary = {
+      kind: "draw",
+      label: "流局",
+      deltas: { p0: 0, p1: 0, p2: 0, p3: 0 },
+    };
+    const state = endGameStateWith(points, { riichiSticks: 3, lastRound });
     const withdrawn = withdrawPot(state);
     expect(potTotal(withdrawn)).toBe(0);
     for (const source of POT_SOURCES) {
       expect(source.points(withdrawn)).toBe(0);
     }
     expect(withdrawn.points).toEqual(state.points);
-    expect(withdrawn.lastRound).toBe(state.lastRound);
+    expect(withdrawn.lastRound).toBe(lastRound);
   });
 });
