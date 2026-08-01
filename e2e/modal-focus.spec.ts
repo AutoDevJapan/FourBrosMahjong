@@ -49,7 +49,7 @@ test.describe("モーダル終了時のフォーカス復帰(#369)", () => {
 });
 
 test.describe("復帰先が到達不能なときの連鎖(#377)", () => {
-  test("トリガーが display:none になっても盤面ルートへ復帰する", async ({
+  test("トリガーが display:none になっても、名前を持つ盤面ルートへ復帰する(#377 / #405)", async ({
     page,
   }) => {
     await page.setViewportSize({ width: 320, height: 800 });
@@ -72,8 +72,9 @@ test.describe("復帰先が到達不能なときの連鎖(#377)", () => {
     await expect(dialog).toBeHidden();
     // <body> へ落とさず、モーダルが補完していた領域のルートへ復帰する。
     await expect(page.locator("[data-phase]").first()).toBeFocused();
-    // その着地点はロールとアクセシブル名を持ち、実ブラウザのアクセシビリティツリー上でも
-    // 「対局盤面へ移った」と読み上げられる(スペック5 5.2.2 / #405)。
+    // その着地点はロールとアクセシブル名を持つ(スペック5 5.2.2 / #405)。jsdom と違い
+    // ここは実 CSS のコンテナクエリで本当に display:none になった経路であり、その状態でも
+    // 同じ要素がロールと名前で解決することを確かめる。
     await expect(page.getByRole("group", { name: "対局盤面" })).toBeFocused();
   });
 });

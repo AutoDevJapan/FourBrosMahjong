@@ -488,9 +488,8 @@ export default function GameBoard() {
       tabIndex={-1}
       // 素の <div> はロールもアクセシブル名も持たないため、ここへプログラム的に
       // フォーカスが移ってもスクリーンリーダには「どこへ移ったか」が伝わらない。
-      // 着地点として名前を持たせる(スペック5 5.2.2 / #405)。
-      // landmark(region)にしないのは、この要素が /game の <main> と範囲がほぼ 1:1 で
-      // 重なり、ランドマーク一覧に同じ範囲が二重に並ぶだけになるため。
+      // 着地点として名前を持たせる。landmark(region)ではなく group を選ぶ理由は
+      // スペック5 5.2.2 が持つ(#405)。
       role="group"
       aria-label="対局盤面"
       className="@container w-full"

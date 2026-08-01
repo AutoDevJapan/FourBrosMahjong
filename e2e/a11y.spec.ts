@@ -658,6 +658,10 @@ test.describe("キーボードのみ操作(a11y 補強)", () => {
     // disabled で伝わる(色ではなく状態)。打牌はキーボードのみで完結できる操作が本筋のため、
     // 手牌の現行 option をフォーカスして操作可能であることを検証する。
     await expect(page.getByRole("group", { name: "操作パネル" })).toBeVisible();
+    // モーダル復帰先の着地点(盤面ルート)は名前付きの group として静的にも露出している
+    // (5.2.2 / #405)。復帰の連鎖そのものは e2e/modal-focus.spec.ts が担保するため、
+    // ここは「名前付き group が /game に存在し、上の axe 監査と共存する」ことだけを見る。
+    await expect(page.getByRole("group", { name: "対局盤面" })).toBeVisible();
     const activeOption = page
       .getByRole("listbox", { name: "自家の手牌" })
       .getByRole("option")
