@@ -9,6 +9,8 @@
  * - {@link randomHand}: 山から k 枚を無作為抽出(向聴が深い手が多く「非和了」を厚く検証)。
  * - {@link randomStructuredHand}: 4面子1雀頭を組んでから 0〜3 枚を無作為置換
  *   (テンパイ〜低向聴の「和了に近い形」を厚く検証)。
+ * - {@link randomAmbiguousMenzenHand}: 多重分解が**構造的に保証された**門前14枚
+ *   (刻子 ⇔ 順子の読み替えを確実に踏む / issue #429)。
  * - {@link randomMeldedHand}: 副露(ポン/明槓/暗槓)1〜4 組 + 対応枚数の門前手
  *   (副露経路の分解・待ちを検証する / issue #390)。
  */
@@ -50,8 +52,16 @@ function indexToTile(idx: number): Tile {
   return { suit, rank, isRed: rank === 5 && RED_FIVE_SUITS.has(suit) };
 }
 
-/** 34-index カウント配列 → `Tile[]`(決定的な牌種順)。 */
-function count34ToTiles(counts34: readonly number[]): Tile[] {
+/**
+ * 34-index カウント配列 → `Tile[]`(決定的な牌種順)。
+ * 特殊形(七対子・国士)の決め打ち手を組み立てるテストからも使う(issue #429)。
+ *
+ * カウント → 牌の逆写像なので `counts34.ts` に置きたくなるが、こちらは赤5判定
+ * ({@link RED_FIVE_SUITS})を持つ。`counts34.ts` は「`isRed` は構造に影響しないので
+ * 種別のみで数える」と宣言しているモジュールなので、赤5ポリシーを持ち込まずに済む
+ * 本ファイルに置く。
+ */
+export function count34ToTiles(counts34: readonly number[]): Tile[] {
   const tiles: Tile[] = [];
   for (const idx of SANMA_INDICES_34) {
     for (let c = 0; c < counts34[idx]; c += 1) tiles.push(indexToTile(idx));
@@ -170,6 +180,77 @@ export function randomStructuredHand(rng: () => number, maxSwaps = 3): Tile[] {
     }
   }
   return count34ToTiles(counts);
+}
+
+/**
+ * 分解が一意に定まらない門前14枚のうち、**連続7牌種を各2枚**の族(issue #429)。
+ *
+ * 例: `11223344556677p`。`[123][123][456][456][77]` と `[11][234][234][567][567]`
+ * の2通り以上に必ず読めるので多重分解が保証され、同時に**七対子でもある**。
+ * 帯3枚族(`111222333p` 型)だけだと「七対子かつ標準形」の手が corpus に現れず、
+ * `isCompleteHand` の OR を両辺同時に真の状態で評価できないため、この族を混ぜる。
+ */
+function ambiguousSevenPairRun(rng: () => number): Tile[] {
+  const base = rng() < 0.5 ? 9 : 18; // 筒子 / 索子
+  const start = base + randInt(rng, 3); // start+6 が同一スート内に収まる(1..3 始まり)
+  const counts = new Array<number>(34).fill(0);
+  for (let offset = 0; offset < 7; offset += 1) counts[start + offset] = 2;
+  return count34ToTiles(counts);
+}
+
+/**
+ * 分解が一意に定まらない**門前14枚**を意図的に組む(issue #429)。
+ *
+ * 半々で2族から選ぶ。1つ目は同一スートの連続3牌種を各3枚
+ * (`111222333p` 型 = 刻子3組 ⇔ 順子3組)+ 面子1組 + 雀頭1組。
+ * 2つ目は {@link ambiguousSevenPairRun}(連続7牌種を各2枚 = 七対子かつ標準形)。
+ * 以下は1つ目の族の説明。
+ *
+ * **多重分解が保証される根拠**: 4組目の面子と雀頭を帯と**牌種が交わらない**位置から
+ * 取るため、帯の9枚は必ず「帯の中だけで3面子」に分解される。その分け方は
+ * 刻子3組 / 順子3組 の2通りあるので、全体の分解も必ず2通り以上になる。
+ * (「帯をまたぐ面子が作れない」という意味ではない。帯の外にも牌がある以上
+ * `345p` のような跨ぎ面子自体は組めるが、残りが余って和了形にならない。)
+ *
+ * {@link randomStructuredHand} の乱択では多重分解の手が 20,000 手に 100 件前後
+ * (1% 未満)しか現れず、「刻子が取れたら順子を試さない」型の列挙欠陥を踏むかどうかが
+ * 運任せになる。副露経路で `buildAmbiguousConcealed` を用意したのと同じ理由で、
+ * 門前にも決め打ち形を置く。
+ */
+export function randomAmbiguousMenzenHand(rng: () => number): Tile[] {
+  if (rng() < 0.5) return ambiguousSevenPairRun(rng);
+  for (let attempt = 0; attempt < 200; attempt += 1) {
+    const counts = new Array<number>(34).fill(0);
+    const base = rng() < 0.5 ? 9 : 18; // 筒子 / 索子
+    const start = base + randInt(rng, 7); // start+2 が同一スート内に収まる
+    for (const idx of [start, start + 1, start + 2]) counts[idx] += 3;
+
+    // 4組目の面子と雀頭は帯の**外**(牌種が交わらない位置)から取る。これにより
+    // 帯の9枚は帯内だけで3面子に分かれ、「刻子3組 ⇔ 順子3組」の2通りが必ず残る。
+    const outside = (idx: number): boolean => idx < start || idx > start + 2;
+    if (rng() < 0.5) {
+      const seq = SEQUENCE_STARTS[randInt(rng, SEQUENCE_STARTS.length)];
+      if (![seq, seq + 1, seq + 2].every(outside)) continue;
+      for (const idx of [seq, seq + 1, seq + 2]) counts[idx] += 1;
+    } else {
+      const idx = SANMA_INDICES_34[randInt(rng, SANMA_INDICES_34.length)];
+      if (!outside(idx)) continue;
+      counts[idx] += 3;
+    }
+
+    const pair = SANMA_INDICES_34[randInt(rng, SANMA_INDICES_34.length)];
+    if (!outside(pair) || counts[pair] > 2) continue;
+    counts[pair] += 2;
+    return count34ToTiles(counts);
+  }
+  // フォールバック(実際上到達しない): 111222333p 444p 55p(帯 1-3p + 刻子 + 雀頭)。
+  const fallback = new Array<number>(34).fill(0);
+  fallback[9] = 3; // 111p
+  fallback[10] = 3; // 222p
+  fallback[11] = 3; // 333p
+  fallback[12] = 3; // 444p
+  fallback[13] = 2; // 55p 雀頭
+  return count34ToTiles(fallback);
 }
 
 // ---------------------------------------------------------------------------

@@ -26,24 +26,36 @@ import {
 } from "./__oracle__/agari-oracle";
 import {
   SANMA_INDICES_34,
+  TERMINAL_AND_HONOR_INDICES_34,
   tilesToCount34,
   tileTo34Index,
 } from "./__oracle__/counts34";
 import {
+  isSevenPairsByDefinition34,
+  isThirteenOrphansByDefinition34,
+  menzenWaitingIndicesByDefinition34,
   shantenByDefinition34,
   standardFormsByDefinition34,
   waitingIndicesByDefinition34,
 } from "./__oracle__/definition-oracle";
 import {
+  count34ToTiles,
   type GeneratedMeld,
   type MeldedHand,
   makeRng,
+  randomAmbiguousMenzenHand,
   randomHand,
   randomMeldedHand,
   randomStructuredHand,
 } from "./__oracle__/generator";
 import { shantenOracle34 } from "./__oracle__/shanten-oracle";
-import { decomposeStandard, isCompleteHand, type Mentsu } from "./decompose";
+import {
+  decomposeSevenPairs,
+  decomposeStandard,
+  decomposeThirteenOrphans,
+  isCompleteHand,
+  type Mentsu,
+} from "./decompose";
 import { parseTiles, tileNotation } from "./notation";
 import { waitingTiles } from "./tenpai";
 
@@ -59,6 +71,29 @@ const STRUCTURED_HANDS = 20_000;
  * 向聴照合より1手のコストが約27倍になる。網羅性と実行時間の釣り合いをここで調整する。
  */
 const UKEIRE_HANDS = 2_000;
+
+/** 門前手が作るべき面子数(副露なし = 4面子1雀頭)。 */
+const MENZEN_GROUPS = 4;
+
+/** `menzen14` が曖昧形(多重分解が構造的に保証された形)を返す周期。 */
+const AMBIGUOUS_MENZEN_EVERY = 4;
+
+/**
+ * 門前14枚を生成する。`AMBIGUOUS_MENZEN_EVERY` 手に 1 手は多重分解が
+ * **構造的に保証された**形(`randomAmbiguousMenzenHand`)。乱択だけだと多重分解の手が
+ * 1% 未満しか現れず、刻子 ⇔ 順子の読み替えを踏むかどうかが運任せになるため。
+ */
+function menzen14(rng: () => number, index: number): Tile[] {
+  return index % AMBIGUOUS_MENZEN_EVERY === 0
+    ? randomAmbiguousMenzenHand(rng)
+    : randomStructuredHand(rng);
+}
+
+/** 14枚から1枚を無作為に抜いて13枚にする。 */
+function dropOne(rng: () => number, tiles: readonly Tile[]): Tile[] {
+  const drop = Math.floor(rng() * tiles.length);
+  return [...tiles.slice(0, drop), ...tiles.slice(drop + 1)];
+}
 
 /** 本作 `StandardForm` を decompose.ts の mentsuSignature と同形式へ正規化。 */
 function formSignature(
@@ -145,9 +180,14 @@ describe("クロス検証: 和了・分解・待ち(decompose/tenpai ⇔ オラ�
     let completeMismatch = 0;
     let decompMismatch = 0;
     let completeCount = 0;
+    let multiFormCount = 0;
     const samples: string[] = [];
     for (let i = 0; i < STRUCTURED_HANDS; i += 1) {
-      const tiles = randomStructuredHand(rng);
+      // 乱択だけだと多重分解の手が 1% 未満しか出ず、刻子 ⇔ 順子の読み替え
+      // (片側リグレッションで最も壊れやすい箇所)をほとんど踏まない(#429)。
+      const tiles = menzen14(rng, i);
+      // 既存ブロックのこの「静かに skip」は #444 で明示的な失敗へ揃える予定
+      // (#429 で追加した門前ブロックは既に `toHaveLength` で hard fail させている)。
       if (tiles.length !== 14) continue;
       const counts = tilesToCount34(tiles);
 
@@ -174,13 +214,20 @@ describe("クロス検証: 和了・分解・待ち(decompose/tenpai ⇔ オラ�
             `decomp ${describeHand(tiles)} ai=${[...aForms].sort().join(" / ")} oracle=${[...oForms].sort().join(" / ")}`,
           );
       }
+      if (oForms.size > 1) multiFormCount += 1;
     }
     if (samples.length) console.log(samples.join("\n"));
     console.log(
-      `[cross] 14-tile hands compared, complete=${completeCount} completeMismatch=${completeMismatch} decompMismatch=${decompMismatch}`,
+      `[cross] 14-tile hands compared, complete=${completeCount} multiForm=${multiFormCount} completeMismatch=${completeMismatch} decompMismatch=${decompMismatch}`,
     );
     expect(completeMismatch).toBe(0);
     expect(decompMismatch).toBe(0);
+    // 刻子 ⇔ 順子の読み替えは片側リグレッションで最も壊れやすい箇所。`menzen14` を
+    // `randomStructuredHand` に戻すと多重分解率が 25% → 1% 未満に落ちるので、
+    // 曖昧形の生成比から導いた下限で固定する(#429)。
+    expect(multiFormCount).toBeGreaterThanOrEqual(
+      STRUCTURED_HANDS / AMBIGUOUS_MENZEN_EVERY,
+    );
   });
 
   it("13枚: waitingTiles と待ちオラクルの集合が一致する", () => {
@@ -188,9 +235,16 @@ describe("クロス検証: 和了・分解・待ち(decompose/tenpai ⇔ オラ�
     let waitMismatch = 0;
     let tenpaiCount = 0;
     const samples: string[] = [];
-    // ランダム+構造化を混ぜてテンパイ〜非テンパイを厚く。
+    // ランダム+構造化を混ぜてテンパイ〜非テンパイを厚く。構造化側は多重分解を
+    // 構造的に含む `menzen14` から1枚落として作る(#429)。
+    // 振り分けは乱数コインではなく `i` の偶奇で行う。コインだと「曖昧形
+    // (`i % AMBIGUOUS_MENZEN_EVERY === 0`)が構造化側へ回る回数」が確率的になり、
+    // カバレッジ下限を生成比から導けなくなるため。奇数を `randomHand` に割り当てる
+    // ことで、曖昧形(= 必ず偶数 i)は全数が構造化側に入る。
     for (let i = 0; i < STRUCTURED_HANDS; i += 1) {
-      const tiles = rng() < 0.5 ? randomHand(rng, 13) : structured13(rng);
+      const tiles =
+        i % 2 === 1 ? randomHand(rng, 13) : dropOne(rng, menzen14(rng, i));
+      // 上と同じく #444 で明示的な失敗へ揃える。
       if (tiles.length !== 13) continue;
       const counts = tilesToCount34(tiles);
 
@@ -212,15 +266,18 @@ describe("クロス検証: 和了・分解・待ち(decompose/tenpai ⇔ オラ�
       `[cross] 13-tile hands compared, tenpai=${tenpaiCount} waitMismatch=${waitMismatch}`,
     );
     expect(waitMismatch).toBe(0);
+    // vacuum 防止: 曖昧形(和了形)から1枚落とした手は必ずテンパイなので、下限は
+    // 生成比から構造的に決まる。14枚ブロック側の `multiForm` 下限と対称(#429)。
+    expect(tenpaiCount).toBeGreaterThanOrEqual(
+      STRUCTURED_HANDS / AMBIGUOUS_MENZEN_EVERY,
+    );
   });
 });
 
 /** 構造化13枚(完成形から1枚除去 → テンパイを厚く)。 */
 function structured13(rng: () => number): Tile[] {
   const tiles = randomStructuredHand(rng);
-  if (tiles.length !== 14) return tiles.slice(0, 13);
-  const drop = Math.floor(rng() * 14);
-  return [...tiles.slice(0, drop), ...tiles.slice(drop + 1)];
+  return tiles.length !== 14 ? tiles.slice(0, 13) : dropOne(rng, tiles);
 }
 
 function setEqual(a: Set<string>, b: Set<string>): boolean {
@@ -493,6 +550,374 @@ describe("クロス検証: 副露あり手の分解・和了・待ち (#390)", (
     expect(
       waitingTiles(concealed, [pon("222z"), ...base]).map(tileNotation),
     ).toEqual(["1z"]);
+  });
+});
+
+/**
+ * 門前手(`melds = []`)の分解・待ちの定義ベース照合(#429)。
+ *
+ * 冒頭の「クロス検証: 和了・分解・待ち」は門前手を `__oracle__/agari-oracle.ts` と
+ * だけ突き合わせている。しかし `agari-oracle.ts` の `decomposeMeldsOnly` は本体
+ * `hand/decompose.ts` の `extractMentsuAll` と**再帰の分岐順まで同型**なので、
+ * **列挙側の共通欠陥は素通りする**。実際 PR #427 では、両方に同じ
+ * 「刻子が取れたら順子を試さない」欠陥を注入しても門前14枚の分解照合は緑のまま通り、
+ * 副露経路の定義ベース照合だけが検出した(#429 の起票理由)。
+ *
+ * ここでは #390 で副露経路に用意した列挙非依存のオラクルを `groupsNeeded = 4` で
+ * 門前にも適用し、その空白を埋める。門前は七対子・国士も成立し得るため、
+ * 定義ベース側に両特殊形を追加して `isCompleteHand` / `waitingTiles` と同じ粒度で
+ * 突き合わせる(issue #429 の提案2の後者)。
+ */
+describe("クロス検証: 門前手の分解・和了・待ち(定義ベース / #429)", () => {
+  /**
+   * 門前照合の手牌数。13枚側はオラクル・本体の**どちらも**重く、実測(10,000 手)では
+   * `menzenWaitingIndicesByDefinition34` ≈ 0.035ms/手 と `waitingTiles()` ≈ 0.049ms/手
+   * が概ね 4:6 で並ぶ(`waitingTiles` は 1 手につき 27 牌種ぶん `isCompleteHand` を
+   * 回す)。14枚側の `standardFormsByDefinition34` は ≈ 0.011ms/手 と一桁軽い。
+   * 冒頭のクロス検証と手牌の作り方が重なるので、CI 時間とのバランスでここは半分
+   * (10,000 手)に絞る(→ PR に実測)。数値はマシン依存の目安。
+   *
+   * 冒頭のブロックと**統合はしない**。あちらの相手 `agari-oracle.ts` は外部参照
+   * ライブラリでアンカーされた唯一のオラクルで、定義ベースオラクルは外部アンカーを
+   * 持たない代わりに列挙構造が独立という別の役割を持つ(README の三層構造)。
+   */
+  const MENZEN_HANDS = 10_000;
+
+  /** `menzen14` が必ず多重分解の手を返す回数(= 下限アサーションの根拠)。 */
+  const GUARANTEED_AMBIGUOUS = MENZEN_HANDS / AMBIGUOUS_MENZEN_EVERY;
+
+  it("門前14枚: 標準分解の集合と和了判定が定義ベースオラクルと一致する", () => {
+    const rng = makeRng(0x4290_0014);
+    let decompMismatch = 0;
+    let completeMismatch = 0;
+    const samples: string[] = [];
+    let completeCount = 0;
+    let multiFormCount = 0;
+    let sevenPairsMismatch = 0;
+    let thirteenOrphansMismatch = 0;
+    let sevenPairsCount = 0;
+
+    for (let i = 0; i < MENZEN_HANDS; i += 1) {
+      const tiles = menzen14(rng, i);
+      // `menzen14` の契約(必ず14枚)。破れたら静かに skip せず落とす(#429 / #444)。
+      expect(tiles).toHaveLength(14);
+      const counts = tilesToCount34(tiles);
+
+      const oracleForms = standardFormsByDefinition34(counts, MENZEN_GROUPS);
+      const actual = new Set(
+        decomposeStandard(tiles, []).map((f) => formSignature(f.melds, f.pair)),
+      );
+      if (!setEqual(actual, oracleForms)) {
+        decompMismatch += 1;
+        if (samples.length < 8) {
+          samples.push(
+            `decomp ${describeHand(tiles)} 本体=${[...actual].sort().join(" / ")} 定義ベース=${[...oracleForms].sort().join(" / ")}`,
+          );
+        }
+      }
+
+      // `isCompleteHand` は特殊形も含むので、定義ベース側も同じ和を取る。
+      // 3項は**必ず全て評価する**。`||` に直接並べると標準形が成立した時点で
+      // 短絡し、特殊形の述語が一度も呼ばれない手が corpus の大半を占めてしまう
+      // (`11223344556677p` 型は標準形かつ七対子なので、まさにそこが短絡する)。
+      const oracleSevenPairs = isSevenPairsByDefinition34(counts);
+      const oracleThirteenOrphans = isThirteenOrphansByDefinition34(counts);
+      const oracleComplete =
+        oracleForms.size > 0 || oracleSevenPairs || oracleThirteenOrphans;
+
+      // 特殊形は本体側とも**個別に**突き合わせる。和(`oracleComplete`)だけを見ると、
+      // 標準形が成立している手では特殊形の偽陽性/偽陰性が和に吸収されて見えない。
+      // ⚠️ この乱択 corpus では七対子は実際に出る(`sevenPairs` を計上している)が、
+      // 国士は構造上まず出ない。したがって `thirteenOrphansMismatch` がここで守るのは
+      // **偽陽性のみ**で、「国士を国士と認める」側は下の総当たりブロックが固定する。
+      const actualSevenPairs = decomposeSevenPairs(tiles, []) !== null;
+      const actualThirteenOrphans =
+        decomposeThirteenOrphans(tiles, []) !== null;
+      if (oracleSevenPairs !== actualSevenPairs) {
+        sevenPairsMismatch += 1;
+        if (samples.length < 8) {
+          samples.push(
+            `sevenPairs ${describeHand(tiles)} 本体=${actualSevenPairs} 定義ベース=${oracleSevenPairs}`,
+          );
+        }
+      }
+      if (oracleThirteenOrphans !== actualThirteenOrphans) {
+        thirteenOrphansMismatch += 1;
+        if (samples.length < 8) {
+          samples.push(
+            `thirteenOrphans ${describeHand(tiles)} 本体=${actualThirteenOrphans} 定義ベース=${oracleThirteenOrphans}`,
+          );
+        }
+      }
+      if (oracleSevenPairs) sevenPairsCount += 1;
+
+      const complete = isCompleteHand(tiles, []);
+      if (complete !== oracleComplete) {
+        completeMismatch += 1;
+        if (samples.length < 8) {
+          samples.push(
+            `complete ${describeHand(tiles)} 本体=${complete} 定義ベース=${oracleComplete}`,
+          );
+        }
+      }
+      if (oracleComplete) completeCount += 1;
+      if (oracleForms.size > 1) multiFormCount += 1;
+    }
+
+    if (samples.length) console.log(samples.join("\n"));
+    console.log(
+      `[cross] menzen 14-tile hands=${MENZEN_HANDS} complete=${completeCount} multiForm=${multiFormCount} sevenPairs=${sevenPairsCount} decompMismatch=${decompMismatch} completeMismatch=${completeMismatch} sevenPairsMismatch=${sevenPairsMismatch} thirteenOrphansMismatch=${thirteenOrphansMismatch}`,
+    );
+    expect(decompMismatch).toBe(0);
+    expect(completeMismatch).toBe(0);
+    expect(sevenPairsMismatch).toBe(0);
+    expect(thirteenOrphansMismatch).toBe(0);
+    // vacuum 防止: 和了手と多重分解手を実際に踏んでいることを固定する。
+    // 閾値は「`menzen14` が返す曖昧形は必ず和了形かつ多重分解」という構造的事実から
+    // 導く(固定シード頼みにしない)。`AMBIGUOUS_MENZEN_EVERY` を変えれば追随する。
+    expect(completeCount).toBeGreaterThanOrEqual(GUARANTEED_AMBIGUOUS);
+    expect(multiFormCount).toBeGreaterThanOrEqual(GUARANTEED_AMBIGUOUS);
+    // 七対子の照合が空回りしていないこと。`ambiguousSevenPairRun`(曖昧形の半分)は
+    // 連続7牌種を各2枚なので必ず七対子。乱数で族が選ばれるぶん下限は余裕を持たせる。
+    expect(sevenPairsCount).toBeGreaterThan(GUARANTEED_AMBIGUOUS / 4);
+  });
+
+  it("門前13枚: waitingTiles が定義ベースの待ちオラクルと一致する", () => {
+    const rng = makeRng(0x4290_0013);
+    let waitMismatch = 0;
+    const samples: string[] = [];
+    let tenpaiCount = 0;
+    let multiWaitCount = 0;
+
+    for (let i = 0; i < MENZEN_HANDS; i += 1) {
+      const tiles = dropOne(rng, menzen14(rng, i));
+      // 14枚から1枚落としたので必ず13枚。破れたら静かに skip せず落とす(#429 / #444)。
+      expect(tiles).toHaveLength(13);
+      const counts = tilesToCount34(tiles);
+
+      const expected = menzenWaitingIndicesByDefinition34(counts);
+      const actual = new Set(
+        waitingTiles(tiles, []).map((t) => tileTo34Index(t)),
+      );
+      if (!setEqualNum(actual, expected)) {
+        waitMismatch += 1;
+        if (samples.length < 8) {
+          samples.push(
+            `waits ${describeHand(tiles)} 本体=${[...actual].sort((x, y) => x - y)} 定義ベース=${[...expected].sort((x, y) => x - y)}`,
+          );
+        }
+      }
+      if (expected.size > 0) tenpaiCount += 1;
+      if (expected.size > 1) multiWaitCount += 1;
+    }
+
+    if (samples.length) console.log(samples.join("\n"));
+    console.log(
+      `[cross] menzen 13-tile hands=${MENZEN_HANDS} tenpai=${tenpaiCount} multiWait=${multiWaitCount} waitMismatch=${waitMismatch}`,
+    );
+    expect(waitMismatch).toBe(0);
+    // 曖昧形(和了形)から1枚落とした手は必ずテンパイなので、下限は構造的に決まる。
+    expect(tenpaiCount).toBeGreaterThanOrEqual(GUARANTEED_AMBIGUOUS);
+    // 多面待ちだけは構造的な下限が引けない(どの1枚を落とすかで待ち数が変わる)。
+    // ここは**経験的な**下限であることを明示しておく。実測 40% 前後に対して 5% は
+    // 8倍の余裕があり、乱数実装や生成比の小変更では割れない。割れたときは
+    // 「corpus が多面待ちを踏まなくなった」というシグナルとして読むこと。
+    expect(multiWaitCount).toBeGreaterThan(MENZEN_HANDS * 0.05);
+  });
+
+  /**
+   * 乱択 corpus に**特殊形の項を単独で踏む手は出ない**。国士は 0 手
+   * (`randomStructuredHand` は4面子1雀頭から作る)。七対子は `ambiguousSevenPairRun`
+   * 由来で実際に出る(実測 1,239/10,000)が、あれは連続7牌種を各2枚なので
+   * **標準形も同時に成立する**族であり、和了判定の OR は標準形の項だけでも真になる。
+   *
+   * つまり乱択だけでは「標準形が偽・特殊形が真」の状態を一度も評価できない。
+   * 定義ベース側に足した特殊形が空回りしないよう、その状態になる手を
+   * **決め打ちで総当たり**して照合する(各手で標準形が空であることも固定する)。
+   */
+  it("七対子: 相異なる7対子の和了形とその1枚不足を総当たりで照合する", () => {
+    // サンマの牌種が27であることを固定してから件数をリテラルで押さえる。
+    // `SANMA_INDICES_34.length` から導くと self-fulfilling になり、牌種が縮んでも
+    // 総当たりが減ったことを検出できない(国士側と同じ理由)。なお stride 2 は
+    // 牌種数が偶数でも 14 以上なら 7 種は相異なるので、それだけでは守れない。
+    expect(SANMA_INDICES_34).toHaveLength(27);
+    let hands = 0;
+    let tenpaiHands = 0;
+    for (let offset = 0; offset < SANMA_INDICES_34.length; offset += 1) {
+      // 27 牌種から stride 2 で 7 種を選ぶ(相異なることが保証される)。
+      const kinds = Array.from(
+        { length: 7 },
+        (_, k) =>
+          SANMA_INDICES_34[
+            (offset + 2 * k) % SANMA_INDICES_34.length
+          ] as number,
+      );
+      // stride 2 は 27 と互いに素なので 7 種は必ず相異なる。前提を直接固定する。
+      expect(new Set(kinds).size, `offset=${offset}`).toBe(7);
+      const counts = new Array<number>(34).fill(0);
+      for (const index of kinds) counts[index] = 2;
+
+      const tiles14 = count34ToTiles(counts);
+      expect(isSevenPairsByDefinition34(counts), describeHand(tiles14)).toBe(
+        true,
+      );
+      expect(isCompleteHand(tiles14, []), describeHand(tiles14)).toBe(true);
+      // このブロックの価値は「**標準形が成立しない**手で七対子の項だけを踏む」ことに
+      // ある(和了判定の OR の七対子項を単独で固定できる唯一の場所)。stride 2 で
+      // 数牌が隣接しないという前提が崩れると標準形が成立し、`isCompleteHand` は
+      // true のままなのに七対子の寄与が静かに消える。前提そのものを固定する。
+      expect(
+        standardFormsByDefinition34(counts, MENZEN_GROUPS).size,
+        describeHand(tiles14),
+      ).toBe(0);
+
+      // 1枚落とすと七対子テンパイ(その牌の単騎待ち)。標準形の待ちが加わることも
+      // あるので、集合そのものを本体と突き合わせる。
+      for (const dropped of kinds) {
+        counts[dropped] = 1;
+        const tiles13 = count34ToTiles(counts);
+        const expectedWaits = menzenWaitingIndicesByDefinition34(counts);
+        const actualWaits = new Set(
+          waitingTiles(tiles13, []).map((t) => tileTo34Index(t)),
+        );
+        expect(expectedWaits.has(dropped), describeHand(tiles13)).toBe(true);
+        expect(
+          setEqualNum(actualWaits, expectedWaits),
+          `${describeHand(tiles13)} 本体=${[...actualWaits].sort((x, y) => x - y)} 定義ベース=${[...expectedWaits].sort((x, y) => x - y)}`,
+        ).toBe(true);
+        tenpaiHands += 1;
+        counts[dropped] = 2;
+      }
+      // 件数のカウントはループ本体の**最後**で行う。先頭で数えると「途中に
+      // `continue` が入って照合を飛ばしても件数だけは合う」状態になり、
+      // 下の件数固定がただのトートロジーに退化するため。
+      hands += 1;
+    }
+    // 総当たり件数をリテラルで固定(牌種が縮んだら落ちる / 上の toHaveLength と対で機能)。
+    expect(hands).toBe(27);
+    expect(tenpaiHands).toBe(27 * 7);
+  });
+
+  it("国士無双: 雀頭13通りの和了形と、単騎・十三面のテンパイを照合する", () => {
+    const orphans = TERMINAL_AND_HONOR_INDICES_34;
+    // 么九が13種であることと総当たり件数を固定する(七対子側と対称)。
+    // これが無いと `TERMINAL_AND_HONOR_INDICES_34` が縮んでも静かに緑のまま通る。
+    expect(orphans).toHaveLength(13);
+    let hands = 0;
+    let tenpaiHands = 0;
+    for (const doubled of orphans) {
+      const counts = new Array<number>(34).fill(0);
+      for (const index of orphans) counts[index] = index === doubled ? 2 : 1;
+      const tiles14 = count34ToTiles(counts);
+      expect(
+        isThirteenOrphansByDefinition34(counts),
+        describeHand(tiles14),
+      ).toBe(true);
+      expect(isCompleteHand(tiles14, []), describeHand(tiles14)).toBe(true);
+      // 七対子側と同じ理由。么九は隣接しないうえ雀頭以外は1枚ずつなので順子も刻子も
+      // 組めず、標準形は成立しない。国士の項を単独で固定できる前提を明示する。
+      expect(
+        standardFormsByDefinition34(counts, MENZEN_GROUPS).size,
+        describeHand(tiles14),
+      ).toBe(0);
+
+      // 雀頭の1枚を落とすと単騎待ち、他の1種を落とすとその牌の待ち。
+      for (const dropped of orphans) {
+        counts[dropped] -= 1;
+        const tiles13 = count34ToTiles(counts);
+        const expectedWaits = menzenWaitingIndicesByDefinition34(counts);
+        const actualWaits = new Set(
+          waitingTiles(tiles13, []).map((t) => tileTo34Index(t)),
+        );
+        expect(expectedWaits.has(dropped), describeHand(tiles13)).toBe(true);
+        expect(
+          setEqualNum(actualWaits, expectedWaits),
+          `${describeHand(tiles13)} 本体=${[...actualWaits].sort((x, y) => x - y)} 定義ベース=${[...expectedWaits].sort((x, y) => x - y)}`,
+        ).toBe(true);
+        tenpaiHands += 1;
+        counts[dropped] += 1;
+      }
+      // 七対子側と同じく、件数はループ本体の最後で数える(トートロジー化を避ける)。
+      hands += 1;
+    }
+    expect(hands).toBe(13);
+    expect(tenpaiHands).toBe(13 * 13);
+
+    // 么九13種を1枚ずつ(13枚)= 十三面待ち。本体とも突き合わせる。
+    const thirteenSided = new Array<number>(34).fill(0);
+    for (const index of orphans) thirteenSided[index] = 1;
+    const sortedOrphans = [...orphans].sort((a, b) => a - b);
+    expect(
+      [...menzenWaitingIndicesByDefinition34(thirteenSided)].sort(
+        (a, b) => a - b,
+      ),
+    ).toEqual(sortedOrphans);
+    expect(
+      waitingTiles(count34ToTiles(thirteenSided), [])
+        .map(tileTo34Index)
+        .sort((a, b) => a - b),
+    ).toEqual(sortedOrphans);
+  });
+
+  /**
+   * 七対子と標準形が**同時に**成立する手(`11223344556677p` 型)。
+   *
+   * 乱択側にも `randomAmbiguousMenzenHand` 経由でこの族が入っているが、期待値を
+   * 名指しで固定するのはここだけ。上の総当たりは 27 牌種を stride 2 で拾うため
+   * 数牌が隣接せず、標準形は一度も成立しない。つまり 14枚の
+   * `oracleForms.size > 0 || isSevenPairs… || isThirteenOrphans…` という OR が、
+   * **両辺同時に真**の状態で一度も評価されていない。ここで踏んでおく。
+   *
+   * ⚠️ 13枚の待ちについては、この手を足しても「和」そのものは固定できない。
+   * 標準形テンパイと七対子テンパイが同時に成立する手では、七対子の単騎は
+   * **必ず標準形の待ちに含まれる**ため(6対子+1単騎の 13 枚 C(27,7)×7 通りを
+   * 総当たりして反例 0 を確認済み)、七対子項は何も足さないからである。
+   * 七対子項の寄与は上の stride-2 総当たり(標準形が空になる手)が固定している。
+   */
+  it("七対子かつ標準形の手で、和了判定と待ちの合成が本体と一致する", () => {
+    const tiles14 = parseTiles("11223344556677p");
+    const counts14 = tilesToCount34(tiles14);
+    const forms = standardFormsByDefinition34(counts14, MENZEN_GROUPS);
+    // 両辺が同時に非空であること自体を固定する(片方だけになったら空回り)。
+    expect(isSevenPairsByDefinition34(counts14)).toBe(true);
+    expect(forms.size).toBeGreaterThan(0);
+    expect(isCompleteHand(tiles14, [])).toBe(true);
+    expect(
+      new Set(
+        decomposeStandard(tiles14, []).map((f) =>
+          formSignature(f.melds, f.pair),
+        ),
+      ),
+    ).toEqual(forms);
+
+    // 13枚: 標準形の三面張(1p/4p/7p)と七対子の単騎(7p)。上のとおり七対子の単騎は
+    // 標準形の待ちに含まれるので、和は標準形の三面張と一致する。
+    const tiles13 = parseTiles("1122334455667p");
+    const counts13 = tilesToCount34(tiles13);
+    const expectedWaits = menzenWaitingIndicesByDefinition34(counts13);
+    expect([...expectedWaits].sort((a, b) => a - b)).toEqual(
+      parseTiles("1p 4p 7p")
+        .map(tileTo34Index)
+        .sort((a, b) => a - b),
+    );
+    expect(
+      new Set(waitingTiles(tiles13, []).map((t) => tileTo34Index(t))),
+    ).toEqual(expectedWaits);
+
+    // 対照1: 么九だらけでも国士でも七対子でもない13枚は待ちが空(特殊形の偽陽性固定)。
+    const notSpecial = parseTiles("111m 999p 19s 12345z");
+    expect(
+      menzenWaitingIndicesByDefinition34(tilesToCount34(notSpecial)).size,
+    ).toBe(0);
+    expect(waitingTiles(notSpecial, [])).toEqual([]);
+
+    // 対照2: 4枚使いを含む「6種」は七対子にならない。オラクル側だけでなく
+    // 本体(`decomposeSevenPairs`)とも突き合わせる。`isCompleteHand` は和なので、
+    // 七対子の否定を名指しで固定するには本体の分解関数を直接呼ぶ必要がある。
+    const fourCopies = parseTiles("1111p 33p 55p 77p 99p 22s");
+    expect(isSevenPairsByDefinition34(tilesToCount34(fourCopies))).toBe(false);
+    expect(decomposeSevenPairs(fourCopies, [])).toBeNull();
+    expect(isCompleteHand(fourCopies, [])).toBe(false);
   });
 });
 
