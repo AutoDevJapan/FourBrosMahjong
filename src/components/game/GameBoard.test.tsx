@@ -200,6 +200,31 @@ describe("GameBoard (spec 6.6 client island / engine-driven)", () => {
     await user.keyboard("{Escape}");
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   });
+
+  it("トリガー到達不能時の復帰先(盤面ルート)はロールとアクセシブル名を持つ(スペック5 5.2.2 / #405)", async () => {
+    const user = userEvent.setup();
+    renderBoard();
+
+    const opener = screen.getByRole("button", { name: "全体盤面" });
+    await user.click(opener);
+    expect(
+      screen.getByRole("dialog", { name: "全体盤面" }),
+    ).toBeInTheDocument();
+
+    // 卓幅が 360px 以上へ変わり、トリガーがコンテナクエリの display:none で隠れた状態
+    // (#377)を模す。jsdom はコンテナクエリを評価せず、インラインの display:none でも
+    // focus() を no-op にしないため、到達不能の代替として disabled を直接立てる
+    // (Modal.test.tsx のハーネスと同じ置き換え)。この属性は GameBoard が JSX で
+    // 与えていないため、以降の再描画で React に上書きされない。
+    opener.setAttribute("disabled", "");
+    await user.keyboard("{Escape}");
+
+    // 着地点はモーダルが補完していた領域のルート = 盤面ルート。素の <div> のままだと
+    // フォーカスリングは出てもスクリーンリーダへ移動先が伝わらないため、名前を要求する。
+    const boardRoot = screen.getByRole("group", { name: "対局盤面" });
+    expect(boardRoot).toHaveFocus();
+    expect(boardRoot).toHaveAttribute("tabindex", "-1");
+  });
 });
 
 describe("GameBoard 打牌フェーズ外の自家手牌(#257)", () => {

@@ -486,6 +486,13 @@ export default function GameBoard() {
       ref={boardRootRef}
       // モーダルの最終復帰先として focus() できるようにするだけで、タブ順には入れない。
       tabIndex={-1}
+      // 素の <div> はロールもアクセシブル名も持たないため、ここへプログラム的に
+      // フォーカスが移ってもスクリーンリーダには「どこへ移ったか」が伝わらない。
+      // 着地点として名前を持たせる(スペック5 5.2.2 / #405)。
+      // landmark(region)にしないのは、この要素が /game の <main> と範囲がほぼ 1:1 で
+      // 重なり、ランドマーク一覧に同じ範囲が二重に並ぶだけになるため。
+      role="group"
+      aria-label="対局盤面"
       className="@container w-full"
       data-phase={phase}
       data-pending={pending?.kind ?? "none"}

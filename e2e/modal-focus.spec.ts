@@ -72,5 +72,8 @@ test.describe("復帰先が到達不能なときの連鎖(#377)", () => {
     await expect(dialog).toBeHidden();
     // <body> へ落とさず、モーダルが補完していた領域のルートへ復帰する。
     await expect(page.locator("[data-phase]").first()).toBeFocused();
+    // その着地点はロールとアクセシブル名を持ち、実ブラウザのアクセシビリティツリー上でも
+    // 「対局盤面へ移った」と読み上げられる(スペック5 5.2.2 / #405)。
+    await expect(page.getByRole("group", { name: "対局盤面" })).toBeFocused();
   });
 });
