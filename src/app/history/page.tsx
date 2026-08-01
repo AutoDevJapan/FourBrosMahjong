@@ -28,21 +28,23 @@ export const metadata: Metadata = {
 
 export default function HistoryPage() {
   return (
-    <div className="mx-auto flex min-h-screen w-full max-w-3xl flex-col gap-6 p-4 sm:p-6">
-      <header className="flex flex-col gap-3">
-        <Link
-          href="/"
-          className="inline-flex w-fit items-center gap-1 rounded-md text-sm text-foreground/70 underline-offset-4 hover:underline"
-        >
-          <span aria-hidden="true">←</span> ロビーへ戻る
-        </Link>
-        <h1 className="text-xl font-bold sm:text-2xl">戦績</h1>
-        <p className="text-sm/6 text-foreground/70">
-          半荘が終了するたびに、最終順位とソシー内訳(素点+ウマ+祝儀)がこの端末に自動で保存されます。
-        </p>
-      </header>
+    <div className="mx-auto flex min-h-screen w-full max-w-3xl flex-col p-4 sm:p-6">
+      {/* ページヘッダーは <main> の内側に置く(スペック5 5.2.6)。外に出すと <header> が
+          banner ランドマークになり、ルートごとにランドマーク構成が割れる(#431)。 */}
+      <main className="flex flex-col gap-6">
+        <header className="flex flex-col gap-3">
+          <Link
+            href="/"
+            className="inline-flex w-fit items-center gap-1 rounded-md text-sm text-foreground/70 underline-offset-4 hover:underline"
+          >
+            <span aria-hidden="true">←</span> ロビーへ戻る
+          </Link>
+          <h1 className="text-xl font-bold sm:text-2xl">戦績</h1>
+          <p className="text-sm/6 text-foreground/70">
+            半荘が終了するたびに、最終順位とソシー内訳(素点+ウマ+祝儀)がこの端末に自動で保存されます。
+          </p>
+        </header>
 
-      <main>
         <MatchHistoryList />
       </main>
     </div>

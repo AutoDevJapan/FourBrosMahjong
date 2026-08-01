@@ -159,7 +159,7 @@ test.describe("自動 a11y 監査(axe-core)", () => {
    * ここへ効かせたくなった場合は、除外ではなく構造側を直すこと。
    */
   for (const screen of LANDMARK_SCREENS) {
-    test(`${screen.name}(${screen.path})は本文が単一の <main> に収まる(#409)`, async ({
+    test(`${screen.name}(${screen.path})は本文が単一の <main> に収まり <h1> を内側に持つ(#409 / #431)`, async ({
       page,
     }) => {
       await openScreen(page, screen, "ライト");
@@ -168,6 +168,18 @@ test.describe("自動 a11y 監査(axe-core)", () => {
       // このロケータは `<div role="main">` を数えないため、`role` 属性だけで代替した形は
       // ここが 0 件で落ちる(axe の 3 ルールはその形を通してしまう)。
       await expect(page.locator("main")).toHaveCount(1);
+
+      // ページヘッダー(`<h1>` を含む)は `<main>` の内側(spec 5.2.6 / #431)。外へ出すと
+      // `<header>` が banner ランドマークになり、ルートごとにランドマーク構成が割れる。
+      // axe の `region` は banner も「ランドマークに属する」と認めるため、この規約は
+      // `LANDMARK_RULES` では強制できない(#409 の時点で内外が割れていた理由)。
+      //
+      // 主ゲートは `src/test/a11y-heading-placement.test.tsx`(全ルート + 404 を jsdom で
+      // 数秒で回す)。ここは実ブラウザのロール計算で `<header>` → banner の実マッピングを
+      // 裏取りする役目に絞る。
+      await expect(page.locator("h1")).toHaveCount(1);
+      await expect(page.locator("main h1")).toHaveCount(1);
+      await expect(page.getByRole("banner")).toHaveCount(0);
 
       const results = await new AxeBuilder({ page })
         .withRules([...LANDMARK_RULES])
