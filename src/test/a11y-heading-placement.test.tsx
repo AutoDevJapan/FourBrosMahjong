@@ -64,13 +64,18 @@ const BANNER_SUPPRESSING_ANCESTORS = "article, aside, main, nav, section";
 
 /** `root` 配下で banner ランドマークとして公開される要素を列挙する。 */
 function bannerLandmarks(root: ParentNode): Element[] {
-  const explicit = [...root.querySelectorAll('[role="banner"]')];
-  const implicit = [...root.querySelectorAll("header")].filter(
-    // 明示 `role` があれば暗黙ロールは上書きされる(上の explicit 側で拾う)。
-    (header) =>
-      !header.hasAttribute("role") &&
-      header.parentElement?.closest(BANNER_SUPPRESSING_ANCESTORS) == null,
-  );
+  // `role` はトークンリスト(`role="banner navigation"` のような並記が許される)なので
+  // `[role~=]` で 1 トークンとして照合する。`[role=]` だと並記された banner を取り逃がす。
+  const explicit = [...root.querySelectorAll('[role~="banner"]')];
+  const implicit = [...root.querySelectorAll("header")].filter((header) => {
+    // 明示 `role` があれば暗黙ロールは上書きされる(上の explicit 側で拾う)。空文字や
+    // 空白だけの `role` は「指定なし」と同じ扱いで、暗黙ロールが残る。
+    const explicitRole = header.getAttribute("role")?.trim() ?? "";
+    return (
+      explicitRole === "" &&
+      header.parentElement?.closest(BANNER_SUPPRESSING_ANCESTORS) == null
+    );
+  });
   return [...explicit, ...implicit];
 }
 
