@@ -108,6 +108,13 @@ function playAggressive(seed: number, tally: ActionTally): EngineState {
   return s;
 }
 
+/**
+ * リーチ局面探索で走査する seed 数(#450)。配牌が既にテンパイに届いている確率は
+ * 低く、現行エンジンではこの範囲に `canRiichi` が 7 局面(うち宣言後も続行するのが
+ * 4 局面)現れる。1 seed あたり配牌 1 回分しか消費しないので全走査でも約 1.5s。
+ */
+const RIICHI_SCAN_SEEDS = 3000;
+
 describe("engine: 鳴き・リーチ・裏ドラ・一発(#97)", () => {
   it("全公開アクションを走らせても半荘は完走し、供託込みでゼロサムを保つ", () => {
     const tally: ActionTally = {
@@ -141,49 +148,68 @@ describe("engine: 鳴き・リーチ・裏ドラ・一発(#97)", () => {
     expect(tally.pon + tally.riichi).toBeGreaterThan(0);
   });
 
-  // #98 で他家 AI が手牌効率ベースになり全局シミュレーションが重くなったため、
-  // 多シード走査で合法リーチ局面を探す本テストは既定 5s では収まらない。検証内容は
-  // 不変なので明示的にタイムアウトを延長する(assert は据え置き)。
+  /**
+   * リーチ宣言の事後条件(供託 +1,000 / 自家 -1,000 / リーチフラグ)を、エンジンが
+   * 実際に提示した `canRiichi` に対してのみ検証する。宣言と同時に局が決着した場合は
+   * 事後条件を観測できないので対象外とし、別 seed で拾う。
+   *
+   * 走査コストの設計(#450)。旧実装は seed ごとに半荘を最後まで回してリーチ機会を
+   * 探していた。しかし自家はツモ切りしか行わないため門前 13 枚は配牌のまま変わらず、
+   * リーチ機会は実質「配牌の引き」で決まる。つまり新しい配牌を得ること以外に価値の
+   * 無い AI 対局を丸ごと回しており、53 seed(約 300 配牌)で 10.2s、フルスイート
+   * 並列下では 12.1s を 1 テストで消費していた。unit プロジェクトの `testTimeout`
+   * 30s の 4 割を占めるため CPU 競合に耐えられず、負荷を掛けた再現実行では 58.7s
+   * まで伸びて timeout している(同期ループなので時間切れでも中断されず、超過分だけ
+   * ファイル全体が待たされる)。
+   *
+   * そこで各 seed は自家の最初の打牌局面だけを見て次の seed へ進む。1 seed あたりの
+   * 費用が「半荘 1 回」から「配牌 1 回」に下がり、early-exit 無しで seed を全走査
+   * しても 10.2s → 1.5s(単体実行・実測)に収まる。当たり seed で打ち切らないため、
+   * エンジン変更で当たり位置が動いても実行時間は変わらない。現行エンジンではこの
+   * 範囲で 7 局面が `canRiichi` を提示し、うち 4 局面が宣言後も局を続行する。
+   */
   it("リーチ宣言で 1,000 点が供託され、リーチ・一発フラグが立つ", () => {
-    // ツモ切りで進めて自家がリーチ可能になった局面で宣言し、その宣言巡でまだ局が
-    // 続く(AI 和了/流局で局が終わらない)ケースを探して純粋な事後条件を検証する。
-    let verified = false;
-    for (let seed = 1; seed <= 300 && !verified; seed++) {
+    // 自家の最初の打牌待ちに到達するまでに挟まるのは他家の打牌(humanReact)だけで、
+    // サンマなので高々 2 回。天和/地和で局が即決着する場合は phase 条件で抜ける。
+    const REACT_GUARD = 8;
+    let verified = 0;
+    for (let seed = 1; seed <= RIICHI_SCAN_SEEDS; seed++) {
       let s = createGame({ seed });
-      for (let guard = 0; guard < 600 && s.phase !== "gameEnd"; guard++) {
-        if (s.phase === "roundEnd") {
-          s = proceedToNextRound(s);
+      for (
+        let guard = 0;
+        guard < REACT_GUARD && s.phase === "playing";
+        guard++
+      ) {
+        const pending = s.pending;
+        if (pending?.kind === "humanReact") {
+          s = passRon(s);
           continue;
         }
-        const pending = s.pending;
-        if (pending?.kind === "humanDiscard") {
-          const hand = s.hand;
-          if (hand === null) break;
-          const seat = seatOfPlayer(hand.seating, "p0");
-          if (seat === null) break;
-          if (pending.canRiichi) {
-            const before = s.points.p0;
-            const beforeSticks = s.riichiSticks;
-            const after = declareRiichi(s, pending.riichiTiles[0]);
-            // 宣言と同時に局が決着(AI 和了/流局)した場合は別 seed で再検証する。
-            if (after.phase !== "playing" || after.hand === null) break;
-            expect(after.riichiSticks).toBe(beforeSticks + 1);
-            expect(after.points.p0).toBe(before - 1000);
-            expect(after.hand.riichi[seat]).toBe(true);
-            verified = true;
-            break;
+        if (pending?.kind !== "humanDiscard") break;
+        const hand = s.hand;
+        if (hand === null) break;
+        const seat = seatOfPlayer(hand.seating, "p0");
+        if (seat === null) break;
+        if (pending.canRiichi) {
+          const before = s.points.p0;
+          const beforeSticks = s.riichiSticks;
+          const after = declareRiichi(s, pending.riichiTiles[0]);
+          // 宣言と同時に局が決着(AI 和了/流局)した局面は事後条件を観測できない。
+          if (after.phase === "playing" && after.hand !== null) {
+            expect(after.riichiSticks, `seed=${seed}`).toBe(beforeSticks + 1);
+            expect(after.points.p0, `seed=${seed}`).toBe(before - 1000);
+            expect(after.hand.riichi[seat], `seed=${seed}`).toBe(true);
+            verified += 1;
           }
-          const tile = hand.drawn ?? hand.hands[seat][0];
-          s = discard(s, tile);
-        } else if (pending?.kind === "humanReact") {
-          s = passRon(s);
-        } else {
-          break;
         }
+        break; // この seed の判定は自家の最初の打牌局面で完結する。
       }
     }
-    expect(verified).toBe(true);
-  }, 30000);
+    expect(
+      verified,
+      `走査範囲(seed 1..${RIICHI_SCAN_SEEDS})に検証可能なリーチ局面が無い`,
+    ).toBeGreaterThan(0);
+  });
 
   it("ポン宣言で明刻が晒され、門前手牌が2枚減り手番が自家に移る", () => {
     // 自家が他家打牌にポンできる humanReact を探索する。
