@@ -109,9 +109,20 @@ function playAggressive(seed: number, tally: ActionTally): EngineState {
 }
 
 /**
- * リーチ局面探索で走査する seed 数(#450)。配牌が既にテンパイに届いている確率は
- * 低く、現行エンジンではこの範囲に `canRiichi` が 7 局面(うち宣言後も続行するのが
- * 4 局面)現れる。1 seed あたり配牌 1 回分しか消費しないので全走査でも約 1.5s。
+ * リーチ局面探索で走査する seed 数(#450)。
+ *
+ * 配牌が既にテンパイへ届いている確率は低いので、検証可能な局面を十分な余裕をもって
+ * 拾える範囲まで広げる必要がある(実測)。
+ *
+ * | 走査範囲 | `canRiichi` 提示 | うち検証可能(宣言後も局が続く) |
+ * | --- | --- | --- |
+ * | 1..1000 | 2 局面 | **1 局面** |
+ * | 1..2000 | 5 局面 | 2 局面 |
+ * | 1..3000 | 7 局面 | **4 局面** |
+ *
+ * 1,000 では検証可能局面が 1 件しかなく、エンジン変更でそれが消えると走査が空振りして
+ * 赤くなる。3,000 まで広げて 4 件の余裕を確保する。1 seed あたり配牌 1 回分しか
+ * 消費しないため、実行時間は seed 数に線形で全走査でも約 1.5s に収まる。
  */
 const RIICHI_SCAN_SEEDS = 3000;
 
@@ -150,64 +161,76 @@ describe("engine: 鳴き・リーチ・裏ドラ・一発(#97)", () => {
 
   /**
    * リーチ宣言の事後条件(供託 +1,000 / 自家 -1,000 / リーチフラグ)を、エンジンが
-   * 実際に提示した `canRiichi` に対してのみ検証する。宣言と同時に局が決着した場合は
-   * 事後条件を観測できないので対象外とし、別 seed で拾う。
+   * 実際に提示した `canRiichi` に対してのみ検証する。
    *
-   * 走査コストの設計(#450)。旧実装は seed ごとに半荘を最後まで回してリーチ機会を
-   * 探していた。しかし自家はツモ切りしか行わないため門前 13 枚は配牌のまま変わらず、
-   * リーチ機会は実質「配牌の引き」で決まる。つまり新しい配牌を得ること以外に価値の
-   * 無い AI 対局を丸ごと回しており、53 seed(約 300 配牌)で 10.2s、フルスイート
-   * 並列下では 12.1s を 1 テストで消費していた。unit プロジェクトの `testTimeout`
-   * 30s の 4 割を占めるため CPU 競合に耐えられず、負荷を掛けた再現実行では 58.7s
-   * まで伸びて timeout している(同期ループなので時間切れでも中断されず、超過分だけ
-   * ファイル全体が待たされる)。
+   * **走査単位は「半荘」ではなく「配牌」**(#450)。自家はツモ切りしか行わないので
+   * 門前 13 枚は配牌のまま変わらず、リーチ機会は実質「配牌の引き」で決まる。よって
+   * 同じ局を回し続けるより新しい seed を引く方が同じ当たりを桁違いに安く探せる。
+   * 各 seed は自家の最初の打牌局面だけを見て次の seed へ進む。
    *
-   * そこで各 seed は自家の最初の打牌局面だけを見て次の seed へ進む。1 seed あたりの
-   * 費用が「半荘 1 回」から「配牌 1 回」に下がり、early-exit 無しで seed を全走査
-   * しても 10.2s → 1.5s(単体実行・実測)に収まる。当たり seed で打ち切らないため、
-   * エンジン変更で当たり位置が動いても実行時間は変わらない。現行エンジンではこの
-   * 範囲で 7 局面が `canRiichi` を提示し、うち 4 局面が宣言後も局を続行する。
+   * **当たり seed で打ち切らない**。`RIICHI_SCAN_SEEDS` を常に全走査するため、
+   * エンジン変更で当たり位置が動いても実行時間が変わらない(実行時間が当たりの位置に
+   * 依存すると、それ自体が flaky の再発経路になる)。
+   *
+   * 検証できる範囲の限界も明示しておく。`createGame` は起家を p0 に固定するため、
+   * ここで捕まえられるのは常に**東1局・自家の第一打**であり、`beforeSticks` は必ず 0
+   * になる。つまり「供託が 0 から 1 になる」ことしか見ていない。**0 以外を起点とした
+   * 増分**(加算ではなく代入にする類の退行)は本ファイル冒頭のゼロサムテストと
+   * `engine.pot-invariant.test.ts` の保存則が捕まえる(欠陥注入で両者が赤になることを
+   * 確認済み)。
    */
-  it("リーチ宣言で 1,000 点が供託され、リーチ・一発フラグが立つ", () => {
-    // 自家の最初の打牌待ちに到達するまでに挟まるのは他家の打牌(humanReact)だけで、
-    // サンマなので高々 2 回。天和/地和で局が即決着する場合は phase 条件で抜ける。
-    const REACT_GUARD = 8;
+  it("リーチ宣言で 1,000 点が供託され、リーチフラグが立つ", () => {
+    let offered = 0;
     let verified = 0;
     for (let seed = 1; seed <= RIICHI_SCAN_SEEDS; seed++) {
-      let s = createGame({ seed });
-      for (
-        let guard = 0;
-        guard < REACT_GUARD && s.phase === "playing";
-        guard++
-      ) {
-        const pending = s.pending;
-        if (pending?.kind === "humanReact") {
-          s = passRon(s);
-          continue;
-        }
-        if (pending?.kind !== "humanDiscard") break;
-        const hand = s.hand;
-        if (hand === null) break;
-        const seat = seatOfPlayer(hand.seating, "p0");
-        if (seat === null) break;
-        if (pending.canRiichi) {
-          const before = s.points.p0;
-          const beforeSticks = s.riichiSticks;
-          const after = declareRiichi(s, pending.riichiTiles[0]);
-          // 宣言と同時に局が決着(AI 和了/流局)した局面は事後条件を観測できない。
-          if (after.phase === "playing" && after.hand !== null) {
-            expect(after.riichiSticks, `seed=${seed}`).toBe(beforeSticks + 1);
-            expect(after.points.p0, `seed=${seed}`).toBe(before - 1000);
-            expect(after.hand.riichi[seat], `seed=${seed}`).toBe(true);
-            verified += 1;
-          }
-        }
-        break; // この seed の判定は自家の最初の打牌局面で完結する。
-      }
+      const s = createGame({ seed });
+      // `createGame` は起家を p0 に固定する(engine.ts の `createInitialRound`)ため、
+      // 初手は必ず自家の打牌待ちになり、他家の打牌(humanReact)が先行することはない。
+      const pending = s.pending;
+      if (s.phase !== "playing" || pending?.kind !== "humanDiscard") continue;
+      if (!pending.canRiichi) continue;
+      offered += 1;
+
+      const hand = s.hand;
+      if (hand === null) continue;
+      const seat = seatOfPlayer(hand.seating, "p0");
+      if (seat === null) continue;
+      const before = s.points.p0;
+      const beforeSticks = s.riichiSticks;
+      // `declareRiichi` は入力の `hand` を破壊的に更新する(#453)ため、比較用の値は
+      // 呼び出し**前**に複製しておく必要がある。
+      const beforeRiichi = { ...hand.riichi };
+
+      const after = declareRiichi(s, pending.riichiTiles[0]);
+      // 宣言後に局が終了した局面(AI 和了/流局)は事後条件を観測できない。
+      if (after.phase !== "playing") continue;
+      const afterHand = after.hand;
+      if (afterHand === null) continue;
+
+      // `declareRiichi` は最後に `pump` するので、`after` は宣言直後の状態とは限らず
+      // リーチ後の自動ツモ切りで数巡進んでいることがある(実測: seed=782 で自家の河が
+      // 12 枚まで進む)。その区間で他家もリーチすると供託の増分が +1 にならないため、
+      // その局面は検証対象から外す(ADR-0002 の AI 方策変更で赤くならないようにする)。
+      const seatKeys = Object.keys(
+        beforeRiichi,
+      ) as (keyof typeof beforeRiichi)[];
+      const otherSeatDeclared = seatKeys.some(
+        (k) => k !== seat && afterHand.riichi[k] && !beforeRiichi[k],
+      );
+      if (otherSeatDeclared) continue;
+
+      expect(after.riichiSticks, `seed=${seed}`).toBe(beforeSticks + 1);
+      expect(after.points.p0, `seed=${seed}`).toBe(before - 1000);
+      // #453 のとおり `afterHand` は入力と同一オブジェクトなので、これは「返り値が
+      // 新しい状態か」ではなく「フラグが立ったか」の検査(未設定の退行は検出できる)。
+      expect(afterHand.riichi[seat], `seed=${seed}`).toBe(true);
+      verified += 1;
     }
+    // 空振り(エンジンがリーチを提示しなくなった / 提示しても常に局が終わる)を
+    // 区別できるよう、両方の件数を残す。現行エンジンでは 7 件提示 / 4 件検証。
     expect(
       verified,
-      `走査範囲(seed 1..${RIICHI_SCAN_SEEDS})に検証可能なリーチ局面が無い`,
+      `走査範囲(seed 1..${RIICHI_SCAN_SEEDS})で canRiichi 提示 ${offered} 件・検証可能 ${verified} 件`,
     ).toBeGreaterThan(0);
   });
 
