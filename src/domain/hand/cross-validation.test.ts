@@ -114,6 +114,9 @@ describe("クロス検証: 向聴数(ai.shanten ⇔ オラクル)", () => {
     for (let i = 0; i < RANDOM_HANDS; i += 1) {
       const size = rng() < 0.5 ? 13 : 14;
       const tiles = randomHand(rng, size);
+      // `shanten()` もオラクルも枚数を問わず受け付けるので、欠けても不一致にならず
+      // 静かに素通りする。ジェネレータの契約はここでも落とす(#444)。
+      expect(tiles, `i=${i}`).toHaveLength(size);
       const a = shanten(tiles);
       const o = shantenOracle34(tilesToCount34(tiles));
       if (a !== o) {
@@ -159,6 +162,9 @@ describe("クロス検証: 受け入れ候補枝刈り(#368)", () => {
     const rng = makeRng(0x3680_0001);
     for (let i = 0; i < UKEIRE_HANDS; i += 1) {
       const tiles = rng() < 0.5 ? randomHand(rng, 13) : structured13(rng);
+      // `structured13` 側は helper 内で 14 → 13 を固定しているが、`randomHand` 側は
+      // ここでしか押さえられない(#444)。
+      expect(tiles, `i=${i}`).toHaveLength(13);
       const counts = tilesToCount34(tiles);
       const base = shantenOracle34(counts);
       let kinds = 0;
@@ -337,6 +343,7 @@ describe("列挙非依存の定義ベース向聴オラクルとの照合 (#392)
     const mismatches: string[] = [];
     for (let i = 0; i < samples; i++) {
       const tiles = randomHand(rng, 13 - 3 * meldCount);
+      expect(tiles, `i=${i}`).toHaveLength(13 - 3 * meldCount);
       const actual = shanten(tiles, meldCount);
       const expected = shantenByDefinition34(tilesToCount34(tiles), meldCount);
       if (actual !== expected) {
@@ -364,6 +371,16 @@ describe("列挙非依存の定義ベース向聴オラクルとの照合 (#392)
     expect(() => shantenByDefinition34(new Array(34).fill(0), 0)).toThrow(
       RangeError,
     );
+  });
+
+  it("枚数と meldCount が噛み合わない呼び出しは失敗する(静かにずらさない)", () => {
+    // 向聴は `13 − 3 × meldCount − 重なり` で決まるので、枚数が違う手を受けると
+    // 結果が静かにずれるだけで呼び出し側は気づけない。兄弟の分解・待ちオラクルと
+    // 同じく明示的に落とす(#444)。
+    const fourTiles = tilesToCount34(parseTiles("123p 9s")); // meldCount=3 の正しい枚数
+    expect(shantenByDefinition34(fourTiles, 3)).toBe(0);
+    expect(() => shantenByDefinition34(fourTiles, 2)).toThrow(RangeError);
+    expect(() => shantenByDefinition34(fourTiles, 1)).toThrow(RangeError);
   });
 });
 

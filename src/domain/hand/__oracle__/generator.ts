@@ -58,6 +58,12 @@ function randInt(rng: () => number, n: number): number {
  */
 export const PLACEMENT_TRIES = 20;
 
+/**
+ * 手牌全体を組み直す試行回数の上限({@link PLACEMENT_TRIES} が「1牌の置き場所」なのに対し、
+ * こちらは「1手ぶんの組み立て」の再試行)。使い切った場合は決め打ちのフォールバックを返す。
+ */
+const REBUILD_ATTEMPTS = 200;
+
 /** 34-index → ドメイン `Tile`(5筒/5索は赤)。 */
 function indexToTile(idx: number): Tile {
   const { suit, rank } = index34ToKind(idx);
@@ -101,8 +107,13 @@ export function randomHand(rng: () => number, size: number): Tile[] {
   return wall.slice(0, size).map(indexToTile);
 }
 
-/** 順子開始として妥当な 34-index(pin/sou の 1..7 始まり。サンマで萬子順子は無い)。 */
-const SEQUENCE_STARTS: readonly number[] = [
+/**
+ * 順子開始として妥当な 34-index(pin/sou の 1..7 始まり。サンマで萬子順子は無い)。
+ *
+ * `generator.test.ts` の台本 RNG が「何番目の順子を引かせるか」を要素数から逆算するため
+ * export している(`PLACEMENT_TRIES` と同じくテスト専用の公開)。
+ */
+export const SEQUENCE_STARTS: readonly number[] = [
   9,
   10,
   11,
@@ -124,7 +135,7 @@ const SEQUENCE_STARTS: readonly number[] = [
  * 1牌種4枚を超えないよう配置し、失敗時は最初からやり直す(有界)。
  */
 function buildCompleteCounts(rng: () => number): number[] {
-  for (let attempt = 0; attempt < 200; attempt += 1) {
+  for (let attempt = 0; attempt < REBUILD_ATTEMPTS; attempt += 1) {
     const counts = new Array<number>(34).fill(0);
     let ok = true;
 
@@ -240,7 +251,7 @@ function ambiguousSevenPairRun(rng: () => number): Tile[] {
  */
 export function randomAmbiguousMenzenHand(rng: () => number): Tile[] {
   if (rng() < 0.5) return ambiguousSevenPairRun(rng);
-  for (let attempt = 0; attempt < 200; attempt += 1) {
+  for (let attempt = 0; attempt < REBUILD_ATTEMPTS; attempt += 1) {
     const counts = new Array<number>(34).fill(0);
     const base = rng() < 0.5 ? 9 : 18; // 筒子 / 索子
     const start = base + randInt(rng, 7); // start+2 が同一スート内に収まる
@@ -514,7 +525,7 @@ export function randomMeldedHand(
   const groupsNeeded = 4 - meldCount;
   const fullSize = groupsNeeded * 3 + 2;
 
-  for (let attempt = 0; attempt < 200; attempt += 1) {
+  for (let attempt = 0; attempt < REBUILD_ATTEMPTS; attempt += 1) {
     const used = new Array<number>(34).fill(0);
     const melds = pickMelds(rng, meldCount, used);
     if (melds === null) continue;

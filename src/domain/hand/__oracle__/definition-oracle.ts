@@ -95,6 +95,8 @@ const GROUPS = buildGroups();
  * @param concealed 門前部分のカウント配列。
  * @param meldCount 副露数(1..3)。
  * @returns 向聴数(0 = テンパイ、-1 = 和了)。
+ * @throws {RangeError} `meldCount` が 1..3 でない場合、または `concealed` の枚数が
+ *   `13 − 3 × meldCount` と噛み合わない場合。
  */
 export function shantenByDefinition34(
   concealed: readonly number[],
@@ -107,6 +109,11 @@ export function shantenByDefinition34(
   }
   const groupsNeeded = TOTAL_GROUPS - meldCount;
   const handSize = 13 - 3 * meldCount;
+  // 枚数は `distance = handSize − overlap` の基準そのもの。噛み合わない手を受けると
+  // 向聴が静かにずれるだけで呼び出し側は気づけないので、明示的に落とす(#444)。
+  // 兄弟の `standardFormsByDefinition34` / `waitingIndicesByDefinition34` /
+  // `menzenWaitingIndicesByDefinition34` は既に同じ方針。
+  assertMenzenSize(concealed, handSize);
 
   // 和了形 W を作りながら、手牌との重なりを増分で持つ。
   const work = new Array<number>(COUNT34_LEN).fill(0);

@@ -9,7 +9,7 @@
  * 二段構えで、足す先の探索は {@link PLACEMENT_TRIES} 回で打ち切られる。打ち切り時に
  * 除去を戻し忘れると **13枚の手**が返る。
  *
- * 通常のシードでこの経路に入る確率は約 (3/27)^20 ≈ 1e-20 で、反復回数をいくら増やしても
+ * 通常のシードでこの経路に入る確率は約 (3/27)^20 ≈ 8e-20 で、反復回数をいくら増やしても
  * 踏めない。乱数任せにするとテストは永久に空回りするため、**台本化した RNG** で
  * 打ち切り経路を決定的に踏ませる。
  */
@@ -17,9 +17,13 @@
 import { describe, expect, it } from "vitest";
 import type { Tile } from "../../tiles/tile";
 import { tileNotation } from "../notation";
-import { isCompleteOracle34 } from "./agari-oracle";
 import { SANMA_INDICES_34, tilesToCount34, tileTo34Index } from "./counts34";
-import { makeRng, PLACEMENT_TRIES, randomStructuredHand } from "./generator";
+import {
+  makeRng,
+  PLACEMENT_TRIES,
+  randomStructuredHand,
+  SEQUENCE_STARTS,
+} from "./generator";
 
 /** 34-index(牌種の別名。台本の意図を読めるようにする)。 */
 const INDEX_1P = tileTo34Index({ suit: "pin", rank: 1 });
@@ -32,17 +36,14 @@ function pickSanma(position: number): number {
 }
 
 /**
- * `generator.ts` 内部の `SEQUENCE_STARTS`(筒子 1-7 始まり + 索子 1-7 始まり)の要素数。
- * 非公開なので台本側で持つ。ここがずれると台本は**別の順子**を組ませてしまい、
- * `tailDraws()` の等式だけでは検出できない(打ち切り経路自体は通るため)。
- * 各テストが生成手そのものを {@link HAND_ROLLED_BACK} / {@link HAND_SWAPPED} で
- * 固定しているので、そちらが落ちる。
+ * `SEQUENCE_STARTS[position]` を引かせる乱数値。
+ *
+ * 要素数だけでなく**中身**が変わると台本は別の順子を組ませてしまい、`tailDraws()` の
+ * 等式では検出できない(打ち切り経路自体は通るため)。各テストが生成手そのものを
+ * {@link HAND_ROLLED_BACK} / {@link HAND_SWAPPED} で固定しており、そちらが落ちる。
  */
-const SEQUENCE_STARTS_LEN = 14;
-
-/** `SEQUENCE_STARTS[position]` を引かせる乱数値。 */
 function pickSequenceStart(position: number): number {
-  return (position + 0.5) / SEQUENCE_STARTS_LEN;
+  return (position + 0.5) / SEQUENCE_STARTS.length;
 }
 
 /** 面子の種別を決めるコイン(`rng() < 0.5` で順子)。 */
@@ -52,8 +53,11 @@ const COIN_TRIPLET = 0.6;
 /** 置換回数 = `⌊0.9 * (maxSwaps + 1)⌋`。`maxSwaps = 1` で呼ぶので 1 回。 */
 const SWAPS_ONE = 0.9;
 
-/** 除去牌 = `present[⌊0.9 * 7⌋] = present[6]` = 東(1p 以外を減らすため)。 */
-const REMOVE_EAST = 0.9;
+/** 完成形 `1111p 22p 33p 123s 東東東` に現れる牌種の数(= `present` の長さ)。 */
+const PRESENT_KINDS = 7;
+
+/** 除去牌 = `present` の末尾 = 東(1p 以外を減らすため)。 */
+const REMOVE_EAST = (PRESENT_KINDS - 0.5) / PRESENT_KINDS;
 
 /**
  * `buildCompleteCounts` に `1111p 22p 33p 123s 東東東`(1p が4枚)を組ませ、
@@ -118,8 +122,9 @@ function scriptedRng(
 describe("ジェネレータの枚数契約(randomStructuredHand / #444)", () => {
   it("試行回数の上限が探索を成立させる値である", () => {
     // 下の2テストは `tailDraws()` が 1(成功)と `PLACEMENT_TRIES`(打ち切り)に
-    // 分かれることを前提にしている。上限が 0/1 だと両者が潰れて区別できなくなり、
-    // 「探索ループが死んでいる」状態を全テストが緑で通してしまう。
+    // 分かれることを前提にしている。上限が 1 だと両者が 1 に潰れて区別できなくなり、
+    // 「探索ループが死んでいる」状態を残り3テストが緑で通してしまう。
+    // (0 なら成功経路が `tailDraws() === 1` で別途落ちるが、1 はここでしか捕まらない。)
     expect(PLACEMENT_TRIES).toBeGreaterThan(1);
   });
 
@@ -143,7 +148,6 @@ describe("ジェネレータの枚数契約(randomStructuredHand / #444)", () =>
     expect(handNotation(tiles), "除去した東が戻っていない").toBe(
       HAND_ROLLED_BACK,
     );
-    expect(isCompleteOracle34(tilesToCount34(tiles))).toBe(true);
   });
 
   it("置換先が見つかれば戻さない(正常系は巻き戻されない)", () => {

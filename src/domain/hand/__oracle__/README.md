@@ -125,9 +125,14 @@
   「静かに空回りさせない」方針で守っています(#444)。置換の追加先が見つからなかった
   ときに除去を戻さないと1枚少ない手が返り、`cross-validation.test.ts` が
   `if (tiles.length !== 14) continue` で**静かに飛ばして**しまうためです。
-  現在は4箇所とも `expect(...).toHaveLength()` で hard fail させ、契約そのものは
-  `generator.test.ts` が台本化した RNG で打ち切り経路を決定的に踏んで固定しています
-  (通常のシードでは約 (3/27)^20 ≈ 1e-20 で到達せず、反復回数を増やしても踏めません)。
+  現在は `cross-validation.test.ts` がジェネレータを呼ぶ**全ループ**で
+  `expect(...).toHaveLength()` を通し、契約そのものは `generator.test.ts` が
+  台本化した RNG で打ち切り経路を決定的に踏んで固定しています(通常のシードでは
+  約 (3/27)^20 ≈ 8e-20 で到達せず、反復回数を増やしても踏めません)。
+  `randomHand` 由来のループも同様です。枚数が欠けても `shanten()` とオラクルは
+  どちらも短い手を受け付けて一致してしまい、**完全に無症状**で素通りするためです。
+  なお `randomMeldedHand` 由来のブロックは `definition-oracle.ts` の
+  `assertMenzenSize` / `assertFormArity` が `RangeError` を投げるので、そちらで守られます。
 
 欠陥注入の実測(本体 `extractMentsuAll` と `agari-oracle.ts` の `decomposeMeldsOnly` の
 **両方**に同じ欠陥を入れた場合):
