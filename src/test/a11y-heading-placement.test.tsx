@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { render } from "@testing-library/react";
 import type { ReactElement } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import GamePage from "@/app/game/page";
@@ -19,7 +19,7 @@ import { bannerLandmarks, describeElement } from "./bannerLandmarks";
  *
  * 規約は「**ページヘッダー(`<h1>` を含む)は `<main>` の内側に置く**」。結果として
  * どのルートも banner ランドマークを持たず、ランドマーク構成が `main`(+ ページ内の
- * `nav` 等)で揃う。#409 の時点では内側 4 ルート / 外側 3 ルートに割れており、
+ * `nav` 等)で揃う。#409 の時点では内側 3 ルート + 404 / 外側 3 ルートに割れており、
  * ルートごとにスクリーンリーダのランドマーク一覧が変わっていた。
  *
  * E2E(`e2e/a11y.spec.ts`)にも同じ不変条件を置いてあるが、**主ゲートはこちら**にする:
@@ -35,7 +35,7 @@ import { bannerLandmarks, describeElement } from "./bannerLandmarks";
  * 補うためで、レイアウトのランドマーク寄与を再現しているわけではない。
  *
  * ルート一覧は `appRoutes()`(`src/app/**\/page.*` の実走査)と突き合わせる。ここを
- * 手書き配列だけにすると、**新ルートを足しても検査が増えない**——この規約が割れた
+ * 手書き配列だけにすると、**新ルートを足しても検査が増えない** — この規約が割れた
  * そもそもの原因(ルートごとに構造が自由)を再生産することになる。
  */
 
@@ -179,122 +179,4 @@ describe("<h1>・ページヘッダーの配置(spec 5.2.6 / #431)", () => {
       ).toEqual([]);
     });
   }
-});
-
-/**
- * 上の検査は全ルートで `[]` を期待する。判定関数が壊れて常に `[]` を返すようになっても
- * 全件緑のままなので、**判定そのものを両方向で固定する**(#409 のメタテストが「文字列走査だと
- * 検査自体が無音化する」を塞いだのと同じ理由)。
- */
-describe("bannerLandmarks()(banner 判定そのもの)", () => {
-  function renderProbe(markup: ReactElement) {
-    render(markup);
-    return document.body;
-  }
-
-  it("<main> の外の <header> は banner、内側の <header> は banner ではない", () => {
-    const root = renderProbe(
-      <div>
-        <header id="outside" />
-        <main>
-          <header id="inside" />
-        </main>
-      </div>,
-    );
-
-    expect(bannerLandmarks(root).map((element) => element.id)).toEqual([
-      "outside",
-    ]);
-  });
-
-  it("明示 role はトークンリストの最初の妥当なトークンで決まる(Playwright と同じ規則)", () => {
-    const root = renderProbe(
-      <main>
-        <div id="explicit" role="banner" />
-        {/* #banner-first: 先頭が banner → banner */}
-        <div id="banner-first" role="banner navigation" />
-        {/* #navigation-first: 先頭が navigation なので navigation。banner は採られない */}
-        <div id="navigation-first" role="navigation banner" />
-        {/* #invalid-then-banner: 先頭が無効トークンなので次の妥当なトークン(banner) */}
-        <div id="invalid-then-banner" role="bannerr banner" />
-      </main>,
-    );
-
-    expect(bannerLandmarks(root).map((element) => element.id)).toEqual([
-      "explicit",
-      "banner-first",
-      "invalid-then-banner",
-    ]);
-  });
-
-  it("妥当なトークンが 1 つも無い role は「指定なし」と同じく暗黙ロールを残す", () => {
-    // ここを「role 属性が空でなければ暗黙ロールは消える」と単純化すると、打鍵ミスや
-    // 抽象ロールを付けた <main> 外の <header> を**取りこぼす**(ブラウザは banner にする)。
-    const root = renderProbe(
-      <div>
-        <header id="blank-role" role=" " />
-        <header id="typo-role" role="bannerr" />
-        {/* section は抽象ロールで、明示 role としては妥当でない */}
-        <header id="abstract-role" role="section" />
-        {/* 妥当な role が付いていれば暗黙ロールは消える(対照) */}
-        <header id="valid-role" role="group" />
-      </div>,
-    );
-
-    expect(bannerLandmarks(root).map((element) => element.id)).toEqual([
-      "blank-role",
-      "typo-role",
-      "abstract-role",
-    ]);
-  });
-
-  it("祖先が role で上書きされていれば暗黙ロールは抑止されない(ブラウザ実装に一致)", () => {
-    const root = renderProbe(
-      <div>
-        {/* ロール上書き済みの <nav> は landmark 抑止の対象外 → banner のまま */}
-        <nav role="menubar">
-          <header id="under-overridden-nav" />
-        </nav>
-        {/* 逆に role=region は sectioning 要素でなくても抑止する */}
-        <div role="region">
-          <header id="under-region" />
-        </div>
-      </div>,
-    );
-
-    expect(bannerLandmarks(root).map((element) => element.id)).toEqual([
-      "under-overridden-nav",
-    ]);
-  });
-
-  /**
-   * 自前判定を持つ理由の**カナリア**。`aria-query` の `elementRoles` は `header` を
-   * 2 エントリ持ち、`{ constraints: ["scoped to the body element"] } → banner` と
-   * `{ constraints: ["scoped to the main element", …] } → generic` に分かれている。
-   * ところが `@testing-library/dom` の `makeElementSelector` はエントリを CSS セレクタへ
-   * 変換するときに**要素レベルの `constraints` を捨てる**(見るのは属性レベルの
-   * `"undefined"` / `"set"` だけ)。両エントリとも素の `header` セレクタになり、特異度でも
-   * 分離できないので先に一致した banner が返る — `<main>` の内側でも banner(実測)。
-   *
-   * **この期待が赤くなったら乗り換えを再検討する合図**。Testing Library が要素レベルの
-   * `constraints` を尊重すれば `"scoped to the main element"` のエントリが効き、
-   * `<main>` 内の `<header>` は generic になって `getByRole("banner")` を使える。ただし
-   * 乗り換えるかは、そのとき `bannerLandmarks()` との残差(明示ロールの解決規則・可視性
-   * フィルタ)を実測してから決めること。期待値だけ書き換えて済ませないこと。
-   */
-  it("Testing Library の getByRole('banner') は祖先条件を見ない(自前判定を持つ理由)", () => {
-    renderProbe(
-      <div>
-        <header id="outside" />
-        <main>
-          <header id="inside" />
-        </main>
-      </div>,
-    );
-
-    expect(
-      screen.queryAllByRole("banner").map((element) => element.id),
-      "この失敗は @testing-library/dom の更新で起きうる。期待値を書き換える前に、上の doc コメント(乗り換え条件)を読むこと",
-    ).toEqual(["outside", "inside"]);
-  });
 });

@@ -62,11 +62,12 @@ function gameBeforeEnd(seed = 2024): {
  * 実対局エンジン(seed 固定 = 決定的)で盤面を描画する。
  * 起家=自家 p0 が 東1 の親のため、開始直後は自家の打牌待ち。
  */
-function renderBoard(seed = 1) {
+function renderBoard(seed = 1, options?: Parameters<typeof render>[1]) {
   return render(
     <GameProvider initialGame={createGame({ seed })}>
       <GameBoard />
     </GameProvider>,
+    options,
   );
 }
 
@@ -190,13 +191,13 @@ describe("GameBoard (spec 6.6 client island / engine-driven)", () => {
     // `/game` と同じく `<main>` の内側へ置いて描く。`GameBoard` を裸で描くと、盤面ルート
     // (`role="group"`)は banner 抑止の祖先ではないため、下の banner 判定が実ページと
     // 違う条件で走ってしまう(盤面直下に `<header>` を足したときだけ偽陽性になる)。
-    render(
-      <main>
-        <GameProvider initialGame={createGame({ seed: 1 })}>
-          <GameBoard />
-        </GameProvider>
-      </main>,
-    );
+    // 描画は共通ヘルパを使う — ここで provider を書き写すと、ヘルパ側の変更が
+    // **この 1 本にだけ**届かなくなる(モーダル経路の banner 検査はここにしかない)。
+    renderBoard(1, {
+      wrapper: ({ children }: { children: React.ReactNode }) => (
+        <main>{children}</main>
+      ),
+    });
 
     // 初期状態ではモーダルは開いていない。
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();

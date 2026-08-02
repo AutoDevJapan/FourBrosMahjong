@@ -68,7 +68,7 @@ describe("Tailwind コンテンツ走査の除外(#329 / #333)", () => {
   const CSS = readFileSync(join(SRC, "app/globals.css"), "utf8");
 
   it("globals.css が非描画ファイルを @source not で除外している(消すと死に CSS が復活する)", () => {
-    // ミューテーション実測(#329): この 3 行を削除して再ビルドすると、Markdown/テスト由来の
+    // ミューテーション実測(#329): これらの除外行(#329 当時は 3 行)を削除して再ビルドすると、Markdown/テスト由来の
     // 未使用クラス 15 個(grid-cols-6・focus-visible:outline-foreground 等)が CSS に復活する。
     // つまり本アサーションは「効かなくなったら落ちる」ガードとして機能する。
     const missing = REQUIRED_EXCLUSIONS.filter(

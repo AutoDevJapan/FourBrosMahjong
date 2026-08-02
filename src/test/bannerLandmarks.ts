@@ -33,7 +33,7 @@
  * そちらは「最も近い祖先のセクショニングコンテンツ / セクショニングルートが `body`」と
  * 定義するため `<main>` を含まない — 実装はどれも追随していない。
  */
-const BANNER_SUPPRESSING_ANCESTORS =
+export const BANNER_SUPPRESSING_ANCESTORS =
   "article:not([role]), aside:not([role]), main:not([role]), nav:not([role]), section:not([role]), [role=article], [role=complementary], [role=main], [role=navigation], [role=region]";
 
 /**
@@ -44,7 +44,7 @@ const BANNER_SUPPRESSING_ANCESTORS =
  * 「`role` 属性が空でなければ暗黙ロールは消える」と単純化すると、`role="bannerr"`(打鍵ミス)や
  * `role="section"`(抽象ロール)を付けた `<main>` 外の `<header>` を**取りこぼす**。
  */
-const VALID_ROLES = new Set(
+export const VALID_ROLES: ReadonlySet<string> = new Set(
   `alert alertdialog application article banner blockquote button caption cell
    checkbox code columnheader combobox complementary contentinfo definition
    deletion dialog directory document emphasis feed figure form generic grid
@@ -85,7 +85,10 @@ export function bannerLandmarks(root: ParentNode): Element[] {
     // 明示ロールが無い(または妥当なトークンが無い)場合だけ暗黙ロールを見る。
     return (
       element.tagName === "HEADER" &&
-      element.parentElement?.closest(BANNER_SUPPRESSING_ANCESTORS) == null
+      // Playwright は `closestCrossShadow(element, …)`(自分自身を含む)。`<header>` 自身は
+      // どの選択肢にも一致しない(要素名の側は article/aside/main/nav/section、`[role=…]` の
+      // 側は上の早期 return で除かれている)ので、素の `closest` で等価。
+      element.closest(BANNER_SUPPRESSING_ANCESTORS) == null
     );
   });
 }
