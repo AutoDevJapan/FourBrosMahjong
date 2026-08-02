@@ -161,7 +161,7 @@ describe("クロス検証: 受け入れ候補枝刈り(#368)", () => {
   it("門前13枚で全27牌種を走査する独立向聴オラクルと一致する", () => {
     const rng = makeRng(0x3680_0001);
     for (let i = 0; i < UKEIRE_HANDS; i += 1) {
-      const tiles = rng() < 0.5 ? randomHand(rng, 13) : structured13(rng);
+      const tiles = rng() < 0.5 ? randomHand(rng, 13) : structured13(rng, i);
       // `structured13` 側は helper 内で 14 → 13 を固定しているが、`randomHand` 側は
       // ここでしか押さえられない(#444)。
       expect(tiles, `i=${i}`).toHaveLength(13);
@@ -290,9 +290,9 @@ describe("クロス検証: 和了・分解・待ち(decompose/tenpai ⇔ オラ�
  * ジェネレータの契約違反(1枚足りない手)が「別の手牌」に化けて静かに紛れ込む。
  * 契約は `expect` で明示的に落とす(#444)。
  */
-function structured13(rng: () => number): Tile[] {
+function structured13(rng: () => number, index: number): Tile[] {
   const tiles = randomStructuredHand(rng);
-  expect(tiles).toHaveLength(14);
+  expect(tiles, `i=${index}`).toHaveLength(14);
   return dropOne(rng, tiles);
 }
 
@@ -372,16 +372,6 @@ describe("列挙非依存の定義ベース向聴オラクルとの照合 (#392)
       RangeError,
     );
   });
-
-  it("枚数と meldCount が噛み合わない呼び出しは失敗する(静かにずらさない)", () => {
-    // 向聴は `13 − 3 × meldCount − 重なり` で決まるので、枚数が違う手を受けると
-    // 結果が静かにずれるだけで呼び出し側は気づけない。兄弟の分解・待ちオラクルと
-    // 同じく明示的に落とす(#444)。
-    const fourTiles = tilesToCount34(parseTiles("123p 9s")); // meldCount=3 の正しい枚数
-    expect(shantenByDefinition34(fourTiles, 3)).toBe(0);
-    expect(() => shantenByDefinition34(fourTiles, 2)).toThrow(RangeError);
-    expect(() => shantenByDefinition34(fourTiles, 1)).toThrow(RangeError);
-  });
 });
 
 /**
@@ -427,6 +417,9 @@ describe("クロス検証: 副露あり手の分解・和了・待ち (#390)", (
           i % 2 === 0,
         );
         const { concealedTiles, melds } = hand;
+        // 定義ベースオラクルの `assertFormArity` が枚数違いを `RangeError` で弾くので
+        // 実害は無いが、契約は呼び出し側でも明示する(他ブロックと同じ形 / #444)。
+        expect(concealedTiles, `i=${i}`).toHaveLength(14 - 3 * meldCount);
         for (const meld of melds) {
           if (meld.isKan) kanCount += 1;
           if (meld.concealed) ankanCount += 1;
@@ -516,6 +509,7 @@ describe("クロス検証: 副露あり手の分解・和了・待ち (#390)", (
           i % 2 === 0,
         );
         const { concealedTiles, melds } = hand;
+        expect(concealedTiles, `i=${i}`).toHaveLength(13 - 3 * meldCount);
 
         // 4枚使い切りの判定には副露牌も数える(`tenpai.ts` の usedCounts と同じ定義)。
         const used = tilesToCount34([

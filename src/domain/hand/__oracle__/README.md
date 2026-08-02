@@ -131,8 +131,8 @@
   約 (3/27)^20 ≈ 8e-20 で到達せず、反復回数を増やしても踏めません)。
   `randomHand` 由来のループも同様です。枚数が欠けても `shanten()` とオラクルは
   どちらも短い手を受け付けて一致してしまい、**完全に無症状**で素通りするためです。
-  なお `randomMeldedHand` 由来のブロックは `definition-oracle.ts` の
-  `assertMenzenSize` / `assertFormArity` が `RangeError` を投げるので、そちらで守られます。
+  `randomMeldedHand` 由来のブロックは `definition-oracle.ts` の `assertFormArity` が
+  `RangeError` を投げるので二重に守られますが、他ブロックと形を揃えて明示もしています。
 
 欠陥注入の実測(本体 `extractMentsuAll` と `agari-oracle.ts` の `decomposeMeldsOnly` の
 **両方**に同じ欠陥を入れた場合):

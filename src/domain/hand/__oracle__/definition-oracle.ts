@@ -95,7 +95,7 @@ const GROUPS = buildGroups();
  * @param concealed 門前部分のカウント配列。
  * @param meldCount 副露数(1..3)。
  * @returns 向聴数(0 = テンパイ、-1 = 和了)。
- * @throws {RangeError} `meldCount` が 1..3 でない場合、または `concealed` の枚数が
+ * @throws RangeError `meldCount` が 1..3 でない場合、または `concealed` の枚数が
  *   `13 − 3 × meldCount` と噛み合わない場合。
  */
 export function shantenByDefinition34(
@@ -311,6 +311,24 @@ function totalOf(counts: readonly number[]): number {
 }
 
 /**
+ * 門前手の枚数を検査する。
+ *
+ * 標準形側の {@link assertFormArity} と同じ方針で、枚数の取り違えを `false` /
+ * 空集合で握り潰さず**明示的に失敗**させる(照合が静かに空回りするのを防ぐ)。
+ */
+function assertMenzenSize(
+  concealed: readonly number[],
+  expected: number,
+): void {
+  const total = totalOf(concealed);
+  if (total !== expected) {
+    throw new RangeError(
+      `門前手の枚数が想定と違う(期待: ${expected} / 受領: ${total})。`,
+    );
+  }
+}
+
+/**
  * 入力枚数と `groupsNeeded` の整合を検査する。
  * `extra` は面子以外の枚数(和了形なら雀頭の 2、待ち判定ならその 1 枚不足で 1)。
  */
@@ -422,24 +440,6 @@ export function waitingIndicesByDefinition34(
 const SEVEN_PAIRS_BLOCKS = 7;
 /** 和了形の総枚数(門前・4面子1雀頭 / 七対子 / 国士のいずれも 14 枚)。 */
 const WINNING_HAND_SIZE = 14;
-
-/**
- * 門前手の枚数を検査する。
- *
- * 標準形側の {@link assertFormArity} と同じ方針で、枚数の取り違えを `false` /
- * 空集合で握り潰さず**明示的に失敗**させる(照合が静かに空回りするのを防ぐ)。
- */
-function assertMenzenSize(
-  concealed: readonly number[],
-  expected: number,
-): void {
-  const total = totalOf(concealed);
-  if (total !== expected) {
-    throw new RangeError(
-      `門前手の枚数が想定と違う(期待: ${expected} / 受領: ${total})。`,
-    );
-  }
-}
 
 /**
  * 七対子の和了形 W(**相異なる** 7 対子)を、手牌を `maxWaste` 以内で覆うものだけ訪問する。

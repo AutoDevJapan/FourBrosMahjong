@@ -38,8 +38,9 @@ function pickSanma(position: number): number {
 /**
  * `SEQUENCE_STARTS[position]` を引かせる乱数値。
  *
- * 要素数だけでなく**中身**が変わると台本は別の順子を組ませてしまい、`tailDraws()` の
- * 等式では検出できない(打ち切り経路自体は通るため)。各テストが生成手そのものを
+ * 除数を配列から取るので**要素数**の増減は自動追随する。一方 `position` 番目の
+ * **中身**が変わると台本は別の順子を組ませてしまい、`tailDraws()` の等式では検出
+ * できない(打ち切り経路自体は通るため)。各テストが生成手そのものを
  * {@link HAND_ROLLED_BACK} / {@link HAND_SWAPPED} で固定しており、そちらが落ちる。
  */
 function pickSequenceStart(position: number): number {
@@ -53,11 +54,12 @@ const COIN_TRIPLET = 0.6;
 /** 置換回数 = `⌊0.9 * (maxSwaps + 1)⌋`。`maxSwaps = 1` で呼ぶので 1 回。 */
 const SWAPS_ONE = 0.9;
 
-/** 完成形 `1111p 22p 33p 123s 東東東` に現れる牌種の数(= `present` の長さ)。 */
-const PRESENT_KINDS = 7;
-
-/** 除去牌 = `present` の末尾 = 東(1p 以外を減らすため)。 */
-const REMOVE_EAST = (PRESENT_KINDS - 0.5) / PRESENT_KINDS;
+/**
+ * 除去牌 = `present`(手牌に在る牌種の昇順リスト)の**末尾** = 東。1p 以外を減らすため。
+ * `⌊REMOVE_LAST_PRESENT × n⌋ = n − 1` は n ≤ 14 で成り立つので、完成形の牌種数が
+ * 多少変わっても「末尾」を指し続ける。実際に東が減ったことは {@link HAND_SWAPPED} が固定する。
+ */
+const REMOVE_LAST_PRESENT = 13.5 / 14;
 
 /**
  * `buildCompleteCounts` に `1111p 22p 33p 123s 東東東`(1p が4枚)を組ませ、
@@ -74,7 +76,7 @@ const SCRIPT_FOUR_COPY_1P: readonly number[] = [
   COIN_TRIPLET,
   pickSanma(SANMA_INDICES_34.indexOf(INDEX_EAST)), // 面子4: 刻子 東東東
   SWAPS_ONE,
-  REMOVE_EAST,
+  REMOVE_LAST_PRESENT,
 ];
 
 /**
