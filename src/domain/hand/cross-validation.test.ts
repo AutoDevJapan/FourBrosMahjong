@@ -280,6 +280,9 @@ describe("クロス検証: 和了・分解・待ち(decompose/tenpai ⇔ オラ�
  * 枚数が14でなければ先頭13枚を切り出して**辻褄を合わせる**実装だったが、それでは
  * ジェネレータの契約違反(1枚足りない手)が「別の手牌」に化けて静かに紛れ込む。
  * 契約は `expect` で明示的に落とす(#444)。
+ *
+ * ⚠️ `expect` を含むので**テスト実行中(`it` の中)からのみ呼ぶこと**。`describe` 直下や
+ * モジュール読み込み時に呼ぶと、枚数エラーではなく Vitest の実行文脈エラーになる。
  */
 function structured13(rng: () => number): Tile[] {
   const tiles = randomStructuredHand(rng);

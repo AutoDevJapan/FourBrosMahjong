@@ -47,11 +47,14 @@ function randInt(rng: () => number, n: number): number {
 }
 
 /**
- * 「別の牌を1枚置く場所」を乱択で探す試行回数の上限(有界化のため)。
+ * 牌の置き場所(1枚 / 雀頭2枚)を乱択で探す試行回数の上限。無限ループを避けるための
+ * 有界化で、実際にはまず打ち切りに達しない。
  *
- * 打ち切ったときは**必ず呼び出し前の状態へ戻す**(枚数を減らしたまま抜けない)。
- * 戻さないと生成手が規定枚数に満たなくなり、クロス検証側は「照合対象が1手減った」
- * ことに気づけないまま緑で通る(issue #444)。
+ * **規約**: この定数でループを打ち切る側は、打ち切り時に**呼び出し前の状態へ戻す**こと
+ * (枚数を減らしたまま抜けない)。戻さないと生成手が規定枚数に満たなくなり、
+ * クロス検証側は「照合対象が1手減った」ことに気づけないまま緑で通る(issue #444)。
+ * 現在の利用箇所はいずれもこの規約を守っている
+ * ({@link randomStructuredHand} / `buildAmbiguousConcealed` / `swapOne`)。
  */
 export const PLACEMENT_TRIES = 20;
 
@@ -169,14 +172,16 @@ function buildCompleteCounts(rng: () => number): number[] {
  * 構造化手牌: 完成形(14枚)を組み、0〜`maxSwaps` 枚を無作為に別牌へ置換する。
  * 置換により向聴が上下し、テンパイ〜低向聴の形を厚く生成する。
  *
- * **必ず14枚を返す**(置換に失敗しても枚数は減らない)。呼び出し側のクロス検証は
- * この契約を `expect(...).toHaveLength(14)` で明示的に固定している(issue #444)。
+ * **必ず14枚を返す**(置換に失敗しても枚数は減らない)。契約は `generator.test.ts` が
+ * 直接固定し、呼び出し側のクロス検証も `expect(...).toHaveLength(14)` で
+ * 明示的に落とす(issue #444)。
  */
 export function randomStructuredHand(rng: () => number, maxSwaps = 3): Tile[] {
   const counts = buildCompleteCounts(rng);
   const swaps = randInt(rng, maxSwaps + 1);
   for (let s = 0; s < swaps; s += 1) {
-    // 手牌中の1枚を除いて別のサンマ牌を1枚加える(4枚超は避ける)。
+    // 手牌中の1枚を除いてサンマ牌を1枚加え直す(4枚超は避ける)。加える先は乱択なので
+    // 除いた牌種と同じになることもあり、その場合は手牌が変わらない。
     const present: number[] = [];
     for (const idx of SANMA_INDICES_34) {
       if (counts[idx] > 0) present.push(idx);
