@@ -23,12 +23,16 @@ import { bannerLandmarks, describeElement } from "./bannerLandmarks";
  * ルートごとにスクリーンリーダのランドマーク一覧が変わっていた。
  *
  * E2E(`e2e/a11y.spec.ts`)にも同じ不変条件を置いてあるが、**主ゲートはこちら**にする:
- * ブラウザを起動せず数秒で回るため、ルート追加時に真っ先に落ちる。E2E 側は実ブラウザの
- * ロール計算で裏を取る役目。
+ * ブラウザを起動せず数秒で回るため、ルート追加時に真っ先に落ちる。E2E 側は**実 DOM**
+ * (SSR + hydration + レイアウト + 実 CSS)で裏を取る役目。判定アルゴリズムの独立検証では
+ * ない — Playwright の `getByRole` はブラウザのアクセシビリティツリーではなく自前の
+ * `computeAriaRole` を注入して評価しており、`bannerLandmarks()` はその実装を写している。
  *
  * **ここが見るのはページコンポーネントであって、ルートの最終的な DOM ではない**。
- * `src/app/layout.tsx`(ルートレイアウト)はツリーに入らないので、レイアウト由来の
- * `<header>` や 2 つ目の `<main>` はここでは見えない — それは E2E 側の担当。
+ * レイアウト(`src/app/layout.tsx` / `src/app/game/layout.tsx`)はツリーに入らないので、
+ * レイアウト由来の `<header>` や 2 つ目の `<main>` はここでは見えない — それは E2E 側の担当。
+ * `/game` 系だけは `GameProvider` を手で再現しているが、これは描画に必要なコンテキストを
+ * 補うためで、レイアウトのランドマーク寄与を再現しているわけではない。
  *
  * ルート一覧は `appRoutes()`(`src/app/**\/page.*` の実走査)と突き合わせる。ここを
  * 手書き配列だけにすると、**新ルートを足しても検査が増えない**——この規約が割れた
@@ -203,30 +207,44 @@ describe("bannerLandmarks()(banner 判定そのもの)", () => {
     ]);
   });
 
-  it("明示 role の banner を拾い、トークン並記でも取りこぼさない", () => {
+  it("明示 role はトークンリストの最初の妥当なトークンで決まる(Playwright と同じ規則)", () => {
     const root = renderProbe(
       <main>
         <div id="explicit" role="banner" />
-        <div id="tokens" role="banner navigation" />
-        {/* ブラウザ / Playwright は**最初の妥当なトークン**を採るので、これは実ブラウザでは
-            navigation になる。ここでは意図して banner として数える(偽陰性より偽陽性へ倒す)
-            — 判定式の doc コメント参照。実装を「最初のトークン」へ寄せるならここが赤になる。 */}
+        {/* #banner-first: 先頭が banner → banner */}
+        <div id="banner-first" role="banner navigation" />
+        {/* #navigation-first: 先頭が navigation なので navigation。banner は採られない */}
         <div id="navigation-first" role="navigation banner" />
+        {/* #invalid-then-banner: 先頭が無効トークンなので次の妥当なトークン(banner) */}
+        <div id="invalid-then-banner" role="bannerr banner" />
       </main>,
     );
 
     expect(bannerLandmarks(root).map((element) => element.id)).toEqual([
       "explicit",
-      "tokens",
-      "navigation-first",
+      "banner-first",
+      "invalid-then-banner",
     ]);
   });
 
-  it("空白だけの role は「指定なし」と同じく暗黙ロールを残す", () => {
-    const root = renderProbe(<header id="blank-role" role=" " />);
+  it("妥当なトークンが 1 つも無い role は「指定なし」と同じく暗黙ロールを残す", () => {
+    // ここを「role 属性が空でなければ暗黙ロールは消える」と単純化すると、打鍵ミスや
+    // 抽象ロールを付けた <main> 外の <header> を**取りこぼす**(ブラウザは banner にする)。
+    const root = renderProbe(
+      <div>
+        <header id="blank-role" role=" " />
+        <header id="typo-role" role="bannerr" />
+        {/* section は抽象ロールで、明示 role としては妥当でない */}
+        <header id="abstract-role" role="section" />
+        {/* 妥当な role が付いていれば暗黙ロールは消える(対照) */}
+        <header id="valid-role" role="group" />
+      </div>,
+    );
 
     expect(bannerLandmarks(root).map((element) => element.id)).toEqual([
       "blank-role",
+      "typo-role",
+      "abstract-role",
     ]);
   });
 
@@ -250,17 +268,19 @@ describe("bannerLandmarks()(banner 判定そのもの)", () => {
   });
 
   /**
-   * 自前判定を持つ理由の**カナリア**。`@testing-library/dom` のロール解決は、`aria-query` の
-   * **ロール単位の `constraints`**(`banner` なら `"scoped to the body element"`)を
-   * まったく読まない — セレクタ生成で見るのは属性単位の `undefined` / `set` 制約だけ。
-   * その結果 `<main>` の内側の `<header>` まで banner として返す(実測)。
+   * 自前判定を持つ理由の**カナリア**。`aria-query` の `elementRoles` は `header` を
+   * 2 エントリ持ち、`{ constraints: ["scoped to the body element"] } → banner` と
+   * `{ constraints: ["scoped to the main element", …] } → generic` に分かれている。
+   * ところが `@testing-library/dom` の `makeElementSelector` はエントリを CSS セレクタへ
+   * 変換するときに**要素レベルの `constraints` を捨てる**(見るのは属性レベルの
+   * `"undefined"` / `"set"` だけ)。両エントリとも素の `header` セレクタになり、特異度でも
+   * 分離できないので先に一致した banner が返る — `<main>` の内側でも banner(実測)。
    *
-   * **この期待が赤くなっても「乗り換えてよい」合図ではない**。`constraints` を字面どおり
-   * 実装しても、その文言は WHATWG HTML 由来で「最も近い祖先のセクショニングコンテンツ /
-   * セクショニングルートが `body`」を指す。`<main>` はそのどちらでもないので、
-   * `<main>` 内の `<header>` は依然 banner のまま返り、#431 が禁じている形を検出できない。
-   * `getByRole("banner")` へ寄せてよいのは、Testing Library が **W3C ARIA in HTML の
-   * 祖先条件**(`article` / `aside` / `main` / `nav` / `section`)を実装した場合だけ。
+   * **この期待が赤くなったら乗り換えを再検討する合図**。Testing Library が要素レベルの
+   * `constraints` を尊重すれば `"scoped to the main element"` のエントリが効き、
+   * `<main>` 内の `<header>` は generic になって `getByRole("banner")` を使える。ただし
+   * 乗り換えるかは、そのとき `bannerLandmarks()` との残差(明示ロールの解決規則・可視性
+   * フィルタ)を実測してから決めること。期待値だけ書き換えて済ませないこと。
    */
   it("Testing Library の getByRole('banner') は祖先条件を見ない(自前判定を持つ理由)", () => {
     renderProbe(

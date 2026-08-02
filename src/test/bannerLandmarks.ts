@@ -2,11 +2,21 @@
  * DOM ツリーから banner ランドマークを列挙する検査ヘルパ(spec 5.2.6 / #431)。
  *
  * ページヘッダーを `<main>` の内側へ統一した結果、**どのルートも banner を公開しない**のが
- * 規約になった。それを守るゲートは「banner が 0 個であること」を数えるので、判定式が
- * 必要になる。Testing Library の `getByRole("banner")` は使えない — ロール解決が
- * `aria-query` のロール単位の `constraints`(`banner` の場合 `"scoped to the body element"`)
- * を**一切評価しない**ため、`<main>` の内側の `<header>` まで banner として返す(実測。
- * `@testing-library/dom` が見るのは属性単位の `undefined` / `set` 制約だけ)。
+ * 規約になった。それを守るゲートは「banner が 0 個であること」を数えるので、判定式が要る。
+ *
+ * Testing Library の `getByRole("banner")` は使えない。`aria-query` の `elementRoles` は
+ * `header` を **2 エントリ**持ち、`constraints` で振り分けている(実測):
+ *
+ * ```
+ * { name: "header", constraints: ["scoped to the body element"] }            → ["banner"]
+ * { name: "header", constraints: ["scoped to the main element", …] }         → ["generic"]
+ * ```
+ *
+ * ところが `@testing-library/dom` の `makeElementSelector` は各エントリを CSS セレクタへ
+ * 変換する際に **要素レベルの `constraints` を捨てる**(見るのは属性レベルの
+ * `"undefined"` / `"set"` だけ)。結果として両エントリとも素の `header` セレクタになり、
+ * 特異度でも分離できず、先に一致した banner が返る。だから `<main>` の内側の `<header>` まで
+ * banner として報告される(実測)。
  *
  * 回帰は `src/test/a11y-heading-placement.test.tsx` の `bannerLandmarks()` ブロックが持つ。
  * 全ルートの期待値が `[]` なので、**判定が壊れて常に `[]` を返しても全件緑**になる —
@@ -17,43 +27,67 @@
  * `<header>` / `<footer>` の暗黙ロールを banner / contentinfo にしない祖先。
  *
  * **Playwright の実装から一字一句写している**(`playwright-core` の
- * `kAncestorPreventingLandmark`)。裏取り役の `e2e/a11y.spec.ts` が `getByRole("banner")`
- * で判定する以上、主ゲートが別の祖先条件を使うと**両者が食い違う**(ロールを上書きした
- * `<nav role="menubar">` の内側などで、こちらだけ緑になる)。
- *
- * axe-core 4.12.1 の `getSectioningContentPlusMainSelector()` も、展開すると
- * `article/aside/nav/section:not([role])` + `main:not([role])` +
- * `[role=article|complementary|navigation|region|main]` で**集合として同一**(実測)。
- * 散文でロール上書きに触れていないのは W3C「ARIA in HTML」の記述だけで、実装は揃っている。
+ * `kAncestorPreventingLandmark`)。axe-core 4.12.1 の
+ * `getSectioningContentPlusMainSelector()` も、W3C「ARIA in HTML」の `header` 行も、
+ * 展開すると**同じ集合**(実測 / 仕様本文で確認)。字面が違うのは WHATWG HTML だけで、
+ * そちらは「最も近い祖先のセクショニングコンテンツ / セクショニングルートが `body`」と
+ * 定義するため `<main>` を含まない — 実装はどれも追随していない。
  */
 const BANNER_SUPPRESSING_ANCESTORS =
   "article:not([role]), aside:not([role]), main:not([role]), nav:not([role]), section:not([role]), [role=article], [role=complementary], [role=main], [role=navigation], [role=region]";
 
 /**
- * `root` 配下で banner ランドマークとして公開される要素を列挙する。
+ * 明示 `role` として妥当なトークン(`playwright-core` の `validRoles` を写したもの)。
  *
- * 明示ロールの解決だけは**意図的にブラウザより厳しい**。`role` はトークンリストで、
- * ブラウザ / Playwright は**最初の妥当なトークン**を採るため `role="navigation banner"` は
- * navigation になるが、ここでは `[role~="banner"]` で banner として数える。トークン並記は
- * 本プロジェクトでは使わない書き方であり、ゲートとしては**取りこぼし(偽陰性)より
- * 誤検知(偽陽性)へ倒す**ほうが安全なため(偽陽性は明確なメッセージで落ちて人が直せるが、
- * 偽陰性は規約違反を無音で通す)。この差は回帰テストで意図として固定してある。
+ * `role` はトークンリストで、**最初の妥当なトークン**が採用される。妥当なトークンが
+ * 1 つも無ければ明示ロールは無効で、暗黙ロールが残る。この一覧を持たずに
+ * 「`role` 属性が空でなければ暗黙ロールは消える」と単純化すると、`role="bannerr"`(打鍵ミス)や
+ * `role="section"`(抽象ロール)を付けた `<main>` 外の `<header>` を**取りこぼす**。
+ */
+const VALID_ROLES = new Set(
+  `alert alertdialog application article banner blockquote button caption cell
+   checkbox code columnheader combobox complementary contentinfo definition
+   deletion dialog directory document emphasis feed figure form generic grid
+   gridcell group heading img insertion link list listbox listitem log main mark
+   marquee math meter menu menubar menuitem menuitemcheckbox menuitemradio
+   navigation none note option paragraph presentation progressbar radio
+   radiogroup region row rowgroup rowheader scrollbar search searchbox separator
+   slider spinbutton status strong subscript superscript switch tab table tablist
+   tabpanel term textbox time timer toolbar tooltip tree treegrid treeitem`.split(
+    /\s+/,
+  ),
+);
+
+/** 明示 `role` を解決する(`playwright-core` の `getExplicitAriaRole` と同じ規則)。 */
+function explicitRole(element: Element): string | null {
+  const tokens = (element.getAttribute("role") ?? "").split(" ");
+  return (
+    tokens.map((token) => token.trim()).find((t) => VALID_ROLES.has(t)) ?? null
+  );
+}
+
+/**
+ * `root` 配下で banner ランドマークとして公開される要素を、**文書順**で列挙する。
  *
- * 可視性も見ない(`getByRole` は非表示要素を除く)。`hidden` な `<header>` を `<main>` の
- * 外に置く形も、規約としては直す対象なので数える。
+ * 祖先条件・明示ロールの解決とも Playwright に揃えてある。揃えないと、裏取り役の
+ * `e2e/a11y.spec.ts`(`getByRole("banner")`)と食い違って、片方だけ緑になる形が生じる。
+ *
+ * **モデル化していない差が 1 つある**: `role="none"` / `role="presentation"` を付けた要素が
+ * グローバル ARIA 属性を持つ / フォーカス可能な場合、ブラウザは presentation conflict
+ * resolution で暗黙ロール(= banner)へ戻す。ここではそのまま「明示ロールあり」として
+ * 扱うため、`<main>` の外の `<header role="none" aria-label="…">` を取りこぼす。実描画で
+ * 同じ判定を回す E2E 側(7 画面)が受け止めるので、既知の穴として据え置く。
  */
 export function bannerLandmarks(root: ParentNode): Element[] {
-  const explicit = [...root.querySelectorAll('[role~="banner"]')];
-  const implicit = [...root.querySelectorAll("header")].filter((header) => {
-    // 明示 `role` があれば暗黙ロールは上書きされる(上の explicit 側で拾う)。空文字や
-    // 空白だけの `role` は「指定なし」と同じ扱いで、暗黙ロールが残る。
-    const explicitRole = header.getAttribute("role")?.trim() ?? "";
+  return [...root.querySelectorAll("*")].filter((element) => {
+    const role = explicitRole(element);
+    if (role !== null) return role === "banner";
+    // 明示ロールが無い(または妥当なトークンが無い)場合だけ暗黙ロールを見る。
     return (
-      explicitRole === "" &&
-      header.parentElement?.closest(BANNER_SUPPRESSING_ANCESTORS) == null
+      element.tagName === "HEADER" &&
+      element.parentElement?.closest(BANNER_SUPPRESSING_ANCESTORS) == null
     );
   });
-  return [...explicit, ...implicit];
 }
 
 /**

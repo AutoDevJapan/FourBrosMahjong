@@ -175,8 +175,10 @@ test.describe("自動 a11y 監査(axe-core)", () => {
       // `LANDMARK_RULES` では強制できない(#409 の時点で内外が割れていた理由)。
       //
       // 主ゲートは `src/test/a11y-heading-placement.test.tsx`(全ルート + 404 を jsdom で
-      // 数秒で回す)。ここは実ブラウザのロール計算で `<header>` → banner の実マッピングを
-      // 裏取りする役目に絞る。
+      // 数秒で回す)。ここが足すのは**実 DOM**での確認 — SSR + hydration + レイアウト +
+      // 実 CSS を通った最終的な木を見る。判定アルゴリズムの独立検証ではない
+      // (`getByRole` はブラウザの AX ツリーではなく Playwright 自前の `computeAriaRole` を
+      // 注入して評価しており、主ゲートの判定式はその実装を写している)。
       //
       // banner 0 個は「現状サイト共通ヘッダーが無い」ことの裏返しでもある。将来
       // `src/app/layout.tsx` へ共通ヘッダーを置く場合は、ここを 0 個から**ちょうど 1 つ**へ

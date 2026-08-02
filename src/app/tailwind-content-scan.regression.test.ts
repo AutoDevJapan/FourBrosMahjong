@@ -36,6 +36,8 @@ const REQUIRED_EXCLUSIONS: ReadonlyArray<{ label: string; glob: string }> = [
     glob: "../../**/*.{test,spec}.{ts,tsx}",
   },
   { label: "E2E ディレクトリ", glob: "../../e2e" },
+  // src/test/ はテストしか読まないヘルパ(*.test.ts 以外の名前)を含むためディレクトリごと。
+  { label: "テストヘルパディレクトリ", glob: "../test" },
 ];
 
 /**

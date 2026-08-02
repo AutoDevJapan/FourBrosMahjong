@@ -113,6 +113,10 @@ describe("/game/result page (spec 6.2 / 6.6)", () => {
     const loadingDom = document.createElement("div");
     loadingDom.innerHTML = loadingHtml;
     expect(
+      loadingDom.querySelectorAll("h1"),
+      "読み込み中分岐の <h1> がちょうど 1 つでない",
+    ).toHaveLength(1);
+    expect(
       loadingDom.querySelectorAll("main h1"),
       "読み込み中分岐の <h1> が <main> の内側にちょうど 1 つ無い",
     ).toHaveLength(1);
@@ -147,6 +151,12 @@ describe("/game/result page (spec 6.2 / 6.6)", () => {
       ).toHaveLength(1);
       // ページヘッダーは `<main>` の内側(spec 5.2.6 / #431)。`<header>` は現状 3 分岐の
       // 外側に 1 つだけ置いてあるが、分岐ごとに書き直された場合に付け忘れを無音にしない。
+      // 総数も見る。`main h1` だけだと `<main>` の外に 2 つ目の `<h1>` を足す形が通る
+      // (ルート単位のゲートは未確定分岐しか描かないので、確定分岐はここでしか見ない)。
+      expect(
+        container.querySelectorAll("h1"),
+        `${branch}分岐の <h1> がちょうど 1 つでない`,
+      ).toHaveLength(1);
       expect(
         container.querySelectorAll("main h1"),
         `${branch}分岐の <h1> が <main> の内側にちょうど 1 つ無い`,

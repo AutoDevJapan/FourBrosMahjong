@@ -24,8 +24,12 @@ export const DEFAULT_APP_DIR = resolve(process.cwd(), "src/app");
  * App Router がページとして解釈するファイル名。
  *
  * `.tsx` だけを見ると、`page.jsx` / `page.js` で足されたルートが**この検査をすり抜ける**
- * (ここで塞ごうとしている失敗モードそのもの)。拡張子は Next.js が受け付ける形を
- * 網羅する。先頭の `/` ごと消してディレクトリ部分だけを残す。
+ * (ここで塞ごうとしている失敗モードそのもの)。拡張子は Next.js の既定
+ * (`tsx` / `ts` / `jsx` / `js`)を網羅し、`mjs` / `cjs` は過剰側に倒して含めてある。
+ * 先頭の `/` ごと消してディレクトリ部分だけを残す。
+ *
+ * `next.config.ts` が `pageExtensions` を設定すると、この一覧は無音で実態から外れる
+ * (現状は `headers()` のみで未設定)。設定するなら**同じコミットでここを合わせる**こと。
  */
 const PAGE_FILE = /(?:^|\/)page\.(?:tsx|ts|jsx|js|mjs|cjs)$/;
 

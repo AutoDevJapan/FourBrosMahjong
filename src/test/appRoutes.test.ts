@@ -1,6 +1,12 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join, resolve } from "node:path";
+import { dirname, join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { appRoutes, DEFAULT_APP_DIR } from "./appRoutes";
 
@@ -37,8 +43,13 @@ afterEach(() => {
 });
 
 describe("appRoutes()(#409 / #431 のルート導出)", () => {
-  it("既定の走査対象は src/app", () => {
-    expect(DEFAULT_APP_DIR).toBe(resolve(process.cwd(), "src/app"));
+  it("既定の走査対象は実在し、引数なしの呼び出しがそこを見る", () => {
+    // 定数の字面をもう一度書くのではなく、**実際に読めるディレクトリを指していること**と
+    // **引数なしの経路がそれを走査していること**を見る(cwd がリポジトリ直下でなくなった、
+    // ディレクトリを移した、といった壊れ方はどちらの呼び出し側テストでも原因が読めない)。
+    expect(existsSync(DEFAULT_APP_DIR), `${DEFAULT_APP_DIR} が無い`).toBe(true);
+    expect(appRoutes()).toEqual(appRoutes(DEFAULT_APP_DIR));
+    expect(appRoutes()).toContain("/");
   });
 
   it("ネストしたページからルートパスを導出し、昇順で返す", () => {

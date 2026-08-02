@@ -7,7 +7,7 @@ import { appRoutes } from "./appRoutes";
  * `e2e/a11y.spec.ts` が回す画面一覧に依存している。ルートを新設しても一覧へ足し忘れれば、
  * 規約から**無音で外れる**(Playwright は存在しない画面を教えてくれない)。
  *
- * ここでは `src/app/**\/page.tsx` から実ルートを導出し、ランドマーク監査の画面一覧と
+ * ここでは `src/app/**\/page.*` から実ルートを導出し、ランドマーク監査の画面一覧と
  * 過不足なく一致することを固定する。ブラウザ不要の node テストなので `pnpm test` で回る。
  *
  * 一覧は `e2e/screens.ts` から**実体を import** する(ソースの文字列走査ではない)。
@@ -49,7 +49,7 @@ describe("ランドマーク監査の画面一覧(spec 5.2.6 / #409)", () => {
     for (const path of audited) {
       expect(
         routes.has(path),
-        `${path} に対応する page.tsx が無い(ルート削除時の消し忘れ)`,
+        `${path} に対応する page.* が無い(ルート削除時の消し忘れ)`,
       ).toBe(true);
     }
   });

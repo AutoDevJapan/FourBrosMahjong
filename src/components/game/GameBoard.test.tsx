@@ -15,7 +15,7 @@ import {
   tsumogiri,
 } from "@/domain/game/engine";
 import type { Tile } from "@/domain/tiles/tile";
-import { bannerLandmarks, describeElement } from "../../test/bannerLandmarks";
+import { bannerLandmarks, describeElement } from "@/test/bannerLandmarks";
 import { tileLabel } from "../common/tileLabel";
 import { walkToGameEnd } from "./finishedGameFixture";
 import GameBoard, { pulledKitaCount, residualSticksNote } from "./GameBoard";
@@ -187,7 +187,16 @@ describe("GameBoard (spec 6.6 client island / engine-driven)", () => {
 
   it("フォーカス表示の「全体盤面」で盤面モーダルを開閉できる(スペック5 5.3.2 段階② / 5.2.2)", async () => {
     const user = userEvent.setup();
-    renderBoard();
+    // `/game` と同じく `<main>` の内側へ置いて描く。`GameBoard` を裸で描くと、盤面ルート
+    // (`role="group"`)は banner 抑止の祖先ではないため、下の banner 判定が実ページと
+    // 違う条件で走ってしまう(盤面直下に `<header>` を足したときだけ偽陽性になる)。
+    render(
+      <main>
+        <GameProvider initialGame={createGame({ seed: 1 })}>
+          <GameBoard />
+        </GameProvider>
+      </main>,
+    );
 
     // 初期状態ではモーダルは開いていない。
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();

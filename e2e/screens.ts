@@ -95,7 +95,7 @@ export const NOT_FOUND_SCREEN_NAME = "404";
 
 /**
  * ランドマーク監査(#409)の対象。実在ルートに加えて 404 も見る。
- * 404 は `not-found.tsx` という独立した実装で、`src/app/**\/page.tsx` を走査する
+ * 404 は `not-found.tsx` という独立した実装で、`src/app/**\/page.*` を走査する
  * ルート網羅の検査(`src/test/a11y-landmark-screens.test.ts`)にも現れないため、
  * 他のルートの規約が波及しない。明示的に足さないと監査から丸ごと落ちる。
  *
