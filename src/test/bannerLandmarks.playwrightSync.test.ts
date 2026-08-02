@@ -110,12 +110,17 @@ describe("bannerLandmarks と playwright-core の同期(#431)", () => {
 
   /**
    * 明示ロールの解決も `bannerLandmarks.ts` が写している(`explicitRole()`)。トークンの
-   * 分割規則が変わる / presentation conflict resolution がここへ入る、といった変更は
-   * 定数も `HEADER` の 1 行も一致したまま通ってしまう。
+   * 分割規則や選択規則が変わる / presentation conflict resolution がここへ入る、といった
+   * 変更は、定数も `HEADER` の 1 行も一致したまま通ってしまう。
    */
   it("明示ロールの解決規則が Playwright と同じ形である", () => {
-    expect(bundle, RESYNC_HINT).toContain(
+    // トークン化と**選択**の両方を見る。選択側(最初の妥当なトークン)が変わる形は、
+    // 定数も HEADER の 1 行もトークン化の 1 行も一致したまま通ってしまう。
+    for (const line of [
       'const roles = (element.getAttribute("role") || "").split(" ").map((role) => role.trim());',
-    );
+      "return roles.find((role) => validRoles.includes(role)) || null;",
+    ]) {
+      expect(bundle, RESYNC_HINT).toContain(line);
+    }
   });
 });
