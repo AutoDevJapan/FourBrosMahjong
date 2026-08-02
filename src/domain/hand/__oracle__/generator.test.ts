@@ -163,14 +163,17 @@ describe("ジェネレータの枚数契約(randomStructuredHand / #444)", () =>
 
     expect(tailDraws(), "追加先が1回目で決まっていない").toBe(1);
     expect(tiles).toHaveLength(14);
-    // 失敗系との**観測可能な差**はここ。戻し処理が正常系まで巻き込むと東が3枚に戻り
-    // 2p は2枚のまま(= `HAND_ROLLED_BACK` に一致してしまう)。枚数だけでは区別できない。
+    // 失敗系との**観測可能な差**はここ。置換そのものが打ち消される(`counts[add]` も
+    // 一緒に戻る)と、枚数は14のまま `HAND_ROLLED_BACK` に一致してしまう。
+    // つまりこの状態は枚数では区別できず、この固定値だけが検出できる。
     expect(handNotation(tiles), "置換が効いていない(巻き戻された)").toBe(
       HAND_SWAPPED,
     );
   });
 
-  it("通常のシード 2,000 手が常に14枚・1牌種4枚以内である", () => {
+  // 14枚であることは `cross-validation.test.ts` が 20,000 手で別シードから見ている。
+  // ここでしか見ていないのは**1牌種4枚以内**(置換が上限を踏み越えないこと)。
+  it("通常のシード 2,000 手が1牌種4枚以内に収まる(枚数も併せて確認)", () => {
     const rng = makeRng(0x4440_0001);
     const sizes = new Set<number>();
     let overFour = 0;

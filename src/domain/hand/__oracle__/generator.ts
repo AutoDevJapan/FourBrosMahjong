@@ -55,6 +55,9 @@ function randInt(rng: () => number, n: number): number {
  * クロス検証側は「照合対象が1手減った」ことに気づけないまま緑で通る(issue #444)。
  * 現在の利用箇所はいずれもこの規約を守っている
  * ({@link randomStructuredHand} / `buildAmbiguousConcealed` / `swapOne`)。
+ *
+ * ⚠️ 3箇所は「置き場所探し」という性質が同じというだけで、独立に調整したくなったら
+ * 定数を分けること(`generator.test.ts` はこの値が 1 より大きいことに依存している)。
  */
 export const PLACEMENT_TRIES = 20;
 

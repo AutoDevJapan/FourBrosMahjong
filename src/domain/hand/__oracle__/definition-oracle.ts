@@ -311,7 +311,7 @@ function totalOf(counts: readonly number[]): number {
 }
 
 /**
- * 門前手の枚数を検査する。
+ * 門前部分(副露牌を含めない側)の枚数を検査する。
  *
  * 標準形側の {@link assertFormArity} と同じ方針で、枚数の取り違えを `false` /
  * 空集合で握り潰さず**明示的に失敗**させる(照合が静かに空回りするのを防ぐ)。
@@ -323,7 +323,7 @@ function assertMenzenSize(
   const total = totalOf(concealed);
   if (total !== expected) {
     throw new RangeError(
-      `門前手の枚数が想定と違う(期待: ${expected} / 受領: ${total})。`,
+      `門前部分の枚数が想定と違う(期待: ${expected} / 受領: ${total})。`,
     );
   }
 }

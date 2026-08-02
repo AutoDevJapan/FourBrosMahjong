@@ -125,8 +125,9 @@
   「静かに空回りさせない」方針で守っています(#444)。置換の追加先が見つからなかった
   ときに除去を戻さないと1枚少ない手が返り、`cross-validation.test.ts` が
   `if (tiles.length !== 14) continue` で**静かに飛ばして**しまうためです。
-  現在は `cross-validation.test.ts` がジェネレータを呼ぶ**全ループ**で
-  `expect(...).toHaveLength()` を通し、契約そのものは `generator.test.ts` が
+  現在は `cross-validation.test.ts` が**乱択ジェネレータを呼ぶ全ループ**で
+  `expect(...).toHaveLength()` を通し(決め打ち fixture の `count34ToTiles` 経路は
+  オラクル側の枚数アサートが担保)、契約そのものは `generator.test.ts` が
   台本化した RNG で打ち切り経路を決定的に踏んで固定しています(通常のシードでは
   約 (3/27)^20 ≈ 8e-20 で到達せず、反復回数を増やしても踏めません)。
   `randomHand` 由来のループも同様です。枚数が欠けても `shanten()` とオラクルは
