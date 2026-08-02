@@ -15,6 +15,7 @@ import {
   tsumogiri,
 } from "@/domain/game/engine";
 import type { Tile } from "@/domain/tiles/tile";
+import { bannerLandmarks, describeElement } from "@/test/bannerLandmarks";
 import { tileLabel } from "../common/tileLabel";
 import { walkToGameEnd } from "./finishedGameFixture";
 import GameBoard, { pulledKitaCount, residualSticksNote } from "./GameBoard";
@@ -61,11 +62,12 @@ function gameBeforeEnd(seed = 2024): {
  * 実対局エンジン(seed 固定 = 決定的)で盤面を描画する。
  * 起家=自家 p0 が 東1 の親のため、開始直後は自家の打牌待ち。
  */
-function renderBoard(seed = 1) {
+function renderBoard(seed = 1, options?: Parameters<typeof render>[1]) {
   return render(
     <GameProvider initialGame={createGame({ seed })}>
       <GameBoard />
     </GameProvider>,
+    options,
   );
 }
 
@@ -186,7 +188,14 @@ describe("GameBoard (spec 6.6 client island / engine-driven)", () => {
 
   it("フォーカス表示の「全体盤面」で盤面モーダルを開閉できる(スペック5 5.3.2 段階② / 5.2.2)", async () => {
     const user = userEvent.setup();
-    renderBoard();
+    // `/game` と同じく `<main>` の内側へ置いて描く。`GameBoard` を裸で描くと、盤面ルート
+    // (`role="group"`)は banner 抑止の祖先ではないため、下の banner 判定が実ページと
+    // 違う条件で走ってしまう(盤面直下に `<header>` を足したときだけ偽陽性になる)。
+    // 描画は共通ヘルパを使う — ここで provider を書き写すと、ヘルパ側の変更が
+    // **この 1 本にだけ**届かなくなる(モーダル経路の banner 検査はここにしかない)。
+    renderBoard(1, {
+      wrapper: ({ children }) => <main>{children}</main>,
+    });
 
     // 初期状態ではモーダルは開いていない。
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
@@ -195,6 +204,16 @@ describe("GameBoard (spec 6.6 client island / engine-driven)", () => {
     await user.click(screen.getByRole("button", { name: "全体盤面" }));
     const dialog = screen.getByRole("dialog", { name: "全体盤面" });
     expect(dialog).toHaveAttribute("aria-modal", "true");
+
+    // spec 5.2.6 / #431: どのルートも banner ランドマークを公開しない。`Modal` は
+    // `document.body` 直下へポータルするため**ページの `<main>` の外**に出る。
+    // `[role="dialog"]` は `<header>` の暗黙 banner を抑止しないので、モーダル内に
+    // `<header>` を足すと banner が生える — ルート単位のゲート
+    // (`src/test/a11y-heading-placement.test.tsx`)はモーダルを開かないので見えない。
+    expect(
+      bannerLandmarks(document.body).map(describeElement),
+      "モーダル表示中に banner ランドマークが生えている(spec 5.2.6 / #431)",
+    ).toEqual([]);
 
     // Escape でフォーカストラップ付きモーダルを閉じられる(5.2.2)。
     await user.keyboard("{Escape}");

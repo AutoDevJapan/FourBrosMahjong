@@ -107,6 +107,19 @@ describe("/game/result page (spec 6.2 / 6.6)", () => {
     expect(loadingHtml).toContain("対局結果を読み込んでいます…");
     expect(loadingHtml.match(/<main[\s>]/g) ?? []).toHaveLength(1);
     expect(loadingHtml).not.toContain('role="main"');
+    // ページヘッダーは `<main>` の内側(spec 5.2.6 / #431)。SSR 出力は文字列だが、
+    // このファイルは jsdom プロジェクトで走るので切り離した要素へ流し込めば DOM 照会できる。
+    // 開始タグの出現順で見る方式は「`</main>` より後の `<h1>`」を通してしまう。
+    const loadingDom = document.createElement("div");
+    loadingDom.innerHTML = loadingHtml;
+    expect(
+      loadingDom.querySelectorAll("h1"),
+      "読み込み中分岐の <h1> がちょうど 1 つでない",
+    ).toHaveLength(1);
+    expect(
+      loadingDom.querySelectorAll("main h1"),
+      "読み込み中分岐の <h1> が <main> の内側にちょうど 1 つ無い",
+    ).toHaveLength(1);
 
     // 分岐を**一意に**指す文言。`最終順位` は未確定分岐の案内文にも出る
     //(「…ここに最終順位とソシー内訳が表示されます」)ので目印に使えない。
@@ -135,6 +148,18 @@ describe("/game/result page (spec 6.2 / 6.6)", () => {
       expect(
         container.querySelectorAll("main"),
         `${branch}分岐の <main> がちょうど 1 つでない`,
+      ).toHaveLength(1);
+      // ページヘッダーは `<main>` の内側(spec 5.2.6 / #431)。`<header>` は現状 3 分岐の
+      // 外側に 1 つだけ置いてあるが、分岐ごとに書き直された場合に付け忘れを無音にしない。
+      // 総数も見る。`main h1` だけだと `<main>` の外に 2 つ目の `<h1>` を足す形が通る
+      // (ルート単位のゲートは未確定分岐しか描かないので、確定分岐はここでしか見ない)。
+      expect(
+        container.querySelectorAll("h1"),
+        `${branch}分岐の <h1> がちょうど 1 つでない`,
+      ).toHaveLength(1);
+      expect(
+        container.querySelectorAll("main h1"),
+        `${branch}分岐の <h1> が <main> の内側にちょうど 1 つ無い`,
       ).toHaveLength(1);
       // 別要素の `role="main"` を足す形も禁止する。`<main>` の数は 1 のままなので上の
       // 数え方では通ってしまうが、main ランドマークとしては重複する(`role` で

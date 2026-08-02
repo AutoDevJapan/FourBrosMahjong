@@ -159,7 +159,7 @@ test.describe("自動 a11y 監査(axe-core)", () => {
    * ここへ効かせたくなった場合は、除外ではなく構造側を直すこと。
    */
   for (const screen of LANDMARK_SCREENS) {
-    test(`${screen.name}(${screen.path})は本文が単一の <main> に収まる(#409)`, async ({
+    test(`${screen.name}(${screen.path})は本文が単一の <main> に収まり <h1> を内側に持つ(#409 / #431)`, async ({
       page,
     }) => {
       await openScreen(page, screen, "ライト");
@@ -168,6 +168,25 @@ test.describe("自動 a11y 監査(axe-core)", () => {
       // このロケータは `<div role="main">` を数えないため、`role` 属性だけで代替した形は
       // ここが 0 件で落ちる(axe の 3 ルールはその形を通してしまう)。
       await expect(page.locator("main")).toHaveCount(1);
+
+      // ページヘッダー(`<h1>` を含む)は `<main>` の内側(spec 5.2.6 / #431)。外へ出すと
+      // `<header>` が banner ランドマークになり、ルートごとにランドマーク構成が割れる。
+      // axe の `region` は banner も「ランドマークに属する」と認めるため、この規約は
+      // `LANDMARK_RULES` では強制できない(#409 の時点で内外が割れていた理由)。
+      //
+      // 主ゲートは `src/test/a11y-heading-placement.test.tsx`(全ルート + 404 を jsdom で
+      // 数秒で回す)。ここが足すのは**実 DOM**での確認 — SSR + hydration + レイアウト +
+      // 実 CSS を通った最終的な木を見る。判定アルゴリズムの独立検証ではない
+      // (`getByRole` はブラウザの AX ツリーではなく Playwright 自前の `computeAriaRole` を
+      // 注入して評価しており、主ゲートの判定式はその実装を写している)。
+      //
+      // banner 0 個は「現状サイト共通ヘッダーが無い」ことの裏返しでもある。将来
+      // `src/app/layout.tsx` へ共通ヘッダーを置く場合は、ここを 0 個から**ちょうど 1 つ**へ
+      // 更新する(spec 5.2.6: banner は 1 ページに 1 つ)。ページ側の `<header>` を外へ
+      // 戻す変更は、そのときも引き続きこの行と `main h1` が落とす。
+      await expect(page.locator("h1")).toHaveCount(1);
+      await expect(page.locator("main h1")).toHaveCount(1);
+      await expect(page.getByRole("banner")).toHaveCount(0);
 
       const results = await new AxeBuilder({ page })
         .withRules([...LANDMARK_RULES])
