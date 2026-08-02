@@ -107,12 +107,15 @@ describe("/game/result page (spec 6.2 / 6.6)", () => {
     expect(loadingHtml).toContain("対局結果を読み込んでいます…");
     expect(loadingHtml.match(/<main[\s>]/g) ?? []).toHaveLength(1);
     expect(loadingHtml).not.toContain('role="main"');
-    // ページヘッダーは `<main>` の内側(spec 5.2.6 / #431)。`<main>` の開始タグより後に
-    // `<h1>` が現れることで確かめる(SSR 出力は文字列なので DOM 照会が使えない)。
+    // ページヘッダーは `<main>` の内側(spec 5.2.6 / #431)。SSR 出力は文字列だが、
+    // このファイルは jsdom プロジェクトで走るので切り離した要素へ流し込めば DOM 照会できる。
+    // 開始タグの出現順で見る方式は「`</main>` より後の `<h1>`」を通してしまう。
+    const loadingDom = document.createElement("div");
+    loadingDom.innerHTML = loadingHtml;
     expect(
-      loadingHtml.indexOf("<h1"),
-      "読み込み中分岐の <h1> が <main> より前にある",
-    ).toBeGreaterThan(loadingHtml.search(/<main[\s>]/));
+      loadingDom.querySelectorAll("main h1"),
+      "読み込み中分岐の <h1> が <main> の内側にちょうど 1 つ無い",
+    ).toHaveLength(1);
 
     // 分岐を**一意に**指す文言。`最終順位` は未確定分岐の案内文にも出る
     //(「…ここに最終順位とソシー内訳が表示されます」)ので目印に使えない。

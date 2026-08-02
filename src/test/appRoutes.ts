@@ -12,13 +12,13 @@ import { resolve } from "node:path";
  * - `src/test/a11y-landmark-screens.test.ts` — 単一 `<main>` の E2E 監査対象(`e2e/screens.ts`)との一致
  * - `src/test/a11y-heading-placement.test.tsx` — `<h1>` を `<main>` の内側に置く規約(#431)の全ルート検査
  *
- * vitest に依存させない(`expect` を持ち込まない)ことで、どちらのプロジェクト
- * (node / jsdom)からも同じ実装を読める素のモジュールに保つ。想定外の形は例外で落とす。
+ * vitest に依存させない(`expect` を持ち込まない)。テストランナー外からも読める素の
+ * モジュールになり、想定外の入力が**アサーション失敗ではなく普通の例外**として出る
+ * (この関数の利用者はテストなので、どちらでも赤にはなるが、原因が読みやすい)。
  */
-const APP_DIR = resolve(process.cwd(), "src/app");
 
 /** 既定の走査対象(`src/app`)。テストからフィクスチャを差し込めるよう引数の既定値にする。 */
-export const DEFAULT_APP_DIR = APP_DIR;
+export const DEFAULT_APP_DIR = resolve(process.cwd(), "src/app");
 
 /**
  * App Router がページとして解釈するファイル名。

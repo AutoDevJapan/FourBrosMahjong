@@ -15,6 +15,7 @@ import {
   tsumogiri,
 } from "@/domain/game/engine";
 import type { Tile } from "@/domain/tiles/tile";
+import { bannerLandmarks, describeElement } from "../../test/bannerLandmarks";
 import { tileLabel } from "../common/tileLabel";
 import { walkToGameEnd } from "./finishedGameFixture";
 import GameBoard, { pulledKitaCount, residualSticksNote } from "./GameBoard";
@@ -195,6 +196,16 @@ describe("GameBoard (spec 6.6 client island / engine-driven)", () => {
     await user.click(screen.getByRole("button", { name: "全体盤面" }));
     const dialog = screen.getByRole("dialog", { name: "全体盤面" });
     expect(dialog).toHaveAttribute("aria-modal", "true");
+
+    // spec 5.2.6 / #431: どのルートも banner ランドマークを公開しない。`Modal` は
+    // `document.body` 直下へポータルするため**ページの `<main>` の外**に出る。
+    // `[role="dialog"]` は `<header>` の暗黙 banner を抑止しないので、モーダル内に
+    // `<header>` を足すと banner が生える — ルート単位のゲート
+    // (`src/test/a11y-heading-placement.test.tsx`)はモーダルを開かないので見えない。
+    expect(
+      bannerLandmarks(document.body).map(describeElement),
+      "モーダル表示中に banner ランドマークが生えている(spec 5.2.6 / #431)",
+    ).toEqual([]);
 
     // Escape でフォーカストラップ付きモーダルを閉じられる(5.2.2)。
     await user.keyboard("{Escape}");

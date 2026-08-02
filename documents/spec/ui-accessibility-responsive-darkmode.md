@@ -42,7 +42,7 @@
   - すべての候補に到達できなかった場合は開発ビルドで警告する。これは呼び出し元が `fallbackFocusRef` を渡していない、またはその要素も到達不能という**呼び出し側の契約違反**であり、黙って `<body>` へ落とさない
   - この不変条件は `src/components/common/Modal.test.tsx`(候補の連鎖と警告)と `e2e/modal-focus.spec.ts`(卓幅が変わってトリガーが `display: none` になる実シナリオ)が回帰として固定する
 - **プログラム的なフォーカスの着地点はアクセシブル名とロールを持つ**(#405)。フォーカスリングは視覚的な手がかりでしかなく、`focus()` を受けるのがロールも名前も無い素の `<div>` だと、スクリーンリーダは**移動先を名指しする読み上げを持たず、コンテナ内容の読み上げに落ちる**(無音ではなく、盤面サブツリー全体を読み下すだけで「どこへ移ったか」が伝わらない)。[WAI-ARIA APG の Dialog (Modal) パターン](https://www.w3.org/WAI/ARIA/apg/patterns/dialog-modal/) は移す先の**名前付けまでは規定していない**ため、本プロジェクトの横断規約として定める。対象は上記「復帰先が到達不能なときは次の候補へ連鎖する」の優先順位 3(`fallbackFocusRef`)へ渡す要素
-  - **ロールは `role="group"` を既定**とし、**ランドマーク(`role="region"` / 名前付き `<section>`)にはしない**。「全体盤面」モーダルの着地点である `GameBoard` の盤面ルートは `/game` の `<main>` と範囲がほぼ 1:1 で重なる(`src/app/game/page.tsx` の `<main>` の子はページヘッダー `<header>` と `<GameBoard />` の 2 つだけで、本文はすべて盤面ルートの内側)ため、region にするとスクリーンリーダのランドマーク一覧(5.2.6 が前提にするランドマークジャンプの行き先)へ `main` と同じ範囲がもう 1 つ並ぶだけで、手がかりを薄める。`group` はランドマークではないのでその一覧には載らない。同じ形は `ActionPanel`(`role="group" aria-label="操作パネル"`)で先行している
+  - **ロールは `role="group"` を既定**とし、**ランドマーク(`role="region"` / 名前付き `<section>`)にはしない**。「全体盤面」モーダルの着地点である `GameBoard` の盤面ルートは `/game` の `<main>` と範囲がほぼ 1:1 で重なる(`src/app/game/page.tsx` の `<main>` の子はページヘッダー `<header>` と `<GameBoard />` の 2 つだけで、**盤面の中身**はすべて盤面ルートの内側)ため、region にするとスクリーンリーダのランドマーク一覧(5.2.6 が前提にするランドマークジャンプの行き先)へ `main` と同じ範囲がもう 1 つ並ぶだけで、手がかりを薄める。`group` はランドマークではないのでその一覧には載らない。同じ形は `ActionPanel`(`role="group" aria-label="操作パネル"`)で先行している
     - **範囲が重なるなら `<main>` 自体を着地点にすればよい、とはしない**。`<main>` はページ側の Server Component(`src/app/game/page.tsx`)が持ち、`fallbackFocusRef` はクライアントアイランドの `GameBoard` が持つ。`<main>` へ ref を付けるには 5.2.6(#409)で意図的にページ側へ置いた `<main>` をアイランドへ移すことになり、ランドマーク構造の所有者を動かしてしまう
     - 名前が読まれるのは**グループへフォーカスが入ったとき**で、着地点自身へのプログラム的な `focus()` に限らず `Tab` で内部の要素へ入った場合も含む。盤面全体を包むぶん出入りで 1 回ずつ読まれる冗長さが生じるが、着地点を伝えられない現状より軽いコストとして許容する
   - 着地点は**名前を持ってもタブ順には入れない**(`tabindex="-1"` のまま)。順路上の停止点を増やさずに、プログラム的な復帰先としてだけ機能させる
@@ -142,20 +142,22 @@ Tailwind v4 preflight は `ul { list-style: none }` を全リストへ適用す�
 | 出典 | `<header>` が banner でなくなる条件 |
 |---|---|
 | WHATWG HTML | 最も近い祖先の**セクショニングコンテンツ / セクショニングルート**が `body` でない。`<main>` は**そのどちらでもない**ため、字面どおりなら `<main>` の中でも banner のまま |
-| W3C ARIA in HTML | `article` / `aside` / `main` / `nav` / `section` の子孫なら generic |
-| axe-core 4.12.1 | `article, aside, main, nav, section`(ARIA in HTML と同じ) |
-| Blink / WebKit / Playwright | 上記に加えて**ロール上書きを見る**(`article:not([role])` … + `[role=article]` / `[role=complementary]` / `[role=main]` / `[role=navigation]` / `[role=region]`) |
+| W3C ARIA in HTML | `article` / `aside` / `main` / `nav` / `section` の子孫なら generic(散文なのでロール上書きの扱いには触れていない) |
+| axe-core 4.12.1 / Playwright 1.62 / Blink・WebKit | `article:not([role])` / `aside:not([role])` / `nav:not([role])` / `section:not([role])` / `main:not([role])` + `[role=article]` / `[role=complementary]` / `[role=navigation]` / `[role=region]` / `[role=main]` の子孫なら generic。**3 者は集合として同一**(axe の `getSectioningContentPlusMainSelector()` と Playwright の `kAncestorPreventingLandmark` を実測して確認) |
 
-本規約は **ARIA in HTML / ブラウザ実装**に依拠する(WHATWG の字面は実装が追随しておらず、実測でも `<main>` 内の `<header>` は banner にならない)。ゲート側は**最も厳密なブラウザ実装の式**を使う。
+本規約は **ARIA in HTML / 実装**に依拠する(WHATWG の字面には実装が追随しておらず、実測でも `<main>` 内の `<header>` は banner にならない)。ゲート側は**実装が使っている式をそのまま写す**。
 
 **規約の強制**:
 
 - 主ゲートは `src/test/a11y-heading-placement.test.tsx`(jsdom / ブラウザ不要)。`src/app/**/page.*` から導出した全ルート + 404 の**ページコンポーネント**を描画し、「`<main>` ちょうど 1 つ」「`<h1>` ちょうど 1 つ」「`<h1>` が `<main>` の内側」「`<h1>` の文言が `e2e/screens.ts` の `Screen.heading` と一致(ルートとページの取り違え検出)」「banner ランドマーク 0 個」を固定する。ルートを新設すると描画ケースの一覧と実ルートが食い違って落ちるため、規約の適用漏れが無音にならない
-  - **ルートレイアウトはツリーに入らない**(`src/app/layout.tsx` / `src/app/game/layout.tsx`)。レイアウト由来のランドマークはここでは見えず、E2E 側が見る
-- banner の判定は**テスト側に式を書く**。Testing Library の `getByRole("banner")` は使えない — ロール解決が `aria-query` の「scoped to the body element」制約を評価しないため、**`<main>` の内側の `<header>` まで banner として返す**(実測。テスト内にカナリアを置いて、この挙動が変わったら気づけるようにしてある)。式は Playwright の `kAncestorPreventingLandmark` を写し、裏取り役の E2E と**同じ述語**にする(単純な `article, aside, main, nav, section` はロール上書きを見ないぶん緩く、両ゲートが食い違う)
-- 判定関数そのものにも回帰を置く。全ルートの期待値が `[]` なので、**判定が壊れて常に `[]` を返しても全件緑**になる。外側/内側の `<header>`、明示 `role`、トークン並記、空 `role`、ロール上書き祖先の 5 形を両方向で固定する
+  - **レイアウトはツリーに入らない**(ルートレイアウト `src/app/layout.tsx` / セグメントレイアウト `src/app/game/layout.tsx`)。レイアウト由来のランドマークはここでは見えず、E2E 側が見る
+- banner の判定式は `src/test/bannerLandmarks.ts` に置く。Testing Library の `getByRole("banner")` は使えない — ロール解決が `aria-query` の**ロール単位の `constraints`**(`banner` なら `"scoped to the body element"`)をまったく読まないため、**`<main>` の内側の `<header>` まで banner として返す**(実測。`@testing-library/dom` がセレクタ生成で見るのは属性単位の `undefined` / `set` 制約だけ)。祖先条件は Playwright の `kAncestorPreventingLandmark` を写し、裏取り役の E2E と**同じ祖先条件**にする
+  - この挙動はテスト内のカナリアで固定してある。ただし**カナリアが赤くなっても `getByRole` へ乗り換えてよい合図ではない**。`constraints` の文言は WHATWG 由来なので、字面どおり実装されても `<main>` 内の `<header>` は banner のままで、#431 が禁じる形を検出できない。乗り換え条件は「Testing Library が ARIA in HTML の祖先条件を実装すること」
+  - 明示ロールの解決だけは**意図してブラウザより厳しい**。ブラウザ / Playwright はトークンリストの**最初の妥当なトークン**を採るため `role="navigation banner"` は navigation になるが、判定式は `[role~="banner"]` で banner として数える。トークン並記は本プロジェクトで使わない書き方であり、ゲートとしては**偽陰性より偽陽性へ倒す**(偽陽性は明確なメッセージで落ちて人が直せる。偽陰性は規約違反を無音で通す)。可視性も見ない
+- 判定関数そのものにも回帰を置く。全ルートの期待値が `[]` なので、**判定が壊れて常に `[]` を返しても全件緑**になる。外側/内側の `<header>`、明示 `role`、トークン並記(上記の意図した差も含む)、空 `role`、ロール上書き祖先の各形を両方向で固定する
+- **モーダル表示中**は `src/components/game/GameBoard.test.tsx` が同じ判定で banner 0 個を固定する。`Modal` は `document.body` 直下へポータルするためページの `<main>` の外へ出るうえ、`[role="dialog"]` は `<header>` の暗黙 banner を抑止しない。ルート単位のゲートはモーダルを開かないのでこの経路を見ない
 - `e2e/a11y.spec.ts` のランドマーク監査(7 画面)にも同じ 3 点を置き、**実ブラウザのロール計算**で `<header>` → banner の実マッピングを裏取りする(新規 spec は作らず CI 時間を増やさない)
-- ルートの導出は `src/test/appRoutes.ts` へ一本化し、`a11y-landmark-screens.test.ts` と共有する。導出を複製すると、片方のゲートだけが新しいルート表現に気づく非対称な穴が残る。導出自体の分岐(ルートグループ / プライベートフォルダ / 動的セグメント / パラレルルート / `.tsx` 以外の拡張子)は本リポジトリの `src/app` に実在しないため呼び出し側からは一度も実行されない — `src/test/appRoutes.test.ts` がフィクスチャディレクトリで個別に固定する
+- ルートの導出は `src/test/appRoutes.ts` へ一本化し、`a11y-landmark-screens.test.ts` と共有する。導出を複製すると、片方のゲートだけが新しいルート表現に気づく非対称な穴が残る。導出自体の分岐(ルートグループ / プライベートフォルダ / 動的セグメント / パラレルルート / `.tsx` 以外の拡張子 / ページ以外のファイル / ページ 0 件)は本リポジトリの `src/app` に実在しないため呼び出し側からは一度も実行されない — `src/test/appRoutes.test.ts` がフィクスチャディレクトリで個別に固定する
 
 **「banner 0 個」は現状にサイト共通ヘッダーが無いことの裏返し**でもある。将来ルートレイアウト(`src/app/layout.tsx`)へ共通ヘッダーを置くなら、そのときは両ゲートの banner 期待値を 0 個から**ちょうど 1 つ**へ更新する(banner は 1 ページに 1 つ)。ページ側の `<header>` を `<main>` の外へ戻す変更は、そのあとも `<h1>` の内側判定が落とす。
 

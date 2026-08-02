@@ -12,6 +12,7 @@ import { GameProvider } from "@/components/game/GameProvider";
 import { createGame } from "@/domain/game/engine";
 import { LANDMARK_SCREENS, NOT_FOUND_SCREEN_NAME } from "../../e2e/screens";
 import { appRoutes } from "./appRoutes";
+import { bannerLandmarks, describeElement } from "./bannerLandmarks";
 
 /**
  * `<h1>`・ページヘッダーの配置規約(spec 5.2.6 / #431)を全ルートで固定する。
@@ -37,11 +38,19 @@ import { appRoutes } from "./appRoutes";
 // App Router のフックを jsdom 用にスタブ。`ResultPageClient` が使うのは `useRouter` だけだが、
 // 素の実装は App Router のコンテキスト外で投げるため、ページが後から別のフックを使い始めた
 // ときに「landmark が壊れた」ではなく不透明な例外で落ちる。よく使う読み取り系も先に埋める。
-vi.mock("next/navigation", () => ({
-  useRouter: () => ({ push: vi.fn(), replace: vi.fn() }),
-  usePathname: () => "/",
-  useSearchParams: () => new URLSearchParams(),
-}));
+//
+// 返り値は**モジュールスコープで 1 度だけ**作る。呼び出しごとに新しい値を返すと、
+// ページ側がそれを `useEffect` / `useMemo` の依存配列へ入れた瞬間に無限再描画になり、
+// 「不透明な例外」より始末の悪い jsdom のハングになる(ここで避けたい失敗モードの逆)。
+vi.mock("next/navigation", () => {
+  const router = { push: vi.fn(), replace: vi.fn() };
+  const searchParams = new URLSearchParams();
+  return {
+    useRouter: () => router,
+    usePathname: () => "/",
+    useSearchParams: () => searchParams,
+  };
+});
 
 // jsdom は `window.matchMedia` を実装しない(`/settings` の `ThemeToggle` が参照する)。
 // `stubGlobal` / `unstubAllGlobals` で対にする(素の代入は `restoreAllMocks` では戻らない)。
@@ -64,45 +73,6 @@ beforeEach(() => {
 afterEach(() => {
   vi.unstubAllGlobals();
 });
-
-/**
- * `<header>` / `<footer>` の暗黙ロールを banner / contentinfo にしない祖先。
- *
- * **Playwright の実装から一字一句写している**(`playwright-core` の
- * `kAncestorPreventingLandmark`)。裏取り役の `e2e/a11y.spec.ts` が
- * `getByRole("banner")` で判定する以上、主ゲートが別の判定式を使うと**両者が食い違う**
- * (ロールを上書きした `<nav role="menubar">` の内側などで、こちらだけ緑になる)。
- *
- * 単純な `article, aside, main, nav, section` は W3C「ARIA in HTML」の記述に近いが、
- * `role` で上書きされた場合を見ないぶん緩い。axe-core 4.12.1 はそちらを使っており、
- * ブラウザ実装(および Playwright)のほうが厳密。厳しい側に揃える。
- */
-const BANNER_SUPPRESSING_ANCESTORS =
-  "article:not([role]), aside:not([role]), main:not([role]), nav:not([role]), section:not([role]), [role=article], [role=complementary], [role=main], [role=navigation], [role=region]";
-
-/** `root` 配下で banner ランドマークとして公開される要素を列挙する。 */
-function bannerLandmarks(root: ParentNode): Element[] {
-  // `role` はトークンリスト(`role="banner navigation"` のような並記が許される)なので
-  // `[role~=]` で 1 トークンとして照合する。`[role=]` だと並記された banner を取り逃がす。
-  const explicit = [...root.querySelectorAll('[role~="banner"]')];
-  const implicit = [...root.querySelectorAll("header")].filter((header) => {
-    // 明示 `role` があれば暗黙ロールは上書きされる(上の explicit 側で拾う)。空文字や
-    // 空白だけの `role` は「指定なし」と同じ扱いで、暗黙ロールが残る。
-    const explicitRole = header.getAttribute("role")?.trim() ?? "";
-    return (
-      explicitRole === "" &&
-      header.parentElement?.closest(BANNER_SUPPRESSING_ANCESTORS) == null
-    );
-  });
-  return [...explicit, ...implicit];
-}
-
-/** 失敗メッセージ用に要素を短く名指しする(`outerHTML` はタグ途中で切れて読めない)。 */
-function describeElement(element: Element): string {
-  const id = element.id === "" ? "" : `#${element.id}`;
-  const role = element.getAttribute("role");
-  return `${element.tagName.toLowerCase()}${id}${role === null ? "" : `[role="${role}"]`}.${element.className}`;
-}
 
 /**
  * 各ルートを jsdom で描画するための要素。キーは `appRoutes()` が返すルートパス。
@@ -187,13 +157,17 @@ describe("<h1>・ページヘッダーの配置(spec 5.2.6 / #431)", () => {
         "<h1> が <main> の外にある(spec 5.2.6: ページヘッダーは <main> の内側)",
       ).toBe(true);
 
-      // ルートに対応するページを描いているか(取り違え検出)。
+      // ルートに対応するページを描いているか(取り違え検出)。`toHaveTextContent` は
+      // 部分一致なので使わない — 「ルール説明とFAQ」のような別見出しを通してしまう。
       const expectedHeading = EXPECTED_HEADING.get(testCase.name);
       expect(
         expectedHeading,
         `${testCase.name} が e2e/screens.ts の一覧に無い`,
       ).toBeDefined();
-      expect(headings[0]).toHaveTextContent(expectedHeading as string);
+      expect(
+        headings[0].textContent?.trim(),
+        `${testCase.name} の <h1> 文言が e2e/screens.ts の Screen.heading と一致しない`,
+      ).toBe(expectedHeading);
 
       expect(
         bannerLandmarks(root).map(describeElement),
@@ -234,12 +208,17 @@ describe("bannerLandmarks()(banner 判定そのもの)", () => {
       <main>
         <div id="explicit" role="banner" />
         <div id="tokens" role="banner navigation" />
+        {/* ブラウザ / Playwright は**最初の妥当なトークン**を採るので、これは実ブラウザでは
+            navigation になる。ここでは意図して banner として数える(偽陰性より偽陽性へ倒す)
+            — 判定式の doc コメント参照。実装を「最初のトークン」へ寄せるならここが赤になる。 */}
+        <div id="navigation-first" role="navigation banner" />
       </main>,
     );
 
     expect(bannerLandmarks(root).map((element) => element.id)).toEqual([
       "explicit",
       "tokens",
+      "navigation-first",
     ]);
   });
 
@@ -271,10 +250,17 @@ describe("bannerLandmarks()(banner 判定そのもの)", () => {
   });
 
   /**
-   * 自前判定を持つ理由の**カナリア**。Testing Library のロール解決は `aria-query` の
-   * 「scoped to the body element」制約を評価しないため、`<main>` の内側の `<header>` まで
-   * banner として返す(実測)。この期待が落ちたら制約が実装された合図で、そのときは
-   * `bannerLandmarks()` を捨てて `getByRole("banner")` に寄せてよい。
+   * 自前判定を持つ理由の**カナリア**。`@testing-library/dom` のロール解決は、`aria-query` の
+   * **ロール単位の `constraints`**(`banner` なら `"scoped to the body element"`)を
+   * まったく読まない — セレクタ生成で見るのは属性単位の `undefined` / `set` 制約だけ。
+   * その結果 `<main>` の内側の `<header>` まで banner として返す(実測)。
+   *
+   * **この期待が赤くなっても「乗り換えてよい」合図ではない**。`constraints` を字面どおり
+   * 実装しても、その文言は WHATWG HTML 由来で「最も近い祖先のセクショニングコンテンツ /
+   * セクショニングルートが `body`」を指す。`<main>` はそのどちらでもないので、
+   * `<main>` 内の `<header>` は依然 banner のまま返り、#431 が禁じている形を検出できない。
+   * `getByRole("banner")` へ寄せてよいのは、Testing Library が **W3C ARIA in HTML の
+   * 祖先条件**(`article` / `aside` / `main` / `nav` / `section`)を実装した場合だけ。
    */
   it("Testing Library の getByRole('banner') は祖先条件を見ない(自前判定を持つ理由)", () => {
     renderProbe(
@@ -288,6 +274,7 @@ describe("bannerLandmarks()(banner 判定そのもの)", () => {
 
     expect(
       screen.queryAllByRole("banner").map((element) => element.id),
+      "この失敗は @testing-library/dom の更新で起きうる。期待値を書き換える前に、上の doc コメント(乗り換え条件)を読むこと",
     ).toEqual(["outside", "inside"]);
   });
 });
