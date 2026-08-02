@@ -7,9 +7,9 @@ import { BANNER_SUPPRESSING_ANCESTORS, VALID_ROLES } from "./bannerLandmarks";
 /**
  * `bannerLandmarks()` が `playwright-core` から写した規則の**同期を機械で守る**(#431)。
  *
- * 対象は 3 点 — 祖先条件(`kAncestorPreventingLandmark`)、妥当ロール一覧(`validRoles`)、
- * そして `<header>` の暗黙ロール規則そのもの。定数だけを見ていると、規則側に条件が
- * 増えたときに定数は一致したまま判定だけがずれる。
+ * 対象は 4 点 — 祖先条件(`kAncestorPreventingLandmark`)、妥当ロール一覧(`validRoles`)、
+ * `<header>` の暗黙ロール規則、明示ロールの解決(`getExplicitAriaRole`)。定数だけを見ていると、
+ * 規則側に条件が増えたときに定数は一致したまま判定だけがずれる。
  *
  * spec 5.2.6 の主ゲート(jsdom)と裏取り役の E2E(`getByRole("banner")`)は、同じ規則で
  * banner を判定していないと**片方だけ緑になる**。ところが両者を結んでいるのは
@@ -64,7 +64,7 @@ function coreBundle(): string {
   return readFileSync(bundlePath, "utf8");
 }
 
-describe("bannerLandmarks の定数と playwright-core の同期(#431)", () => {
+describe("bannerLandmarks と playwright-core の同期(#431)", () => {
   const bundle = coreBundle();
 
   it("祖先条件は kAncestorPreventingLandmark と一致する", () => {
@@ -105,6 +105,17 @@ describe("bannerLandmarks の定数と playwright-core の同期(#431)", () => {
   it("HEADER の暗黙ロール規則そのものが Playwright と同じ形である", () => {
     expect(bundle, RESYNC_HINT).toContain(
       '"HEADER": (e) => closestCrossShadow(e, kAncestorPreventingLandmark) ? null : "banner"',
+    );
+  });
+
+  /**
+   * 明示ロールの解決も `bannerLandmarks.ts` が写している(`explicitRole()`)。トークンの
+   * 分割規則が変わる / presentation conflict resolution がここへ入る、といった変更は
+   * 定数も `HEADER` の 1 行も一致したまま通ってしまう。
+   */
+  it("明示ロールの解決規則が Playwright と同じ形である", () => {
+    expect(bundle, RESYNC_HINT).toContain(
+      'const roles = (element.getAttribute("role") || "").split(" ").map((role) => role.trim());',
     );
   });
 });

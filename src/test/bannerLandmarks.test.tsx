@@ -12,7 +12,8 @@ import { bannerLandmarks } from "./bannerLandmarks";
  * 両方向で固定しないとゲートが無音化する(#409 のメタテストが「文字列走査だと検査自体が
  * 無音化する」を塞いだのと同じ理由)。
  *
- * `playwright-core` から写した 2 定数の同期は `bannerLandmarks.playwrightSync.test.ts` が守る。
+ * `playwright-core` から写した規則(祖先条件・妥当ロール一覧・`<header>` の暗黙ロール規則・
+ * 明示ロールの解決)の同期は `bannerLandmarks.playwrightSync.test.ts` が守る。
  */
 describe("bannerLandmarks()(banner 判定そのもの)", () => {
   function renderProbe(markup: ReactElement) {
