@@ -18,7 +18,7 @@
  * 特異度でも分離できず、先に一致した banner が返る。だから `<main>` の内側の `<header>` まで
  * banner として報告される(実測)。
  *
- * 回帰は `src/test/a11y-heading-placement.test.tsx` の `bannerLandmarks()` ブロックが持つ。
+ * 回帰は `src/test/bannerLandmarks.test.tsx` が持つ。
  * 全ルートの期待値が `[]` なので、**判定が壊れて常に `[]` を返しても全件緑**になる —
  * 判定そのものを両方向で固定しないとゲートが無音化する。
  */
@@ -27,7 +27,9 @@
  * `<header>` / `<footer>` の暗黙ロールを banner / contentinfo にしない祖先。
  *
  * **Playwright の実装から一字一句写している**(`playwright-core` の
- * `kAncestorPreventingLandmark`)。axe-core 4.12.1 の
+ * `kAncestorPreventingLandmark`)。写した内容の同期は
+ * `src/test/bannerLandmarks.playwrightSync.test.ts` がバンドルを直接読んで固定する
+ * (散文の「写している」だけでは `pnpm up playwright` で無音にずれる)。axe-core 4.12.1 の
  * `getSectioningContentPlusMainSelector()` も、W3C「ARIA in HTML」の `header` 行も、
  * 展開すると**同じ集合**(実測 / 仕様本文で確認)。字面が違うのは WHATWG HTML だけで、
  * そちらは「最も近い祖先のセクショニングコンテンツ / セクショニングルートが `body`」と

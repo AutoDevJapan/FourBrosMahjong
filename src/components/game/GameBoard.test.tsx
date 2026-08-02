@@ -194,9 +194,7 @@ describe("GameBoard (spec 6.6 client island / engine-driven)", () => {
     // 描画は共通ヘルパを使う — ここで provider を書き写すと、ヘルパ側の変更が
     // **この 1 本にだけ**届かなくなる(モーダル経路の banner 検査はここにしかない)。
     renderBoard(1, {
-      wrapper: ({ children }: { children: React.ReactNode }) => (
-        <main>{children}</main>
-      ),
+      wrapper: ({ children }) => <main>{children}</main>,
     });
 
     // 初期状態ではモーダルは開いていない。
