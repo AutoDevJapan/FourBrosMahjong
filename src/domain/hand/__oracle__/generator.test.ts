@@ -15,6 +15,8 @@
  */
 
 import { describe, expect, it } from "vitest";
+import type { Tile } from "../../tiles/tile";
+import { tileNotation } from "../notation";
 import { isCompleteOracle34 } from "./agari-oracle";
 import { SANMA_INDICES_34, tilesToCount34, tileTo34Index } from "./counts34";
 import { makeRng, PLACEMENT_TRIES, randomStructuredHand } from "./generator";
@@ -31,8 +33,10 @@ function pickSanma(position: number): number {
 
 /**
  * `generator.ts` 内部の `SEQUENCE_STARTS`(筒子 1-7 始まり + 索子 1-7 始まり)の要素数。
- * 非公開なので台本側で持つ。ここがずれると台本は別の順子を組ませてしまうが、
- * その場合は下の `tailDraws()` の等式が壊れて**落ちる**(静かに空回りしない)。
+ * 非公開なので台本側で持つ。ここがずれると台本は**別の順子**を組ませてしまい、
+ * `tailDraws()` の等式だけでは検出できない(打ち切り経路自体は通るため)。
+ * 各テストが生成手そのものを {@link HAND_ROLLED_BACK} / {@link HAND_SWAPPED} で
+ * 固定しているので、そちらが落ちる。
  */
 const SEQUENCE_STARTS_LEN = 14;
 
@@ -68,6 +72,20 @@ const SCRIPT_FOUR_COPY_1P: readonly number[] = [
   SWAPS_ONE,
   REMOVE_EAST,
 ];
+
+/**
+ * 台本が組ませる完成形。置換に**失敗**した場合は除去した東が戻るので、返り値はこれと一致する。
+ * (`randomStructuredHand` は `count34ToTiles` 経由なので牌順は 34-index 昇順で決定的。)
+ */
+const HAND_ROLLED_BACK = "1p1p1p1p2p2p3p3p1s2s3s1z1z1z";
+
+/** 置換に**成功**した場合。東が1枚減り、2p が1枚増える。 */
+const HAND_SWAPPED = "1p1p1p1p2p2p2p3p3p1s2s3s1z1z";
+
+/** 生成手を決定的な文字列へ(台本の意図した手そのものを固定するため)。 */
+function handNotation(tiles: readonly Tile[]): string {
+  return tiles.map(tileNotation).join("");
+}
 
 /**
  * 台本の値を順に返し、尽きたら `tail` を返し続ける RNG。
@@ -112,19 +130,20 @@ describe("ジェネレータの枚数契約(randomStructuredHand / #444)", () =>
       pickSanma(SANMA_INDICES_34.indexOf(INDEX_1P)),
     );
     const tiles = randomStructuredHand(rng, 1);
-    const counts = tilesToCount34(tiles);
 
+    // 打ち切り経路を通ったこと。`PLACEMENT_TRIES` 自体が 0/1 に縮むとこの等式は
+    // 自己成就するので、上の「上限の健全性」テストと対で機能する。
     expect(
       tailDraws(),
       "台本が置換失敗経路を作れていない(buildCompleteCounts の乱数消費順が変わった可能性)",
     ).toBe(PLACEMENT_TRIES);
-    expect(counts[INDEX_1P], "1p が4枚でないと置換は失敗しない").toBe(4);
-
-    // 本題: 打ち切っても枚数は減らず、除去した東が戻っている。
+    // 本題: 打ち切っても枚数は減らず、除去した東が戻って元の完成形に一致する。
+    // (期待値の 1p が4枚であること自体が「置換が失敗する」前提の裏取りになっている。)
     expect(tiles).toHaveLength(14);
-    expect(counts[INDEX_EAST], "除去した東が戻っていない").toBe(3);
-    // 戻した結果、元の完成形(4面子1雀頭)のまま。
-    expect(isCompleteOracle34(counts)).toBe(true);
+    expect(handNotation(tiles), "除去した東が戻っていない").toBe(
+      HAND_ROLLED_BACK,
+    );
+    expect(isCompleteOracle34(tilesToCount34(tiles))).toBe(true);
   });
 
   it("置換先が見つかれば戻さない(正常系は巻き戻されない)", () => {
@@ -135,14 +154,14 @@ describe("ジェネレータの枚数契約(randomStructuredHand / #444)", () =>
       pickSanma(SANMA_INDICES_34.indexOf(INDEX_2P)),
     );
     const tiles = randomStructuredHand(rng, 1);
-    const counts = tilesToCount34(tiles);
 
     expect(tailDraws(), "追加先が1回目で決まっていない").toBe(1);
     expect(tiles).toHaveLength(14);
-    // 失敗系との**観測可能な差**はここ。戻し処理が正常系まで巻き込むと東が3枚に戻り、
-    // 2p は2枚のまま(= 置換が無かったことになる)。
-    expect(counts[INDEX_EAST], "置換したのに東が戻されている").toBe(2);
-    expect(counts[INDEX_2P], "追加した 2p が入っていない").toBe(3);
+    // 失敗系との**観測可能な差**はここ。戻し処理が正常系まで巻き込むと東が3枚に戻り
+    // 2p は2枚のまま(= `HAND_ROLLED_BACK` に一致してしまう)。枚数だけでは区別できない。
+    expect(handNotation(tiles), "置換が効いていない(巻き戻された)").toBe(
+      HAND_SWAPPED,
+    );
   });
 
   it("通常のシード 2,000 手が常に14枚・1牌種4枚以内である", () => {

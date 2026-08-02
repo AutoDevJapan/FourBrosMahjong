@@ -125,7 +125,7 @@
   「静かに空回りさせない」方針で守っています(#444)。置換の追加先が見つからなかった
   ときに除去を戻さないと1枚少ない手が返り、`cross-validation.test.ts` が
   `if (tiles.length !== 14) continue` で**静かに飛ばして**しまうためです。
-  現在は3箇所とも `expect(...).toHaveLength()` で hard fail させ、契約そのものは
+  現在は4箇所とも `expect(...).toHaveLength()` で hard fail させ、契約そのものは
   `generator.test.ts` が台本化した RNG で打ち切り経路を決定的に踏んで固定しています
   (通常のシードでは約 (3/27)^20 ≈ 1e-20 で到達せず、反復回数を増やしても踏めません)。
 

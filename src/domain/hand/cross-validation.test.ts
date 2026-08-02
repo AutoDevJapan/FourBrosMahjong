@@ -135,6 +135,9 @@ describe("クロス検証: 向聴数(ai.shanten ⇔ オラクル)", () => {
     const samples: string[] = [];
     for (let i = 0; i < STRUCTURED_HANDS; i += 1) {
       const tiles = randomStructuredHand(rng);
+      // `shanten()` もオラクルも13枚を受け付けてしまうので、枚数が欠けても不一致にならず
+      // 静かに素通りする。ジェネレータの契約はここでも落とす(#444)。
+      expect(tiles, `i=${i}`).toHaveLength(14);
       const a = shanten(tiles);
       const o = shantenOracle34(tilesToCount34(tiles));
       if (a !== o) {
@@ -187,7 +190,7 @@ describe("クロス検証: 和了・分解・待ち(decompose/tenpai ⇔ オラ�
       // (片側リグレッションで最も壊れやすい箇所)をほとんど踏まない(#429)。
       const tiles = menzen14(rng, i);
       // `menzen14` の契約(必ず14枚)。破れたら静かに skip せず落とす(#444)。
-      expect(tiles).toHaveLength(14);
+      expect(tiles, `i=${i}`).toHaveLength(14);
       const counts = tilesToCount34(tiles);
 
       const aComplete = isCompleteHand(tiles, []);
@@ -245,7 +248,7 @@ describe("クロス検証: 和了・分解・待ち(decompose/tenpai ⇔ オラ�
         i % 2 === 1 ? randomHand(rng, 13) : dropOne(rng, menzen14(rng, i));
       // `randomHand(13)` / `menzen14`(14枚)から1枚落とした手はどちらも必ず13枚。
       // 破れたら静かに skip せず落とす(#444)。
-      expect(tiles).toHaveLength(13);
+      expect(tiles, `i=${i}`).toHaveLength(13);
       const counts = tilesToCount34(tiles);
 
       const aWaits = new Set(
@@ -280,9 +283,6 @@ describe("クロス検証: 和了・分解・待ち(decompose/tenpai ⇔ オラ�
  * 枚数が14でなければ先頭13枚を切り出して**辻褄を合わせる**実装だったが、それでは
  * ジェネレータの契約違反(1枚足りない手)が「別の手牌」に化けて静かに紛れ込む。
  * 契約は `expect` で明示的に落とす(#444)。
- *
- * ⚠️ `expect` を含むので**テスト実行中(`it` の中)からのみ呼ぶこと**。`describe` 直下や
- * モジュール読み込み時に呼ぶと、枚数エラーではなく Vitest の実行文脈エラーになる。
  */
 function structured13(rng: () => number): Tile[] {
   const tiles = randomStructuredHand(rng);
@@ -610,7 +610,7 @@ describe("クロス検証: 門前手の分解・和了・待ち(定義ベース 
     for (let i = 0; i < MENZEN_HANDS; i += 1) {
       const tiles = menzen14(rng, i);
       // `menzen14` の契約(必ず14枚)。破れたら静かに skip せず落とす(#429 / #444)。
-      expect(tiles).toHaveLength(14);
+      expect(tiles, `i=${i}`).toHaveLength(14);
       const counts = tilesToCount34(tiles);
 
       const oracleForms = standardFormsByDefinition34(counts, MENZEN_GROUPS);
@@ -702,7 +702,7 @@ describe("クロス検証: 門前手の分解・和了・待ち(定義ベース 
     for (let i = 0; i < MENZEN_HANDS; i += 1) {
       const tiles = dropOne(rng, menzen14(rng, i));
       // 14枚から1枚落としたので必ず13枚。破れたら静かに skip せず落とす(#429 / #444)。
-      expect(tiles).toHaveLength(13);
+      expect(tiles, `i=${i}`).toHaveLength(13);
       const counts = tilesToCount34(tiles);
 
       const expected = menzenWaitingIndicesByDefinition34(counts);
