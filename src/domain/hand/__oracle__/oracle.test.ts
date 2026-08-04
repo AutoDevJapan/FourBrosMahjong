@@ -20,6 +20,7 @@ import {
   isSevenPairsByDefinition34,
   isThirteenOrphansByDefinition34,
   menzenWaitingIndicesByDefinition34,
+  shantenByDefinition34,
   standardFormsByDefinition34,
   waitingIndicesByDefinition34,
 } from "./definition-oracle";
@@ -176,6 +177,15 @@ describe("定義ベースの分解・待ちオラクル(副露経路 / #390)", (
     expect(() => defWaits("123p 9s", 2)).toThrow(RangeError);
     expect(() => forms("123p 456p 99s", 5)).toThrow(RangeError);
     expect(() => forms("123p 456p 99s", -1)).toThrow(RangeError);
+  });
+
+  it("shantenByDefinition34 も枚数が噛み合わなければ失敗する(静かにずらさない)", () => {
+    // 向聴は `13 − 3 × meldCount − 重なり` で決まるので、枚数が違う手を受けると
+    // 結果が静かにずれるだけで呼び出し側は気づけない。上の分解・待ちと同じ方針(#444)。
+    const fourTiles = tilesToCount34(parseTiles("123p 9s")); // meldCount=3 の正しい枚数
+    expect(shantenByDefinition34(fourTiles, 3)).toBe(TENPAI);
+    expect(() => shantenByDefinition34(fourTiles, 2)).toThrow(RangeError);
+    expect(() => shantenByDefinition34(fourTiles, 1)).toThrow(RangeError);
   });
 
   it("副露2組の三面張を列挙する(2面子+雀頭の1枚不足)", () => {
