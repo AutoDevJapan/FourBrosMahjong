@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it } from "vitest";
 import { DEFAULT_NAMES } from "@/domain/game/engine";
@@ -92,6 +92,17 @@ describe("PlayerNamesForm", () => {
     await user.type(input, "あ".repeat(MAX_PLAYER_NAME_LENGTH + 5));
 
     expect(input.value).toHaveLength(MAX_PLAYER_NAME_LENGTH);
+  });
+
+  it("入力欄も保存処理と同じ書記素単位で絵文字を制限する(#484)", () => {
+    render(<PlayerNamesForm />);
+    const input = inputFor("対局者2");
+    const withinLimit = `${"あ".repeat(11)}😀`;
+
+    fireEvent.change(input, { target: { value: `${withinLimit}超過` } });
+
+    expect(input).toHaveValue(withinLimit);
+    expect(input.value).not.toMatch(/[\uD800-\uDFFF]/u);
   });
 
   it("グループと各入力がアクセシブルな名前を持つ(スペック5 5.2)", () => {

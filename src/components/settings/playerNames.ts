@@ -30,6 +30,74 @@ export const PLAYER_NAMES_STORAGE_KEY = "four-bros-mahjong.playerNames.v1";
  */
 export const MAX_PLAYER_NAME_LENGTH = 12;
 
+/** 不正な UTF-16 を U+FFFD へ置換し、サロゲートペアを分断しない文字列にする。 */
+function toWellFormed(value: string): string {
+  let result = "";
+  for (let index = 0; index < value.length; index++) {
+    const first = value.charCodeAt(index);
+    if (first >= 0xd800 && first <= 0xdbff) {
+      const second = value.charCodeAt(index + 1);
+      if (second >= 0xdc00 && second <= 0xdfff) {
+        result += value[index] + value[index + 1];
+        index++;
+      } else result += "\uFFFD";
+    } else if (first >= 0xdc00 && first <= 0xdfff) result += "\uFFFD";
+    else result += value[index];
+  }
+  return result;
+}
+
+const isRegionalIndicator = (value: string) =>
+  /[\u{1F1E6}-\u{1F1FF}]/u.test(value);
+const extendsPreviousGrapheme = (value: string) =>
+  /\p{Mark}/u.test(value) ||
+  /[\uFE0E\uFE0F]/u.test(value) ||
+  /[\u{1F3FB}-\u{1F3FF}]/u.test(value);
+
+/** `Intl.Segmenter` 非対応環境向けの決定的 fallback。 */
+function fallbackGraphemes(value: string): string[] {
+  const result: string[] = [];
+  for (const point of value) {
+    const previous = result.at(-1);
+    if (
+      previous !== undefined &&
+      (extendsPreviousGrapheme(point) ||
+        point === "\u200D" ||
+        previous.endsWith("\u200D") ||
+        (isRegionalIndicator(point) &&
+          isRegionalIndicator(previous) &&
+          [...previous].length === 1))
+    ) {
+      result[result.length - 1] += point;
+    } else result.push(point);
+  }
+  return result;
+}
+
+/** ユーザーが認識する書記素クラスタへ分割する。 */
+export function playerNameGraphemes(value: string): string[] {
+  const wellFormed = toWellFormed(value);
+  if (typeof Intl.Segmenter === "function") {
+    const segmenter = new Intl.Segmenter("ja", { granularity: "grapheme" });
+    return [...segmenter.segment(wellFormed)].map(({ segment }) => segment);
+  }
+  return fallbackGraphemes(wellFormed);
+}
+
+/** 入力中・保存時で共用する、書記素クラスタ単位の上限適用。 */
+export function limitPlayerName(value: string): string {
+  return playerNameGraphemes(value).slice(0, MAX_PLAYER_NAME_LENGTH).join("");
+}
+
+/** 永続化境界で用いる名前の非空・上限・well-formed 検証。 */
+export function isValidPlayerName(value: string): boolean {
+  return (
+    value.length > 0 &&
+    !/[\uD800-\uDFFF]/u.test(value) &&
+    playerNameGraphemes(value).length <= MAX_PLAYER_NAME_LENGTH
+  );
+}
+
 /** 入力欄のラベル(index 0 = 自家)。 */
 export const PLAYER_NAME_LABELS: readonly [string, string, string, string] = [
   "あなた(自家)",
@@ -51,7 +119,7 @@ export { DEFAULT_NAMES };
 export function sanitizePlayerName(raw: string): string | null {
   const normalized = raw.replace(/\s+/gu, " ").trim();
   if (normalized === "") return null;
-  return normalized.slice(0, MAX_PLAYER_NAME_LENGTH);
+  return limitPlayerName(normalized);
 }
 
 /** 4件の入力値を正規化し、空欄は既定名で埋めた確定名を返す。 */

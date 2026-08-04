@@ -388,6 +388,26 @@ describe("game persistence journal", () => {
     expect(parseJournal(JSON.stringify(journal))).toBeNull();
   });
 
+  it("12書記素の絵文字名を受け入れ、lone surrogateは拒否する(#484)", () => {
+    const emojiName = "😀".repeat(MAX_PLAYER_NAME_LENGTH);
+    const valid = {
+      version: 2,
+      seed: 1,
+      actions: [],
+      names: [emojiName, "B", "C", "D"],
+    };
+
+    expect(parseJournal(JSON.stringify(valid))?.names[0]).toBe(emojiName);
+    expect(
+      parseJournal(
+        JSON.stringify({
+          ...valid,
+          names: ["壊れた\uD83D", "B", "C", "D"],
+        }),
+      ),
+    ).toBeNull();
+  });
+
   it("v2でnamesキーが無い記録は拒否する (#291)", () => {
     expect(
       parseJournal(JSON.stringify({ version: 2, seed: 1, actions: [] })),

@@ -74,4 +74,13 @@ describe("GameProvider 対局者名の反映 (#291)", () => {
     expect(after).toBe(before);
     expect(after).not.toContain("別人1");
   });
+
+  it("12書記素目が絵文字の名前を保存し、リロード後の盤面にも復元する(#484)", () => {
+    const unicodeName = "12345678901😀";
+    storeNames([unicodeName, "B", "C", "D"]);
+
+    expect(renderNames()).toContain(unicodeName);
+    cleanup();
+    expect(renderNames()).toContain(unicodeName);
+  });
 });

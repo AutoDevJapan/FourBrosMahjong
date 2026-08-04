@@ -7,7 +7,7 @@ import { expect, test } from "@playwright/test";
  * `/settings` で保存 → `/game` の盤面 → リロード復元まで、同じ名前が一貫して出ることを確認する。
  */
 
-const NAMES = ["わたし", "龍さん", "下ちゃん", "翔生くん"] as const;
+const NAMES = ["12345678901😀", "龍さん", "下ちゃん", "翔生くん"] as const;
 const DEFAULT_NAMES = ["あなた", "一郎", "二郎", "三郎"] as const;
 const LABELS = ["あなた(自家)", "対局者2", "対局者3", "対局者4"] as const;
 

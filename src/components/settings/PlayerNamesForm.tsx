@@ -27,6 +27,7 @@ import {
   DEFAULT_NAMES,
   getPlayerNamesSnapshot,
   getServerPlayerNamesSnapshot,
+  limitPlayerName,
   MAX_PLAYER_NAME_LENGTH,
   PLAYER_NAME_LABELS,
   type PlayerNames,
@@ -55,7 +56,7 @@ export function PlayerNamesForm() {
 
   const updateAt = (index: number, value: string) => {
     const next = [...values] as unknown as [string, string, string, string];
-    next[index] = value;
+    next[index] = limitPlayerName(value);
     setDraft(next);
     setStatus({ kind: "idle" });
   };
@@ -89,7 +90,7 @@ export function PlayerNamesForm() {
           先頭が自家(あなた)で、残り3人が他家です。空欄のまま保存すると既定名(
           {DEFAULT_NAMES.join("・")})に戻ります。1人あたり
           {MAX_PLAYER_NAME_LENGTH}
-          文字までです。変更は次に開始する半荘から反映されます。
+          文字（絵文字や結合文字は見た目の1文字として数えます）までです。変更は次に開始する半荘から反映されます。
         </p>
 
         <div className="flex flex-col gap-3">
@@ -104,7 +105,6 @@ export function PlayerNamesForm() {
                   id={inputId}
                   type="text"
                   value={values[index]}
-                  maxLength={MAX_PLAYER_NAME_LENGTH}
                   autoComplete="off"
                   aria-describedby={hintId}
                   onChange={(event) => updateAt(index, event.target.value)}

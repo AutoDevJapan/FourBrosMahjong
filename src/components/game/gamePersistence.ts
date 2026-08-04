@@ -1,4 +1,4 @@
-import { MAX_PLAYER_NAME_LENGTH } from "@/components/settings/playerNames";
+import { isValidPlayerName } from "@/components/settings/playerNames";
 import {
   createGame,
   DEFAULT_NAMES,
@@ -122,12 +122,7 @@ function isNames(value: unknown): value is PlayerNames {
   return (
     Array.isArray(value) &&
     value.length === 4 &&
-    value.every(
-      (name) =>
-        typeof name === "string" &&
-        name.length > 0 &&
-        name.length <= MAX_PLAYER_NAME_LENGTH,
-    )
+    value.every((name) => typeof name === "string" && isValidPlayerName(name))
   );
 }
 

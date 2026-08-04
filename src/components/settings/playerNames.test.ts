@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { DEFAULT_NAMES } from "@/domain/game/engine";
 import {
   loadPlayerNames,
@@ -6,10 +6,13 @@ import {
   PLAYER_NAMES_STORAGE_KEY,
   type PlayerNames,
   parsePlayerNames,
+  playerNameGraphemes,
   resolvePlayerNames,
   sanitizePlayerName,
   savePlayerNames,
 } from "./playerNames";
+
+afterEach(() => vi.unstubAllGlobals());
 
 class MemoryStorage implements Storage {
   private readonly values = new Map<string, string>();
@@ -52,6 +55,43 @@ describe("sanitizePlayerName", () => {
   it("上限文字数で切り詰める", () => {
     const long = "あ".repeat(MAX_PLAYER_NAME_LENGTH + 5);
     expect(sanitizePlayerName(long)).toHaveLength(MAX_PLAYER_NAME_LENGTH);
+  });
+
+  it("11文字+絵文字を12書記素として保持しサロゲートを分断しない(#484)", () => {
+    const value = "12345678901😀";
+    expect(sanitizePlayerName(value)).toBe(value);
+    expect(sanitizePlayerName(value)).not.toMatch(/[\uD800-\uDFFF]/u);
+  });
+
+  it("絵文字は見た目の1文字として数え、上限超過分だけを切り詰める(#484)", () => {
+    expect(sanitizePlayerName("😀".repeat(MAX_PLAYER_NAME_LENGTH))).toBe(
+      "😀".repeat(MAX_PLAYER_NAME_LENGTH),
+    );
+    expect(sanitizePlayerName("😀".repeat(MAX_PLAYER_NAME_LENGTH + 1))).toBe(
+      "😀".repeat(MAX_PLAYER_NAME_LENGTH),
+    );
+  });
+
+  it("結合文字とZWJ絵文字をそれぞれ1書記素として数える(#484)", () => {
+    const combined = "か\u3099";
+    expect(
+      playerNameGraphemes(combined.repeat(MAX_PLAYER_NAME_LENGTH)),
+    ).toHaveLength(MAX_PLAYER_NAME_LENGTH);
+    expect(playerNameGraphemes("👨‍👩‍👧‍👦")).toEqual(["👨‍👩‍👧‍👦"]);
+  });
+
+  it("Intl.Segmenter非対応環境でも結合文字・ZWJ・国旗を分断しない(#484)", () => {
+    vi.stubGlobal("Intl", { ...Intl, Segmenter: undefined });
+    expect(playerNameGraphemes("か\u3099👨‍👩‍👧‍👦🇯🇵")).toEqual([
+      "か\u3099",
+      "👨‍👩‍👧‍👦",
+      "🇯🇵",
+    ]);
+  });
+
+  it("壊れた入力からlone surrogateを出力しない(#484)", () => {
+    expect(sanitizePlayerName("名前\uD83D")).toBe("名前�");
+    expect(sanitizePlayerName("名前\uD83D")).not.toMatch(/[\uD800-\uDFFF]/u);
   });
 
   it("空文字・空白のみはnull(既定名フォールバック用)", () => {
@@ -101,7 +141,9 @@ describe("parsePlayerNames", () => {
   it("保存値が上限超過でも読み出し時に切り詰める", () => {
     const long = "あ".repeat(MAX_PLAYER_NAME_LENGTH + 10);
     const parsed = parsePlayerNames(JSON.stringify([long, "B", "C", "D"]));
-    expect(parsed?.[0]).toHaveLength(MAX_PLAYER_NAME_LENGTH);
+    expect(playerNameGraphemes(parsed?.[0] ?? "")).toHaveLength(
+      MAX_PLAYER_NAME_LENGTH,
+    );
   });
 });
 

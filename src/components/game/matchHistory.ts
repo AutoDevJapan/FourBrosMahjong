@@ -10,6 +10,7 @@
  * 形状を厳密検証し、件数・容量に上限を設けて巨大入力や破損データから防御する。
  */
 import { localStorageOrNull } from "@/components/common/browserStorage";
+import { isValidPlayerName } from "@/components/settings/playerNames";
 import { hasOnlyKeys } from "./gamePersistence";
 
 /** `localStorage` の保存キー。形式変更時は version を上げて別キーにする。 */
@@ -56,12 +57,6 @@ export interface MatchHistoryEntry {
 /** 4兄弟の人数(保存レコードの `players` 長の不変条件)。 */
 const PLAYER_COUNT = 4;
 /**
- * 想定外に長い名前(改竄・破損)を拒否する上限。
- * ユーザー設定の上限は12文字(`MAX_PLAYER_NAME_LENGTH` / #291)なので、
- * 正規の名前は必ず収まる。ここは防御用に余裕を持たせた値。
- */
-const MAX_NAME_LENGTH = 32;
-/**
  * `Date` が表現できる epoch ミリ秒の上限(±8.64e15)。
  * `Number.isSafeInteger` だけでは 2^53-1 まで通ってしまい、`new Date()` が
  * Invalid Date になって `Intl.DateTimeFormat.format` が `RangeError` を投げる。
@@ -82,8 +77,7 @@ function isPlayer(value: unknown): value is MatchHistoryPlayer {
       "soshiiTotal",
     ]) &&
     typeof player.name === "string" &&
-    player.name.length > 0 &&
-    player.name.length <= MAX_NAME_LENGTH &&
+    isValidPlayerName(player.name) &&
     Number.isInteger(player.rank) &&
     Number(player.rank) >= 1 &&
     Number(player.rank) <= PLAYER_COUNT &&
