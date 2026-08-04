@@ -849,8 +849,12 @@ function settleFourKanAbortiveDraw(state: EngineState): EngineState | null {
  * 和了牌の温存は考えない(和了は本関数の前段でツモ宣言済み)。
  * 副露後は門前牌だけを評価対象にし、副露数 `meldCount` を渡して向聴・受け入れを
  * 副露込みで補正する(#294: 未補正だと副露手で向聴値が飽和し、AI が自らテンパイを崩す)。
+ *
+ * `engine.ai-furiten-riichi.test.ts` の全席 AI ドライバもこの関数を直接使う。入力文脈を
+ * テスト側でミラーすると `meldCount` / `forbiddenDiscards` が再び乖離するため(#424)。
+ * @internal UI 向け公開アクションではなく、engine と回帰ドライバの方策共有点。
  */
-function chooseAiDiscard(
+export function chooseAiDiscard(
   hand: HandState,
   seat: SeatKey,
   drawn: Tile | null,
