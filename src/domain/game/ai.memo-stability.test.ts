@@ -10,10 +10,14 @@ describe("AI memoの長時間安定性(#362)", () => {
   beforeEach(() => aiMemoDiagnosticsForTests.clear());
   afterEach(() => aiMemoDiagnosticsForTests.clear());
 
-  it("60半荘を連続完走しても両memoが固定容量を超えず、結果はcache状態に依存しない", () => {
+  it("両memoを上限まで使っても固定容量を超えず、結果はcache状態に依存しない", () => {
     const coldExpected = walkToGameEnd(1).state.result;
 
-    for (let seed = 2; seed <= 61; seed++) walkToGameEnd(seed);
+    // #452 の実測では shanten memo は seed=7、suit memo は seed=12 で上限に達する。
+    // 旧テストの seed=13..61 は既に上限へ達した後の反復で、assert の検証内容を増やさず
+    // CPU 負荷時の timeout だけを招いていた。seed=12 までで両memoの満杯状態を作り、
+    // 下の再実行で満杯状態からの退避と cache 状態に依存しない結果を同時に固定する。
+    for (let seed = 2; seed <= 12; seed++) walkToGameEnd(seed);
 
     expect(aiMemoDiagnosticsForTests.sizes()).toEqual({
       shanten: SHANTEN_MEMO_CAP,
