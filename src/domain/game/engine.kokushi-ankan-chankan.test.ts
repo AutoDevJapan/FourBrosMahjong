@@ -44,7 +44,7 @@ function armAnkan(
   hand.melds.east = [];
   // pool(= hands + drawn)に暗槓する4枚を含める。残り(1s 9s)は任意。
   hand.hands.east = parseTiles(`${ankanKind} ${ankanKind} ${ankanKind} 1s 9s`);
-  hand.drawn = parseTile(ankanKind);
+  hand.drawn = { tile: parseTile(ankanKind), source: "live" };
   hand.turn = "east";
 
   const ankanTile = parseTile(ankanKind);

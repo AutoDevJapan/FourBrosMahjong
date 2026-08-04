@@ -175,25 +175,23 @@ interface HandState {
   kita: Record<SeatKey, number>;
   /** 現在の手番の席。 */
   turn: SeatKey;
-  /** 現在の手番がツモった牌(打牌待ち)。未ツモは null。 */
-  drawn: Tile | null;
   /**
-   * 現在の `drawn` の供給元(#415)。`drawn` が `null` のときは `"live"`(既定)。
+   * 現在の手番がツモった牌(打牌待ち)と供給元。未ツモは null。
    *
    * 役判定は2つの別条件をここから導く:
-   * - **嶺上開花**: `drawSource === "kanReplacement"`。カン限定(spec 3.2「**槓の**
+   * - **嶺上開花**: `source === "kanReplacement"`。カン限定(spec 3.2「**槓の**
    *   嶺上牌で和了」)なので、北抜きの嶺上牌には付かない。
-   * - **海底摸月の抑止**: `drawSource !== "live"`。海底摸月は「ライブ壁の最後の1枚を
+   * - **海底摸月の抑止**: `source !== "live"`。海底摸月は「ライブ壁の最後の1枚を
    *   ツモった」ことが条件で、嶺上牌のツモは**カン・北抜きのいずれも**対象外
    *   (`isHaiteiTsumo` の契約 / #396)。
    *
    * この2条件は包含関係(カン嶺上 ⊂ 嶺上補充)にあるため、2つの boolean ではなく
    * 直和型1つで表す(不正な組み合わせを表現不能にする / #415)。
    *
-   * **不変条件**: `drawn === null ⇒ drawSource === "live"`。維持のため、未ツモへ戻す
-   * 側は {@link resetDrawState} に集約している。
+   * 牌と供給元を同じ nullable 値に束ねることで、牌がないのに供給元だけが残る状態を
+   * 型で表現不能にする(#440)。
    */
-  drawSource: DrawSource;
+  drawn: { readonly tile: Tile; readonly source: DrawSource } | null;
   /** 席ごとのリーチ宣言済みフラグ。 */
   riichi: SeatFlags;
   /** 席ごとのダブルリーチ(初巡・鳴きなしでのリーチ)。 */
@@ -565,7 +563,7 @@ export function isHaitei(remainingLiveTiles: number): boolean {
  * 通常ツモが海底牌か。嶺上補充(カン・北抜きのいずれも)はライブ牌残数を0にしても
  * 海底摸月ではない(#396)。
  *
- * @param drawSource 現在のツモ牌の供給元(`HandState.drawSource`)。
+ * @param drawSource 現在のツモ牌の供給元(`HandState.drawn.source`)。
  */
 export function isHaiteiTsumo(
   remainingLiveTiles: number,
@@ -692,7 +690,6 @@ function beginRound(state: EngineState): EngineState {
     kita: { east: 0, south: 0, west: 0 },
     turn: "east",
     drawn: null,
-    drawSource: "live",
     riichi: seatFlags(),
     doubleRiichi: seatFlags(),
     ippatsu: seatFlags(),
@@ -770,20 +767,7 @@ function autoPullDealtNorths(hand: HandState): void {
 }
 
 /**
- * ツモ状態(`drawn` と `drawSource`)を未ツモへ戻す。
- * 呼ばれるのは打牌・鳴きによる手番移動・カン成立・嶺上枯渇の各経路。
- *
- * `drawSource` は `drawn` に付随する情報なので、必ず対で更新して
- * `drawn === null ⇒ drawSource === "live"` を保つ(#415)。片方だけ書き換えると
- * 次の通常ツモが嶺上由来と誤認され、海底摸月が消えたり嶺上開花が誤って付いたりする。
- */
-function resetDrawState(hand: HandState): void {
-  hand.drawn = null;
-  hand.drawSource = "live";
-}
-
-/**
- * カン後の嶺上補充(北抜きも自動処理)。`drawn` / `drawSource` を更新する。
+ * カン後の嶺上補充(北抜きも自動処理)。`drawn` を更新する。
  *
  * 嶺上牌が北で続けて抜かれた場合も `"kanReplacement"` のままにする(カンを起点とした
  * 一連の補充なので嶺上開花の対象)。この解釈は #396 以前からの既存挙動で、spec 3.2 の
@@ -795,13 +779,15 @@ function drawKanReplacement(hand: HandState, seat: SeatKey): void {
     tile = hand.wall.drawReplacement();
   } catch (error) {
     if (error instanceof WallEmptyError) {
-      resetDrawState(hand);
+      hand.drawn = null;
       return;
     }
     throw error;
   }
-  hand.drawn = autoPullNorth(hand, seat, tile).tile;
-  hand.drawSource = "kanReplacement";
+  hand.drawn = {
+    tile: autoPullNorth(hand, seat, tile).tile,
+    source: "kanReplacement",
+  };
   hand.tempMiss[seat] = false;
 }
 
@@ -891,7 +877,7 @@ function nonFuritenRiichiTiles(
 ): Tile[] {
   if (hand.drawn === null) return [];
   const melds = meldInputsOf(hand.melds[seat]);
-  const pool = [...hand.hands[seat], hand.drawn];
+  const pool = [...hand.hands[seat], hand.drawn.tile];
   const ownDiscardKeys = new Set(
     // 鳴かれた牌も恒久フリテンの原因として残る(#395)。
     hand.discardHistory[seat].map((t) => tileKey(t)),
@@ -932,7 +918,7 @@ function applyAiRiichi(state: EngineState, seat: SeatKey): EngineState {
   }
   const declarable = nonFuritenRiichiTiles(hand, seat, candidates);
   if (declarable.length === 0) return state;
-  const selected = chooseAiDiscard(hand, seat, hand.drawn);
+  const selected = chooseAiDiscard(hand, seat, hand.drawn.tile);
   const tile =
     declarable.find((candidate) => sameTile(candidate, selected)) ??
     declarable[0];
@@ -1010,11 +996,11 @@ function completeAiAnkan(
 ): EngineState {
   const hand = state.hand;
   if (hand === null || hand.drawn === null) return state;
-  const pool = [...hand.hands[seat], hand.drawn];
+  const pool = [...hand.hands[seat], hand.drawn.tile];
   const { taken, rest } = takeKind(pool, tile, 4);
   if (taken.length < 4) return state;
   hand.hands[seat] = rest;
-  resetDrawState(hand);
+  hand.drawn = null;
   hand.melds[seat] = [
     ...hand.melds[seat],
     { type: "kan", tiles: taken, concealed: true },
@@ -1039,12 +1025,12 @@ function completeAiKakan(
     (meld) => meld.type === "pon" && sameKind(meld.tiles[0], tile),
   );
   if (target === undefined) return state;
-  const pool = [...hand.hands[seat], hand.drawn];
+  const pool = [...hand.hands[seat], hand.drawn.tile];
   const { taken, rest } = takeKind(pool, tile, 1);
   if (taken.length < 1) return state;
   const kakanTile = taken[0];
   hand.hands[seat] = rest;
-  resetDrawState(hand);
+  hand.drawn = null;
   hand.melds[seat] = hand.melds[seat].map((meld) =>
     meld === target
       ? {
@@ -1073,7 +1059,7 @@ function applyAiAnkan(
 ): EngineState {
   const hand = state.hand;
   if (hand === null || hand.drawn === null) return state;
-  const pool = [...hand.hands[seat], hand.drawn];
+  const pool = [...hand.hands[seat], hand.drawn.tile];
   const { taken } = takeKind(pool, tile, 4);
   if (taken.length < 4) return state;
   const chankan = resolveChankan(state, seat, taken[0], "ankan");
@@ -1096,7 +1082,7 @@ function applyAiKakan(
     (meld) => meld.type === "pon" && sameKind(meld.tiles[0], tile),
   );
   if (target === undefined) return state;
-  const { taken } = takeKind([...hand.hands[seat], hand.drawn], tile, 1);
+  const { taken } = takeKind([...hand.hands[seat], hand.drawn.tile], tile, 1);
   if (taken.length < 1) return state;
   const chankan = resolveChankan(state, seat, taken[0], "kakan");
   if (chankan !== null) return chankan;
@@ -1129,7 +1115,7 @@ function applyAiCall(
   hand.callsMade = true;
   hand.pendingDiscard = null;
   hand.passedRonSeats = [];
-  resetDrawState(hand);
+  hand.drawn = null;
   hand.turn = caller;
   if (kan) {
     const abortiveDraw = settleFourKanAbortiveDraw(state);
@@ -1185,20 +1171,25 @@ function pump(state: EngineState): EngineState {
       }
       const raw = hand.wall.draw();
       const pull = autoPullNorth(hand, seat, raw);
-      hand.drawn = pull.tile;
-      // 北抜きの嶺上牌も嶺上補充由来。海底摸月を付けてはならない(#396)。
-      hand.drawSource = pull.pulled ? "kitaReplacement" : "live";
+      hand.drawn = {
+        tile: pull.tile,
+        // 北抜きの嶺上牌も嶺上補充由来。海底摸月を付けてはならない(#396)。
+        source: pull.pulled ? "kitaReplacement" : "live",
+      };
       hand.tempMiss[seat] = false; // 同巡内フリテンは次の自ツモで解消。
     }
 
     const wallExhausted = isHaitei(hand.wall.remainingLiveTiles);
-    const haitei = isHaiteiTsumo(hand.wall.remainingLiveTiles, hand.drawSource);
+    const haitei = isHaiteiTsumo(
+      hand.wall.remainingLiveTiles,
+      hand.drawn.source,
+    );
 
     if (isHuman) {
       if (hand.riichi[seat]) {
         // リーチ後は自動ツモ切りが基本(ツモ和了のみ選択の余地)。ただし送り槓に
         // ならない暗槓は許可する(標準慣行 / Q18・#116)。
-        const tsumo = analyzeTsumo(s, seat, hand.drawn, haitei);
+        const tsumo = analyzeTsumo(s, seat, hand.drawn.tile, haitei);
         const ankanTiles = riichiAnkanTiles(hand, seat);
         if (tsumo !== null || ankanTiles.length > 0) {
           return {
@@ -1215,7 +1206,7 @@ function pump(state: EngineState): EngineState {
             },
           };
         }
-        s = applyDiscard(s, seat, hand.drawn);
+        s = applyDiscard(s, seat, hand.drawn.tile);
         if (s.phase !== "playing" || s.pending !== null) return s;
         continue;
       }
@@ -1223,12 +1214,12 @@ function pump(state: EngineState): EngineState {
     }
 
     // AI: ツモ和了できるなら宣言。
-    const aiTsumo = analyzeTsumo(s, seat, hand.drawn, haitei);
+    const aiTsumo = analyzeTsumo(s, seat, hand.drawn.tile, haitei);
     if (aiTsumo !== null) {
       return settleWin(s, {
         winnerSeat: seat,
         winType: "tsumo",
-        winningTile: hand.drawn,
+        winningTile: hand.drawn.tile,
         analysis: aiTsumo,
         haitei,
       });
@@ -1242,14 +1233,14 @@ function pump(state: EngineState): EngineState {
         if (s.phase !== "playing" || s.pending !== null) return s;
         continue;
       }
-      s = applyDiscard(s, seat, hand.drawn);
+      s = applyDiscard(s, seat, hand.drawn.tile);
       if (s.phase !== "playing" || s.pending !== null) return s;
       continue;
     }
 
     // AI: 海底でなければ加槓→暗槓の順で合法なカンを宣言する。
     if (canKanOnDrawTurn(hand.drawn !== null, wallExhausted)) {
-      const pool = [...hand.hands[seat], hand.drawn];
+      const pool = [...hand.hands[seat], hand.drawn.tile];
       const meldCount = hand.melds[seat].length;
       // 向聴を悪化させるカンは宣言しない(#304)。ドラ増加より手を崩さないことを優先する。
       const kakan = kakanCandidates(hand, seat, pool).filter((t) =>
@@ -1279,7 +1270,7 @@ function pump(state: EngineState): EngineState {
       continue;
     }
 
-    const chosen = chooseAiDiscard(hand, seat, hand.drawn);
+    const chosen = chooseAiDiscard(hand, seat, hand.drawn.tile);
     s = applyDiscard(s, seat, chosen);
     if (s.phase !== "playing" || s.pending !== null) return s;
   }
@@ -1290,7 +1281,7 @@ function pump(state: EngineState): EngineState {
 function riichiDiscardTiles(hand: HandState, seat: SeatKey): Tile[] {
   if (hand.drawn === null) return [];
   const melds = meldInputsOf(hand.melds[seat]);
-  const pool = [...hand.hands[seat], hand.drawn];
+  const pool = [...hand.hands[seat], hand.drawn.tile];
   const result: Tile[] = [];
   const seen = new Set<string>();
   for (let i = 0; i < pool.length; i++) {
@@ -1467,7 +1458,7 @@ export function canAnkanAfterRiichi(
  * 判定は {@link canAnkanAfterRiichi}(標準慣行 / Q18)。
  */
 function riichiAnkanTiles(hand: HandState, seat: SeatKey): Tile[] {
-  const drawn = hand.drawn;
+  const drawn = hand.drawn?.tile ?? null;
   if (drawn === null) return [];
   // 海底(ライブ牌 0 = 嶺上を引けない)ではカン不可(標準慣行・#128)。
   if (isHaitei(hand.wall.remainingLiveTiles)) return [];
@@ -1489,9 +1480,13 @@ function kakanCandidates(hand: HandState, seat: SeatKey, pool: Tile[]): Tile[] {
 function buildHumanPending(state: EngineState, seat: SeatKey): Pending {
   const hand = state.hand;
   if (hand === null) return null;
-  const drawn = hand.drawn;
+  const drawState = hand.drawn;
+  const drawn = drawState?.tile ?? null;
   const wallExhausted = isHaitei(hand.wall.remainingLiveTiles);
-  const haitei = isHaiteiTsumo(hand.wall.remainingLiveTiles, hand.drawSource);
+  const haitei =
+    drawState !== null
+      ? isHaiteiTsumo(hand.wall.remainingLiveTiles, drawState.source)
+      : false;
   const canTsumo =
     drawn !== null && analyzeTsumo(state, seat, drawn, haitei) !== null;
 
@@ -1539,7 +1534,7 @@ function applyDiscard(
   const hand = state.hand;
   if (hand === null) return state;
   // 手牌(+ツモ)から捨て牌1枚を取り除く。
-  const pool = [...hand.hands[seat], hand.drawn].filter(
+  const pool = [...hand.hands[seat], hand.drawn?.tile ?? null].filter(
     (t): t is Tile => t !== null,
   );
   const removeAt = pool.findIndex((t) => sameTile(t, tile));
@@ -1549,7 +1544,7 @@ function applyDiscard(
   hand.hands[seat] = pool;
   hand.discards[seat] = [...hand.discards[seat], discarded];
   hand.discardHistory[seat] = [...hand.discardHistory[seat], discarded];
-  resetDrawState(hand);
+  hand.drawn = null;
   hand.ponnedKind = null; // 打牌で喰い替え禁止の窓(ポン直後の1打)を閉じる。
   hand.ippatsu[seat] = false; // 自分の打牌で一発の権利は消える。
   hand.pendingDiscard = { seat, tile: discarded };
@@ -1735,7 +1730,7 @@ function analyzeTsumo(
     doubleRiichi: hand.doubleRiichi[seat],
     ippatsu: hand.ippatsu[seat],
     haitei,
-    rinshan: hand.drawSource === "kanReplacement",
+    rinshan: hand.drawn?.source === "kanReplacement",
     blessing,
   });
 }
@@ -2382,12 +2377,14 @@ function discardImpl(state: EngineState, tile: Tile): EngineState {
   const seat = seatOfPlayer(state.hand.seating, HUMAN_ID);
   if (seat === null || state.hand.turn !== seat) return state;
   const useTile =
-    state.pending.locked && state.hand.drawn !== null ? state.hand.drawn : tile;
+    state.pending.locked && state.hand.drawn !== null
+      ? state.hand.drawn.tile
+      : tile;
   // UI や永続化ジャーナルから存在しない牌を渡されても、applyDiscard の内部
   // フォールバック（末尾牌）で別の牌を捨てて状態を壊さないよう公開境界で拒否する。
   const available = [
     ...state.hand.hands[seat],
-    ...(state.hand.drawn === null ? [] : [state.hand.drawn]),
+    ...(state.hand.drawn === null ? [] : [state.hand.drawn.tile]),
   ];
   if (!available.some((candidate) => sameTile(candidate, useTile)))
     return state;
@@ -2417,7 +2414,7 @@ function tsumogiriImpl(state: EngineState): EngineState {
   const after = applyDiscard(
     { ...state, pending: null },
     seat,
-    state.hand.drawn,
+    state.hand.drawn.tile,
   );
   return pump(after);
 }
@@ -2520,7 +2517,7 @@ function declarePonImpl(state: EngineState): EngineState {
   hand.callsMade = true;
   hand.pendingDiscard = null;
   hand.passedRonSeats = [];
-  resetDrawState(hand);
+  hand.drawn = null;
   hand.turn = seat;
   // 喰い替え禁止: 直後の打牌でこの牌種(ポンした牌)を切れないよう記録する(スペック1 1.4)。
   hand.ponnedKind = tile;
@@ -2562,7 +2559,7 @@ function declareKanImpl(state: EngineState): EngineState {
   hand.callsMade = true;
   hand.pendingDiscard = null;
   hand.passedRonSeats = [];
-  resetDrawState(hand);
+  hand.drawn = null;
   hand.turn = seat;
   const abortiveDraw = settleFourKanAbortiveDraw(state);
   if (abortiveDraw !== null) return abortiveDraw;
@@ -2590,7 +2587,7 @@ function declareAnkanImpl(state: EngineState, tile: Tile): EngineState {
   const seat = humanSeatOf(hand);
   if (seat === null || hand.turn !== seat || hand.drawn === null) return state;
 
-  const pool = [...hand.hands[seat], hand.drawn];
+  const pool = [...hand.hands[seat], hand.drawn.tile];
   const { taken, rest } = takeKind(pool, tile, 4);
   if (taken.length < 4) return state;
 
@@ -2610,7 +2607,7 @@ function declareAnkanImpl(state: EngineState, tile: Tile): EngineState {
   if (chankan !== null) return chankan;
 
   hand.hands[seat] = rest;
-  resetDrawState(hand);
+  hand.drawn = null;
   hand.melds[seat] = [
     ...hand.melds[seat],
     { type: "kan", tiles: taken, concealed: true },
@@ -2646,7 +2643,7 @@ function declareKakanImpl(state: EngineState, tile: Tile): EngineState {
   const seat = humanSeatOf(hand);
   if (seat === null || hand.turn !== seat || hand.drawn === null) return state;
 
-  const pool = [...hand.hands[seat], hand.drawn];
+  const pool = [...hand.hands[seat], hand.drawn.tile];
   const target = hand.melds[seat].find(
     (m) => m.type === "pon" && sameKind(m.tiles[0], tile),
   );
@@ -2671,7 +2668,7 @@ function declareKakanImpl(state: EngineState, tile: Tile): EngineState {
 
   // 槍槓なし → 加槓成立。嶺上ツモへ進む。
   hand.hands[seat] = rest;
-  resetDrawState(hand);
+  hand.drawn = null;
   hand.melds[seat] = hand.melds[seat].map((m) =>
     m === target
       ? { type: "kan", tiles: [...m.tiles, kakanTile], concealed: false }
@@ -2702,16 +2699,16 @@ function declareTsumoImpl(state: EngineState): EngineState {
   if (seat === null) return state;
   const haitei = isHaiteiTsumo(
     state.hand.wall.remainingLiveTiles,
-    state.hand.drawSource,
+    state.hand.drawn.source,
   );
-  const analysis = analyzeTsumo(state, seat, state.hand.drawn, haitei);
+  const analysis = analyzeTsumo(state, seat, state.hand.drawn.tile, haitei);
   if (analysis === null) return state;
   return settleWin(
     { ...state, pending: null },
     {
       winnerSeat: seat,
       winType: "tsumo",
-      winningTile: state.hand.drawn,
+      winningTile: state.hand.drawn.tile,
       analysis,
       haitei,
     },

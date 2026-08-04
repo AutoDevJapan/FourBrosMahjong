@@ -24,7 +24,7 @@ describe("engine: 和了形開示スナップショット(#259)", () => {
     hand.hands.east = concealed;
     hand.discards.east = [parseTile("9m")];
     hand.discardHistory.east = [parseTile("9m")];
-    hand.drawn = winningTile;
+    hand.drawn = { tile: winningTile, source: "live" };
     hand.turn = "east";
 
     const armed = {
@@ -75,7 +75,7 @@ describe("engine: 和了形開示スナップショット(#259)", () => {
 
     const declarationTile = parseTile("2z");
     hand.hands.east = parseTiles("123m 456m 789m 234p 5s");
-    hand.drawn = declarationTile;
+    hand.drawn = { tile: declarationTile, source: "live" };
     hand.turn = "east";
 
     const armed = {

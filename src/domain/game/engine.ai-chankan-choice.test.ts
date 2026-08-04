@@ -74,7 +74,7 @@ function armHumanTurn(
   hand.hands.east = parseTiles(humanHand13);
   hand.melds.east = [];
   hand.discards.east = [];
-  hand.drawn = parseTile(drawnTile);
+  hand.drawn = { tile: parseTile(drawnTile), source: "live" };
   hand.turn = "east";
   return {
     state: {

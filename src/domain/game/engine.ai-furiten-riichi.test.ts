@@ -53,7 +53,7 @@ function nonFuritenTiles(
 ): Tile[] {
   if (hand.drawn === null) return [];
   const melds = meldInputs(hand.melds[seat]);
-  const pool = [...hand.hands[seat], hand.drawn];
+  const pool = [...hand.hands[seat], hand.drawn.tile];
   const ownKeys = new Set(hand.discardHistory[seat].map((t) => tileKey(t)));
   return candidates.filter((candidate) => {
     const index = pool.findIndex((t) => sameTile(t, candidate));
@@ -109,7 +109,7 @@ function stepHumanAsAi(state: EngineState): EngineState {
   if (pending.canRiichi && pending.riichiTiles.length > 0) {
     const declarable = nonFuritenTiles(hand, seat, pending.riichiTiles);
     if (declarable.length > 0) {
-      const selected = chooseAiDiscard(hand, seat, hand.drawn);
+      const selected = chooseAiDiscard(hand, seat, hand.drawn?.tile ?? null);
       const tile =
         declarable.find((c) => sameTile(c, selected)) ?? declarable[0];
       return declareRiichi(state, tile);
@@ -120,7 +120,7 @@ function stepHumanAsAi(state: EngineState): EngineState {
   const chosen = chooseAiDiscard(
     hand,
     seat,
-    hand.drawn,
+    hand.drawn?.tile ?? null,
     pending.forbiddenDiscards,
   );
   return discard(state, chosen);

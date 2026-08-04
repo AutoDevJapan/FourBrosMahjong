@@ -55,7 +55,7 @@ export function firstLegalDiscard(
       (candidate) =>
         candidate.suit === tile.suit && candidate.rank === tile.rank,
     );
-  let tile = hand?.drawn ?? undefined;
+  let tile = hand?.drawn?.tile;
   if ((tile == null || isForbidden(tile)) && hand && seat) {
     tile = hand.hands[seat].find((candidate) => !isForbidden(candidate));
   }
