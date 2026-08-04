@@ -4,7 +4,7 @@ import type { MeldInput } from "@/domain/hand/decompose";
 import type { Meld } from "@/domain/hand/meld";
 import { waitingTiles } from "@/domain/hand/tenpai";
 import { tileKey } from "@/domain/hand/tile-identity";
-import { HONOR, type Tile } from "@/domain/tiles/tile";
+import { HONOR, type PlayableWind, type Tile } from "@/domain/tiles/tile";
 import {
   chooseAiDiscard,
   createGame,
@@ -27,7 +27,7 @@ import {
 type Hand = NonNullable<EngineState["hand"]>;
 
 const SEATS: readonly SeatKey[] = ["east", "south", "west"];
-const SEAT_WIND: Record<SeatKey, number> = {
+const SEAT_WIND: Record<SeatKey, PlayableWind> = {
   east: HONOR.EAST,
   south: HONOR.SOUTH,
   west: HONOR.WEST,

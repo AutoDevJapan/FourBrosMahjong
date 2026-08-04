@@ -127,7 +127,9 @@ describe("北の役牌除外(刻子・雀頭)(spec 3.0 #83-3・明示ガード)"
       concealedTiles: parseTiles("444z 111p 222p 333p 99p"),
       winningTile: parseTile("3p"),
       winType: "ron",
+      // @ts-expect-error 北は PlayableWind ではない。型境界を迂回した外部入力の防御を検証する。
       roundWind: HONOR.NORTH,
+      // @ts-expect-error 北は PlayableWind ではない。ランタイムガードはこのケース用に残す。
       seatWind: HONOR.NORTH,
     };
     const got = ids(ctx);
@@ -150,7 +152,9 @@ describe("北の役牌除外(刻子・雀頭)(spec 3.0 #83-3・明示ガード)"
     };
     const withNorthWind = analyzeWin({
       ...base,
+      // @ts-expect-error 永続化/JSON 等が型境界を迂回して北を渡した場合の防御を検証する。
       roundWind: HONOR.NORTH,
+      // @ts-expect-error 北はコンパイル時には拒否されるが、実行時にも安全側へ倒す。
       seatWind: HONOR.NORTH,
     });
     expect(withNorthWind).not.toBeNull();

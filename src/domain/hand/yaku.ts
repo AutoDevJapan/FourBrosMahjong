@@ -16,7 +16,7 @@
  * 純関数・決定的・React/DOM 非依存。
  */
 
-import type { Tile } from "../tiles/tile";
+import type { PlayableWind, Tile } from "../tiles/tile";
 import {
   type Mentsu,
   mentsuContainsKind,
@@ -56,10 +56,10 @@ export interface YakuInput {
   readonly menzen: boolean;
   readonly winType: "tsumo" | "ron";
   readonly winningTile: Tile;
-  /** 自風(HONOR の風 rank)。未指定なら自風役牌を数えない(席=Q9依存を導出しない)。 */
-  readonly seatWind?: number;
-  /** 場風(HONOR の風 rank)。未指定なら場風役牌を数えない。 */
-  readonly roundWind?: number;
+  /** 自風(東・南・西)。未指定なら自風役牌を数えない(席=Q9依存を導出しない)。 */
+  readonly seatWind?: PlayableWind;
+  /** 場風(東・南・西。現行東南戦では東・南)。未指定なら場風役牌を数えない。 */
+  readonly roundWind?: PlayableWind;
   readonly riichi?: boolean;
   readonly doubleRiichi?: boolean;
   readonly ippatsu?: boolean;
@@ -218,7 +218,7 @@ function standardFormYaku(form: StandardForm, input: YakuInput): RawYaku[] {
   for (const m of triplets) {
     // 字牌以外と、抜きドラ専用の北(ガリ)を除外する(spec 3.0 #83-3)。北は三元牌で
     // ないため現行の風割り当てでは元々役牌翻は付かないが、四人回し(北家=抜け番)で
-    // `roundWind`/`seatWind` に誤って北を渡された場合でも役牌翻が付かないよう、
+    // 型境界を迂回して `roundWind`/`seatWind` に北を渡された場合でも役牌翻が付かないよう、
     // 雀頭側({@link pairIsValue})と同じ述語で守る(挙動非破壊のガード)。
     if (!isYakuhaiCandidate({ suit: m.suit, rank: m.startRank })) continue;
     const completedByAgari =
