@@ -48,7 +48,9 @@ describe("shouldCallMeld: ナシナシの AI 鳴き判断(#210)", () => {
       shouldCallMeld({
         tile: parseTiles("4z")[0],
         melds: [],
+        // @ts-expect-error 北は PlayableWind ではない。型境界を迂回した入力の防御を検証する。
         seatWind: HONOR.NORTH,
+        // @ts-expect-error 北はコンパイル時に拒否されるが、実行時にも安全側へ倒す。
         roundWind: HONOR.NORTH,
       }),
     ).toBe(false);
