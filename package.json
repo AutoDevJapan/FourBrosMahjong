@@ -60,8 +60,9 @@
   },
   "pnpm": {
     "overrides": {
-      "brace-expansion@5.0.7": "5.0.8",
-      "postcss": ">=8.5.10",
+      "brace-expansion@^1.0.0": "1.1.18",
+      "brace-expansion@^5.0.0": "5.0.9",
+      "postcss@^8.0.0": "8.5.25",
       "sharp": ">=0.35.3"
     }
   }
