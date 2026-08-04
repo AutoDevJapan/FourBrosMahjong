@@ -45,33 +45,27 @@
  */
 
 import { beforeAll, describe, expect, it } from "vitest";
-import type { RoundNumber, RoundState, RoundWind } from "../round/round";
 import type { PlayerRing } from "../round/seat";
 import { TOTAL_POINTS } from "../scoring/settlement";
 import type { Tile } from "../tiles/tile";
+import {
+  advanceEngine,
+  endGameStateWith as buildEndGameState,
+  type DriverActionKind,
+  type DriverPolicy,
+  OORASU_DRAW,
+} from "./__testing__/engine-fixtures";
 import { chooseDiscard } from "./ai";
 import {
   createGame,
-  declareAnkan,
-  declareKakan,
-  declareKan,
-  declarePon,
-  declareRiichi,
-  declareRon,
-  declareTsumo,
-  discard,
   type EngineState,
   finishRound,
   type Pending,
   type PlayerId,
   POT_SOURCES,
-  passRon,
   potTotal,
-  proceedToNextRound,
-  type RoundConclusion,
   type RoundSummary,
   seatOfPlayer,
-  tsumogiri,
   withdrawPot,
 } from "./engine";
 
@@ -96,18 +90,7 @@ function expectPointsConserved(state: EngineState, label: string): void {
 // ---------------------------------------------------------------------------
 
 /** 走査で踏んだ公開アクションの識別子。 */
-type ActionKind =
-  | "discard"
-  | "tsumogiri"
-  | "declareRiichi"
-  | "declarePon"
-  | "declareKan"
-  | "declareAnkan"
-  | "declareKakan"
-  | "declareTsumo"
-  | "declareRon"
-  | "passRon"
-  | "proceedToNextRound";
+type ActionKind = DriverActionKind;
 
 /**
  * 網羅を要求する公開アクション。
@@ -160,7 +143,7 @@ const POLICIES = [
    * なりやすいため、独立した経路をもう1本持たせて冗長化している)。
    */
   "riichiFirst",
-] as const;
+] as const satisfies readonly DriverPolicy[];
 
 type Policy = (typeof POLICIES)[number];
 
@@ -192,71 +175,6 @@ function humanDiscardTile(
   });
 }
 
-/** 提示された合法手を方策に従って1つ選び、1手進める。 */
-function advance(
-  s: EngineState,
-  policy: Policy,
-): { readonly next: EngineState; readonly action: ActionKind } {
-  if (s.phase === "roundEnd")
-    return { next: proceedToNextRound(s), action: "proceedToNextRound" };
-
-  const pending = s.pending;
-
-  if (pending?.kind === "humanReact") {
-    // 和了は方策によらず取る(取らないと保存則の「場 → 持ち点」方向が痩せる)。
-    if (pending.canRon) return { next: declareRon(s), action: "declareRon" };
-    if (policy === "passive" || policy === "riichiFirst")
-      return { next: passRon(s), action: "passRon" };
-    if (policy === "kanFirst" && pending.canKan)
-      return { next: declareKan(s), action: "declareKan" };
-    if (pending.canPon) return { next: declarePon(s), action: "declarePon" };
-    // 以下2行は `canKan ⇒ canPon` と「humanReact は必ず何か1つ立つ」により
-    // aggressive/kanFirst では到達しない。契約が変わったときに黙って壊れないための防御。
-    if (pending.canKan) return { next: declareKan(s), action: "declareKan" };
-    return { next: passRon(s), action: "passRon" };
-  }
-
-  if (pending?.kind === "humanDiscard") {
-    if (pending.canTsumo)
-      return { next: declareTsumo(s), action: "declareTsumo" };
-    // リーチ後は打牌がツモ切りに固定される(= `tsumogiri` の唯一の到達経路)。
-    if (pending.locked) return { next: tsumogiri(s), action: "tsumogiri" };
-
-    if (policy !== "passive") {
-      if (policy === "kanFirst" && pending.ankanTiles.length > 0)
-        return {
-          next: declareAnkan(s, pending.ankanTiles[0]),
-          action: "declareAnkan",
-        };
-      if (pending.kakanTiles.length > 0)
-        return {
-          next: declareKakan(s, pending.kakanTiles[0]),
-          action: "declareKakan",
-        };
-      if (pending.ankanTiles.length > 0)
-        return {
-          next: declareAnkan(s, pending.ankanTiles[0]),
-          action: "declareAnkan",
-        };
-    }
-
-    if (pending.canRiichi && policy !== "passive")
-      return {
-        next: declareRiichi(s, pending.riichiTiles[0]),
-        action: "declareRiichi",
-      };
-
-    return {
-      next: discard(s, humanDiscardTile(s, pending)),
-      action: "discard",
-    };
-  }
-
-  throw new Error(
-    `stuck: phase=${s.phase} pending=${s.pending?.kind ?? "none"}`,
-  );
-}
-
 /** 走査全体の集計(空振り防止の実測値つき)。 */
 interface SweepTotals {
   /** 実行した遷移数。 */
@@ -284,7 +202,7 @@ function playChecked(
   let step = 0;
   for (let guard = 0; guard < 8000 && s.phase !== "gameEnd"; guard++) {
     const beforePot = potTotal(s);
-    const { next, action } = advance(s, policy);
+    const { next, action } = advanceEngine(s, policy, humanDiscardTile);
     s = next;
     step += 1;
     totals.steps += 1;
@@ -299,14 +217,6 @@ function playChecked(
   // `lastRound` が非 null のときだけ。終局時の `lastRound` は常に非 null なので一致する)。
   if (s.lastRound?.residualSticks != null) totals.endGameFolds += 1;
   return s;
-}
-
-/** 指定の場/局の局状態(`engine.residual-riichi.test.ts` と同じ組み立て)。 */
-function roundAt(
-  wind: RoundWind,
-  roundNumber: RoundNumber,
-): RoundState<PlayerId> {
-  return { order: ORDER, wind, roundNumber, honba: 0 };
 }
 
 /**
@@ -324,20 +234,8 @@ function endGameStateWith(
   points: Record<PlayerId, number>,
   overrides: Partial<EngineState> = {},
 ): EngineState {
-  const base = withdrawPot(createGame({ seed: 430 }));
-  return { ...base, round: roundAt("south", 4), points, ...overrides };
+  return buildEndGameState(points, { seed: 430, clearPot: true, overrides });
 }
-
-/** 南4親流れ流局(オーラス完了で半荘終了)の決着結果。 */
-const OORASU_DRAW: RoundConclusion = {
-  outcome: "dealerPasses",
-  isDraw: true,
-  summary: {
-    kind: "draw",
-    label: "流局",
-    deltas: { p0: 0, p1: 0, p2: 0, p3: 0 },
-  },
-};
 
 describe("engine 不変条件: Σ持ち点 + 場の供託 = 140,000(#430)", () => {
   // 4方策 × 6シード = 24半荘を1度だけ走らせ、以降の it で集計値を検査する。

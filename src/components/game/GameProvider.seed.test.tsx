@@ -1,7 +1,19 @@
 // @vitest-environment jsdom
 
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { freshSeed } from "./GameProvider";
+import { deterministicSeedEnabled, freshSeed } from "./GameProvider";
+
+describe("deterministicSeedEnabled", () => {
+  it("developmentではE2Eフラグなしでも決定的seedを許可する", () => {
+    expect(deterministicSeedEnabled("development", undefined)).toBe(true);
+  });
+
+  it("productionでは明示したE2E buildだけ決定的seedを許可する", () => {
+    expect(deterministicSeedEnabled("production", undefined)).toBe(false);
+    expect(deterministicSeedEnabled("production", "0")).toBe(false);
+    expect(deterministicSeedEnabled("production", "1")).toBe(true);
+  });
+});
 
 describe("freshSeed", () => {
   afterEach(() => vi.restoreAllMocks());
