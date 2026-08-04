@@ -35,9 +35,6 @@ export interface Screen {
    * 消失を待つ負のアンカーは、文言を変えた瞬間に最初から 0 件になって無音 pass するため、
    * ここで塞ぎたい欠陥と同型になる。
    *
-   * 同じ設計は `e2e/non-text-contrast.spec.ts` の `Screen.ready` が先行して持っている。
-   * 画面を足すときは両者を揃えること(片方だけに足すと監査の穴が非対称に残る)。
-   * この手運用にゲートは無い — インベントリの一本化は #445 で扱う。
    */
   readonly clientReady?: (page: Page) => Locator;
   /**
@@ -51,11 +48,41 @@ export interface Screen {
   readonly baseQuery?: string;
 }
 
-/** WCAG A/AA 監査(3 テーマ)とランドマーク監査の共通対象。実在ルートのみ。 */
-export const SCREENS: readonly Screen[] = [
-  { path: "/", name: "ロビー", heading: "四兄弟麻雀" },
-  { path: "/rules", name: "ルール説明", heading: "ルール説明" },
-  { path: "/settings", name: "設定", heading: "設定" },
+/** 実在ルートに対する非テキストコントラスト監査の設定を備えた画面。 */
+export interface NonTextContrastScreen extends Screen {
+  /** 非テキスト監査が測定対象の描画を待つ正のアンカー。 */
+  readonly clientReady: (page: Page) => Locator;
+  /**
+   * 実際に比を測れる枠の数の下限。
+   * 違反ゼロだけでは測定処理が 0 件へ崩壊しても通るため、画面ごとに固定する。
+   */
+  readonly nonTextContrastMinMeasured: number;
+}
+
+/** WCAG A/AA・ランドマーク・非テキストコントラスト監査の共通対象。実在ルートのみ。 */
+export const SCREENS: readonly NonTextContrastScreen[] = [
+  {
+    path: "/",
+    name: "ロビー",
+    heading: "四兄弟麻雀",
+    clientReady: (page) => page.getByRole("link", { name: /対局を開始/ }),
+    nonTextContrastMinMeasured: 4,
+  },
+  {
+    path: "/rules",
+    name: "ルール説明",
+    heading: "ルール説明",
+    clientReady: (page) => page.getByRole("group").first(),
+    nonTextContrastMinMeasured: 6,
+  },
+  {
+    path: "/settings",
+    name: "設定",
+    heading: "設定",
+    clientReady: (page) => page.getByRole("radio").first(),
+    // 対局者名入力 4 + 保存/既定名 2 + テーマ選択カード 3 + 「戦績を見る」1。
+    nonTextContrastMinMeasured: 10,
+  },
   {
     path: "/history",
     name: "戦績",
@@ -64,13 +91,21 @@ export const SCREENS: readonly Screen[] = [
     // (ヘッダのリンクはサーバ側の殻にあり待ちにならない)。
     clientReady: (page) =>
       page.getByText(/保存された戦績はまだありません|新しい順に表示/).first(),
+    // 空状態では枠を持つ対話コントロールがほぼ無い。件数ありは状態駆動ケースで測る。
+    nonTextContrastMinMeasured: 0,
   },
   {
     path: "/game",
     name: "対局画面",
     heading: "対局画面",
-    clientReady: (page) => page.locator("[data-phase]").first(),
+    clientReady: (page) =>
+      page
+        .getByRole("listbox", { name: "自家の手牌" })
+        .filter({ visible: true })
+        .first(),
     baseQuery: "?seed=0",
+    // 自家手牌 14 枚 + ヘッダの「ロビーへ戻る」1。
+    nonTextContrastMinMeasured: 15,
   },
   {
     path: "/game/result",
@@ -83,8 +118,14 @@ export const SCREENS: readonly Screen[] = [
         .getByRole("link", { name: "対局画面へ" })
         .or(page.getByRole("heading", { name: "最終順位" }))
         .first(),
+    nonTextContrastMinMeasured: 2,
   },
 ];
+
+/** 非テキストコントラスト監査の対象。実在ルートの共通一覧をそのまま返す(#445)。 */
+export function nonTextContrastScreens(): readonly NonTextContrastScreen[] {
+  return SCREENS;
+}
 
 /**
  * `LANDMARK_SCREENS` 内で 404 エントリを識別する名前。

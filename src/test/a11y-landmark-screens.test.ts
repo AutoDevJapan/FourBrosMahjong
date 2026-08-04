@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { LANDMARK_SCREENS, NOT_FOUND_SCREEN_NAME } from "../../e2e/screens";
+import {
+  LANDMARK_SCREENS,
+  NOT_FOUND_SCREEN_NAME,
+  nonTextContrastScreens,
+  SCREENS,
+} from "../../e2e/screens";
 import { appRoutes } from "./appRoutes";
 
 /**
@@ -22,12 +27,18 @@ import { appRoutes } from "./appRoutes";
 
 /** ランドマーク監査の対象のうち、実在ルートを指すもの(404 の番兵を除く)。 */
 function auditedRoutes(): string[] {
-  return LANDMARK_SCREENS.filter(
-    (screen) => screen.name !== NOT_FOUND_SCREEN_NAME,
-  ).map((screen) => screen.path);
+  return SCREENS.map((screen) => screen.path);
 }
 
 describe("ランドマーク監査の画面一覧(spec 5.2.6 / #409)", () => {
+  it("実在ルート一覧を landmark と非テキストコントラストの両監査が共有する", () => {
+    expect(nonTextContrastScreens()).toBe(SCREENS);
+    expect(
+      LANDMARK_SCREENS.slice(0, SCREENS.length),
+      "LANDMARK_SCREENS の実在ルート部分が共通一覧から外れている",
+    ).toEqual(SCREENS);
+  });
+
   it("実在する全ルートがランドマーク監査の対象に入っている", () => {
     const audited = new Set(auditedRoutes());
     const routes = appRoutes();
