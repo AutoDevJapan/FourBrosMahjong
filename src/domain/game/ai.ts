@@ -31,7 +31,13 @@ import {
   SANMA_TILE_KINDS,
   tileKey,
 } from "@/domain/hand/tile-identity";
-import { createTile, HONOR, type Suit, type Tile } from "@/domain/tiles/tile";
+import {
+  createTile,
+  HONOR,
+  type PlayableWind,
+  type Suit,
+  type Tile,
+} from "@/domain/tiles/tile";
 import { COPIES_PER_TILE } from "@/domain/tiles/tileSet";
 import { BoundedMemo } from "./boundedMemo";
 
@@ -39,15 +45,15 @@ import { BoundedMemo } from "./boundedMemo";
 export interface CallMeldContext {
   readonly tile: Tile;
   readonly melds: readonly Meld[];
-  readonly seatWind: number;
-  readonly roundWind: number;
+  readonly seatWind: PlayableWind;
+  readonly roundWind: PlayableWind;
 }
 
 /** 三元牌、場風、自風（北はガリ専用）か。 */
 function isValueHonor(
   tile: Tile,
-  seatWind: number,
-  roundWind: number,
+  seatWind: PlayableWind,
+  roundWind: PlayableWind,
 ): boolean {
   if (tile.suit !== "honor" || tile.rank === HONOR.NORTH) return false;
   return (
