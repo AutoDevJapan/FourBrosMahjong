@@ -1,5 +1,8 @@
-import { expect, type Locator, type Page, test } from "@playwright/test";
+import { expect, type Page, test } from "@playwright/test";
 import { advanceUntil } from "./helpers/gameDriver";
+import { type NonTextContrastScreen, nonTextContrastScreens } from "./screens";
+
+const SCREENS = nonTextContrastScreens();
 
 /**
  * 非テキストコントラスト(WCAG 1.4.11)の実描画監査(#388 / スペック5 5.2.4)。
@@ -32,90 +35,15 @@ const MIN_RATIO = 3;
 
 type Theme = "ライト" | "OSダーク" | "手動ダーク";
 
-interface Screen {
-  readonly path: string;
-  readonly heading: string;
-  /**
-   * クライアント描画が終わった目印。
-   *
-   * `<h1>` はサーバ側の静的な殻に含まれるため、見出しの可視化だけでは
-   * **クライアントアイランドが未描画のまま監査してしまう**(`/game` は `mounted` になるまで
-   * 「対局を準備しています…」のプレースホルダで、盤面の対話要素が 1 つも存在しない)。
-   * 実際にこれで手牌が丸ごと監査から漏れていたため、画面ごとに待つ対象を明示する。
-   *
-   * クライアントアイランドを持つ画面(`/game` の盤面、`/history` の一覧、`/game/result`)では
-   * **サーバ側の殻に含まれる要素を指してはならない**(待ちにならず穴が残る)。
-   * 静的な画面(`/`・`/rules`・`/settings`)は SSR 済みで hydration により構造が変わらないため、
-   * ここでの `ready` は「監査対象が描画済みであること」の明示に留まる。
-   */
-  readonly ready: (page: Page) => Locator;
-  /**
-   * 実際に比を測れた枠の数の下限。
-   *
-   * この監査の失敗モードは常に「静かに 0 件」で、違反ゼロのアサートだけでは
-   * **測定が崩壊しても緑のまま**になる(実際 `/rules` は 6 件中 2 件、`/history` は 0 件しか
-   * 測れていなかった)。画面ごとに下限を固定して、取りこぼしそのものを回帰対象にする。
-   */
-  readonly minMeasured: number;
+function screenFor(path: string): NonTextContrastScreen {
+  const screen = SCREENS.find((candidate) => candidate.path === path);
+  if (screen === undefined) throw new Error(`SCREENS に ${path} がない`);
+  return screen;
 }
 
-const LOBBY: Screen = {
-  path: "/",
-  heading: "四兄弟麻雀",
-  ready: (page) => page.getByRole("link", { name: /対局を開始/ }),
-  minMeasured: 4,
-};
-
-const HISTORY: Screen = {
-  path: "/history",
-  heading: "戦績",
-  // `MatchHistoryList`(Client)の描画完了を待つ。ヘッダのリンクはサーバ側の殻にあり待ちにならない。
-  ready: (page) =>
-    page.getByText(/保存された戦績はまだありません|新しい順に表示/).first(),
-  // 空の戦績では枠を持つ対話コントロールがほぼ無い。件数のある状態は状態駆動ケースで測る。
-  minMeasured: 0,
-};
-
-const GAME: Screen = {
-  path: "/game?seed=0",
-  heading: "対局画面",
-  ready: (page) =>
-    page
-      .getByRole("listbox", { name: "自家の手牌" })
-      .filter({ visible: true })
-      .first(),
-  // 内訳: 自家手牌 14 枚 + ヘッダの「ロビーへ戻る」1。配牌枚数を変える変更を入れると
-  // ここも動くので、赤くなったら「取りこぼし」か「仕様変更」かを内訳で切り分けること。
-  minMeasured: 15,
-};
-
-const RESULT: Screen = {
-  path: "/game/result",
-  heading: "対局結果",
-  ready: (page) => page.getByRole("link", { name: /対局画面へ/ }).first(),
-  minMeasured: 2,
-};
-
-const SCREENS: readonly Screen[] = [
-  LOBBY,
-  {
-    path: "/rules",
-    heading: "ルール説明",
-    ready: (page) => page.getByRole("group").first(),
-    minMeasured: 6,
-  },
-  {
-    path: "/settings",
-    heading: "設定",
-    ready: (page) => page.getByRole("radio").first(),
-    // 内訳: 対局者名の入力 4 + 保存/既定名に戻す 2 + テーマ選択カード 3 + 「戦績を見る」1。
-    // ラジオ入力自体は UA 描画で CSS 枠を持たないため測定対象にならない。
-    minMeasured: 10,
-  },
-  HISTORY,
-  GAME,
-  RESULT,
-];
+const LOBBY = screenFor("/");
+const HISTORY = screenFor("/history");
+const GAME = screenFor("/game");
 
 /** 戦績 1 件ぶんの保存データ(`matchHistory.ts` の保存形式)。 */
 const HISTORY_FIXTURE = {
@@ -210,7 +138,7 @@ interface Offender {
 /** 指定テーマで画面を開く(`e2e/a11y.spec.ts` の `openScreen` と同じ経路)。 */
 async function openScreen(
   page: Page,
-  screen: Screen,
+  screen: NonTextContrastScreen,
   theme: Theme,
 ): Promise<void> {
   if (theme === "OSダーク") {
@@ -224,11 +152,11 @@ async function openScreen(
       }
     });
   }
-  await page.goto(screen.path);
+  await page.goto(`${screen.path}${screen.baseQuery ?? ""}`);
   await expect(
     page.getByRole("heading", { level: 1, name: screen.heading }),
   ).toBeVisible();
-  await expect(screen.ready(page)).toBeVisible();
+  await expect(screen.clientReady(page)).toBeVisible();
 
   // テーマが実際に適用されたことを確かめる。これが無いと `ThemeToggle` の保存キーや
   // `layout.tsx` の初期化スクリプトが変わったときに、「手動ダーク」の 6 ケースが
@@ -572,7 +500,7 @@ test.describe("非テキストコントラスト(WCAG 1.4.11 / #388)", () => {
         await auditScreen(
           page,
           `${theme} / ${screen.path}`,
-          screen.minMeasured,
+          screen.nonTextContrastMinMeasured,
         );
       });
     }
@@ -586,7 +514,7 @@ test.describe("非テキストコントラスト(WCAG 1.4.11 / #388)", () => {
    * そこで **意図的に 3:1 未満の枠を注入し、それを検出できること**を同じ経路で確認する。
    * この検査が落ちたら、他の全ケースの緑は信用できない。
    *
-   * 画面単位の「測定件数フロア」(`Screen.minMeasured`)と対で、
+   * 画面単位の「測定件数フロア」(`nonTextContrastMinMeasured`)と対で、
    * 「検出器が動くこと」と「各画面で実際に測れていること」の両方を固定する。
    */
   test("自己検査: 3:1 未満の枠を注入すると検出できる", async ({ page }) => {
@@ -667,7 +595,7 @@ test.describe("非テキストコントラスト(WCAG 1.4.11 / #388)", () => {
   test("状態駆動: 確定済みの /game/result でも 3:1 以上", async ({ page }) => {
     test.setTimeout(120_000);
     await page.goto(`/game?seed=${SEED_RESULT}`);
-    await expect(GAME.ready(page)).toBeVisible();
+    await expect(GAME.clientReady(page)).toBeVisible();
 
     // 半荘終了(gameEnd)まで進め、最終局の決着表示から結果画面へ入る(#277: 自動遷移は無い)。
     await advanceUntil(page, (state) => state?.phase === "gameEnd", {
