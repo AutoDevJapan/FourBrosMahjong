@@ -16,27 +16,17 @@
  */
 
 import { describe, expect, it } from "vitest";
-import type { RoundNumber, RoundState, RoundWind } from "../round/round";
-import type { PlayerRing } from "../round/seat";
 import {
-  createGame,
+  endGameStateWith as buildEndGameState,
+  OORASU_DRAW,
+  TEST_PLAYER_ORDER as ORDER,
+} from "./__testing__/engine-fixtures";
+import {
   type EngineState,
   finishRound,
   type PlayerId,
   type RoundConclusion,
 } from "./engine";
-
-/** 起家=p0 の固定円環(createGame と同一)。 */
-const ORDER: PlayerRing<PlayerId> = ["p0", "p1", "p2", "p3"];
-
-/** 指定の場/局/本場の局状態を組む(席割りは round モジュールが導出)。 */
-function roundAt(
-  wind: RoundWind,
-  roundNumber: RoundNumber,
-  honba = 0,
-): RoundState<PlayerId> {
-  return { order: ORDER, wind, roundNumber, honba };
-}
 
 /**
  * オーラス(南4)親流れ流局で `finishRound` → `endGame` を発火させる EngineState を組む。
@@ -47,20 +37,11 @@ function endGameStateWith(
   points: Record<PlayerId, number>,
   riichiSticks: number,
 ): EngineState {
-  const base = createGame({ seed: 130 });
-  return { ...base, round: roundAt("south", 4), points, riichiSticks };
+  return buildEndGameState(points, {
+    seed: 130,
+    overrides: { riichiSticks },
+  });
 }
-
-/** 南4親流れ流局(オーラス完了で半荘終了)の決着結果。 */
-const OORASU_DRAW: RoundConclusion = {
-  outcome: "dealerPasses",
-  isDraw: true,
-  summary: {
-    kind: "draw",
-    label: "流局",
-    deltas: { p0: 0, p1: 0, p2: 0, p3: 0 },
-  },
-};
 
 /** result のソシー合計を集計する。 */
 function soshiiSum(state: EngineState): number {
