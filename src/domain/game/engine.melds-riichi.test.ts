@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { parseTile, parseTiles } from "@/domain/hand/notation";
 import { TOTAL_POINTS } from "../scoring/settlement";
 import {
   createGame,
@@ -23,8 +24,13 @@ import {
  * 鳴き(ポン/カン)・リーチ・裏ドラ・一発の結線検証(#97 / スペック2 2.2・2.4)。
  *
  * 盤面は seed 固定の乱数で決まるため、個別牌姿を直接組み立てず「提示された合法手を
- * 積極的に選ぶドライバ」で全公開アクション(riichi/pon/kan/ankan/kakan/ron/tsumo)を
- * 実際に走らせ、不変条件で正しさを担保する。決定的な確認はシード走査で行う。
+ * 積極的に選ぶ単一方策」で半荘を完走させ、不変条件で正しさを担保する。固定 seed 列の
+ * 実測では riichi / pon / ankan / kakan を踏む一方、ron / tsumo / 大明槓は踏まない。
+ * 大明槓は `canKan` なら `canPon` でもあり、この方策がポンを先に選ぶため構造的に
+ * 到達しない。ron / tsumo はこの配牌群では提示されないため、本テストの保証対象外。
+ *
+ * 公開アクション全11種の保存則は、方策を `kanFirst` / `passive` / `riichiFirst` にも
+ * 分けて未踏経路を明示的に落とす `engine.pot-invariant.test.ts` が担う(issue #458)。
  */
 
 interface ActionTally {
@@ -37,7 +43,7 @@ interface ActionTally {
   tsumo: number;
 }
 
-/** 提示された合法手を積極的に選び、1半荘を完走させる(全アクション経路を踏む)。 */
+/** 提示された合法手を積極的に選び、1半荘を完走させる単一方策。 */
 function playAggressive(seed: number, tally: ActionTally): EngineState {
   let s = createGame({ seed });
   for (let guard = 0; guard < 8000 && s.phase !== "gameEnd"; guard++) {
@@ -109,27 +115,67 @@ function playAggressive(seed: number, tally: ActionTally): EngineState {
   return s;
 }
 
+/** #450 で確認した、自家の第一打に `canRiichi` が提示される固定 seed。 */
+const RIICHI_OFFER_SEED = 782;
+
 /**
- * リーチ局面探索で走査する seed 数(#450)。
+ * 非0供託からリーチを宣言できる決定的局面を組む。
  *
- * 配牌が既にテンパイへ届いている確率は低いので、検証可能な局面を十分な余裕をもって
- * 拾える範囲まで広げる必要がある(実測)。
- *
- * | 走査範囲 | `canRiichi` 提示 | うち検証可能(宣言後も局が続く) |
- * | --- | --- | --- |
- * | 1..1000 | 2 局面 | **1 局面** |
- * | 1..2000 | 5 局面 | 2 局面 |
- * | 1..3000 | 7 局面 | **4 局面** |
- *
- * 1,000 では検証可能局面が 1 件しかなく、エンジン変更でそれが消えると走査が空振りして
- * 赤くなる。3,000 まで広げて 4 件の余裕を確保する。1 seed あたり配牌 1 回分しか
- * 消費しないため実行時間は seed 数に線形で、単体実行で約 1.5s・フルスイート並列下でも
- * 約 2s(unit の `testTimeout` 30s に対して 7%)に収まる。
+ * ライブ壁を0枚にすることで、宣言牌の処理後に `pump` が他家のツモ・リーチ・和了を
+ * 挟まず即流局する。したがって返り値はリーチ宣言自身の差分だけを保持する。
  */
-const RIICHI_SCAN_SEEDS = 3000;
+function armDeterministicRiichi(): {
+  state: EngineState;
+  declarationTile: ReturnType<typeof parseTile>;
+  seat: SeatKey;
+} {
+  const state = createGame({ seed: 1 });
+  const hand = state.hand;
+  if (hand === null) throw new Error("initial hand should exist");
+  const seat = seatOfPlayer(hand.seating, "p0");
+  if (seat !== "east") throw new Error("initial human seat should be east");
+
+  while (hand.wall.remainingLiveTiles > 0) hand.wall.draw();
+
+  hand.hands.east = parseTiles("123p 456p 789p 123s 5s");
+  // 流局時のノーテン罰符で点棒差分を汚さないよう、3家とも同じテンパイ形にする。
+  hand.hands.south = parseTiles("123p 456p 789p 123s 5s");
+  hand.hands.west = parseTiles("123p 456p 789p 123s 5s");
+  for (const current of ["east", "south", "west"] as SeatKey[]) {
+    hand.melds[current] = [];
+    hand.discards[current] = [];
+    hand.discardHistory[current] = [];
+    hand.riichi[current] = false;
+    hand.doubleRiichi[current] = false;
+    hand.riichiMiss[current] = false;
+    hand.tempMiss[current] = false;
+  }
+  const declarationTile = parseTile("9s");
+  hand.drawn = declarationTile;
+  hand.turn = seat;
+
+  return {
+    declarationTile,
+    seat,
+    state: {
+      ...state,
+      riichiSticks: 2,
+      pending: {
+        kind: "humanDiscard",
+        canTsumo: false,
+        canRiichi: true,
+        riichiTiles: [declarationTile],
+        ankanTiles: [],
+        kakanTiles: [],
+        forbiddenDiscards: [],
+        locked: false,
+      },
+    },
+  };
+}
 
 describe("engine: 鳴き・リーチ・裏ドラ・一発(#97)", () => {
-  it("全公開アクションを走らせても半荘は完走し、供託込みでゼロサムを保つ", () => {
+  it("積極的に鳴く単一方策でも半荘は完走し、供託込みでゼロサムを保つ", () => {
     const tally: ActionTally = {
       riichi: 0,
       pon: 0,
@@ -157,91 +203,34 @@ describe("engine: 鳴き・リーチ・裏ドラ・一発(#97)", () => {
         expect(Number.isInteger(p)).toBe(true);
       }
     }
-    // 積極ドライバで少なくとも鳴きとリーチの経路が実際に踏まれている(カバレッジ保証)。
-    expect(tally.pon + tally.riichi).toBeGreaterThan(0);
+    // この固定 seed 列で実際に踏むと明記した4経路を個別に固定する。合算では片方が
+    // 0になっても通るため、docblock と実測カバレッジの乖離を検出できない(issue #458)。
+    expect(tally.riichi, "riichi が未踏").toBeGreaterThan(0);
+    expect(tally.pon, "pon が未踏").toBeGreaterThan(0);
+    expect(tally.ankan, "ankan が未踏").toBeGreaterThan(0);
+    expect(tally.kakan, "kakan が未踏").toBeGreaterThan(0);
   });
 
-  /**
-   * リーチ宣言の事後条件(供託 +1,000 / 自家 -1,000 / リーチフラグ)を、エンジンが
-   * 実際に提示した `canRiichi` に対してのみ検証する。
-   *
-   * **走査単位は「半荘」ではなく「配牌」**(#450)。自家はツモ切りしか行わないので
-   * 門前 13 枚は配牌のまま変わらず、リーチ機会は実質「配牌の引き」で決まる。よって
-   * 同じ局を回し続けるより新しい seed を引く方が同じ当たりを桁違いに安く探せる。
-   * 各 seed は自家の最初の打牌局面だけを見て次の seed へ進む。
-   *
-   * **当たり seed で打ち切らない**。`RIICHI_SCAN_SEEDS` を常に全走査するため、
-   * エンジン変更で当たり位置が動いても実行時間が変わらない(実行時間が当たりの位置に
-   * 依存すると、それ自体が flaky の再発経路になる)。
-   *
-   * 検証できる範囲の限界も明示しておく。`createGame` は起家を p0 に固定するため、
-   * ここで捕まえられるのは常に**東1局・自家の第一打**であり、`beforeSticks` は必ず 0
-   * になる。つまり「供託が 0 から 1 になる」ことしか見ていない。**0 以外を起点とした
-   * 増分**(加算ではなく代入にする類の退行)は本ファイル冒頭のゼロサムテストと
-   * `engine.pot-invariant.test.ts` の保存則が捕まえる(欠陥注入で両者が赤になることを
-   * 確認済み)。
-   */
-  it("リーチ宣言で 1,000 点が供託され、リーチフラグが立つ", () => {
-    let offered = 0;
-    let verified = 0;
-    for (let seed = 1; seed <= RIICHI_SCAN_SEEDS; seed++) {
-      const s = createGame({ seed });
-      // `createGame` は起家を p0 に固定する(`dealer: "p0"` を渡している)ため、初手は
-      // 必ず自家の打牌待ちになり、他家の打牌(humanReact)が先行することはない。
-      const pending = s.pending;
-      if (s.phase !== "playing" || pending?.kind !== "humanDiscard") continue;
-      if (!pending.canRiichi) continue;
-      offered += 1;
+  it("固定 seed の実配牌でエンジンがリーチを提示する", () => {
+    const state = createGame({ seed: RIICHI_OFFER_SEED });
+    expect(state.pending?.kind).toBe("humanDiscard");
+    if (state.pending?.kind !== "humanDiscard") return;
+    expect(state.pending.canRiichi).toBe(true);
+    expect(state.pending.riichiTiles.length).toBeGreaterThan(0);
+  });
 
-      const hand = s.hand;
-      if (hand === null) continue;
-      const seat = seatOfPlayer(hand.seating, "p0");
-      if (seat === null) continue;
-      const before = s.points.p0;
-      const beforeSticks = s.riichiSticks;
-      // 供託の増分は「宣言で新たに立ったリーチ」の数で決まるので、宣言前のリーチ状況を
-      // 差分の基準として控える。現状この走査は必ず第一打を捕まえるため全席 false だが、
-      // 走査範囲を第一打以外へ広げても壊れないよう差分で見る。なお `declareRiichi` は
-      // 入力の `hand` を破壊的に更新する(#453)ので、複製は呼び出し**前**に取る必要がある。
-      const beforeRiichi = { ...hand.riichi };
+  it("非0供託からのリーチ宣言で供託+1・点棒-1,000・フラグ設定を保つ", () => {
+    const { state, declarationTile, seat } = armDeterministicRiichi();
+    const beforeSticks = state.riichiSticks;
+    const beforePoints = state.points.p0;
 
-      const after = declareRiichi(s, pending.riichiTiles[0]);
-      // 宣言後に局が終了した局面(AI 和了/流局)は事後条件を観測できない。
-      if (after.phase !== "playing") continue;
-      const afterHand = after.hand;
-      if (afterHand === null) continue;
+    const after = declareRiichi(state, declarationTile);
 
-      // `declareRiichi` は最後に `pump` するので、`after` は宣言直後の状態とは限らず、
-      // リーチ後の自動ツモ切りで数巡進んでいることがある(実測: seed=782 で自家の河が
-      // 12 枚まで進む)。その区間で他家もリーチすれば供託はその分も増えるので、
-      // 期待値を「自家の 1 本 + その区間で確定した他家のリーチ」として厳密に組む。
-      // 局面を除外せずに済むため、ADR-0002 の AI 方策が変わっても検証点が減らない。
-      // 宣言牌がまだ通っていないリーチ(`pendingRiichiSeat`)は供託未確定なので数えない
-      // (`commitPendingRiichi` の意味論と 1:1)。
-      const seatKeys = Object.keys(beforeRiichi) as SeatKey[];
-      const othersCommitted = seatKeys.filter(
-        (k) =>
-          k !== seat &&
-          afterHand.riichi[k] &&
-          !beforeRiichi[k] &&
-          afterHand.pendingRiichiSeat !== k,
-      ).length;
-
-      expect(after.riichiSticks, `seed=${seed}`).toBe(
-        beforeSticks + 1 + othersCommitted,
-      );
-      expect(after.points.p0, `seed=${seed}`).toBe(before - 1000);
-      // #453 のとおり `afterHand` は入力と同一オブジェクトなので、これは「返り値が
-      // 新しい状態か」ではなく「フラグが立ったか」の検査(未設定の退行は検出できる)。
-      expect(afterHand.riichi[seat], `seed=${seed}`).toBe(true);
-      verified += 1;
-    }
-    // 空振り(エンジンがリーチを提示しなくなった / 提示しても常に局が終わる)を
-    // 区別できるよう、両方の件数を残す。
-    expect(
-      verified,
-      `走査範囲(seed 1..${RIICHI_SCAN_SEEDS})で canRiichi 提示 ${offered} 件・検証可能 ${verified} 件`,
-    ).toBeGreaterThan(0);
+    expect(after.phase).toBe("roundEnd");
+    expect(after.lastRound?.kind).toBe("draw");
+    expect(after.riichiSticks).toBe(beforeSticks + 1);
+    expect(after.points.p0).toBe(beforePoints - 1000);
+    expect(after.hand?.riichi[seat]).toBe(true);
   });
 
   it("ポン宣言で明刻が晒され、門前手牌が2枚減り手番が自家に移る", () => {
