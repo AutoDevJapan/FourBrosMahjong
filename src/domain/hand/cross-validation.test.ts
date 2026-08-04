@@ -114,6 +114,9 @@ describe("クロス検証: 向聴数(ai.shanten ⇔ オラクル)", () => {
     for (let i = 0; i < RANDOM_HANDS; i += 1) {
       const size = rng() < 0.5 ? 13 : 14;
       const tiles = randomHand(rng, size);
+      // `shanten()` もオラクルも枚数を問わず受け付けるので、欠けても不一致にならず
+      // 静かに素通りする。ジェネレータの契約はここでも落とす(#444)。
+      expect(tiles, `i=${i}`).toHaveLength(size);
       const a = shanten(tiles);
       const o = shantenOracle34(tilesToCount34(tiles));
       if (a !== o) {
@@ -135,6 +138,9 @@ describe("クロス検証: 向聴数(ai.shanten ⇔ オラクル)", () => {
     const samples: string[] = [];
     for (let i = 0; i < STRUCTURED_HANDS; i += 1) {
       const tiles = randomStructuredHand(rng);
+      // `shanten()` もオラクルも13枚を受け付けてしまうので、枚数が欠けても不一致にならず
+      // 静かに素通りする。ジェネレータの契約はここでも落とす(#444)。
+      expect(tiles, `i=${i}`).toHaveLength(14);
       const a = shanten(tiles);
       const o = shantenOracle34(tilesToCount34(tiles));
       if (a !== o) {
@@ -155,7 +161,10 @@ describe("クロス検証: 受け入れ候補枝刈り(#368)", () => {
   it("門前13枚で全27牌種を走査する独立向聴オラクルと一致する", () => {
     const rng = makeRng(0x3680_0001);
     for (let i = 0; i < UKEIRE_HANDS; i += 1) {
-      const tiles = rng() < 0.5 ? randomHand(rng, 13) : structured13(rng);
+      const tiles = rng() < 0.5 ? randomHand(rng, 13) : structured13(rng, i);
+      // `structured13` 側は helper 内で 14 → 13 を固定しているが、`randomHand` 側は
+      // ここでしか押さえられない(#444)。
+      expect(tiles, `i=${i}`).toHaveLength(13);
       const counts = tilesToCount34(tiles);
       const base = shantenOracle34(counts);
       let kinds = 0;
@@ -186,9 +195,8 @@ describe("クロス検証: 和了・分解・待ち(decompose/tenpai ⇔ オラ�
       // 乱択だけだと多重分解の手が 1% 未満しか出ず、刻子 ⇔ 順子の読み替え
       // (片側リグレッションで最も壊れやすい箇所)をほとんど踏まない(#429)。
       const tiles = menzen14(rng, i);
-      // 既存ブロックのこの「静かに skip」は #444 で明示的な失敗へ揃える予定
-      // (#429 で追加した門前ブロックは既に `toHaveLength` で hard fail させている)。
-      if (tiles.length !== 14) continue;
+      // `menzen14` の契約(必ず14枚)。破れたら静かに skip せず落とす(#444)。
+      expect(tiles, `i=${i}`).toHaveLength(14);
       const counts = tilesToCount34(tiles);
 
       const aComplete = isCompleteHand(tiles, []);
@@ -244,8 +252,9 @@ describe("クロス検証: 和了・分解・待ち(decompose/tenpai ⇔ オラ�
     for (let i = 0; i < STRUCTURED_HANDS; i += 1) {
       const tiles =
         i % 2 === 1 ? randomHand(rng, 13) : dropOne(rng, menzen14(rng, i));
-      // 上と同じく #444 で明示的な失敗へ揃える。
-      if (tiles.length !== 13) continue;
+      // `randomHand(13)` / `menzen14`(14枚)から1枚落とした手はどちらも必ず13枚。
+      // 破れたら静かに skip せず落とす(#444)。
+      expect(tiles, `i=${i}`).toHaveLength(13);
       const counts = tilesToCount34(tiles);
 
       const aWaits = new Set(
@@ -274,10 +283,17 @@ describe("クロス検証: 和了・分解・待ち(decompose/tenpai ⇔ オラ�
   });
 });
 
-/** 構造化13枚(完成形から1枚除去 → テンパイを厚く)。 */
-function structured13(rng: () => number): Tile[] {
+/**
+ * 構造化13枚(完成形から1枚除去 → テンパイを厚く)。
+ *
+ * 枚数が14でなければ先頭13枚を切り出して**辻褄を合わせる**実装だったが、それでは
+ * ジェネレータの契約違反(1枚足りない手)が「別の手牌」に化けて静かに紛れ込む。
+ * 契約は `expect` で明示的に落とす(#444)。
+ */
+function structured13(rng: () => number, index: number): Tile[] {
   const tiles = randomStructuredHand(rng);
-  return tiles.length !== 14 ? tiles.slice(0, 13) : dropOne(rng, tiles);
+  expect(tiles, `i=${index}`).toHaveLength(14);
+  return dropOne(rng, tiles);
 }
 
 function setEqual(a: Set<string>, b: Set<string>): boolean {
@@ -327,6 +343,7 @@ describe("列挙非依存の定義ベース向聴オラクルとの照合 (#392)
     const mismatches: string[] = [];
     for (let i = 0; i < samples; i++) {
       const tiles = randomHand(rng, 13 - 3 * meldCount);
+      expect(tiles, `i=${i}`).toHaveLength(13 - 3 * meldCount);
       const actual = shanten(tiles, meldCount);
       const expected = shantenByDefinition34(tilesToCount34(tiles), meldCount);
       if (actual !== expected) {
@@ -400,6 +417,9 @@ describe("クロス検証: 副露あり手の分解・和了・待ち (#390)", (
           i % 2 === 0,
         );
         const { concealedTiles, melds } = hand;
+        // 定義ベースオラクルの `assertFormArity` が枚数違いを `RangeError` で弾くので
+        // 実害は無いが、契約は呼び出し側でも明示する(他ブロックと同じ形 / #444)。
+        expect(concealedTiles, `i=${i}`).toHaveLength(14 - 3 * meldCount);
         for (const meld of melds) {
           if (meld.isKan) kanCount += 1;
           if (meld.concealed) ankanCount += 1;
@@ -489,6 +509,7 @@ describe("クロス検証: 副露あり手の分解・和了・待ち (#390)", (
           i % 2 === 0,
         );
         const { concealedTiles, melds } = hand;
+        expect(concealedTiles, `i=${i}`).toHaveLength(13 - 3 * meldCount);
 
         // 4枚使い切りの判定には副露牌も数える(`tenpai.ts` の usedCounts と同じ定義)。
         const used = tilesToCount34([
@@ -600,7 +621,7 @@ describe("クロス検証: 門前手の分解・和了・待ち(定義ベース 
     for (let i = 0; i < MENZEN_HANDS; i += 1) {
       const tiles = menzen14(rng, i);
       // `menzen14` の契約(必ず14枚)。破れたら静かに skip せず落とす(#429 / #444)。
-      expect(tiles).toHaveLength(14);
+      expect(tiles, `i=${i}`).toHaveLength(14);
       const counts = tilesToCount34(tiles);
 
       const oracleForms = standardFormsByDefinition34(counts, MENZEN_GROUPS);
@@ -692,7 +713,7 @@ describe("クロス検証: 門前手の分解・和了・待ち(定義ベース 
     for (let i = 0; i < MENZEN_HANDS; i += 1) {
       const tiles = dropOne(rng, menzen14(rng, i));
       // 14枚から1枚落としたので必ず13枚。破れたら静かに skip せず落とす(#429 / #444)。
-      expect(tiles).toHaveLength(13);
+      expect(tiles, `i=${i}`).toHaveLength(13);
       const counts = tilesToCount34(tiles);
 
       const expected = menzenWaitingIndicesByDefinition34(counts);

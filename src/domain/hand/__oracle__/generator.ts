@@ -46,6 +46,27 @@ function randInt(rng: () => number, n: number): number {
   return Math.floor(rng() * n);
 }
 
+/**
+ * 牌の置き場所(1枚 / 雀頭2枚)を乱択で探す試行回数の上限。乱択が空振りし続けた場合に
+ * 打ち切るためのもので、実際にはまず打ち切りに達しない。
+ *
+ * **規約**: この定数でループを打ち切る側は、打ち切り時に**呼び出し前の状態へ戻す**こと
+ * (枚数を減らしたまま抜けない)。戻さないと生成手が規定枚数に満たなくなり、
+ * クロス検証側は「照合対象が1手減った」ことに気づけないまま緑で通る(issue #444)。
+ * 現在の利用箇所はいずれもこの規約を守っている
+ * ({@link randomStructuredHand} / `buildAmbiguousConcealed` / `swapOne`)。
+ *
+ * ⚠️ 3箇所は「置き場所探し」という性質が同じというだけで、独立に調整したくなったら
+ * 定数を分けること(`generator.test.ts` はこの値が 1 より大きいことに依存している)。
+ */
+export const PLACEMENT_TRIES = 20;
+
+/**
+ * 手牌全体を組み直す試行回数の上限({@link PLACEMENT_TRIES} が「1牌の置き場所」なのに対し、
+ * こちらは「1手ぶんの組み立て」の再試行)。使い切った場合は決め打ちのフォールバックを返す。
+ */
+const REBUILD_ATTEMPTS = 200;
+
 /** 34-index → ドメイン `Tile`(5筒/5索は赤)。 */
 function indexToTile(idx: number): Tile {
   const { suit, rank } = index34ToKind(idx);
@@ -89,8 +110,13 @@ export function randomHand(rng: () => number, size: number): Tile[] {
   return wall.slice(0, size).map(indexToTile);
 }
 
-/** 順子開始として妥当な 34-index(pin/sou の 1..7 始まり。サンマで萬子順子は無い)。 */
-const SEQUENCE_STARTS: readonly number[] = [
+/**
+ * 順子開始として妥当な 34-index(pin/sou の 1..7 始まり。サンマで萬子順子は無い)。
+ *
+ * `generator.test.ts` の台本 RNG が「何番目の順子を引かせるか」を要素数から逆算するため
+ * export している(`PLACEMENT_TRIES` と同じくテスト専用の公開)。
+ */
+export const SEQUENCE_STARTS: readonly number[] = [
   9,
   10,
   11,
@@ -112,7 +138,7 @@ const SEQUENCE_STARTS: readonly number[] = [
  * 1牌種4枚を超えないよう配置し、失敗時は最初からやり直す(有界)。
  */
 function buildCompleteCounts(rng: () => number): number[] {
-  for (let attempt = 0; attempt < 200; attempt += 1) {
+  for (let attempt = 0; attempt < REBUILD_ATTEMPTS; attempt += 1) {
     const counts = new Array<number>(34).fill(0);
     let ok = true;
 
@@ -159,25 +185,34 @@ function buildCompleteCounts(rng: () => number): number[] {
 /**
  * 構造化手牌: 完成形(14枚)を組み、0〜`maxSwaps` 枚を無作為に別牌へ置換する。
  * 置換により向聴が上下し、テンパイ〜低向聴の形を厚く生成する。
+ *
+ * **必ず14枚を返す**(置換に失敗しても枚数は減らない)。契約は `generator.test.ts` が
+ * 直接固定し、呼び出し側のクロス検証も `expect(...).toHaveLength(14)` で
+ * 明示的に落とす(issue #444)。
  */
 export function randomStructuredHand(rng: () => number, maxSwaps = 3): Tile[] {
   const counts = buildCompleteCounts(rng);
   const swaps = randInt(rng, maxSwaps + 1);
   for (let s = 0; s < swaps; s += 1) {
-    // 手牌中の1枚を除いて別のサンマ牌を1枚加える(4枚超は避ける)。
+    // 手牌中の1枚を除いてサンマ牌を1枚加え直す(4枚超は避ける)。加える先は乱択なので
+    // 除いた牌種と同じになることもあり、その場合は手牌が変わらない。
     const present: number[] = [];
     for (const idx of SANMA_INDICES_34) {
       if (counts[idx] > 0) present.push(idx);
     }
     const remove = present[randInt(rng, present.length)];
     counts[remove] -= 1;
-    for (let tries = 0; tries < 20; tries += 1) {
+    let placed = false;
+    for (let tries = 0; tries < PLACEMENT_TRIES && !placed; tries += 1) {
       const add = SANMA_INDICES_34[randInt(rng, SANMA_INDICES_34.length)];
       if (counts[add] < 4) {
         counts[add] += 1;
-        break;
+        placed = true;
       }
     }
+    // 追加先が見つからない(実際上到達しない)場合は元に戻す。`swapOne` と同じ方針で、
+    // 「1枚減った手」を返して照合対象を静かに減らさない(issue #444)。
+    if (!placed) counts[remove] += 1;
   }
   return count34ToTiles(counts);
 }
@@ -219,7 +254,7 @@ function ambiguousSevenPairRun(rng: () => number): Tile[] {
  */
 export function randomAmbiguousMenzenHand(rng: () => number): Tile[] {
   if (rng() < 0.5) return ambiguousSevenPairRun(rng);
-  for (let attempt = 0; attempt < 200; attempt += 1) {
+  for (let attempt = 0; attempt < REBUILD_ATTEMPTS; attempt += 1) {
     const counts = new Array<number>(34).fill(0);
     const base = rng() < 0.5 ? 9 : 18; // 筒子 / 索子
     const start = base + randInt(rng, 7); // start+2 が同一スート内に収まる
@@ -391,7 +426,7 @@ function buildAmbiguousConcealed(
       counts[idx] += 3;
     }
     // 雀頭は帯の外から(帯内は既に3枚使用で、雀頭を足すと5枚になる)。
-    for (let tries = 0; tries < 20; tries += 1) {
+    for (let tries = 0; tries < PLACEMENT_TRIES; tries += 1) {
       const pair = SANMA_INDICES_34[randInt(rng, SANMA_INDICES_34.length)];
       if (pair >= start && pair <= start + 2) continue;
       if (used[pair] + 2 > 4) continue;
@@ -432,7 +467,7 @@ function swapOne(rng: () => number, counts: number[], used: number[]): void {
   const remove = present[randInt(rng, present.length)];
   counts[remove] -= 1;
   used[remove] -= 1;
-  for (let tries = 0; tries < 20; tries += 1) {
+  for (let tries = 0; tries < PLACEMENT_TRIES; tries += 1) {
     const add = SANMA_INDICES_34[randInt(rng, SANMA_INDICES_34.length)];
     if (used[add] < 4) {
       counts[add] += 1;
@@ -493,7 +528,7 @@ export function randomMeldedHand(
   const groupsNeeded = 4 - meldCount;
   const fullSize = groupsNeeded * 3 + 2;
 
-  for (let attempt = 0; attempt < 200; attempt += 1) {
+  for (let attempt = 0; attempt < REBUILD_ATTEMPTS; attempt += 1) {
     const used = new Array<number>(34).fill(0);
     const melds = pickMelds(rng, meldCount, used);
     if (melds === null) continue;

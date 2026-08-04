@@ -140,6 +140,32 @@
 つまり和了判定の boolean はこの欠陥で変わらず、分解**集合**を比べる14枚だけが落ちます。
 待ち側の非空回りは2つ目の注入が示しています。
 
+## ジェネレータの枚数契約(#444)
+
+ジェネレータ側の契約(`randomStructuredHand` は**必ず14枚**を返す)も、照合と同じ
+「静かに空回りさせない」方針で守っています。置換の追加先が見つからなかったときに除去を
+戻さないと1枚少ない手が返り、`cross-validation.test.ts` が
+`if (tiles.length !== 14) continue` で**静かに飛ばして**しまうためです。門前だけの話では
+ないので、節を分けてあります。
+
+- 契約そのものは `generator.test.ts` が固定します。台本化した RNG で打ち切り経路を
+  決定的に踏ませ、除去した1枚が戻ることと、生成手が台本どおりであることを見ます
+  (通常のシードでは約 (3/27)^20 ≈ 8e-20 で到達せず、反復回数を増やしても踏めません)。
+- 呼び出し側は `cross-validation.test.ts` の**乱択ジェネレータを呼ぶ全ループ**で
+  `expect(...).toHaveLength()` を通します。決め打ち fixture の `count34ToTiles` 経路は
+  オラクル側の枚数アサートが担保します。
+- `randomHand` 由来のループも同様です。枚数が欠けても `shanten()` とオラクルはどちらも
+  短い手を受け付けて一致してしまい、**完全に無症状**で素通りするためです。
+- `randomMeldedHand` 由来のブロックは `definition-oracle.ts` の `assertFormArity` が
+  `RangeError` を投げるので二重に守られますが、他ブロックと形を揃えて明示もしています。
+- オラクル側も同じ方針です。`standardFormsByDefinition34` /
+  `waitingIndicesByDefinition34` / `menzenWaitingIndicesByDefinition34` /
+  `shantenByDefinition34` はいずれも枚数が噛み合わなければ `RangeError` を投げ、
+  「和了形でない」と「呼び出し側の契約違反」を空集合で同一視しません。
+
+⚠️ **未対応**: `src/domain/game/ai.test.ts` の `randomHand` ループだけはまだガードが
+無く、契約違反が静かに素通りします(#456 で追随)。本ディレクトリ外なので分離しました。
+
 ## 参照ライブラリとのアンカー(再現手順)
 
 `shanten-oracle.ts` / `agari-oracle.ts` は、MIT ライブラリ
