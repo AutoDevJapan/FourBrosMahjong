@@ -1,78 +1,24 @@
-import { readdirSync } from "node:fs";
-import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 import { LANDMARK_SCREENS, NOT_FOUND_SCREEN_NAME } from "../../e2e/screens";
+import { appRoutes } from "./appRoutes";
 
 /**
  * spec 5.2.6 は「**全ルート**は本文を単一の `<main>` に収める」と定めるが、その強制は
  * `e2e/a11y.spec.ts` が回す画面一覧に依存している。ルートを新設しても一覧へ足し忘れれば、
  * 規約から**無音で外れる**(Playwright は存在しない画面を教えてくれない)。
  *
- * ここでは `src/app/**\/page.tsx` から実ルートを導出し、ランドマーク監査の画面一覧と
+ * ここでは `src/app/**\/page.*` から実ルートを導出し、ランドマーク監査の画面一覧と
  * 過不足なく一致することを固定する。ブラウザ不要の node テストなので `pnpm test` で回る。
  *
  * 一覧は `e2e/screens.ts` から**実体を import** する(ソースの文字列走査ではない)。
  * 走査だとエントリをコメントアウトされても素通りしてしまい、この検査自体が無音化する。
  *
  * 同型の穴埋めとして `src/test/playwright-projects.test.ts`(testMatch の空振り)がある。
+ *
+ * ルートの導出は `src/test/appRoutes.ts` に置き、`<h1>` の配置規約(#431)を検査する
+ * `a11y-heading-placement.test.tsx` と共有する。導出を各テストへ複製すると、片方だけが
+ * 新しいルート表現(動的セグメント等)に気づく非対称な穴が生まれる。
  */
-const APP_DIR = resolve(process.cwd(), "src/app");
-
-/**
- * App Router がページとして解釈するファイル名。
- *
- * `.tsx` だけを見ると、`page.jsx` / `page.js` で足されたルートが**この検査をすり抜ける**
- * (このテストが塞ごうとしている失敗モードそのもの)。拡張子は Next.js が受け付ける形を
- * 網羅する。先頭の `/` ごと消してディレクトリ部分だけを残す。
- */
-const PAGE_FILE = /(?:^|\/)page\.(?:tsx|ts|jsx|js|mjs|cjs)$/;
-
-/**
- * App Router のページファイル群から公開ルートパスを導出する。
- *
- * - ルートグループ `(name)` は URL に現れないのでセグメントごと落とす
- * - プライベートフォルダ `_name` 配下は**ルーティングされない**ので**エントリごと**除外する
- *   (セグメントだけ落とすと `_drafts/preview/page.tsx` が `/preview` に化ける)
- *
- * 一方、**監査すべき具体的な URL を機械的に決められない**形は推測せず落とす:
- * - 動的セグメント `[param]`
- * - パラレルルート `@slot`(スロットは単独の URL を持たない)
- *
- * 追加した時点でこのテストが失敗し、監査対象の決め方を明示的に更新させる。
- */
-function appRoutes(): string[] {
-  const pages = readdirSync(APP_DIR, { recursive: true, encoding: "utf8" })
-    .map((entry) => entry.replaceAll("\\", "/"))
-    .filter((entry) => PAGE_FILE.test(entry));
-
-  expect(
-    pages.length,
-    "src/app にページファイルが 1 つも無い(PAGE_FILE の想定が崩れた可能性)",
-  ).toBeGreaterThan(0);
-
-  const routes: string[] = [];
-  for (const entry of pages) {
-    const segments = entry
-      .replace(PAGE_FILE, "")
-      .split("/")
-      .filter((segment) => segment !== "");
-
-    for (const segment of segments) {
-      expect(
-        segment.startsWith("[") || segment.startsWith("@"),
-        `${entry}: 動的セグメント/パラレルルート ${segment} は未対応。監査対象の具体 URL を決めてこのテストを更新すること`,
-      ).toBe(false);
-    }
-
-    // プライベートフォルダ配下はルートを持たない。
-    if (segments.some((segment) => segment.startsWith("_"))) continue;
-
-    const visible = segments.filter((segment) => !segment.startsWith("("));
-    routes.push(visible.length === 0 ? "/" : `/${visible.join("/")}`);
-  }
-
-  return routes.sort();
-}
 
 /** ランドマーク監査の対象のうち、実在ルートを指すもの(404 の番兵を除く)。 */
 function auditedRoutes(): string[] {
@@ -103,7 +49,7 @@ describe("ランドマーク監査の画面一覧(spec 5.2.6 / #409)", () => {
     for (const path of audited) {
       expect(
         routes.has(path),
-        `${path} に対応する page.tsx が無い(ルート削除時の消し忘れ)`,
+        `${path} に対応する page.* が無い(ルート削除時の消し忘れ)`,
       ).toBe(true);
     }
   });
