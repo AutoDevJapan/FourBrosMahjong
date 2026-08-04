@@ -8,7 +8,27 @@ import {
   seatOfPlayer,
 } from "@/domain/game/engine";
 import { walkToGameEnd } from "./finishedGameFixture";
-import { selectView } from "./gameView";
+import { selectView, toTile } from "./gameView";
+
+describe("toTile 赤5規約の正規化(#379)", () => {
+  it("省略・矛盾した isRed に依存せず牌種から赤5を決定する", () => {
+    expect(toTile({ suit: "pin", rank: 5 })).toEqual({
+      suit: "pin",
+      rank: 5,
+      isRed: true,
+    });
+    expect(toTile({ suit: "sou", rank: 5, isRed: false })).toEqual({
+      suit: "sou",
+      rank: 5,
+      isRed: true,
+    });
+    expect(toTile({ suit: "man", rank: 5, isRed: true })).toEqual({
+      suit: "man",
+      rank: 5,
+      isRed: false,
+    });
+  });
+});
 
 describe("selectView pointsDelta projection(#277)", () => {
   it("半荘を終える局(gameEnd 直行)でも最終局の点数増減を写像する", () => {
