@@ -2,22 +2,19 @@ import { describe, expect, it } from "vitest";
 import { parseTile, parseTiles } from "@/domain/hand/notation";
 import { TOTAL_POINTS } from "../scoring/settlement";
 import {
+  advanceEngine,
+  firstLegalDiscard,
+} from "./__testing__/engine-fixtures";
+import {
   createGame,
-  declareAnkan,
-  declareKakan,
-  declareKan,
   declarePon,
   declareRiichi,
-  declareRon,
-  declareTsumo,
   discard,
   type EngineState,
   passRon,
   potTotal,
-  proceedToNextRound,
   type SeatKey,
   seatOfPlayer,
-  tsumogiri,
 } from "./engine";
 
 /**
@@ -47,70 +44,15 @@ interface ActionTally {
 function playAggressive(seed: number, tally: ActionTally): EngineState {
   let s = createGame({ seed });
   for (let guard = 0; guard < 8000 && s.phase !== "gameEnd"; guard++) {
-    if (s.phase === "roundEnd") {
-      s = proceedToNextRound(s);
-      continue;
-    }
-    const pending = s.pending;
-    if (pending?.kind === "humanReact") {
-      if (pending.canRon) {
-        tally.ron += 1;
-        s = declareRon(s);
-      } else if (pending.canPon) {
-        tally.pon += 1;
-        s = declarePon(s);
-      } else if (pending.canKan) {
-        tally.kan += 1;
-        s = declareKan(s);
-      } else {
-        s = passRon(s);
-      }
-      continue;
-    }
-    if (pending?.kind === "humanDiscard") {
-      if (pending.canTsumo) {
-        tally.tsumo += 1;
-        s = declareTsumo(s);
-        continue;
-      }
-      if (pending.locked) {
-        s = tsumogiri(s);
-        continue;
-      }
-      if (pending.kakanTiles.length > 0) {
-        tally.kakan += 1;
-        s = declareKakan(s, pending.kakanTiles[0]);
-        continue;
-      }
-      if (pending.ankanTiles.length > 0) {
-        tally.ankan += 1;
-        s = declareAnkan(s, pending.ankanTiles[0]);
-        continue;
-      }
-      if (pending.canRiichi) {
-        tally.riichi += 1;
-        s = declareRiichi(s, pending.riichiTiles[0]);
-        continue;
-      }
-      // ツモ牌があればツモ切り。無い(ポン直後など)なら門前手牌から切る。
-      // 喰い替え禁止(#105)でポンした牌種は切れないため、それを避けて選ぶ。
-      const hand = s.hand;
-      const seat = hand ? seatOfPlayer(hand.seating, "p0") : null;
-      const forbidden = pending.forbiddenDiscards;
-      const isForbidden = (t: { suit: string; rank: number }): boolean =>
-        forbidden.some((f) => f.suit === t.suit && f.rank === t.rank);
-      let tile = hand?.drawn ?? undefined;
-      if ((tile == null || isForbidden(tile)) && hand && seat) {
-        tile = hand.hands[seat].find((t) => !isForbidden(t));
-      }
-      if (tile == null)
-        throw new Error("humanDiscard without a discardable tile");
-      s = discard(s, tile);
-      continue;
-    }
-    throw new Error(
-      `stuck: phase=${s.phase} pending=${s.pending?.kind ?? "none"}`,
-    );
+    const { next, action } = advanceEngine(s, "aggressive", firstLegalDiscard);
+    if (action === "declareRon") tally.ron += 1;
+    if (action === "declarePon") tally.pon += 1;
+    if (action === "declareKan") tally.kan += 1;
+    if (action === "declareAnkan") tally.ankan += 1;
+    if (action === "declareKakan") tally.kakan += 1;
+    if (action === "declareTsumo") tally.tsumo += 1;
+    if (action === "declareRiichi") tally.riichi += 1;
+    s = next;
   }
   return s;
 }
