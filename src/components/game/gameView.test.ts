@@ -7,6 +7,7 @@ import {
   type RoundConclusion,
   seatOfPlayer,
 } from "@/domain/game/engine";
+import { parseTiles } from "@/domain/hand/notation";
 import { walkToGameEnd } from "./finishedGameFixture";
 import { selectView, toTile } from "./gameView";
 
@@ -27,6 +28,60 @@ describe("toTile 赤5規約の正規化(#379)", () => {
       rank: 5,
       isRed: false,
     });
+  });
+});
+
+describe("selectView 自家フリテン表示(#408)", () => {
+  const KOKUSHI_13_WAIT = "1m 9m 1p 9p 1s 9s 1z 2z 3z 4z 5z 6z 7z";
+
+  function selfPlayer(state: EngineState) {
+    const slot = selectView(state).slots.self;
+    if (slot.kind !== "seated") throw new Error("self must be seated");
+    return slot.player;
+  }
+
+  it("鳴かれた当たり牌が河から消えてもdiscardHistoryから捨て牌フリテンを写像する", () => {
+    const state = createGame({ seed: 408 });
+    const hand = state.hand;
+    if (hand === null) throw new Error("hand must exist");
+    hand.hands.east = parseTiles(KOKUSHI_13_WAIT);
+    hand.discards.east = [];
+    hand.discardHistory.east = parseTiles("5z");
+    hand.tempMiss.east = false;
+    hand.riichiMiss.east = false;
+
+    const player = selfPlayer(state);
+    expect(player.discards).toEqual([]);
+    expect(player.status?.furitenReason).toBe("discard");
+  });
+
+  it.each([
+    [{ tempMiss: true, riichiMiss: false }, "temporary"],
+    [{ tempMiss: true, riichiMiss: true }, "riichi"],
+  ] as const)("見逃し状態を %s として写像する", (miss, reason) => {
+    const state = createGame({ seed: 408 });
+    const hand = state.hand;
+    if (hand === null) throw new Error("hand must exist");
+    hand.hands.east = parseTiles(KOKUSHI_13_WAIT);
+    hand.discards.east = [];
+    hand.discardHistory.east = [];
+    hand.tempMiss.east = miss.tempMiss;
+    hand.riichiMiss.east = miss.riichiMiss;
+
+    expect(selfPlayer(state).status?.furitenReason).toBe(reason);
+  });
+
+  it("フリテンでなければ理由を写像しない", () => {
+    const state = createGame({ seed: 408 });
+    const hand = state.hand;
+    if (hand === null) throw new Error("hand must exist");
+    hand.hands.east = parseTiles(KOKUSHI_13_WAIT);
+    hand.discards.east = [];
+    hand.discardHistory.east = [];
+    hand.tempMiss.east = false;
+    hand.riichiMiss.east = false;
+
+    expect(selfPlayer(state).status?.furitenReason).toBeUndefined();
   });
 });
 

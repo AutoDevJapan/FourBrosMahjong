@@ -10,6 +10,8 @@
  * UI 表示に必要な最小限に絞った表示用ビューモデルとする。
  */
 
+import type { FuritenReason } from "@/domain/hand/furiten";
+
 /** 牌のスート(スペック4 `Suit`)。字牌は `honor`。 */
 type Suit = "man" | "pin" | "sou" | "honor";
 
@@ -43,6 +45,8 @@ interface PlayerStatus {
   readonly isCurrentTurn?: boolean;
   /** リーチ宣言済みか。 */
   readonly hasDeclaredRiichi?: boolean;
+  /** 自家のフリテン理由。表示は色だけに依存せずラベルを併記する。 */
+  readonly furitenReason?: FuritenReason;
 }
 
 /**

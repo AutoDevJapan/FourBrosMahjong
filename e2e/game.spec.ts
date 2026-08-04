@@ -48,6 +48,23 @@ function normalizeColor(color: string): string {
  * 席割りは起家=自家 p0 固定(engine)のため、東1 の席(あなた=東家 / 抜け番=三郎)は決定的。
  */
 test.describe("対局画面(/game)", () => {
+  test("自家の捨て牌フリテンを色だけでなく理由付きバッジで表示する(#408)", async ({
+    page,
+  }) => {
+    await page.goto("/game?seed=255");
+    const furiten = page
+      .getByRole("region", { name: /^あなた/ })
+      .filter({ visible: true })
+      .getByTestId("status-badge-furiten");
+
+    await advanceUntil(page, async () => (await furiten.count()) > 0, {
+      maxSteps: 30,
+      onRoundEnd: "stop",
+    });
+
+    await expect(furiten).toHaveText("禁フリテン（捨て牌）");
+  });
+
   test("ロビーの「対局を開始」導線から /game へ遷移できる(スペック6 6.3)", async ({
     page,
   }) => {

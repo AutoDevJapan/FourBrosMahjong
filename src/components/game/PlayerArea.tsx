@@ -36,6 +36,12 @@ export interface PlayerAreaProps {
   onBlockedTile?: (message: string) => void;
 }
 
+const FURITEN_LABEL = {
+  discard: "フリテン（捨て牌）",
+  temporary: "フリテン（同巡内）",
+  riichi: "フリテン（リーチ後）",
+} as const;
+
 export default function PlayerArea({
   player,
   isSelf,
@@ -77,6 +83,13 @@ export default function PlayerArea({
         ) : null}
         {status?.hasDeclaredRiichi ? (
           <StatusBadge icon="宣" label="リーチ" variant="riichi" />
+        ) : null}
+        {status?.furitenReason ? (
+          <StatusBadge
+            icon="禁"
+            label={FURITEN_LABEL[status.furitenReason]}
+            variant="furiten"
+          />
         ) : null}
       </header>
 

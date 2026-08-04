@@ -21,6 +21,7 @@
 
 ### Added
 
+- 自家のフリテン状態を、捨て牌・同巡内・リーチ後の理由と `禁` アイコンを併記して盤面に表示。鳴かれて当たり牌が河から消えた場合も打牌履歴を基に表示を維持 (#408)。
 - デプロイ構成の ADR(`documents/adr/0001-deploy-architecture-and-preview-policy.md`)を追加。prd 構成(Vercel フロント + Railway バックエンドは将来配置先)と Vercel Preview 方針を明文化 (#69)。
 - カスタムドメイン公開手順(`documents/guides/custom-domain-setup.md`)と `documents/adr/` `documents/guides/` の索引 README を追加 (#69)。
 
