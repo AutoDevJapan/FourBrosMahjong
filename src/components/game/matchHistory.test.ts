@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   appendHistory,
   clearHistory,
+  clearHistoryAcrossTabs,
   type HistoryLockManager,
   loadHistory,
   MATCH_HISTORY_KEY,
@@ -218,6 +219,47 @@ describe("match history persistence (#293)", () => {
 
     expect(storage.getItem(MATCH_HISTORY_KEY)).toBeNull();
     expect(loadHistory(storage)).toEqual([]);
+  });
+
+  it("追記が先・削除が後なら最終状態は空になる(#482)", async () => {
+    const storage = new MemoryStorage();
+    appendHistory(storage, entry(1));
+    const locks = new SerialLockManager();
+
+    const [written, cleared] = await Promise.all([
+      persistHistoryAcrossTabs(storage, entry(2), locks),
+      clearHistoryAcrossTabs(storage, locks),
+    ]);
+
+    expect(written).toBe("appended");
+    expect(cleared).toBe(true);
+    expect(loadHistory(storage)).toEqual([]);
+  });
+
+  it("削除が先・追記が後なら削除前の履歴は復活しない(#482)", async () => {
+    const storage = new MemoryStorage();
+    appendHistory(storage, entry(1));
+    const locks = new SerialLockManager();
+
+    const [cleared, written] = await Promise.all([
+      clearHistoryAcrossTabs(storage, locks),
+      persistHistoryAcrossTabs(storage, entry(2), locks),
+    ]);
+
+    expect(cleared).toBe(true);
+    expect(written).toBe("appended");
+    expect(loadHistory(storage).map((item) => item.seed)).toEqual([2]);
+  });
+
+  it("削除のlock不在・取得失敗では成功を返さない(#482)", async () => {
+    const storage = new MemoryStorage();
+    appendHistory(storage, entry(1));
+    expect(await clearHistoryAcrossTabs(storage, null)).toBe(false);
+    const broken: HistoryLockManager = {
+      request: () => Promise.reject(new Error("locks unavailable")),
+    };
+    expect(await clearHistoryAcrossTabs(storage, broken)).toBe(false);
+    expect(loadHistory(storage).map((item) => item.seed)).toEqual([1]);
   });
 
   it("破損データは読み込み時に空扱いとし、次回のため削除する", () => {

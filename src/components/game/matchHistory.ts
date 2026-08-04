@@ -302,6 +302,32 @@ export function clearHistory(storage: Storage): boolean {
   }
 }
 
+/**
+ * 複数タブの終局保存と競合せずに戦績を全件削除する。
+ *
+ * 追記と同じ Web Lock に参加し、writer が読んだ古い snapshot から削除済み履歴を
+ * 復活させる lost update を防ぐ。排他を保証できない環境では削除成功を偽らない。
+ */
+export async function clearHistoryAcrossTabs(
+  storage: Storage,
+  locks?: HistoryLockManager | null,
+): Promise<boolean> {
+  const lockManager =
+    locks === undefined
+      ? typeof navigator !== "undefined" && navigator.locks !== undefined
+        ? (navigator.locks as HistoryLockManager)
+        : null
+      : locks;
+  if (lockManager === null) return false;
+  try {
+    return await lockManager.request(MATCH_HISTORY_LOCK, () =>
+      clearHistory(storage),
+    );
+  } catch {
+    return false;
+  }
+}
+
 // ---------------------------------------------------------------------------
 // 外部ストア購読(`useSyncExternalStore` 用) — issue #302
 //

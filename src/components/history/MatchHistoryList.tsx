@@ -19,7 +19,7 @@
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { localStorageOrNull } from "@/components/common/browserStorage";
 import {
-  clearHistory,
+  clearHistoryAcrossTabs,
   getHistorySnapshot,
   getServerHistorySnapshot,
   MAX_HISTORY_ENTRIES,
@@ -115,9 +115,9 @@ export default function MatchHistoryList() {
     emptyStateRef.current?.focus();
   });
 
-  const executeClear = () => {
+  const executeClear = async () => {
     const storage = localStorageOrNull();
-    const cleared = storage !== null && clearHistory(storage);
+    const cleared = storage !== null && (await clearHistoryAcrossTabs(storage));
     if (cleared) {
       // 永続化と購読者への通知は分離されているため、削除後に明示的に知らせる(#302)。
       notifyHistoryChanged();

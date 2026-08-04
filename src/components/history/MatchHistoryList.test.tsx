@@ -1,7 +1,13 @@
 // @vitest-environment jsdom
 
-import { fireEvent, render, screen, within } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import {
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   appendHistory,
   MATCH_HISTORY_KEY,
@@ -39,10 +45,27 @@ const formatted = (finishedAt: number) =>
     timeStyle: "short",
   }).format(new Date(finishedAt));
 
+const originalLocksDescriptor = Object.getOwnPropertyDescriptor(
+  navigator,
+  "locks",
+);
+
+beforeEach(() => {
+  Object.defineProperty(navigator, "locks", {
+    configurable: true,
+    value: { request: (_name: string, callback: () => unknown) => callback() },
+  });
+});
+
 afterEach(() => {
   window.localStorage.clear();
   // スパイの復元をテスト本体末尾に置くと、手前の expect が落ちた際に次のテストへ漏れる。
   vi.restoreAllMocks();
+  if (originalLocksDescriptor) {
+    Object.defineProperty(navigator, "locks", originalLocksDescriptor);
+  } else {
+    Reflect.deleteProperty(navigator, "locks");
+  }
 });
 
 describe("MatchHistoryList (#293)", () => {
@@ -109,9 +132,11 @@ describe("MatchHistoryList (#293)", () => {
     ).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "削除する" }));
 
-    expect(window.localStorage.getItem(MATCH_HISTORY_KEY)).toBeNull();
+    await waitFor(() =>
+      expect(window.localStorage.getItem(MATCH_HISTORY_KEY)).toBeNull(),
+    );
     expect(
-      screen.getByText(/保存された戦績はまだありません/),
+      await screen.findByText(/保存された戦績はまだありません/),
     ).toBeInTheDocument();
     expect(
       screen.getByText("保存されていた戦績をすべて削除しました。"),
@@ -168,7 +193,7 @@ describe("MatchHistoryList (#293)", () => {
       screen.getByRole("list", { name: "保存された半荘結果" }),
     ).toBeInTheDocument();
     expect(
-      screen.getByText(/この端末では戦績を削除できませんでした/),
+      await screen.findByText(/この端末では戦績を削除できませんでした/),
     ).toBeInTheDocument();
     // 確認UIは畳まない。畳むと押したボタンが消え、フォーカスが body へ落ちる。
     expect(confirmButton).toBeInTheDocument();
@@ -186,9 +211,9 @@ describe("MatchHistoryList (#293)", () => {
     // 押した「削除する」ボタンごとセクションが消えるため、フォーカスの行き先が要る。
     fireEvent.click(screen.getByRole("button", { name: "削除する" }));
 
-    const emptyState = screen
-      .getByText(/保存された戦績はまだありません/)
-      .closest("div");
+    const emptyState = (
+      await screen.findByText(/保存された戦績はまだありません/)
+    ).closest("div");
     expect(emptyState).toHaveFocus();
     expect(document.body).not.toHaveFocus();
   });
