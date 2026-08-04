@@ -1,12 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { resolveDora } from "@/domain/dora/doraSet";
-import { chooseDiscard, shouldCallMeld } from "@/domain/game/ai";
+import { shouldCallMeld } from "@/domain/game/ai";
 import type { MeldInput } from "@/domain/hand/decompose";
 import type { Meld } from "@/domain/hand/meld";
 import { waitingTiles } from "@/domain/hand/tenpai";
 import { tileKey } from "@/domain/hand/tile-identity";
 import { HONOR, type Tile } from "@/domain/tiles/tile";
 import {
+  chooseAiDiscard,
   createGame,
   declareAnkan,
   declareKakan,
@@ -43,18 +43,6 @@ function meldInputs(melds: readonly Meld[]): MeldInput[] {
 
 function sameTile(a: Tile, b: Tile): boolean {
   return a.suit === b.suit && a.rank === b.rank && !!a.isRed === !!b.isRed;
-}
-
-/** engine の chooseAiDiscard と同じ文脈で打牌を選ぶ。 */
-function aiPickDiscard(hand: Hand, seat: SeatKey, pool: readonly Tile[]): Tile {
-  const opponentDiscards = SEATS.filter((s) => s !== seat).map(
-    // engine と同じく打牌履歴を渡す(鳴かれても現物であり続ける / #395)。
-    (s) => hand.discardHistory[s],
-  );
-  const doraKinds = new Set(
-    resolveDora(hand.doraSet).omote.map((t) => tileKey(t)),
-  );
-  return chooseDiscard({ tiles: [...pool], opponentDiscards, doraKinds });
 }
 
 /** engine の nonFuritenRiichiTiles と同じ判定(自家 p0 でも AI 方針を再現するため)。 */
@@ -118,19 +106,23 @@ function stepHumanAsAi(state: EngineState): EngineState {
   if (pending.ankanTiles.length > 0)
     return declareAnkan(state, pending.ankanTiles[0]);
 
-  const pool = [...hand.hands[seat], ...(hand.drawn ? [hand.drawn] : [])];
   if (pending.canRiichi && pending.riichiTiles.length > 0) {
     const declarable = nonFuritenTiles(hand, seat, pending.riichiTiles);
     if (declarable.length > 0) {
-      const selected = aiPickDiscard(hand, seat, pool);
+      const selected = chooseAiDiscard(hand, seat, hand.drawn);
       const tile =
         declarable.find((c) => sameTile(c, selected)) ?? declarable[0];
       return declareRiichi(state, tile);
     }
   }
-  const forbidden = new Set(pending.forbiddenDiscards.map((t) => tileKey(t)));
-  const legal = pool.filter((t) => !forbidden.has(tileKey(t)));
-  const chosen = aiPickDiscard(hand, seat, legal.length > 0 ? legal : pool);
+  // engine 本体と同じ関数へ禁止牌を候補制約として渡す。`pool` から削ると向聴・受け入れの
+  // 評価枚数が `14 − 3×副露数` を下回るため、禁止牌も評価対象には残す(#424 / #303)。
+  const chosen = chooseAiDiscard(
+    hand,
+    seat,
+    hand.drawn,
+    pending.forbiddenDiscards,
+  );
   return discard(state, chosen);
 }
 
