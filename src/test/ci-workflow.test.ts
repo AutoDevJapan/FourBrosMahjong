@@ -8,6 +8,7 @@ type Step = {
   uses?: string;
   run?: string;
   if?: string;
+  env?: Record<string, unknown>;
   with?: Record<string, unknown>;
 };
 
@@ -146,6 +147,23 @@ describe("CI が必須ゲートを実際に実行している (#418)", () => {
       /pnpm\s+format:check(\s|$)/m.test(commands),
       "pnpm format:check は pnpm check に包含されるため、両方を走らせる必要はない",
     ).toBe(false);
+  });
+});
+
+describe("production E2E parity gate (#432)", () => {
+  it("E2E専用seedを埋め込んだ同じproduction buildで主要導線を検証する", () => {
+    const steps = readWorkflow().jobs?.ci?.steps ?? [];
+    const build = steps.find((step) => step.run?.trim() === "pnpm build");
+    expect(build, "ci job にproduction buildが無い").toBeDefined();
+    expect(build?.env?.NEXT_PUBLIC_E2E_SEED_ENABLED).toBe("1");
+
+    const productionE2e = steps.find(
+      (step) => step.run?.trim() === "pnpm test:e2e:prod:prebuilt",
+    );
+    expect(
+      productionE2e,
+      "prebuilt production成果物に対する主要E2Eがci jobに無い",
+    ).toBeDefined();
   });
 });
 
