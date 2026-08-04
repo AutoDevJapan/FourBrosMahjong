@@ -16,7 +16,7 @@ import {
   proceedToNextRound,
   tsumogiri,
 } from "@/domain/game/engine";
-import type { Tile } from "@/domain/tiles/tile";
+import { createTile, type Tile } from "@/domain/tiles/tile";
 
 const GAME_SESSION_KEY = "four-bros-mahjong.game.v1";
 // v2 で `names`(対局者名 / issue #291)を追加。半荘の表示名は開始時に固定したいので
@@ -67,19 +67,20 @@ function isTile(value: unknown): value is Tile {
   if (!hasOnlyKeys(tile, ["suit", "rank", "isRed"])) return false;
   const suit = tile.suit;
   const rank = tile.rank;
+  if (
+    (suit !== "man" && suit !== "pin" && suit !== "sou" && suit !== "honor") ||
+    typeof rank !== "number" ||
+    !Number.isInteger(rank)
+  ) {
+    return false;
+  }
   const validRank =
-    (suit === "honor" &&
-      Number.isInteger(rank) &&
-      Number(rank) >= 1 &&
-      Number(rank) <= 7) ||
-    (["man", "pin", "sou"].includes(String(suit)) &&
-      Number.isInteger(rank) &&
-      Number(rank) >= 1 &&
-      Number(rank) <= 9);
+    (suit === "honor" && rank >= 1 && rank <= 7) ||
+    (suit !== "honor" && rank >= 1 && rank <= 9);
   return (
     validRank &&
     typeof tile.isRed === "boolean" &&
-    (!tile.isRed || (suit !== "honor" && rank === 5))
+    tile.isRed === createTile(suit, rank).isRed
   );
 }
 
