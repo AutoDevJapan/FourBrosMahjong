@@ -8,6 +8,7 @@ import {
   isGreenTile,
   isTerminalNumber,
   isWind,
+  isYakuhaiCandidate,
   isYaochu,
   sameKind,
 } from "./tile-identity";
@@ -41,6 +42,27 @@ describe("tile-identity", () => {
     expect(isDragon(parseTile("5z"))).toBe(true);
     expect(isWind(parseTile("4z"))).toBe(true);
     expect(isDragon(parseTile("4z"))).toBe(false);
+  });
+
+  it.each([
+    { suit: "honor" as const, rank: HONOR.NORTH },
+    { suit: "honor" as const, rank: 0 },
+    { suit: "honor" as const, rank: 8 },
+    { suit: "honor" as const, rank: 99 },
+    { suit: "pin" as const, rank: HONOR.WHITE },
+  ])("役牌候補は実在する東南西・三元牌だけに閉じる: $suit $rank", (tile) => {
+    expect(isYakuhaiCandidate(tile)).toBe(false);
+  });
+
+  it.each([
+    HONOR.EAST,
+    HONOR.SOUTH,
+    HONOR.WEST,
+    HONOR.WHITE,
+    HONOR.GREEN,
+    HONOR.RED,
+  ])("実在する役牌 rank %s は役牌候補", (rank) => {
+    expect(isYakuhaiCandidate({ suit: "honor", rank })).toBe(true);
   });
 
   it("緑一色の緑牌(索2346 8 と發)", () => {
