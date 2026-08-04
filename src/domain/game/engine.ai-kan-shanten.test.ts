@@ -74,7 +74,7 @@ function armEastTurn(seed: number, drawnTile: string): EngineState {
   hand.hands.east = parseTiles(EAST_JUNK_13);
   hand.melds.east = [];
   hand.discards.east = [];
-  hand.drawn = parseTile(drawnTile);
+  hand.drawn = { tile: parseTile(drawnTile), source: "live" };
   hand.turn = "east";
   return {
     ...s,

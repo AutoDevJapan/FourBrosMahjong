@@ -60,14 +60,10 @@ function expectFourKanDraw(
     honba: before.round.honba + 1,
   });
   expect(after.hand?.wall.remainingLiveTiles).toBe(liveTilesBefore);
-  // 四槓散了は嶺上補充の**前**に局を打ち切るため、カン成立時に `drawn` を消す各経路が
-  // `drawSource` も戻さないと「ツモ牌が無いのに嶺上由来」という不整合が局に残る
-  // (`drawKanReplacement` による上書きが起きない唯一の経路 / #415)。
-  // 実際に退行を捕まえるのは、カンの直前に `drawSource !== "live"` を持ち込む4テスト
-  // (人間の暗槓・人間の加槓・AIが嶺上牌で連続ankan/kakan)。大明槓の2テストでは
-  // カン前から `"live"` なので、ここでは不変条件の再確認にとどまる。
+  // 四槓散了は嶺上補充の**前**に局を打ち切るため、カン成立時に `drawn` を消す各経路を
+  // この唯一の露出点で確認する。牌と供給元は同じ nullable 値なので、null なら供給元も
+  // 構造的に残らない(#440)。
   expect(after.hand?.drawn).toBeNull();
-  expect(after.hand?.drawSource).toBe("live");
 }
 
 function baseWithThreeKans(seed = 1): EngineState {
@@ -130,7 +126,7 @@ function setupAiKanChain(kind: "ankan" | "kakan"): {
     }
 
     const humanDiscard = parseTile("9m");
-    hand.drawn = humanDiscard;
+    hand.drawn = { tile: humanDiscard, source: "live" };
     hand.turn = "east";
     return {
       armed: { ...state, pending: discardPending() },
@@ -147,9 +143,7 @@ describe("engine: 四槓散了(#183)", () => {
     const hand = state.hand;
     if (!hand) throw new Error("hand required");
     hand.hands.east = parseTiles("1m 1m 1m 2s 3s 4s");
-    hand.drawn = parseTile("1m");
-    // 直前のカンの嶺上牌で連続カンした状況(`drawSource` の取り残しが露出する条件)。
-    hand.drawSource = "kanReplacement";
+    hand.drawn = { tile: parseTile("1m"), source: "kanReplacement" };
     hand.turn = "east";
     const armed = {
       ...state,
@@ -168,9 +162,7 @@ describe("engine: 四槓散了(#183)", () => {
     hand.melds.east = [hand.melds.east[0], hand.melds.east[1], pon(tile)];
     hand.melds.west = [kan("4p 4p 4p 4p")];
     hand.hands.east = parseTiles("5s 1m 9m 1s 9s");
-    hand.drawn = parseTile("9m");
-    // 直前のカンの嶺上牌を持ったまま加槓した状況(#415)。
-    hand.drawSource = "kanReplacement";
+    hand.drawn = { tile: parseTile("9m"), source: "kanReplacement" };
     hand.turn = "east";
     const armed = {
       ...state,
@@ -217,7 +209,7 @@ describe("engine: 四槓散了(#183)", () => {
     hand.melds.south = [];
     hand.melds.west = [];
     hand.hands.east = parseTiles("1m 1m 1m");
-    hand.drawn = parseTile("1m");
+    hand.drawn = { tile: parseTile("1m"), source: "live" };
     hand.turn = "east";
     hand.hands.south = parseTiles(JUNK);
     hand.hands.west = parseTiles(JUNK);
@@ -240,7 +232,7 @@ describe("engine: 四槓散了(#183)", () => {
     const tile = parseTile("3p");
     hand.melds.east = [hand.melds.east[0], hand.melds.east[1], pon(tile)];
     hand.hands.east = parseTiles("3p 1m 9m 1s 9s");
-    hand.drawn = parseTile("9m");
+    hand.drawn = { tile: parseTile("9m"), source: "live" };
     hand.turn = "east";
     hand.hands.south = parseTiles("2p 4p 123s 789s 678p 99p");
     hand.melds.south = [];
@@ -264,7 +256,7 @@ describe("engine: 四槓散了(#183)", () => {
     // AI の戦略ゲート(#210)を通る役牌(白)の大明槓にする。
     const tile = parseTile("5z");
     hand.hands.east = parseTiles("5z 1m 9m 1s 9s");
-    hand.drawn = tile;
+    hand.drawn = { tile: tile, source: "live" };
     hand.turn = "east";
     hand.hands.south = parseTiles("5z 5z 5z 2m 4m 6m 8m 2s 4s 2p 4p 6p 8p");
     const armed = { ...state, pending: discardPending() };
@@ -274,10 +266,10 @@ describe("engine: 四槓散了(#183)", () => {
   });
 
   it.each(["ankan", "kakan"] as const)(
-    "AIが嶺上牌で連続%sして四槓散了になっても drawSource は既定へ戻る(#415)",
+    "AIが嶺上牌で連続%sして四槓散了になっても drawn は null になる(#440)",
     (kind) => {
       // AI が「通常ツモでカン → 嶺上牌でさらにカン」と連鎖し、2回目で四槓散了になる局面。
-      // 2回目のカンは嶺上補充の前に打ち切られるため、`drawSource` の取り残しが露出する。
+      // 2回目のカンは嶺上補充の前に打ち切られるため、`drawn` の消去を直接観測できる。
       const setup = setupAiKanChain(kind);
 
       // ライブ牌は通常ツモ1枚 + 1回目のカンの嶺上補充による王牌への補填1枚で 2 減る
@@ -299,7 +291,7 @@ describe("engine: 四槓散了(#183)", () => {
       const next = hand.wall.liveWall[0];
       const humanDiscard = parseTile("9m");
       hand.hands.east = parseTiles("1m 2m 3m 1s 2s 3s");
-      hand.drawn = humanDiscard;
+      hand.drawn = { tile: humanDiscard, source: "live" };
       hand.turn = "east";
       hand.hands.west = parseTiles(JUNK);
       if (kind === "ankan") {

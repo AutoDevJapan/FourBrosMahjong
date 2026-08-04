@@ -18,7 +18,7 @@ import { waitingTiles } from "./tenpai";
 import { sameKind } from "./tile-identity";
 
 /** フリテンの原因種別。 */
-type FuritenReason = "discard" | "temporary" | "riichi";
+export type FuritenReason = "discard" | "temporary" | "riichi";
 
 export interface FuritenContext {
   /** テンパイ手(和了牌を含まない 13 − 3×副露 枚)。 */

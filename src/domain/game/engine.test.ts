@@ -27,7 +27,7 @@ function playOut(seed: number, opts: { tsumo?: boolean } = {}): EngineState {
         s = declareTsumo(s);
       } else {
         // drawn は humanDiscard 時に必ず存在する。
-        const drawn = s.hand?.drawn;
+        const drawn = s.hand?.drawn?.tile;
         if (drawn === null || drawn === undefined) {
           throw new Error("humanDiscard without a drawn tile");
         }
@@ -179,7 +179,7 @@ function tallyRounds(seed: number): { wins: number; draws: number } {
       continue;
     }
     if (s.pending?.kind === "humanDiscard") {
-      const drawn = s.hand?.drawn;
+      const drawn = s.hand?.drawn?.tile;
       if (drawn === null || drawn === undefined) {
         throw new Error("humanDiscard without a drawn tile");
       }

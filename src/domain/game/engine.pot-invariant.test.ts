@@ -167,7 +167,7 @@ function humanDiscardTile(
   const seat = hand ? seatOfPlayer(hand.seating, "p0") : null;
   if (hand == null || seat == null)
     throw new Error("humanDiscard without a hand");
-  const tiles = [...hand.hands[seat], ...(hand.drawn ? [hand.drawn] : [])];
+  const tiles = [...hand.hands[seat], ...(hand.drawn ? [hand.drawn.tile] : [])];
   return chooseDiscard({
     tiles,
     meldCount: hand.melds[seat].length,

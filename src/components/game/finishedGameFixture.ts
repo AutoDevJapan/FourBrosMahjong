@@ -34,7 +34,7 @@ export function walkToGameEnd(seed: number): FinishedGameFixture {
       actions.push({ type: "nextRound" });
       s = proceedToNextRound(s);
     } else if (s.pending?.kind === "humanDiscard") {
-      const drawn = s.hand?.drawn;
+      const drawn = s.hand?.drawn?.tile;
       if (!drawn) throw new Error("打牌待ちなのにツモ牌がない");
       actions.push({ type: "discard", tile: drawn });
       s = discard(s, drawn);

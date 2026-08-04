@@ -233,7 +233,7 @@ describe("engine 結線: 明槓(加槓)成立後は非門前のためリーチ�
     };
     hand.melds.east = [pon3p];
     hand.hands.east = parseTiles("3p 1m 9m 1s 9s 1p 2p");
-    hand.drawn = parseTile("9m");
+    hand.drawn = { tile: parseTile("9m"), source: "live" };
     hand.turn = "east";
     // 他家は非テンパイに固定(3p の槍槓が発火しないよう)。
     hand.hands.south = parseTiles("2m 4m 6m 8m 2s 4s 6s 8s 2p 4p 6p 8p 1s");

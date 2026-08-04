@@ -49,7 +49,7 @@ function armKakan(seed: number): {
   hand.melds.east = [pon3p];
   // pool(= hands + drawn)に加槓する4枚目の 3p を含める。残りは任意。
   hand.hands.east = parseTiles("3p 1m 9m 1s 9s");
-  hand.drawn = parseTile("9m");
+  hand.drawn = { tile: parseTile("9m"), source: "live" };
   hand.turn = "east";
 
   const kakanTile = parseTile(KAKAN_KIND);

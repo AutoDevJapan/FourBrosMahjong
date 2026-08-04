@@ -72,7 +72,7 @@ function armKokushiTenpai(
   // 自家の手番へ戻る前に終わらないようにする)。
   hand.hands.west = parseTiles("1m 1m 9m 9m 23p 56p 8p 23s 5s 8s");
   const drawnTile = parseTile(drawn);
-  hand.drawn = drawnTile;
+  hand.drawn = { tile: drawnTile, source: "live" };
   hand.turn = "east";
 
   return {
@@ -221,7 +221,10 @@ describe("engine: 鳴かれた牌によるフリテンでも AI はリーチし�
     }
     hand.hands.east = parseTiles("1m 9m 1p 9p 1s 9s 1z 2z 3z 5z 6z 7z 2p");
     hand.hands.west = parseTiles("1m 9m 9p 2p 5p 8p 2s 8s 9s 1z 2z 6z 7z");
-    hand.drawn = parseTile("8p"); // 誰にも鳴かれず、南のテンパイにも無関係
+    hand.drawn = {
+      tile: parseTile("8p"),
+      source: "live",
+    }; // 誰にも鳴かれず、南のテンパイにも無関係
     hand.turn = "east";
 
     return {

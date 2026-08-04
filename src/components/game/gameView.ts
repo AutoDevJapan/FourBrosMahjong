@@ -14,6 +14,7 @@ import {
   type PlayerId,
   seatOfPlayer,
 } from "@/domain/game/engine";
+import { evaluateFuriten } from "@/domain/hand/furiten";
 import { seatingOf } from "@/domain/round/round";
 import type { Seating } from "@/domain/round/seat";
 import { createTile, type Tile } from "@/domain/tiles/tile";
@@ -109,6 +110,20 @@ function buildSlotContent(engine: EngineState, id: PlayerId): SlotContent {
         concealed: m.concealed,
       }))
     : [];
+  const furiten =
+    isSelf && hand
+      ? evaluateFuriten({
+          concealedTiles: hand.hands[seat],
+          melds: hand.melds[seat].map((meld) => ({
+            tiles: meld.tiles,
+            isKan: meld.type === "kan",
+            concealed: meld.concealed,
+          })),
+          ownDiscardHistory: hand.discardHistory[seat],
+          temporaryMiss: hand.tempMiss[seat],
+          riichiMiss: hand.riichiMiss[seat],
+        })
+      : null;
 
   const seated: SeatedPlayerView = {
     name: nameOf(engine, id),
@@ -119,6 +134,7 @@ function buildSlotContent(engine: EngineState, id: PlayerId): SlotContent {
       isDealer: seat === "east",
       isCurrentTurn: isTurn,
       hasDeclaredRiichi: hand ? hand.riichi[seat] : false,
+      ...(furiten?.reason ? { furitenReason: furiten.reason } : {}),
     },
     ...(melds.length > 0 ? { melds } : {}),
     kitaCount: hand?.kita[seat] ?? 0,
@@ -127,7 +143,7 @@ function buildSlotContent(engine: EngineState, id: PlayerId): SlotContent {
       ? {
           hand: sortTiles([
             ...hand.hands[seat],
-            ...(isTurn && hand.drawn ? [hand.drawn] : []),
+            ...(isTurn && hand.drawn ? [hand.drawn.tile] : []),
           ]).map(toTileData),
         }
       : {

@@ -65,7 +65,7 @@ describe("game persistence journal", () => {
     }
     const journal: GameJournal = {
       ...start,
-      actions: [{ type: "discard", tile: initial.hand.drawn }],
+      actions: [{ type: "discard", tile: initial.hand.drawn.tile }],
     };
     const expected = applyGameAction(initial, journal.actions[0]);
     expect(selectView(replayJournal(journal))).toEqual(selectView(expected));
@@ -142,7 +142,9 @@ describe("game persistence journal", () => {
                 (f) => f.suit === tile.suit && f.rank === tile.rank,
               );
             const tile =
-              (hand?.drawn && allowed(hand.drawn) ? hand.drawn : undefined) ??
+              (hand?.drawn && allowed(hand.drawn.tile)
+                ? hand.drawn.tile
+                : undefined) ??
               (hand && seat ? hand.hands[seat].find(allowed) : undefined);
             if (!tile) throw new Error(`seed=${seed}: 打牌可能な牌がない`);
             action = { type: "discard", tile };
