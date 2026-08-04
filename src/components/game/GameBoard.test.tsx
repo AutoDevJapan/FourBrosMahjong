@@ -479,7 +479,7 @@ describe("GameBoard 対話 a11y 経路(#285)", () => {
     if (state.pending?.kind === "humanDiscard") {
       const pending = state.pending;
       if (pending.locked) return tsumogiri(state);
-      const drawn = state.hand?.drawn;
+      const drawn = state.hand?.drawn?.tile;
       if (drawn && !pending.forbiddenDiscards.some((f) => sameKind(f, drawn))) {
         return discard(state, drawn);
       }

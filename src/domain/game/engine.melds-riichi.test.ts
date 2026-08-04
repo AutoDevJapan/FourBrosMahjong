@@ -93,7 +93,7 @@ function armDeterministicRiichi(): {
     hand.tempMiss[current] = false;
   }
   const declarationTile = parseTile("9s");
-  hand.drawn = declarationTile;
+  hand.drawn = { tile: declarationTile, source: "live" };
   hand.turn = seat;
 
   return {
@@ -189,7 +189,7 @@ describe("engine: 鳴き・リーチ・裏ドラ・一発(#97)", () => {
         if (pending?.kind === "humanReact") {
           s = passRon(s);
         } else if (pending?.kind === "humanDiscard") {
-          const drawn = s.hand?.drawn;
+          const drawn = s.hand?.drawn?.tile;
           if (drawn == null) break;
           s = discard(s, drawn);
         } else {
@@ -245,7 +245,7 @@ describe("engine: 喰い替え(現物)禁止(#105)", () => {
         if (pending?.kind === "humanReact") {
           s = passRon(s);
         } else if (pending?.kind === "humanDiscard") {
-          const drawn = s.hand?.drawn;
+          const drawn = s.hand?.drawn?.tile;
           if (drawn == null) break;
           s = discard(s, drawn);
         } else {

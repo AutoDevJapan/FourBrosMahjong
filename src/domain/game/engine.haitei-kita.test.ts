@@ -133,7 +133,7 @@ function armKitaWin(seed: number, opts: Options): Fixture {
   if (sameKind(discardTile, winTile)) {
     throw new Error("自家の打牌が待ち牌と同種ではフィクスチャが成立しない");
   }
-  hand.drawn = discardTile;
+  hand.drawn = { tile: discardTile, source: "live" };
   hand.turn = "east";
 
   return {
@@ -182,7 +182,7 @@ describe("engine: 北抜きの嶺上ツモと海底摸月(#396)", () => {
     hand.hands.south = tenpaiOn(winTile);
     hand.callsMade = true;
     const discardTile = parseTile(EAST_DISCARD);
-    hand.drawn = discardTile;
+    hand.drawn = { tile: discardTile, source: "live" };
     hand.turn = "east";
 
     const after = discard(
@@ -245,7 +245,7 @@ describe("engine: 北抜きの嶺上ツモと海底摸月(#396)", () => {
     expect(after.pending?.kind).toBe("humanDiscard");
     if (after.pending?.kind !== "humanDiscard") return;
     expect(after.pending.canTsumo).toBe(true);
-    expect(after.hand?.drawn).toEqual(winTile);
+    expect(after.hand?.drawn?.tile).toEqual(winTile);
     expect(after.hand?.kita.east).toBe(1);
 
     const won = declareTsumo(after);
@@ -273,7 +273,7 @@ describe("engine: 北抜きの嶺上ツモと海底摸月(#396)", () => {
     expect(after.phase).toBe("playing");
     expect(after.pending?.kind).toBe("humanDiscard");
     if (after.pending?.kind !== "humanDiscard") return;
-    expect(after.hand?.drawn).toEqual(winTile);
+    expect(after.hand?.drawn?.tile).toEqual(winTile);
     expect(after.hand?.kita.east).toBe(1);
     // 待ちは揃っているが役が無いので和了できない。海底摸月が誤って付くと true になる。
     expect(after.pending.canTsumo).toBe(false);

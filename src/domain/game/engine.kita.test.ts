@@ -14,7 +14,7 @@ describe("engine: 配牌時の自動北抜き(#178)", () => {
     expect(hand.kita.east).toBe(2);
     expect(hand.hands.east).toHaveLength(13);
     expect(hand.hands.east.some(isNorth)).toBe(false);
-    expect(hand.drawn && isNorth(hand.drawn)).toBe(false);
+    expect(hand.drawn && isNorth(hand.drawn.tile)).toBe(false);
   });
 
   it("全席の配牌北と連続する補充北を抜き、牌の総数を108枚に保つ", () => {
@@ -73,7 +73,7 @@ describe("engine: 配牌時の自動北抜き(#178)", () => {
       if (state.phase === "roundEnd") {
         state = proceedToNextRound(state);
       } else if (state.pending?.kind === "humanDiscard") {
-        const drawn = state.hand?.drawn;
+        const drawn = state.hand?.drawn?.tile;
         if (!drawn) throw new Error("human discard requires a drawn tile");
         state = discard(state, drawn);
       } else if (state.pending?.kind === "humanReact") {

@@ -124,7 +124,7 @@ function armDiscardWith(params: {
     hand.riichiMiss[seat] = false;
     hand.tempMiss[seat] = false;
   }
-  hand.drawn = parseTile(RON_TILE);
+  hand.drawn = { tile: parseTile(RON_TILE), source: "live" };
   hand.turn = humanSeat;
 
   return {

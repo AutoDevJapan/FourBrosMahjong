@@ -71,7 +71,7 @@ function anyHumanTile(state: EngineState): Tile {
   if (hand === null) throw new Error("no hand");
   const seat = seatOfPlayer(hand.seating, "p0");
   if (seat === null) throw new Error("human is on the bench");
-  const tile = hand.drawn ?? hand.hands[seat][0];
+  const tile = hand.drawn?.tile ?? hand.hands[seat][0];
   if (tile === undefined) throw new Error("empty hand");
   return tile;
 }

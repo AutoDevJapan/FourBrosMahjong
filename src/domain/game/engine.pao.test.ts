@@ -163,7 +163,7 @@ describe("engine: パオ(責任払い)の結線(#284 / スペック3 3.3)", () =
     // 9m をツモって和了(親・役満ツモ 48,000)。責任者の全額負担でトビに
     // ならないよう p1 の持ち点だけ引き上げておく(検証対象は差分のみ)。
     const hand = requireHand(ponState);
-    hand.drawn = parseTile("9m");
+    hand.drawn = { tile: parseTile("9m"), source: "live" };
     hand.turn = "east";
     const after = declareTsumo({
       ...ponState,
@@ -219,7 +219,7 @@ describe("engine: パオ(責任払い)の結線(#284 / スペック3 3.3)", () =
 
     // 嶺上ツモを 9p に差し替えて四槓子をツモ和了(親・役満ツモ 48,000)。
     const kanHand = requireHand(kanState);
-    kanHand.drawn = parseTile("9p");
+    kanHand.drawn = { tile: parseTile("9p"), source: "live" };
     kanHand.turn = "east";
     const after = declareTsumo({
       ...kanState,
@@ -249,7 +249,7 @@ describe("engine: パオ(責任払い)の結線(#284 / スペック3 3.3)", () =
     hand.hands.east = parseTiles("7z 7z 7z 1m 2m 3m 9m");
     hand.hands.south = parseTiles(JUNK);
     hand.hands.west = parseTiles(JUNK);
-    hand.drawn = parseTile("7z");
+    hand.drawn = { tile: parseTile("7z"), source: "live" };
     hand.turn = "east";
     const armed = {
       ...state,
@@ -263,7 +263,7 @@ describe("engine: パオ(責任払い)の結線(#284 / スペック3 3.3)", () =
 
     // 9m をツモって大三元和了。パオ役満だが責任者未記録 → 通常の親ツモ折半。
     const kanHand = requireHand(kanState);
-    kanHand.drawn = parseTile("9m");
+    kanHand.drawn = { tile: parseTile("9m"), source: "live" };
     const after = declareTsumo({
       ...kanState,
       pending: discardPending({ canTsumo: true }),
@@ -331,7 +331,7 @@ describe("engine: パオ(責任払い)の結線(#284 / スペック3 3.3)", () =
     hand.hands.east = parseTiles(JUNK);
     hand.hands.south = parseTiles("7z 7z 1p 1p 1p 4p 9s");
     hand.hands.west = parseTiles(JUNK);
-    hand.drawn = parseTile("7z");
+    hand.drawn = { tile: parseTile("7z"), source: "live" };
     hand.turn = "east";
 
     // 自家(東=p0)が中を打牌 → 南AIがポン(applyAiCall)し、責任者 p0 を記録。
@@ -353,7 +353,7 @@ describe("engine: パオ(責任払い)の結線(#284 / スペック3 3.3)", () =
     calledHand.hands.south = parseTiles("1p 1p 1p 4p");
     calledHand.discards.south = [];
     calledHand.hands.east = parseTiles(JUNK);
-    calledHand.drawn = parseTile("4p");
+    calledHand.drawn = { tile: parseTile("4p"), source: "live" };
     calledHand.turn = "east";
     calledHand.pendingDiscard = null;
     const after = discard(

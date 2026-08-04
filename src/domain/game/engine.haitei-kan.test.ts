@@ -56,7 +56,7 @@ function armAnkan(seed: number, opts: { riichi?: boolean } = {}): EngineState {
   // 1m の暗刻(3枚)を手に持ち、4枚目をツモした状態(pool に 1m×4)。
   hand.hands.east = parseTiles("1m 1m 1m 2p 3p 4p 6p 7p 8p 4s 5s 6s");
   hand.melds.east = [];
-  hand.drawn = parseTile("1m");
+  hand.drawn = { tile: parseTile("1m"), source: "live" };
   hand.turn = "east";
   hand.riichi.east = opts.riichi ?? false;
   // 他家は非テンパイ(国士暗槓槍槓 #126 が誤発火しないよう固定)。
@@ -92,7 +92,7 @@ function armKakan(seed: number): EngineState {
   hand.melds.east = [pon3p, pon7p];
   // pool(= hands + drawn)に加槓の4枚目 3p / 7p を含める。残りは和了にならない雑多牌。
   hand.hands.east = parseTiles("3p 7p 1m 9m 1s 9s 1p");
-  hand.drawn = parseTile("9m");
+  hand.drawn = { tile: parseTile("9m"), source: "live" };
   hand.turn = "east";
   // 他家は非テンパイ(3p/7p の槍槓が発火しないよう固定)。
   hand.hands.south = parseTiles("2m 4m 6m 8m 2s 4s 6s 8s 2p 4p 6p 8p 1s");
@@ -143,7 +143,7 @@ describe("engine: 海底での暗槓禁止(#128)", () => {
     expect(kan?.type).toBe("kan");
     expect(kan?.concealed).toBe(true);
     expect(kan?.tiles).toHaveLength(4);
-    expect(after.hand?.drawSource).toBe("kanReplacement"); // 嶺上ツモ済み
+    expect(after.hand?.drawn?.source).toBe("kanReplacement"); // 嶺上ツモ済み
     expect(after.pending?.kind).toBe("humanDiscard");
   });
 });

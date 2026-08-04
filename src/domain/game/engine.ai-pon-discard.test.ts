@@ -60,7 +60,7 @@ function armAiPon(seed: number): EngineState {
   hand.hands.south = south;
   // 西は白を持たず、ポン競合しない。
   hand.hands.west = parseTiles("1p 1p 1p 9p 9p 9p 1s 1s 1s 9s 9s 2s 3s");
-  hand.drawn = parseTile(PON_TILE);
+  hand.drawn = { tile: parseTile(PON_TILE), source: "live" };
   hand.turn = "east";
 
   return {
@@ -93,7 +93,7 @@ function armAiThreeTilePon(seed: number): EngineState {
   };
   hand.hands.south = parseTiles("5s 5s 5s 4s 6s 1p 2p 3p 9m 1z");
   hand.melds.south = [whitePon];
-  hand.drawn = parseTile("5s");
+  hand.drawn = { tile: parseTile("5s"), source: "live" };
   return state;
 }
 

@@ -127,7 +127,7 @@ function buildSlotContent(engine: EngineState, id: PlayerId): SlotContent {
       ? {
           hand: sortTiles([
             ...hand.hands[seat],
-            ...(isTurn && hand.drawn ? [hand.drawn] : []),
+            ...(isTurn && hand.drawn ? [hand.drawn.tile] : []),
           ]).map(toTileData),
         }
       : {

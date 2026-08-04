@@ -80,7 +80,7 @@ function armEastDiscard(seed: number, drawnTile: string): EngineState {
   hand.hands.west = parseTiles(EAST_JUNK_13);
   hand.melds.west = [];
   hand.discards.west = [];
-  hand.drawn = parseTile(drawnTile);
+  hand.drawn = { tile: parseTile(drawnTile), source: "live" };
   hand.turn = "east";
   return {
     ...s,

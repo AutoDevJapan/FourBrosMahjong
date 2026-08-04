@@ -31,7 +31,7 @@ describe("blessingForTsumo(#185)", () => {
     const base = createGame({ seed: 185 });
     if (base.hand === null) throw new Error("hand not started");
     base.hand.hands.east = parseTiles("19m 19p 19s 1234567z");
-    base.hand.drawn = parseTile("1m");
+    base.hand.drawn = { tile: parseTile("1m"), source: "live" };
     base.hand.melds.east = [];
     base.hand.discards.east = [];
     // 天和の判定ゲートは履歴側(#395)。河だけ空にしても成立しない構成を避ける。
