@@ -16,7 +16,7 @@ import {
 } from "@/domain/game/engine";
 import { seatingOf } from "@/domain/round/round";
 import type { Seating } from "@/domain/round/seat";
-import type { Tile } from "@/domain/tiles/tile";
+import { createTile, type Tile } from "@/domain/tiles/tile";
 import type {
   BenchPlayerView,
   DoraData,
@@ -37,7 +37,7 @@ function toTileData(tile: Tile): TileData {
 
 /** 表示 `TileData` → ドメイン `Tile`(打牌をエンジンへ戻す際に使用)。 */
 export function toTile(tile: TileData): Tile {
-  return { suit: tile.suit, rank: tile.rank, isRed: tile.isRed ?? false };
+  return createTile(tile.suit, tile.rank);
 }
 
 /** 牌の表示ソート(萬→筒→索→字、同スートは rank 昇順、赤は同種内で後ろ)。 */
