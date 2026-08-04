@@ -56,6 +56,20 @@ describe("shouldCallMeld: ナシナシの AI 鳴き判断(#210)", () => {
     ).toBe(false);
   });
 
+  it.each([0, 8, 99])(
+    "カタログ外の字牌 rank %s は役牌として鳴かない",
+    (rank) => {
+      expect(
+        shouldCallMeld({
+          tile: { suit: "honor", rank, isRed: false },
+          melds: [],
+          seatWind: HONOR.SOUTH,
+          roundWind: HONOR.EAST,
+        }),
+      ).toBe(false);
+    },
+  );
+
   it("役牌を既に副露して役が確定済みなら、別の鳴きを許す", () => {
     expect(
       shouldCallMeld({

@@ -26,6 +26,16 @@ const WIND_RANKS: ReadonlySet<number> = new Set([
   HONOR.NORTH,
 ]);
 
+/** 役牌候補になり得る実在 rank（東・南・西・白・發・中。北はガリのため除外）。 */
+const YAKUHAI_CANDIDATE_RANKS: ReadonlySet<number> = new Set([
+  HONOR.EAST,
+  HONOR.SOUTH,
+  HONOR.WEST,
+  HONOR.WHITE,
+  HONOR.GREEN,
+  HONOR.RED,
+]);
+
 /**
  * 牌の「種別キー」。赤フラグを無視し suit+rank で同一視する
  * (赤5筒と黒5筒は面子・役の上では同一牌)。
@@ -81,14 +91,15 @@ export function isWind(tile: Pick<Tile, "suit" | "rank">): boolean {
  * 風(`roundWind`/`seatWind`)の値域が変わった瞬間に非対称が無音で破れるため(#400)。
  * AI 方策側(`../game/ai.ts` の `isValueHonor`)もこの述語を経由する(#438)。
  *
- * TypeScript 上は自風・場風を東・南・西に制限しているが、JSON・永続化データ・
- * 型アサーションなど型境界を越える入力に備え、このランタイムガードも維持する。
+ * TypeScript 上は自風・場風を東・南・西に制限しているが、`Tile.rank` 自体は number で
+ * `createTile` も実在性を検証しない。JSON・永続化データ・型アサーションなど型境界を
+ * 越える入力に備え、北だけでなくカタログ外 rank も有限集合で拒否する。
  *
  * 「役牌にならない」だけであり、北が**風牌である**こと自体は否定しない
  * (小四喜・大四喜の風牌、字一色・混老頭の構成要素にはなり得る → {@link isWind})。
  */
 export function isYakuhaiCandidate(tile: Pick<Tile, "suit" | "rank">): boolean {
-  return tile.suit === "honor" && tile.rank !== HONOR.NORTH;
+  return tile.suit === "honor" && YAKUHAI_CANDIDATE_RANKS.has(tile.rank);
 }
 
 /**
