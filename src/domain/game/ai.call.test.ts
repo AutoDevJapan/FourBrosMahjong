@@ -43,6 +43,15 @@ describe("shouldCallMeld: ナシナシの AI 鳴き判断(#210)", () => {
     expect(decide("3z")).toBe(true);
     expect(decide("2z")).toBe(false);
     expect(decide("4z")).toBe(false);
+    // 入力境界が将来広がって風に北が渡っても、共通の役牌候補判定がガリを除外する。
+    expect(
+      shouldCallMeld({
+        tile: parseTiles("4z")[0],
+        melds: [],
+        seatWind: HONOR.NORTH,
+        roundWind: HONOR.NORTH,
+      }),
+    ).toBe(false);
   });
 
   it("役牌を既に副露して役が確定済みなら、別の鳴きを許す", () => {

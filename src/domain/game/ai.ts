@@ -27,6 +27,7 @@
 
 import type { Meld } from "@/domain/hand/meld";
 import {
+  isYakuhaiCandidate,
   isYaochu,
   SANMA_TILE_KINDS,
   tileKey,
@@ -43,13 +44,13 @@ export interface CallMeldContext {
   readonly roundWind: number;
 }
 
-/** 三元牌、場風、自風（北はガリ専用）か。 */
+/** 三元牌、場風、自風か。役牌候補の共通定義は hand domain に委譲する。 */
 function isValueHonor(
   tile: Tile,
   seatWind: number,
   roundWind: number,
 ): boolean {
-  if (tile.suit !== "honor" || tile.rank === HONOR.NORTH) return false;
+  if (!isYakuhaiCandidate(tile)) return false;
   return (
     tile.rank >= HONOR.WHITE ||
     tile.rank === seatWind ||
