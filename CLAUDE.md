@@ -63,5 +63,5 @@ Full rationale, exclusion justifications, and the local/pre-commit/CI execution-
 - **Next.js 16** (App Router) with **React 19** and **TypeScript** (`strict` mode).
 - **Tailwind CSS v4** — configured via `@import "tailwindcss"` and the `@theme` block in `src/app/globals.css`; there is no `tailwind.config.*` file. PostCSS uses `@tailwindcss/postcss` (`postcss.config.mjs`).
 - Import alias: `@/*` → `./src/*` (see `tsconfig.json`).
-- Dev/build use Turbopack; `next.config.ts` is currently empty.
+- Dev/build use Turbopack; `next.config.ts` defines static security headers and a restrictive CSP for SVG responses.
 - Routing lives in `src/app/` (App Router). Add routes as folders with `page.tsx`; shared shell is `layout.tsx`.
