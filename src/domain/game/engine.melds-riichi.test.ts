@@ -23,8 +23,13 @@ import {
  * 鳴き(ポン/カン)・リーチ・裏ドラ・一発の結線検証(#97 / スペック2 2.2・2.4)。
  *
  * 盤面は seed 固定の乱数で決まるため、個別牌姿を直接組み立てず「提示された合法手を
- * 積極的に選ぶドライバ」で全公開アクション(riichi/pon/kan/ankan/kakan/ron/tsumo)を
- * 実際に走らせ、不変条件で正しさを担保する。決定的な確認はシード走査で行う。
+ * 積極的に選ぶ単一方策」で半荘を完走させ、不変条件で正しさを担保する。固定 seed 列の
+ * 実測では riichi / pon / ankan / kakan を踏む一方、ron / tsumo / 大明槓は踏まない。
+ * 大明槓は `canKan` なら `canPon` でもあり、この方策がポンを先に選ぶため構造的に
+ * 到達しない。ron / tsumo はこの配牌群では提示されないため、本テストの保証対象外。
+ *
+ * 公開アクション全11種の保存則は、方策を `kanFirst` / `passive` / `riichiFirst` にも
+ * 分けて未踏経路を明示的に落とす `engine.pot-invariant.test.ts` が担う(issue #458)。
  */
 
 interface ActionTally {
@@ -37,7 +42,7 @@ interface ActionTally {
   tsumo: number;
 }
 
-/** 提示された合法手を積極的に選び、1半荘を完走させる(全アクション経路を踏む)。 */
+/** 提示された合法手を積極的に選び、1半荘を完走させる単一方策。 */
 function playAggressive(seed: number, tally: ActionTally): EngineState {
   let s = createGame({ seed });
   for (let guard = 0; guard < 8000 && s.phase !== "gameEnd"; guard++) {
@@ -129,7 +134,7 @@ function playAggressive(seed: number, tally: ActionTally): EngineState {
 const RIICHI_SCAN_SEEDS = 3000;
 
 describe("engine: 鳴き・リーチ・裏ドラ・一発(#97)", () => {
-  it("全公開アクションを走らせても半荘は完走し、供託込みでゼロサムを保つ", () => {
+  it("積極的に鳴く単一方策でも半荘は完走し、供託込みでゼロサムを保つ", () => {
     const tally: ActionTally = {
       riichi: 0,
       pon: 0,
@@ -157,8 +162,12 @@ describe("engine: 鳴き・リーチ・裏ドラ・一発(#97)", () => {
         expect(Number.isInteger(p)).toBe(true);
       }
     }
-    // 積極ドライバで少なくとも鳴きとリーチの経路が実際に踏まれている(カバレッジ保証)。
-    expect(tally.pon + tally.riichi).toBeGreaterThan(0);
+    // この固定 seed 列で実際に踏むと明記した4経路を個別に固定する。合算では片方が
+    // 0になっても通るため、docblock と実測カバレッジの乖離を検出できない(issue #458)。
+    expect(tally.riichi, "riichi が未踏").toBeGreaterThan(0);
+    expect(tally.pon, "pon が未踏").toBeGreaterThan(0);
+    expect(tally.ankan, "ankan が未踏").toBeGreaterThan(0);
+    expect(tally.kakan, "kakan が未踏").toBeGreaterThan(0);
   });
 
   /**
