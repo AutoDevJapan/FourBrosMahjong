@@ -42,6 +42,11 @@
  *
  * 決定性: `createGame({ seed })` で `createSeededRng` を用いるため、同じ seed + 同じ操作列から
  * 完全に同じ進行が再現できる(ユニットテストの土台)。
+ *
+ * state の所有権: 公開アクションへ渡した `EngineState` は**使い捨て**であり、有効な後続 state は
+ * 返り値だけである(#453 / ADR-0003)。契約と、その違反を即座に落とす仕組みは
+ * {@link publicAction} に集約している。分岐を試したいときは state を複製せず、上記の決定性を
+ * 使って `createGame` から操作列を再生すること。
  */
 
 import { dealStartingHands } from "@/domain/deal/deal";
@@ -361,7 +366,15 @@ export type Pending =
 /** 半荘のフェーズ。 */
 export type GamePhase = "playing" | "roundEnd" | "gameEnd";
 
-/** 半荘全体の状態(不変値として React state に載せる。内部の `Wall` のみ可変)。 */
+/**
+ * 半荘全体の状態(React state に載せる値)。
+ *
+ * **不変値ではない**(#453 / ADR-0003)。`readonly` が付くのは参照の付け替えだけで、
+ * `hand`(`HandState`)は全域が in-place 更新され、`hand.wall`(`Wall`)・{@link rng}
+ * (クロージャ)・{@link ledger}(`SoshiiLedger`)は `{ ...state }` では複製されない
+ * 可変リソースである。したがって公開アクションへ渡した state は**使い捨て**で、
+ * 有効な後続 state は返り値だけになる。契約の全体は {@link publicAction} を参照。
+ */
 export interface EngineState {
   readonly players: readonly EnginePlayer[];
   readonly order: PlayerRing<PlayerId>;
@@ -2278,8 +2291,83 @@ function endGame(state: EngineState): EngineState {
 // 公開アクション(UI から呼ぶ操作)
 // ---------------------------------------------------------------------------
 
+/**
+ * 公開アクションへ渡して遷移に使い終えた `EngineState` を、**再び**アクションへ
+ * 渡したときに投げる(#453)。契約の全体は {@link publicAction} と
+ * `documents/adr/0003-engine-state-ownership.md` を参照。
+ */
+export class EngineStateConsumedError extends Error {
+  constructor(action: string) {
+    super(
+      `EngineState was already consumed by a previous action; ${action}() received a stale state. ` +
+        "Engine actions take ownership of the state passed in: only the returned state is valid. " +
+        "(入力 state は使い捨て。分岐を試したいときは createGame から操作列を再生すること。)",
+    );
+    this.name = "EngineStateConsumedError";
+  }
+}
+
+/**
+ * 遷移に使い終えた(= 所有権が engine 側へ移った)`EngineState` の集合。
+ *
+ * `EngineState` そのものをキーにするため {@link WeakSet} を使う。参照が切れた state は
+ * 自動的に外れるので、長い半荘でも保持コストが増えない。
+ */
+const consumedStates = new WeakSet<EngineState>();
+
+/**
+ * 公開アクションに**所有権契約**を被せる(#453 / ADR-0003)。
+ *
+ * ## 契約: 入力 state は使い捨て(engine が所有権を取る)
+ *
+ * アクションが遷移を起こしたとき、有効な後続 state は**返り値だけ**である。入力 state は
+ * その場で不定になる: engine は `hand` を in-place 更新し、`hand.wall`(`Wall`)・
+ * `state.rng`(クロージャ)・`state.ledger`(`SoshiiLedger`)は新旧 state で共有される
+ * 可変リソースなので、`{ ...state }` では複製されない。よって「返り値を捨てれば入力は
+ * 元のまま」は成り立たない。
+ *
+ * これは選択ではなく構造から来ている。`hand` だけ複製すると「手牌は元のまま・山だけ
+ * 進んだ」state ができ、牌の保存則(総数108)が静かに破れるぶん**元の破壊より危険**になる。
+ *
+ * ## 本ラッパの役割: 契約違反を静かに進行させず即座に落とす
+ *
+ * #453 の実害は破壊性そのものではなく、違反が**無症状のまま進行し**「局が終わらない /
+ * テストが遅い」という別の症状に化けることだった(実際に同一局で 500 巡以上ツモ切りが
+ * 続いた)。そこで遷移を起こした入力 state を消費済みとして記録し、再投入を
+ * {@link EngineStateConsumedError} で即座に拒否する。
+ *
+ * **読み取りは常に自由**(遷移の前後を差分で観測するテストを壊さない)。裏を返すと、
+ * 返り値を捨てて入力 state を**読むだけ**のコードは依然として中途半端な値を読む。
+ * その残存穴は ADR-0003 の「この決定で解決しないこと」に明記している。
+ *
+ * ## 非合法手の no-op は消費しない
+ *
+ * 非合法手は入力 state を**同一参照のまま**返す(#105 の喰い替え no-op、UI 側の
+ * `nextEngine === engine` による journal 記録抑止がこれに依存する)。遷移が起きていない
+ * = 何も消費していないので、続けて別のアクションを呼べる。
+ *
+ * ## 適用の形
+ *
+ * 実装本体は `*Impl` として**インデントを変えずに**残し、公開名だけを本関数で包む
+ * (`export const discard = publicAction("discard", discardImpl)`)。公開アクションを
+ * 追加するときも同じ形にすること — ここを通さないと契約が掛からない。
+ */
+function publicAction<Args extends readonly unknown[]>(
+  name: string,
+  run: (state: EngineState, ...args: Args) => EngineState,
+): (state: EngineState, ...args: Args) => EngineState {
+  return (state, ...args) => {
+    if (consumedStates.has(state)) throw new EngineStateConsumedError(name);
+    const next = run(state, ...args);
+    if (next !== state) consumedStates.add(state);
+    return next;
+  };
+}
+
 /** 自家の打牌。`tile` は表示手牌から選ばれた牌(リーチ後は無視され `drawn` を切る)。 */
-export function discard(state: EngineState, tile: Tile): EngineState {
+export const discard = publicAction("discard", discardImpl);
+
+function discardImpl(state: EngineState, tile: Tile): EngineState {
   if (
     state.phase !== "playing" ||
     state.pending?.kind !== "humanDiscard" ||
@@ -2309,7 +2397,9 @@ export function discard(state: EngineState, tile: Tile): EngineState {
 }
 
 /** 自家のツモ切り(リーチ後にツモ和了しないとき用)。 */
-export function tsumogiri(state: EngineState): EngineState {
+export const tsumogiri = publicAction("tsumogiri", tsumogiriImpl);
+
+function tsumogiriImpl(state: EngineState): EngineState {
   if (
     state.phase !== "playing" ||
     state.pending?.kind !== "humanDiscard" ||
@@ -2329,7 +2419,9 @@ export function tsumogiri(state: EngineState): EngineState {
 }
 
 /** 自家のリーチ宣言(門前テンパイ・1,000点供託)。`tile` は宣言牌(捨て牌)。 */
-export function declareRiichi(state: EngineState, tile: Tile): EngineState {
+export const declareRiichi = publicAction("declareRiichi", declareRiichiImpl);
+
+function declareRiichiImpl(state: EngineState, tile: Tile): EngineState {
   if (
     state.phase !== "playing" ||
     state.pending?.kind !== "humanDiscard" ||
@@ -2391,7 +2483,9 @@ function recordPaoResponsible(
 }
 
 /** 自家のポン(直前の他家打牌に対して)。 */
-export function declarePon(state: EngineState): EngineState {
+export const declarePon = publicAction("declarePon", declarePonImpl);
+
+function declarePonImpl(state: EngineState): EngineState {
   if (
     state.phase !== "playing" ||
     state.pending?.kind !== "humanReact" ||
@@ -2431,7 +2525,9 @@ export function declarePon(state: EngineState): EngineState {
 }
 
 /** 自家の明槓(大明槓・直前の他家打牌に対して)。 */
-export function declareKan(state: EngineState): EngineState {
+export const declareKan = publicAction("declareKan", declareKanImpl);
+
+function declareKanImpl(state: EngineState): EngineState {
   if (
     state.phase !== "playing" ||
     state.pending?.kind !== "humanReact" ||
@@ -2471,7 +2567,9 @@ export function declareKan(state: EngineState): EngineState {
 }
 
 /** 自家の暗槓(自ツモ番)。`tile` は槓子にする牌種。 */
-export function declareAnkan(state: EngineState, tile: Tile): EngineState {
+export const declareAnkan = publicAction("declareAnkan", declareAnkanImpl);
+
+function declareAnkanImpl(state: EngineState, tile: Tile): EngineState {
   if (
     state.phase !== "playing" ||
     state.pending?.kind !== "humanDiscard" ||
@@ -2525,7 +2623,9 @@ export function declareAnkan(state: EngineState, tile: Tile): EngineState {
 }
 
 /** 自家の加槓(自ツモ番・既存ポンに4枚目)。`tile` は加える牌。 */
-export function declareKakan(state: EngineState, tile: Tile): EngineState {
+export const declareKakan = publicAction("declareKakan", declareKakanImpl);
+
+function declareKakanImpl(state: EngineState, tile: Tile): EngineState {
   if (
     state.phase !== "playing" ||
     state.pending?.kind !== "humanDiscard" ||
@@ -2582,7 +2682,9 @@ export function declareKakan(state: EngineState, tile: Tile): EngineState {
 }
 
 /** 自家のツモ和了宣言。 */
-export function declareTsumo(state: EngineState): EngineState {
+export const declareTsumo = publicAction("declareTsumo", declareTsumoImpl);
+
+function declareTsumoImpl(state: EngineState): EngineState {
   if (
     state.phase !== "playing" ||
     state.pending?.kind !== "humanDiscard" ||
@@ -2613,7 +2715,9 @@ export function declareTsumo(state: EngineState): EngineState {
 }
 
 /** 自家のロン和了宣言(通常ロン / 槍槓ロン)。 */
-export function declareRon(state: EngineState): EngineState {
+export const declareRon = publicAction("declareRon", declareRonImpl);
+
+function declareRonImpl(state: EngineState): EngineState {
   if (
     state.phase !== "playing" ||
     state.pending?.kind !== "humanReact" ||
@@ -2649,7 +2753,9 @@ export function declareRon(state: EngineState): EngineState {
 }
 
 /** 自家のロン/鳴き見送り(スルー)。頭ハネの残り候補を解決して進行を続ける。 */
-export function passRon(state: EngineState): EngineState {
+export const passRon = publicAction("passRon", passRonImpl);
+
+function passRonImpl(state: EngineState): EngineState {
   if (
     state.phase !== "playing" ||
     state.pending?.kind !== "humanReact" ||
@@ -2694,7 +2800,12 @@ export function passRon(state: EngineState): EngineState {
 }
 
 /** 局終了後、次局を開始する(半荘終了時は何もしない)。 */
-export function proceedToNextRound(state: EngineState): EngineState {
+export const proceedToNextRound = publicAction(
+  "proceedToNextRound",
+  proceedToNextRoundImpl,
+);
+
+function proceedToNextRoundImpl(state: EngineState): EngineState {
   if (state.phase !== "roundEnd") return state;
   if (state.nextRoundState === null) return state; // 終了済み(通常 gameEnd 済み)
   const next: EngineState = {
