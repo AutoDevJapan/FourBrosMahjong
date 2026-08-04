@@ -255,6 +255,9 @@ describe("ai: 受け入れ(ukeire)", () => {
     for (let meldCount = 1; meldCount <= MAX_MELD_COUNT; meldCount += 1) {
       for (let i = 0; i < MELD_UKEIRE_HANDS; i += 1) {
         const tiles = randomHand(rng, 13 - 3 * meldCount);
+        expect(tiles, `meldCount=${meldCount}, i=${i}`).toHaveLength(
+          13 - 3 * meldCount,
+        );
         const base = shanten(tiles, meldCount);
         let kinds = 0;
         let copies = 0;
