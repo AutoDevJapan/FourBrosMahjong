@@ -105,11 +105,16 @@ describe("engine: 半荘の状態機械(#67)", () => {
     expect(potTotal(s)).toBe(0);
   });
 
-  it("進行に伴い場が東→南へ進み、南4(オーラス)まで到達し得る", () => {
-    // 決定的に南場へ到達することを確認(seed により東場で終わらない範囲)。
-    const s = playOut(2024);
-    // 半荘終了時点の局は東1より必ず先へ進んでいる(1局で終わらない)。
-    expect(s.roundsPlayed).toBeGreaterThan(0);
+  it("seed=3: engine の半荘進行が南場へ到達して完走する", () => {
+    // このドライバで seed=3 は南3終了・roundsPlayed=8 まで進む。wind を直接見るため、
+    // 「東場から先へ進まない」退行では roundsPlayed だけが増えても赤になる(#397)。
+    const s = playOut(3);
+    expect(s.phase).toBe("gameEnd");
+    expect(s.round).toMatchObject({ wind: "south", roundNumber: 3 });
+    expect(s.roundsPlayed).toBe(8);
+
+    // 東1→南4 の全ラベル列、席回転、オーラス判定は engine の乱数決着へ依存させず、
+    // round-progression.integration.test.ts が全局親流れの決定的構成で担保する。
   });
 
   it("自家がツモ和了可能なら宣言でき、局が決着する", () => {
