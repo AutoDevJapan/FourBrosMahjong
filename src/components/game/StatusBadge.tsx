@@ -10,7 +10,7 @@ export interface StatusBadgeProps {
   /** テキストラベル(読み上げ対象)。 */
   label: string;
   /** 強調バリアント。`highlight` は現在手番のハイライト色を使う。 */
-  variant?: "default" | "highlight" | "riichi" | "bench";
+  variant?: "default" | "highlight" | "riichi" | "furiten" | "bench";
 }
 
 /*
@@ -33,6 +33,8 @@ const VARIANT_CLASS: Record<
   highlight:
     "bg-tile-face border-turn-highlight-ink text-turn-highlight-ink font-semibold",
   riichi:
+    "bg-tile-face border-tile-badge-red text-tile-badge-red font-semibold",
+  furiten:
     "bg-tile-face border-tile-badge-red text-tile-badge-red font-semibold",
   bench: "border-foreground/30 text-foreground/70",
 };

@@ -48,4 +48,26 @@ describe("PlayerArea status badges (spec 5.2.1)", () => {
       screen.queryByTestId("status-badge-default"),
     ).not.toBeInTheDocument();
   });
+
+  it.each([
+    ["discard", "禁フリテン（捨て牌）"],
+    ["temporary", "禁フリテン（同巡内）"],
+    ["riichi", "禁フリテン（リーチ後）"],
+  ] as const)("%s フリテンの理由をアイコン+テキストで示す", (reason, label) => {
+    render(
+      <PlayerArea
+        player={{ ...PLAYER, status: { furitenReason: reason } }}
+        isSelf
+      />,
+    );
+
+    expect(screen.getByTestId("status-badge-furiten")).toHaveTextContent(label);
+  });
+
+  it("フリテンでないときはフリテンバッジを描画しない", () => {
+    render(<PlayerArea player={{ ...PLAYER, status: {} }} isSelf />);
+    expect(
+      screen.queryByTestId("status-badge-furiten"),
+    ).not.toBeInTheDocument();
+  });
 });
