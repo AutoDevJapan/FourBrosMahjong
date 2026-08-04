@@ -34,20 +34,22 @@ export default function ResultPageClient() {
   };
 
   return (
-    <div className="mx-auto flex min-h-screen w-full max-w-3xl flex-col gap-6 p-4 sm:p-6">
-      <header className="flex items-center justify-between gap-4">
-        <h1 className="text-xl font-bold sm:text-2xl">対局結果</h1>
-        <Link
-          href="/"
-          className="rounded-full border border-control-border px-3 py-1.5 text-sm hover:bg-foreground/5"
-        >
-          ロビーへ戻る
-        </Link>
-      </header>
-
+    <div className="mx-auto min-h-screen w-full max-w-3xl p-4 sm:p-6">
       {/* 本文は単一の <main> に収める(スペック5 5.2.6)。読み込み中・未確定・確定の
-          いずれの分岐でも本文がランドマーク外に取り残されないよう、分岐の外側で包む。 */}
+          いずれの分岐でも本文がランドマーク外に取り残されないよう、分岐の外側で包む。
+          ページヘッダー(<h1>)も内側に置く。外に出すと <header> が banner ランドマークに
+          なり、ルートごとにランドマーク構成が割れる(#431)。 */}
       <main className="flex flex-col gap-6">
+        <header className="flex items-center justify-between gap-4">
+          <h1 className="text-xl font-bold sm:text-2xl">対局結果</h1>
+          <Link
+            href="/"
+            className="rounded-full border border-control-border px-3 py-1.5 text-sm hover:bg-foreground/5"
+          >
+            ロビーへ戻る
+          </Link>
+        </header>
+
         {!mounted ? (
           <div
             role="status"

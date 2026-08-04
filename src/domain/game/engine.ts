@@ -256,9 +256,12 @@ export interface RoundSummary {
     /** 帰属先(Q15 = 最終持ち点最高 / Q20 = 同点最高は席順上位)。 */
     readonly recipientId: PlayerId;
     readonly recipientName: string;
-    /** 残存本数。 */
+    /** 残存本数(**リーチ棒の本数**。供託種別を足すときは表示側の拡張が要る → `POT_SOURCES`)。 */
     readonly sticks: number;
-    /** 加算点(= sticks × 1,000)。 */
+    /**
+     * 加算点(**場に残っていた供託の合計** = `potTotal`)。現状は供託種別がリーチ棒だけなので
+     * `sticks × 1,000` に一致するが、種別が増えると一致しなくなる(#430)。
+     */
     readonly points: number;
   };
   /** 和了時点で固定した、GUI検算用の表示スナップショット。 */
@@ -294,11 +297,21 @@ export interface RoundSummary {
     readonly yakuman: number;
     readonly category: string;
     readonly honba: number;
+    /**
+     * 和了者が回収した供託の**本数**(= リーチ棒の本数)。
+     *
+     * `stickPayout`(点数)と対で `WinDetails` が「供託回収 N本(N,000点)」と描画するが、
+     * 両者はリーチ棒固有の別ソースであり供託レジストリ(`POT_SOURCES`)を経由しない。
+     * `RoundSummary.residualSticks` の `sticks`/`points` と同型の組で、局中の回収を
+     * 新しい供託種別へ広げる(spec 3.3 の (a))と本数と点数が食い違うため、
+     * そのときは表示側の拡張も要る(#430)。
+     */
     readonly riichiSticks: number;
     readonly payments: readonly {
       readonly name: string;
       readonly amount: number;
     }[];
+    /** 和了者が回収した供託の**点数**({@link riichiSticks} の注記を参照)。 */
     readonly stickPayout: number;
   };
 }
@@ -359,7 +372,12 @@ export interface EngineState {
   readonly bonus: Record<PlayerId, number>;
   /** ソシー精算台帳(祝儀は局中、素点+ウマは半荘終了時に適用)。 */
   readonly ledger: SoshiiLedger;
-  /** 供託リーチ棒(和了で回収・流局で持ち越し)。 */
+  /**
+   * 供託リーチ棒の本数(和了で回収・流局で持ち越し)。
+   *
+   * **場に残る供託の一種**であり、点数への換算と半荘終了時の畳み込みは供託レジストリ
+   * `POT_SOURCES` / {@link potTotal} を経由する(#430)。
+   */
   readonly riichiSticks: number;
   readonly rng: Rng;
   readonly hand: HandState | null;
@@ -2062,8 +2080,104 @@ export function finishRound(
   return gameEnds ? endGame(base) : base;
 }
 
+// ---------------------------------------------------------------------------
+// 供託(場に残る点棒)の集約
+// ---------------------------------------------------------------------------
+
 /**
- * 残存供託リーチ棒の帰属先 = 抜け番を含む4兄弟全員の最終持ち点で**最高**のプレイヤーID。
+ * 場に残る供託(点棒)1種別の記述子。
+ *
+ * `Σ持ち点 + 場の供託 = 140,000`(spec 3.3「供託の集約と保存則」)を保つため、**プレイヤーの
+ * 持ち点から場へ移した点棒はすべてここに列挙されていなければならない**。列挙漏れがあると
+ * `endGame` の畳み込みから外れ、精算入口({@link SoshiiLedger.applyUma} /
+ * {@link SoshiiLedger.applyRawScore})が `RangeError` を投げて対局中にクラッシュする(#430)。
+ */
+export interface PotSource {
+  /** 現在この種別で場に残っている点数(残存なしなら 0)。 */
+  readonly points: (state: EngineState) => number;
+  /**
+   * この種別の供託を場から下ろした状態。
+   *
+   * **自分のカウンタ以外を変えてはならない**。特に `points`(持ち点)と `lastRound` は
+   * `endGame` が畳み込み後の値で明示的に上書きするため、ここでの変更は黙って捨てられる。
+   * 下ろした点数を帰属先の持ち点へ加算するのは呼び出し側(`endGame`)の責務。
+   *
+   * **自種別のカウンタが 0 のときは受け取った `state` をそのまま(同一参照で)返すこと**
+   * (判定は「点数換算が 0 か」ではなく「カウンタが 0 か」で行う。点数換算 0 でもカウンタが
+   * 残る種別を将来足したときに下ろし損ねないため)。呼び出し側は合計が 0 でも無条件に呼ぶ
+   * ({@link withdrawPot})ので、この要求により **no-op が no-op のまま保たれる** — つまり
+   * `withdrawPot(s) === s` が「場に供託が無い」ことの判定に使える。この契約は
+   * `engine.pot-invariant.test.ts`(「供託レジストリの契約」)が全種別に対して検査する。
+   */
+  readonly withdraw: (state: EngineState) => EngineState;
+}
+
+/**
+ * 場に残る供託の全種別レジストリ(**単一の「供託」概念**)。
+ *
+ * 現状で場に残り得るのはリーチ棒だけだが、`質問リスト.md` Q29(チョンボ罰符)が
+ * 「供託方式」で確定した場合など、**保存則と畳み込みに関しては新しい供託種別を
+ * ここへ1エントリ追加するだけ**でよい。{@link potTotal} / `withdrawPot` を経由する
+ * `endGame` の畳み込みと、`engine.pot-invariant.test.ts` の不変条件テストが
+ * 自動的に新種別を対象に含める(#430)。決着表示の内訳
+ * (`RoundSummary.residualSticks`)は自動では追随しない(`endGame` 内の注記を参照)。
+ *
+ * **帰属先について**: `endGame` は集約した供託を {@link residualPotRecipient}
+ * (Q15 = 1位取得 / Q20 = 同点最高は席順上位)へまとめて渡す。この帰属規則は spec 3.4 で
+ * **リーチ棒について**確定したものなので、これと異なる帰属規則を持つ種別を追加するときは
+ * 規則の裁定(→ `質問リスト.md`)と本レジストリの拡張(種別ごとの帰属先)が併せて必要になる。
+ * ただし**合計の保存(= クラッシュしないこと)は帰属先によらず本レジストリだけで担保される**。
+ *
+ * **局中の回収・表示について**: 和了時の供託回収(`settleWin` → `resolveWinPayment` の
+ * `stickPayout`)、卓上の供託表示(`gameView` → `TableInfo`)、和了表示の内訳
+ * ({@link RoundSummary.winDetails} の `riichiSticks`/`stickPayout`)はいずれもリーチ棒固有の
+ * 経路で、本レジストリを経由しない。新種別を和了者の回収対象に含めるか・表示に出すかは
+ * 種別ごとの判断であり、含めなくても供託は場に残り続けて終局時に畳み込まれるため
+ * **保存則は破れない**(安全側)。詳細は spec 3.3「供託の集約と保存則」。
+ *
+ * **本レジストリで自動化されるのは「保存則」と「終局時の畳み込み」だけ**である点に注意
+ * (レジストリの存在が登録忘れそのものを防ぐわけではない。登録漏れは
+ * `engine.pot-invariant.test.ts` の走査が**踏む経路であれば** red になるが、
+ * 現状 engine から到達不能な経路(Q29 のチョンボ罰符など)は検出できない)。
+ */
+export const POT_SOURCES: readonly PotSource[] = [
+  // 供託リーチ棒(`state.riichiSticks` 本 × 1,000点)。
+  {
+    points: (state) => state.riichiSticks * RIICHI_STICK_POINTS,
+    withdraw: (state) =>
+      state.riichiSticks === 0 ? state : { ...state, riichiSticks: 0 },
+  },
+];
+
+/**
+ * いま場に残っている供託の合計点(全種別の総和)。
+ *
+ * 半荘中を通じて `Σ持ち点 + potTotal(state) = 140,000`(`TOTAL_POINTS`)が成立する(#430)。
+ *
+ * 描画・進行はどれも個別カウンタ(`state.riichiSticks`)を直接読むため production の
+ * 呼び出し元は `endGame` のみ。**保存則を検査するテストのために公開**している
+ * (`finishRound` と同じ扱い)。
+ */
+export function potTotal(state: EngineState): number {
+  return POT_SOURCES.reduce((sum, source) => sum + source.points(state), 0);
+}
+
+/**
+ * 全種別の供託を場から下ろす(点数は呼び出し側が帰属先の持ち点へ移す)。
+ *
+ * 合計 0 でも**無条件に呼んでよい**({@link PotSource.withdraw} がカウンタ 0 のとき同一参照を
+ * 返す契約のため)。逆に呼び出し側で `potTotal > 0` を条件にすると、「点数換算は 0 だが
+ * カウンタは残っている」種別を将来足したときに場から下ろし損ねる。
+ *
+ * production の呼び出し元は `endGame` のみ。**レジストリの契約を検査するテストのために公開**
+ * している({@link potTotal} と同じ扱い)。
+ */
+export function withdrawPot(state: EngineState): EngineState {
+  return POT_SOURCES.reduce((acc, source) => source.withdraw(acc), state);
+}
+
+/**
+ * 残存供託の帰属先 = 抜け番を含む4兄弟全員の最終持ち点で**最高**のプレイヤーID。
  *
  * 単独最高ならその1人(Q15 確定・1位取得 / #130)。**同点最高(単独1位が存在しない)場合は
  * 席順(固定円環 `order` の先頭 = 起家に近い順 = 供託の上家取り慣行に準ずる)で最上位の1人**を
@@ -2072,7 +2186,7 @@ export function finishRound(
  * `order[0]` が起家(初局の親)で半荘を通じ不変(`round/seat` の `PlayerRing`)。実装は席順に
  * 走査し、**厳密に**高い持ち点でのみ更新する(同点は先着 = 席順上位を保持)ため一意に決まる。
  */
-function residualRiichiRecipient(
+function residualPotRecipient(
   order: PlayerRing<PlayerId>,
   points: Record<PlayerId, number>,
 ): PlayerId {
@@ -2085,25 +2199,32 @@ function residualRiichiRecipient(
 
 /** 半荘を締め、ソシー精算(素点+ウマ+オカ+祝儀)を確定する。 */
 function endGame(state: EngineState): EngineState {
-  // 半荘終了時に場へ残った供託リーチ棒(`state.riichiSticks` > 0)は、**最終持ち点が最高**
-  // (抜け番含む全員に対する厳密比較 = Q19 整合)のプレイヤーの素点へ加算する(Q15 確定・
-  // ユーザー承認 2026-07-17 = 1位取得 / issue #130)。**同点最高で単独1位が存在しない場合は
-  // 席順(起家に近い順)で最上位の1人が総取り**する(Q20 確定・ユーザー承認 2026-07-17 =
-  // 同点最高のうち席順上位が総取り / issue #131)。`settleWin` は和了者が供託を回収して 0 に
-  // するため、残存するのは最終局が `settleDraw`(流局・トビ流局含む)で終わったとき。帰属先が
-  // 一意に定まるためソシー合計は常に zero-sum を保つ(消失で総和が目減りしない)。
-  const residual = state.riichiSticks * RIICHI_STICK_POINTS;
+  // 半荘終了時に場へ残った供託(`potTotal(state)` > 0。現状の種別はリーチ棒のみ)は、
+  // **最終持ち点が最高**(抜け番含む全員に対する厳密比較 = Q19 整合)のプレイヤーの素点へ
+  // 加算する(Q15 確定・ユーザー承認 2026-07-17 = 1位取得 / issue #130)。**同点最高で
+  // 単独1位が存在しない場合は席順(起家に近い順)で最上位の1人が総取り**する(Q20 確定・
+  // ユーザー承認 2026-07-17 = 同点最高のうち席順上位が総取り / issue #131)。`settleWin` は
+  // 和了者が供託を回収して 0 にするため、残存するのは最終局が `settleDraw`(流局・トビ流局
+  // 含む)で終わったとき。帰属先が一意に定まるためソシー合計は常に zero-sum を保つ
+  // (消失で総和が目減りしない)。
+  //
+  // 畳み込みは種別ごとではなく供託レジストリ(`POT_SOURCES`)の**集約**に対して行う。
+  // 新しい供託種別を追加しても `potTotal`/`withdrawPot` 経由で自動的に畳み込まれ、
+  // 精算入口の `Σ持ち点 = 140,000` 検証が破れない(#430)。
+  const residual = potTotal(state);
+  const withdrawn = withdrawPot(state);
   const points: Record<PlayerId, number> = { ...state.points };
-  let riichiSticks = state.riichiSticks;
   let lastRound = state.lastRound;
   if (residual > 0) {
-    const recipient = residualRiichiRecipient(state.order, points);
+    const recipient = residualPotRecipient(state.order, points);
     points[recipient] += residual;
-    riichiSticks = 0; // 供託を素点へ移し、場から下ろす。
     // gameEnd の決着表示は「局開始持ち点 + 表示デルタ = 表示持ち点」「供託カウント 0 と整合」
     // を保つ必要がある(#282)。和了決着では複数局分の供託回収(`stickPayout`)が和了者の
     // デルタに含まれるのと同じ扱いで、残存供託の受取も最終局デルタへ畳み込み、内訳を
     // `residualSticks` に記録して hint 表示・事後検算を可能にする。
+    // `sticks`(本数)は**リーチ棒の本数**であり、点数 `residual` は供託全体の合計。
+    // 種別が増えたら内訳表示(`RoundSummary.residualSticks`)側の拡張も要る
+    // (合計の保存は上の集約だけで担保されるため、表示の拡張漏れでは破れない)。
     if (lastRound !== null) {
       lastRound = {
         ...lastRound,
@@ -2144,9 +2265,8 @@ function endGame(state: EngineState): EngineState {
   });
 
   return {
-    ...state,
+    ...withdrawn,
     points,
-    riichiSticks,
     lastRound,
     phase: "gameEnd",
     pending: null,

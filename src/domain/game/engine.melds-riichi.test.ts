@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { TOTAL_POINTS } from "../scoring/settlement";
 import {
   createGame,
   declareAnkan,
@@ -11,7 +12,9 @@ import {
   discard,
   type EngineState,
   passRon,
+  potTotal,
   proceedToNextRound,
+  type SeatKey,
   seatOfPlayer,
   tsumogiri,
 } from "./engine";
@@ -106,6 +109,25 @@ function playAggressive(seed: number, tally: ActionTally): EngineState {
   return s;
 }
 
+/**
+ * リーチ局面探索で走査する seed 数(#450)。
+ *
+ * 配牌が既にテンパイへ届いている確率は低いので、検証可能な局面を十分な余裕をもって
+ * 拾える範囲まで広げる必要がある(実測)。
+ *
+ * | 走査範囲 | `canRiichi` 提示 | うち検証可能(宣言後も局が続く) |
+ * | --- | --- | --- |
+ * | 1..1000 | 2 局面 | **1 局面** |
+ * | 1..2000 | 5 局面 | 2 局面 |
+ * | 1..3000 | 7 局面 | **4 局面** |
+ *
+ * 1,000 では検証可能局面が 1 件しかなく、エンジン変更でそれが消えると走査が空振りして
+ * 赤くなる。3,000 まで広げて 4 件の余裕を確保する。1 seed あたり配牌 1 回分しか
+ * 消費しないため実行時間は seed 数に線形で、単体実行で約 1.5s・フルスイート並列下でも
+ * 約 2s(unit の `testTimeout` 30s に対して 7%)に収まる。
+ */
+const RIICHI_SCAN_SEEDS = 3000;
+
 describe("engine: 鳴き・リーチ・裏ドラ・一発(#97)", () => {
   it("全公開アクションを走らせても半荘は完走し、供託込みでゼロサムを保つ", () => {
     const tally: ActionTally = {
@@ -122,13 +144,14 @@ describe("engine: 鳴き・リーチ・裏ドラ・一発(#97)", () => {
       expect(s.phase, `seed=${seed}`).toBe("gameEnd");
       expect(s.result).toHaveLength(4);
 
-      // 持ち点総和 === 140,000 − 場に残る供託(未回収リーチ棒 × 1,000)。
-      // 半荘終了時の残存供託は単独1位の素点へ加算する(Q15 確定・1位取得 / #130)。
-      // 単独1位が取得したときは供託が素点へ移り `riichiSticks` が 0 になる(総和=140,000)。
-      // 同点最高で単独1位が無い場合のみ暫定で据え置く(Q20/#131 → 総和=140,000−供託ぶん)。
-      // どちらの分岐でも本式は成立する(残存供託の帰属詳細は engine.residual-riichi.test.ts)。
+      // 保存則: 持ち点総和 + 場に残る供託 = 140,000。供託は種別ごとの本数ではなく
+      // 集約 `potTotal` で数える(#430)。半荘終了時は残存供託の帰属先が一意に定まる
+      // (Q15 = 1位取得 / #130、Q20 = 同点最高は席順上位 / #131)ため全額が素点へ移り、
+      // 実際には `potTotal(s) === 0`(帰属の詳細は engine.residual-riichi.test.ts、
+      // 保存則そのものは engine.pot-invariant.test.ts)。
       const total = Object.values(s.points).reduce((a, b) => a + b, 0);
-      expect(total).toBe(140000 - 1000 * s.riichiSticks);
+      expect(total + potTotal(s), `seed=${seed}`).toBe(TOTAL_POINTS);
+      expect(potTotal(s), `seed=${seed} pot at gameEnd`).toBe(0);
       // 持ち点はすべて整数(端数処理の破綻がない)。
       for (const p of Object.values(s.points)) {
         expect(Number.isInteger(p)).toBe(true);
@@ -138,49 +161,88 @@ describe("engine: 鳴き・リーチ・裏ドラ・一発(#97)", () => {
     expect(tally.pon + tally.riichi).toBeGreaterThan(0);
   });
 
-  // #98 で他家 AI が手牌効率ベースになり全局シミュレーションが重くなったため、
-  // 多シード走査で合法リーチ局面を探す本テストは既定 5s では収まらない。検証内容は
-  // 不変なので明示的にタイムアウトを延長する(assert は据え置き)。
-  it("リーチ宣言で 1,000 点が供託され、リーチ・一発フラグが立つ", () => {
-    // ツモ切りで進めて自家がリーチ可能になった局面で宣言し、その宣言巡でまだ局が
-    // 続く(AI 和了/流局で局が終わらない)ケースを探して純粋な事後条件を検証する。
-    let verified = false;
-    for (let seed = 1; seed <= 300 && !verified; seed++) {
-      let s = createGame({ seed });
-      for (let guard = 0; guard < 600 && s.phase !== "gameEnd"; guard++) {
-        if (s.phase === "roundEnd") {
-          s = proceedToNextRound(s);
-          continue;
-        }
-        const pending = s.pending;
-        if (pending?.kind === "humanDiscard") {
-          const hand = s.hand;
-          if (hand === null) break;
-          const seat = seatOfPlayer(hand.seating, "p0");
-          if (seat === null) break;
-          if (pending.canRiichi) {
-            const before = s.points.p0;
-            const beforeSticks = s.riichiSticks;
-            const after = declareRiichi(s, pending.riichiTiles[0]);
-            // 宣言と同時に局が決着(AI 和了/流局)した場合は別 seed で再検証する。
-            if (after.phase !== "playing" || after.hand === null) break;
-            expect(after.riichiSticks).toBe(beforeSticks + 1);
-            expect(after.points.p0).toBe(before - 1000);
-            expect(after.hand.riichi[seat]).toBe(true);
-            verified = true;
-            break;
-          }
-          const tile = hand.drawn ?? hand.hands[seat][0];
-          s = discard(s, tile);
-        } else if (pending?.kind === "humanReact") {
-          s = passRon(s);
-        } else {
-          break;
-        }
-      }
+  /**
+   * リーチ宣言の事後条件(供託 +1,000 / 自家 -1,000 / リーチフラグ)を、エンジンが
+   * 実際に提示した `canRiichi` に対してのみ検証する。
+   *
+   * **走査単位は「半荘」ではなく「配牌」**(#450)。自家はツモ切りしか行わないので
+   * 門前 13 枚は配牌のまま変わらず、リーチ機会は実質「配牌の引き」で決まる。よって
+   * 同じ局を回し続けるより新しい seed を引く方が同じ当たりを桁違いに安く探せる。
+   * 各 seed は自家の最初の打牌局面だけを見て次の seed へ進む。
+   *
+   * **当たり seed で打ち切らない**。`RIICHI_SCAN_SEEDS` を常に全走査するため、
+   * エンジン変更で当たり位置が動いても実行時間が変わらない(実行時間が当たりの位置に
+   * 依存すると、それ自体が flaky の再発経路になる)。
+   *
+   * 検証できる範囲の限界も明示しておく。`createGame` は起家を p0 に固定するため、
+   * ここで捕まえられるのは常に**東1局・自家の第一打**であり、`beforeSticks` は必ず 0
+   * になる。つまり「供託が 0 から 1 になる」ことしか見ていない。**0 以外を起点とした
+   * 増分**(加算ではなく代入にする類の退行)は本ファイル冒頭のゼロサムテストと
+   * `engine.pot-invariant.test.ts` の保存則が捕まえる(欠陥注入で両者が赤になることを
+   * 確認済み)。
+   */
+  it("リーチ宣言で 1,000 点が供託され、リーチフラグが立つ", () => {
+    let offered = 0;
+    let verified = 0;
+    for (let seed = 1; seed <= RIICHI_SCAN_SEEDS; seed++) {
+      const s = createGame({ seed });
+      // `createGame` は起家を p0 に固定する(`dealer: "p0"` を渡している)ため、初手は
+      // 必ず自家の打牌待ちになり、他家の打牌(humanReact)が先行することはない。
+      const pending = s.pending;
+      if (s.phase !== "playing" || pending?.kind !== "humanDiscard") continue;
+      if (!pending.canRiichi) continue;
+      offered += 1;
+
+      const hand = s.hand;
+      if (hand === null) continue;
+      const seat = seatOfPlayer(hand.seating, "p0");
+      if (seat === null) continue;
+      const before = s.points.p0;
+      const beforeSticks = s.riichiSticks;
+      // 供託の増分は「宣言で新たに立ったリーチ」の数で決まるので、宣言前のリーチ状況を
+      // 差分の基準として控える。現状この走査は必ず第一打を捕まえるため全席 false だが、
+      // 走査範囲を第一打以外へ広げても壊れないよう差分で見る。なお `declareRiichi` は
+      // 入力の `hand` を破壊的に更新する(#453)ので、複製は呼び出し**前**に取る必要がある。
+      const beforeRiichi = { ...hand.riichi };
+
+      const after = declareRiichi(s, pending.riichiTiles[0]);
+      // 宣言後に局が終了した局面(AI 和了/流局)は事後条件を観測できない。
+      if (after.phase !== "playing") continue;
+      const afterHand = after.hand;
+      if (afterHand === null) continue;
+
+      // `declareRiichi` は最後に `pump` するので、`after` は宣言直後の状態とは限らず、
+      // リーチ後の自動ツモ切りで数巡進んでいることがある(実測: seed=782 で自家の河が
+      // 12 枚まで進む)。その区間で他家もリーチすれば供託はその分も増えるので、
+      // 期待値を「自家の 1 本 + その区間で確定した他家のリーチ」として厳密に組む。
+      // 局面を除外せずに済むため、ADR-0002 の AI 方策が変わっても検証点が減らない。
+      // 宣言牌がまだ通っていないリーチ(`pendingRiichiSeat`)は供託未確定なので数えない
+      // (`commitPendingRiichi` の意味論と 1:1)。
+      const seatKeys = Object.keys(beforeRiichi) as SeatKey[];
+      const othersCommitted = seatKeys.filter(
+        (k) =>
+          k !== seat &&
+          afterHand.riichi[k] &&
+          !beforeRiichi[k] &&
+          afterHand.pendingRiichiSeat !== k,
+      ).length;
+
+      expect(after.riichiSticks, `seed=${seed}`).toBe(
+        beforeSticks + 1 + othersCommitted,
+      );
+      expect(after.points.p0, `seed=${seed}`).toBe(before - 1000);
+      // #453 のとおり `afterHand` は入力と同一オブジェクトなので、これは「返り値が
+      // 新しい状態か」ではなく「フラグが立ったか」の検査(未設定の退行は検出できる)。
+      expect(afterHand.riichi[seat], `seed=${seed}`).toBe(true);
+      verified += 1;
     }
-    expect(verified).toBe(true);
-  }, 30000);
+    // 空振り(エンジンがリーチを提示しなくなった / 提示しても常に局が終わる)を
+    // 区別できるよう、両方の件数を残す。
+    expect(
+      verified,
+      `走査範囲(seed 1..${RIICHI_SCAN_SEEDS})で canRiichi 提示 ${offered} 件・検証可能 ${verified} 件`,
+    ).toBeGreaterThan(0);
+  });
 
   it("ポン宣言で明刻が晒され、門前手牌が2枚減り手番が自家に移る", () => {
     // 自家が他家打牌にポンできる humanReact を探索する。
