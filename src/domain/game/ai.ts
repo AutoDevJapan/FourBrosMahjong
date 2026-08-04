@@ -27,11 +27,18 @@
 
 import type { Meld } from "@/domain/hand/meld";
 import {
+  isYakuhaiCandidate,
   isYaochu,
   SANMA_TILE_KINDS,
   tileKey,
 } from "@/domain/hand/tile-identity";
-import { createTile, HONOR, type Suit, type Tile } from "@/domain/tiles/tile";
+import {
+  createTile,
+  HONOR,
+  type PlayableWind,
+  type Suit,
+  type Tile,
+} from "@/domain/tiles/tile";
 import { COPIES_PER_TILE } from "@/domain/tiles/tileSet";
 import { BoundedMemo } from "./boundedMemo";
 
@@ -39,17 +46,17 @@ import { BoundedMemo } from "./boundedMemo";
 export interface CallMeldContext {
   readonly tile: Tile;
   readonly melds: readonly Meld[];
-  readonly seatWind: number;
-  readonly roundWind: number;
+  readonly seatWind: PlayableWind;
+  readonly roundWind: PlayableWind;
 }
 
-/** 三元牌、場風、自風（北はガリ専用）か。 */
+/** 三元牌、場風、自風か。役牌候補の共通定義は hand domain に委譲する。 */
 function isValueHonor(
   tile: Tile,
-  seatWind: number,
-  roundWind: number,
+  seatWind: PlayableWind,
+  roundWind: PlayableWind,
 ): boolean {
-  if (tile.suit !== "honor" || tile.rank === HONOR.NORTH) return false;
+  if (!isYakuhaiCandidate(tile)) return false;
   return (
     tile.rank >= HONOR.WHITE ||
     tile.rank === seatWind ||

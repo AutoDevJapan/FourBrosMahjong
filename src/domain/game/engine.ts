@@ -88,7 +88,7 @@ import {
   resolveWinPayment,
   type SeatedPlayerRef,
 } from "@/domain/scoring/win-payment";
-import { HONOR, type Tile } from "@/domain/tiles/tile";
+import { HONOR, type PlayableWind, type Tile } from "@/domain/tiles/tile";
 import { buildWall, type Wall, WallEmptyError } from "@/domain/wall/wall";
 
 /** プレイヤー識別子(4兄弟)。`p0` は常に自家(人間)。 */
@@ -113,7 +113,7 @@ const NEXT_SEAT: Record<SeatKey, SeatKey> = {
 };
 
 /** 席風の番号(役判定の照合用: 東1・南2・西3 = `HONOR` 準拠)。 */
-const SEAT_WIND_NUMBER: Record<SeatKey, number> = {
+const SEAT_WIND_NUMBER: Record<SeatKey, PlayableWind> = {
   east: HONOR.EAST,
   south: HONOR.SOUTH,
   west: HONOR.WEST,
@@ -451,7 +451,7 @@ function humanSeatOf(hand: HandState): SeatKey | null {
 }
 
 /** 場風の番号(東場=東1・南場=南2)。 */
-function roundWindNumber(state: RoundState<PlayerId>): number {
+function roundWindNumber(state: RoundState<PlayerId>): PlayableWind {
   return state.wind === "east" ? HONOR.EAST : HONOR.SOUTH;
 }
 

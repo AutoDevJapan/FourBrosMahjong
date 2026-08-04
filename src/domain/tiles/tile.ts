@@ -77,3 +77,12 @@ export const HONOR = {
   GREEN: 6,
   RED: 7,
 } as const;
+
+/**
+ * 四人回しサンマで場風・自風になり得る風。北家は抜け番なので北を含まない
+ * (spec 2.5 / Q32 の北抜きが強制・任意どちらでもこの席契約は不変)。
+ */
+export type PlayableWind =
+  | typeof HONOR.EAST
+  | typeof HONOR.SOUTH
+  | typeof HONOR.WEST;
