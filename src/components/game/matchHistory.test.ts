@@ -244,6 +244,27 @@ describe("match history persistence (#293)", () => {
       expect(parseHistory(JSON.stringify(valid()))).toEqual([entry(1)]);
     });
 
+    it("12書記素の名前を受理する(1書記素が複数code unitでも / #484)", () => {
+      // 設定側の上限は12**書記素**なので、家族絵文字3つ(33 code unit)や
+      // 国旗9つ(36 code unit)は正規の名前として保存・復元できなければならない。
+      // ここが code unit 12〜32 の上限だと `persistHistory` が "failed" を返し、
+      // その名前を使う限り戦績が一切保存されなくなる。
+      for (const name of [
+        "👨‍👩‍👧‍👦".repeat(3),
+        "🇯🇵".repeat(9),
+        "😀".repeat(12),
+      ]) {
+        const storage = new MemoryStorage();
+        const record = {
+          ...entry(1),
+          players: entry(1).players.map((p) => ({ ...p, name })),
+        };
+
+        expect(persistHistory(storage, record), name).toBe("appended");
+        expect(loadHistory(storage)[0]?.players[0]?.name).toBe(name);
+      }
+    });
+
     it("4人が同名でも受理する(対局者名はユーザー設定で重複可 / #291)", () => {
       const sameNames = {
         version: 1,

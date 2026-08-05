@@ -74,4 +74,20 @@ describe("GameProvider 対局者名の反映 (#291)", () => {
     expect(after).toBe(before);
     expect(after).not.toContain("別人1");
   });
+
+  it("12書記素目が絵文字の名前を保存し、リロード後の盤面にも復元する(#484)", () => {
+    const unicodeName = "12345678901😀";
+    storeNames([unicodeName, "B", "C", "D"]);
+
+    expect(renderNames()).toContain(unicodeName);
+
+    // リロード相当。設定を差し替えることで、2回目の描画が localStorage の読み直しではなく
+    // sessionStorage のジャーナル復元を通っていることを確定させる。
+    cleanup();
+    storeNames(["別人1", "別人2", "別人3", "別人4"]);
+    const after = renderNames();
+
+    expect(after).toContain(unicodeName);
+    expect(after).not.toContain("別人1");
+  });
 });

@@ -388,6 +388,37 @@ describe("game persistence journal", () => {
     expect(parseJournal(JSON.stringify(journal))).toBeNull();
   });
 
+  it("12書記素の絵文字名を受け入れる(#484)", () => {
+    const emojiName = "😀".repeat(MAX_PLAYER_NAME_LENGTH);
+    const journal = {
+      version: 2,
+      seed: 1,
+      actions: [],
+      names: [emojiName, "B", "C", "D"],
+    };
+
+    expect(parseJournal(JSON.stringify(journal))?.names[0]).toBe(emojiName);
+  });
+
+  it("修正前に書かれたlone surrogate入りの記録を拒否せず正規化して再生する(#484)", () => {
+    // 修正前は UTF-16 code unit で切り詰めていたため、既存の記録は末尾が半端な
+    // サロゲートになり得る。これを拒否すると #484 に当たったユーザーだけが
+    // 進行中の半荘を失うので、U+FFFD へ正規化して受け入れる。
+    const legacy = "12345678901😀".slice(0, MAX_PLAYER_NAME_LENGTH);
+    expect(legacy).toMatch(/[\uD800-\uDFFF]/u);
+
+    const journal = {
+      version: 2,
+      seed: 1,
+      actions: [],
+      names: [legacy, "B", "C", "D"],
+    };
+
+    expect(parseJournal(JSON.stringify(journal))?.names[0]).toBe(
+      "12345678901�",
+    );
+  });
+
   it("v2でnamesキーが無い記録は拒否する (#291)", () => {
     expect(
       parseJournal(JSON.stringify({ version: 2, seed: 1, actions: [] })),

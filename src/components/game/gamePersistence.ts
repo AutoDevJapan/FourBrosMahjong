@@ -1,4 +1,7 @@
-import { MAX_PLAYER_NAME_LENGTH } from "@/components/settings/playerNames";
+import {
+  isValidPlayerName,
+  limitPlayerName,
+} from "@/components/settings/playerNames";
 import {
   createGame,
   DEFAULT_NAMES,
@@ -122,12 +125,7 @@ function isNames(value: unknown): value is PlayerNames {
   return (
     Array.isArray(value) &&
     value.length === 4 &&
-    value.every(
-      (name) =>
-        typeof name === "string" &&
-        name.length > 0 &&
-        name.length <= MAX_PLAYER_NAME_LENGTH,
-    )
+    value.every((name) => typeof name === "string" && isValidPlayerName(name))
   );
 }
 
@@ -137,6 +135,10 @@ function isNames(value: unknown): value is PlayerNames {
  * v1(`names` 無し)は既定名を補って受け入れる。デプロイをまたいで開いたままのタブが
  * 進行中の半荘を失わないための移行措置(`names` は表示名だけを決めるので、既定名を
  * 補っても Wall/RNG・操作列の再生結果は一切変わらない)。
+ *
+ * v2 の `names` も同じ理由で「拒否より正規化」を優先する。#484 の修正前に書かれた記録は
+ * UTF-16 code unit で切り詰められた結果 lone surrogate を末尾に持ち得るため、
+ * `limitPlayerName` を通して well-formed 化してから再生する。
  */
 function namesOfVersion(value: Record<string, unknown>): PlayerNames | null {
   if (value.version === 1) {
@@ -146,7 +148,14 @@ function namesOfVersion(value: Record<string, unknown>): PlayerNames | null {
   }
   if (value.version !== VERSION) return null;
   if (!hasOnlyKeys(value, ["version", "seed", "names", "actions"])) return null;
-  return isNames(value.names) ? value.names : null;
+  if (!isNames(value.names)) return null;
+  const [east, south, west, bench] = value.names;
+  return [
+    limitPlayerName(east),
+    limitPlayerName(south),
+    limitPlayerName(west),
+    limitPlayerName(bench),
+  ];
 }
 
 export function parseJournal(raw: string): GameJournal | null {
