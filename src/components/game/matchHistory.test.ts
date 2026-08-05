@@ -1,9 +1,12 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { createLockRequest } from "@/test/webLocksStub";
 import {
   appendHistory,
   clearHistory,
   clearHistoryAcrossTabs,
+  HISTORY_LOCK_TIMEOUT_MS,
   type HistoryLockManager,
+  type HistoryLockOptions,
   loadHistory,
   MATCH_HISTORY_KEY,
   MAX_HISTORY_BYTES,
@@ -36,23 +39,49 @@ class MemoryStorage implements Storage {
   }
 }
 
-/** Web Locks の排他実行を決定的に再現する FIFO lock manager。 */
+/**
+ * Web Locks の排他実行を決定的に再現する FIFO lock manager。
+ *
+ * 実体は jsdom テストと共有する `createLockRequest`(FIFO + `signal` 尊重)で、
+ * **名前によらず1本の列へ入れる**点だけが異なる。lock 名はモジュール外へ公開されない
+ * ため、「別タブが同じ lock を保持している」状況をテストから作るにはこの畳み込みが要る。
+ * 代わりに要求された名前を記録し、追記と削除が同名を使う不変条件をそこで固定する。
+ */
 class SerialLockManager implements HistoryLockManager {
-  private tail: Promise<void> = Promise.resolve();
-  /**
-   * 要求された lock 名(到着順)。この manager は名前によらず全要求を直列化するため、
-   * 「追記と削除が同じ lock を共有する」不変条件はここを検証して固定する。
-   */
+  private readonly serialize = createLockRequest();
+  /** 要求された lock 名(到着順)。 */
   readonly names: string[] = [];
 
-  request<T>(name: string, callback: () => T | PromiseLike<T>): Promise<T> {
+  request<T>(
+    name: string,
+    options: HistoryLockOptions,
+    callback: () => T | PromiseLike<T>,
+  ): Promise<T> {
     this.names.push(name);
-    const result = this.tail.then(callback);
-    this.tail = result.then(
-      () => undefined,
-      () => undefined,
-    );
-    return result;
+    return this.serialize("all", options, callback) as Promise<T>;
+  }
+}
+
+/** 中断されない `AbortSignal`(テストから lock を保持する側が渡す)。 */
+function neverAborted(): AbortSignal {
+  return new AbortController().signal;
+}
+
+/**
+ * lock を取得できないまま待たせ続ける manager(別タブがフリーズ等で保持し続ける状況)。
+ * `signal` の中断だけが待機を終わらせる ─ 実 API と同じ契約(#488)。
+ */
+class NeverGrantedLockManager implements HistoryLockManager {
+  // 取得できない要求では callback が決して実行されないため、引数として受け取らない
+  // (受け取ったうえで捨てると「実行し忘れ」と区別できない)。
+  request<T>(_name: string, options: HistoryLockOptions): Promise<T> {
+    return new Promise<T>((_resolve, reject) => {
+      options.signal.addEventListener(
+        "abort",
+        () => reject(options.signal.reason),
+        { once: true },
+      );
+    });
   }
 }
 
@@ -266,11 +295,16 @@ describe("match history persistence (#293)", () => {
     // 削除が lock 外で先に走ると、この古い snapshot が書き戻されて削除済み履歴が
     // 復活する(issue #482 の事象)。
     const stale = storage.getItem(MATCH_HISTORY_KEY);
-    const writer = locks.request("holder", async () => {
-      await Promise.resolve();
-      if (stale !== null) storage.setItem(MATCH_HISTORY_KEY, stale);
-      appendHistory(storage, entry(2));
-    });
+    // 別タブの writer は中断しない(= 中断しない要求も実 API と同じ options 形式で来る)。
+    const writer = locks.request(
+      "holder",
+      { signal: neverAborted() },
+      async () => {
+        await Promise.resolve();
+        if (stale !== null) storage.setItem(MATCH_HISTORY_KEY, stale);
+        appendHistory(storage, entry(2));
+      },
+    );
     const clearing = clearHistoryAcrossTabs(storage, locks);
 
     await writer;
@@ -308,6 +342,68 @@ describe("match history persistence (#293)", () => {
       false,
     );
     expect(loadHistory(storage).map((item) => item.seed)).toEqual([1]);
+  });
+
+  describe("lock取得の上限時間(#488)", () => {
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    it("lockを保持し続ける別タブがあっても追記は上限時間で失敗する", async () => {
+      vi.useFakeTimers();
+      const storage = new MemoryStorage();
+      const locks = new NeverGrantedLockManager();
+
+      let settled = false;
+      const persisting = persistHistoryAcrossTabs(storage, entry(1), locks);
+      void persisting.then(() => {
+        settled = true;
+      });
+
+      // 上限時間の手前では待ち続ける(= 早すぎる打ち切りで正常な待機を潰さない)。
+      await vi.advanceTimersByTimeAsync(HISTORY_LOCK_TIMEOUT_MS - 1);
+      expect(settled).toBe(false);
+
+      await vi.advanceTimersByTimeAsync(1);
+      expect(await persisting).toBe("failed");
+      // 排他区間へ入れていないので保存内容は変えない。
+      expect(loadHistory(storage)).toEqual([]);
+    });
+
+    it("lockを保持し続ける別タブがあっても削除は上限時間で失敗する", async () => {
+      vi.useFakeTimers();
+      const storage = new MemoryStorage();
+      appendHistory(storage, entry(1));
+      const locks = new NeverGrantedLockManager();
+
+      let settled = false;
+      const clearing = clearHistoryAcrossTabs(storage, locks);
+      void clearing.then(() => {
+        settled = true;
+      });
+
+      await vi.advanceTimersByTimeAsync(HISTORY_LOCK_TIMEOUT_MS - 1);
+      expect(settled).toBe(false);
+
+      await vi.advanceTimersByTimeAsync(1);
+      expect(await clearing).toBe(false);
+      // 排他できていない以上、履歴は消さない(#482 の fail-closed を維持する)。
+      expect(loadHistory(storage).map((item) => item.seed)).toEqual([1]);
+    });
+
+    it("lockを取得できた場合は上限時間のタイマーを残さない", async () => {
+      vi.useFakeTimers();
+      const storage = new MemoryStorage();
+      const locks = new SerialLockManager();
+
+      expect(await persistHistoryAcrossTabs(storage, entry(1), locks)).toBe(
+        "appended",
+      );
+      expect(await clearHistoryAcrossTabs(storage, locks)).toBe(true);
+
+      // 解除し損ねると、取得済みの lock へ無用な abort を投げるタイマーが残る。
+      expect(vi.getTimerCount()).toBe(0);
+    });
   });
 
   it("破損データは読み込み時に空扱いとし、次回のため削除する", () => {

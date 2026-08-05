@@ -8,21 +8,82 @@
  * `request` は実 API と同じく **必ず Promise を返す**。同期に値を返す stub は解決が
  * 1マイクロタスク早まり、フォーカス移動や `role="status"` の読み上げ順序を実機と
  * 異なるタイミングで観測してしまう。
+ *
+ * 既定実装は**実 API の契約を捨てない**。すなわち
+ *
+ * - **lock 名ごと**に排他する(名前が違えば同時に走る)。名前を無視する stub だと、
+ *   実装が別名の lock を使い始めても直列化が壊れたことに気づけない。
+ * - `options.signal` の中断を尊重する。中断は**待機中にだけ**効き、取得後の中断は
+ *   無視する(Web Locks 仕様と同じ)。上限時間(#488)の検証がここに依存する。
  */
 
-/** `navigator.locks.request` のうち、テストが必要とする最小形。 */
+/** `navigator.locks.request` の options のうち、テスト対象が使う最小形。 */
+export interface StubLockOptions {
+  readonly signal: AbortSignal;
+}
+
+/** `navigator.locks.request` のうち、テストが必要とする最小形(実 API と同じ options 形式)。 */
 export type StubLockRequest = (
   name: string,
+  options: StubLockOptions,
   callback: () => unknown,
 ) => Promise<unknown>;
 
-const defaultRequest: StubLockRequest = async (_name, callback) => callback();
+/**
+ * lock 名ごとに FIFO で排他する `request` を作る。呼び出しごとに独立した保持状態を
+ * 持つため、テスト間で lock が漏れない。
+ */
+export function createLockRequest(): StubLockRequest {
+  /** lock 名 → その名前で現在待ち行列にある最後の処理(解放時点)。 */
+  const tails = new Map<string, Promise<void>>();
+
+  return (name, options, callback) => {
+    const previous = tails.get(name) ?? Promise.resolve();
+    let aborted = false;
+    let settle!: (value: unknown) => void;
+    let fail!: (reason: unknown) => void;
+    const result = new Promise<unknown>((resolve, reject) => {
+      settle = resolve;
+      fail = reject;
+    });
+    const onAbort = () => {
+      aborted = true;
+      fail(options.signal.reason);
+    };
+    if (options.signal.aborted) {
+      onAbort();
+    } else {
+      options.signal.addEventListener("abort", onAbort, { once: true });
+    }
+    // 直前の保持者が解放してから callback を実行する(= lock の取得)。
+    const held = previous.then(() => {
+      // 待機中に中断されていた場合は取得せず、callback も実行しない。
+      if (aborted) return;
+      // 取得後の中断は無視する(実 API と同じ)。
+      options.signal.removeEventListener("abort", onAbort);
+      return Promise.resolve(callback()).then(settle, fail);
+    });
+    // 次の待機者は「直前の保持者の解放 → この要求の callback 完了」まで待つ。
+    // 中断された要求は lock を取得しないので、待ち行列だけを素通りさせる
+    // (`result` に繋ぐと、中断した瞬間に後続が保持中の lock を追い越してしまう)。
+    tails.set(
+      name,
+      held.then(
+        () => undefined,
+        () => undefined,
+      ),
+    );
+    return result;
+  };
+}
 
 /**
- * `navigator.locks` を差し替える。`request` を省略すると、排他せず callback を
- * そのまま実行する(単一タブ相当)。
+ * `navigator.locks` を差し替える。`request` を省略すると、lock 名ごとに直列化する
+ * 既定実装(`createLockRequest`)を使う。
  */
-export function stubWebLocks(request: StubLockRequest = defaultRequest): void {
+export function stubWebLocks(
+  request: StubLockRequest = createLockRequest(),
+): void {
   Object.defineProperty(navigator, "locks", {
     configurable: true,
     value: { request },

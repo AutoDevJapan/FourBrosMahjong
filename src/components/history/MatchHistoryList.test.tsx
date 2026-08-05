@@ -247,7 +247,7 @@ describe("MatchHistoryList (#293)", () => {
     appendHistory(window.localStorage, entry(1, 1_753_000_000_000));
     // 削除の lock を解放した直後に別タブの終局保存が入り、一覧が再び描かれる状況。
     // 空状態が存在しないため、着地点が無いとフォーカスは <body> へ落ちる。
-    stubWebLocks(async (_name, callback) => {
+    stubWebLocks(async (_name, _options, callback) => {
       const result = await callback();
       appendHistory(window.localStorage, entry(2, 1_753_100_000_000, "二郎"));
       return result;
