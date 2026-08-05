@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { createTile, HONOR, type Suit, type Tile } from "./tile";
+import { createTile, HONOR, isRedDora, type Suit, type Tile } from "./tile";
 
 describe("Tile モデル(スペック4 4.2)", () => {
   it("suit / rank / isRed を表現できる", () => {
@@ -93,5 +93,42 @@ describe("createTile(牌種 → Tile の唯一のファクトリ / issue #375)",
       rank: 9,
       isRed: false,
     });
+  });
+});
+
+describe("isRedDora(赤扱い判定の唯一の述語 / issue #485)", () => {
+  it("5筒・5索の isRed=true のみ true", () => {
+    expect(isRedDora({ suit: "pin", rank: 5, isRed: true })).toBe(true);
+    expect(isRedDora({ suit: "sou", rank: 5, isRed: true })).toBe(true);
+  });
+
+  // `Tile` は実行時検証を持たないため、復元データ等が不変条件を破った isRed を
+  // 持ち込み得る。牌種を見ずに `tile.isRed` を信じると仕様外の赤ドラ翻が混入する。
+  it.each<[string, Suit, number]>([
+    ["赤5萬(サンマに5萬は無い)", "man", 5],
+    ["1萬", "man", 1],
+    ["4筒(非5)", "pin", 4],
+    ["6索(非5)", "sou", 6],
+    ["白(字牌 rank 5)", "honor", HONOR.WHITE],
+  ])("仕様外の赤フラグは無視する: %s", (_label, suit, rank) => {
+    expect(isRedDora({ suit, rank, isRed: true })).toBe(false);
+  });
+
+  it.each<[string, Suit, number]>([
+    ["5筒", "pin", 5],
+    ["5索", "sou", 5],
+  ])("赤フラグが無い/省略された %s は false", (_label, suit, rank) => {
+    expect(isRedDora({ suit, rank, isRed: false })).toBe(false);
+    expect(isRedDora({ suit, rank })).toBe(false); // 表示用 TileData は isRed 省略可
+  });
+
+  it("createTile の不変条件と一致する(判定と生成が同じ規則を共有する)", () => {
+    const suits: Suit[] = ["man", "pin", "sou", "honor"];
+    for (const suit of suits) {
+      for (let rank = 1; rank <= 9; rank++) {
+        const tile = createTile(suit, rank);
+        expect(isRedDora(tile)).toBe(tile.isRed);
+      }
+    }
   });
 });

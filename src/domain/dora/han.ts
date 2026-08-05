@@ -4,7 +4,7 @@
  * 和了時、次の4種をすべて **1枚1翻** で合算する:
  * - 表ドラ … その局の枚数分めくった実ドラ牌に一致する牌の枚数。
  * - 裏ドラ … リーチ和了時のみ、表と同数分の実ドラ牌に一致する牌の枚数。
- * - 赤5(オール赤5) … 手牌中の赤5筒・赤5索の枚数。
+ * - 赤5(オール赤5) … 手牌中の赤5筒・赤5索の枚数(判定は {@link isRedDora})。
  * - ガリ(北抜き) … 抜いた北の枚数。
  *
  * **抜いた北 × 実ドラ北の二重取り(Q16 = 二重取りする / 天鳳サンマ流)**:
@@ -19,7 +19,7 @@
  * 純ロジック・副作用なし。React/DOM 非依存。
  */
 
-import { createTile, HONOR, type Tile } from "../tiles/tile";
+import { createTile, HONOR, isRedDora, type Tile } from "../tiles/tile";
 import type { DoraSet } from "./doraSet";
 import { resolveDora } from "./doraSet";
 
@@ -51,7 +51,11 @@ export interface DoraHanBreakdown {
   readonly omote: number;
   /** 裏ドラ由来の翻(非リーチ時は常に 0)。 */
   readonly ura: number;
-  /** 赤5由来の翻。 */
+  /**
+   * 赤5由来の翻。対象は牌種が 5筒・5索の赤のみ({@link isRedDora})。
+   * `isRed` フラグだけを見ないのは、`createTile` を経由しない構造的な入力が
+   * 仕様外の赤フラグを持ち得るため(issue #485)。
+   */
   readonly aka: number;
   /** ガリ(北抜き)由来の翻。 */
   readonly gari: number;
@@ -103,7 +107,7 @@ export function countDoraHan(input: DoraHanInput): DoraHanBreakdown {
   const ura = riichi
     ? countMatches(hand, uraDora) + countMatches(kitaTiles, uraDora)
     : 0;
-  const aka = hand.reduce((sum, tile) => sum + (tile.isRed ? 1 : 0), 0);
+  const aka = hand.reduce((sum, tile) => sum + (isRedDora(tile) ? 1 : 0), 0);
   const gari = kitaCount;
 
   return {

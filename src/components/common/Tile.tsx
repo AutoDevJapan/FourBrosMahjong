@@ -16,8 +16,9 @@
  *
  * 値渡しのみの純表示コンポーネントのため Server Component として実装できる(スペック6 6.6)。
  */
+import { isRedDora } from "@/domain/tiles/tile";
 import type { TileData } from "../game/types";
-import { isRedDora, resolveTileFace } from "./tileImage";
+import { resolveTileFace } from "./tileImage";
 import { FACE_DOWN_LABEL, tileLabel } from "./tileLabel";
 
 export interface TileProps {

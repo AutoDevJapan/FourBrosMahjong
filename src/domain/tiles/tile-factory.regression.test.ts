@@ -11,8 +11,7 @@ import { describe, expect, it } from "vitest";
  * `suit`/`rank` から `Tile` を組み立てる処理が独立に 6 か所へ実装されていた。
  * どれか1か所だけを直すと静かに不整合が生まれるため、`createTile`(`tiles/tile.ts`)へ集約した。
  *
- * 本テストは「また別の場所で組み立て直す」退行を検出する。
- * 対象は **`src/domain/` の本番コードのみ**(issue #375 の完了条件と一致):
+ * 本テストは「また別の場所で組み立て直す」退行を検出する。共通の除外方針:
  * - テストファイルは不変条件を**独立に検証する**側なので対象外
  *   (`createTile` を使って期待値を作ると検証が恒真になる)。
  * - `__oracle__/` は「本番へ依存しない独立オラクル」が検証価値の源泉のため対象外
@@ -21,10 +20,27 @@ import { describe, expect, it } from "vitest";
 
 // `new URL(...).pathname` はパーセントエンコーディングを解かないため、リポジトリパスに
 // 空白や非 ASCII を含むと壊れる。`vitest.config.ts` と同じく fileURLToPath を使う。
-const DOMAIN = fileURLToPath(new URL("..", import.meta.url));
+const SRC = fileURLToPath(new URL("../..", import.meta.url));
 
-/** 不変条件を持ってよい唯一の本番ファイル(`DOMAIN` からの相対パス)。 */
-const FACTORY = "tiles/tile.ts";
+/** 不変条件を持ってよい唯一の本番ファイル(`SRC` からの相対パス)。 */
+const FACTORY = "domain/tiles/tile.ts";
+
+/**
+ * `Tile` 組み立ての走査対象。ドメイン本番コードのみ(issue #375 の完了条件と一致)。
+ * 表示層のビューモデル `TileData` は `isRed` が任意の**投影**で `Tile` そのものではないため、
+ * ここで組み立てを禁じる対象ではない。
+ */
+const TILE_LITERAL_ROOTS = ["domain"] as const;
+
+/**
+ * 赤5判定の走査対象。**表示層まで含める**(issue #485)。
+ *
+ * `components/common/tileImage.ts` が独自の赤5判定(`rank === 5 && (pin|sou)`)を
+ * 持っていたため、同じ入力が「画面では非赤・得点では赤1翻」に割れていた。
+ * ドメイン限定の走査ではこの重複を検出できなかったので、判定の再実装は
+ * 表示層(`components` / `app`)でも退行として扱う。
+ */
+const RED_FIVE_ROOTS = ["domain", "components", "app"] as const;
 
 /**
  * `Tile` のオブジェクトリテラル生成を検出する。`Tile` は `isRed` が必須なので、
@@ -67,32 +83,38 @@ function stripComments(source: string): string {
   return source.replace(/\/\*[\s\S]*?\*\/|\/\/.*/g, "");
 }
 
-/** `src/domain` 配下の本番 .ts を再帰列挙(テスト・独立オラクルは除く)。 */
-function productionFiles(dir: string, base = ""): string[] {
+/**
+ * 指定ルート配下の本番 .ts / .tsx を再帰列挙(テスト・独立オラクルは除く)。
+ * 返すパスは {@link SRC} からの相対パスで、走査ルートをまたいでも一意になる。
+ */
+function productionFiles(roots: readonly string[]): string[] {
   const out: string[] = [];
-  // withFileTypes はシンボリックリンクを追わないため、リンクループで無限再帰しない。
-  for (const entry of readdirSync(dir, { withFileTypes: true })) {
-    const rel = base ? `${base}/${entry.name}` : entry.name;
-    if (entry.isDirectory()) {
-      if (entry.name === "__oracle__") continue;
-      out.push(...productionFiles(join(dir, entry.name), rel));
-    } else if (
-      entry.isFile() &&
-      entry.name.endsWith(".ts") &&
-      !/\.(test|spec)\.ts$/.test(entry.name)
-    ) {
-      out.push(rel);
+  const walk = (dir: string, base: string) => {
+    // withFileTypes はシンボリックリンクを追わないため、リンクループで無限再帰しない。
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      const rel = `${base}/${entry.name}`;
+      if (entry.isDirectory()) {
+        if (entry.name === "__oracle__") continue;
+        walk(join(dir, entry.name), rel);
+      } else if (
+        entry.isFile() &&
+        /\.tsx?$/.test(entry.name) &&
+        !/\.(test|spec)\.tsx?$/.test(entry.name)
+      ) {
+        out.push(rel);
+      }
     }
-  }
+  };
+  for (const root of roots) walk(join(SRC, root), root);
   return out;
 }
 
-/** 対象ファイルから `re` にマッチする箇所を `path: matched` 形式で集める。 */
-function offenders(re: () => RegExp): string[] {
+/** 走査対象から `re` にマッチする箇所を `path: matched` 形式で集める。 */
+function offenders(re: () => RegExp, roots: readonly string[]): string[] {
   const found: string[] = [];
-  for (const rel of productionFiles(DOMAIN)) {
+  for (const rel of productionFiles(roots)) {
     if (rel === FACTORY) continue;
-    const text = stripComments(readFileSync(join(DOMAIN, rel), "utf8"));
+    const text = stripComments(readFileSync(join(SRC, rel), "utf8"));
     for (const m of text.matchAll(re())) found.push(`${rel}: ${m[0]}`);
   }
   return found;
@@ -102,13 +124,23 @@ describe("牌ファクトリの単一起点(issue #375)", () => {
   it("列挙対象に本番ファイルが実在する(走査が空振りしていない)", () => {
     // 相対パスの起点や除外条件を壊すと offenders が常に空になり、
     // 以降の検査が「常に成功する無意味なテスト」へ静かに退化するため先に固定する。
-    const files = productionFiles(DOMAIN);
+    const files = productionFiles(TILE_LITERAL_ROOTS);
     expect(files).toContain(FACTORY);
-    expect(files).toContain("hand/tenpai.ts");
-    expect(files).toContain("game/ai.ts");
-    expect(files).toContain("dora/indicator.ts");
+    expect(files).toContain("domain/hand/tenpai.ts");
+    expect(files).toContain("domain/game/ai.ts");
+    expect(files).toContain("domain/dora/indicator.ts");
     expect(files.some((f) => f.includes("__oracle__"))).toBe(false);
-    expect(files.some((f) => /\.test\.ts$/.test(f))).toBe(false);
+    expect(files.some((f) => /\.test\.tsx?$/.test(f))).toBe(false);
+  });
+
+  it("赤5判定の走査は表示層(.tsx を含む)まで届く(issue #485)", () => {
+    // ドメイン限定の走査では tileImage.ts の重複を見逃した。
+    // 走査ルートを縮められたら失敗するよう、表示層の実在ファイルを固定する。
+    const files = productionFiles(RED_FIVE_ROOTS);
+    expect(files).toContain("components/common/tileImage.ts");
+    expect(files).toContain("components/common/Tile.tsx");
+    expect(files).toContain("app/game/page.tsx");
+    expect(files.some((f) => /\.test\.tsx?$/.test(f))).toBe(false);
   });
 
   it("検出器そのものが違反例を捕まえる(正例)", () => {
@@ -135,8 +167,8 @@ describe("牌ファクトリの単一起点(issue #375)", () => {
     );
   });
 
-  it("本番コードは tiles/tile.ts 以外で Tile を組み立てない", () => {
-    const found = offenders(tileLiteral);
+  it("ドメイン本番コードは tiles/tile.ts 以外で Tile を組み立てない", () => {
+    const found = offenders(tileLiteral, TILE_LITERAL_ROOTS);
     expect(
       found,
       `Tile の組み立ては createTile(${FACTORY})に集約してください。\n` +
@@ -144,11 +176,12 @@ describe("牌ファクトリの単一起点(issue #375)", () => {
     ).toEqual([]);
   });
 
-  it("本番コードは tiles/tile.ts 以外で赤5判定を再実装しない", () => {
-    const found = offenders(redFiveRule);
+  it("ドメイン・表示層とも tiles/tile.ts 以外で赤5判定を再実装しない", () => {
+    const found = offenders(redFiveRule, RED_FIVE_ROOTS);
     expect(
       found,
-      `オール赤5の不変条件は createTile(${FACTORY})が唯一の定義元です。\n` +
+      `オール赤5の不変条件は ${FACTORY}(createTile / isRedDora)が唯一の定義元です。\n` +
+        `表示層も判定を再実装せず isRedDora を import してください(issue #485)。\n` +
         found.join("\n"),
     ).toEqual([]);
   });

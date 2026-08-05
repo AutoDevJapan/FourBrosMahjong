@@ -113,6 +113,20 @@ describe("countDoraHan", () => {
     expect(breakdown.aka).toBe(2);
   });
 
+  it.each<[string, Tile]>([
+    ["赤フラグ付き1萬", t("man", 1, true)],
+    ["赤フラグ付き4筒", t("pin", 4, true)],
+    ["赤フラグ付き白", t("honor", HONOR.WHITE, true)],
+  ])("%s は赤5ではないため赤ドラ翻に加算しない", (_label, tile) => {
+    const breakdown = countDoraHan({
+      hand: [tile],
+      doraSet: DORA_SET_2,
+      riichi: false,
+      kitaCount: 0,
+    });
+    expect(breakdown.aka).toBe(0);
+  });
+
   it("kitaCount が負・非整数なら RangeError", () => {
     expect(() =>
       countDoraHan({

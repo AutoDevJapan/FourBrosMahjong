@@ -5,6 +5,9 @@
  * 同梱したもの。出典は `public/tiles/CREDITS.md` を参照。ここで扱うのは「どの牌にどの SVG を
  * 割り当てるか」という表示写像のみで、ゲームロジック(赤5の不変条件・スート値域等)は
  * ドメイン層(`src/domain/tiles/`)が SSOT であり、本モジュールは一切それを変更・再定義しない。
+ * 赤扱い(色付き `*-Dora` 素材・赤枠・「赤」バッジ・`(赤ドラ)` ラベル)の判定も同様で、
+ * ドメインの {@link "@/domain/tiles/tile".isRedDora} をそのまま使う。表示側で再実装すると
+ * 得点側の赤ドラ翻と食い違い、「画面では非赤なのに得点では赤1翻」が起きるため(issue #485)。
  *
  * 四兄弟麻雀=サンマのため萬子は 1・9 のみ、赤5は 5筒・5索(`Pin5-Dora`/`Sou5-Dora`)。
  * これらは実使用牌として `public/tiles/` に同梱済み(`Man2`〜`Man8`・`Man5-Dora` は非同梱)。
@@ -14,6 +17,7 @@
  * 返さず {@link resolveTileFace} が `fallback` を返す。これにより 404・空白牌・裏面誤描画を防ぎ、
  * 表示側で可視のプレースホルダへ確定的に切り替えられる(issue #146)。
  */
+import { isRedDora } from "@/domain/tiles/tile";
 import type { TileData } from "../game/types";
 
 /** SVG を配信する公開パス(`public/tiles/`)。 */
@@ -94,22 +98,6 @@ export const TILE_ASSET_URLS: readonly string[] = [
   ...[...TILE_CATALOG].map((name) => `${TILE_DIR}/${name}.svg`),
   `${TILE_DIR}/Back.svg`,
 ];
-
-/**
- * 赤ドラ素材(色付き `*-Dora`)が実在する牌か = **5筒・5索のみ**。
- *
- * ドメイン不変条件(スペック4 4.4「赤5は5筒・5索に限る」)に一致する唯一の判定。
- * `isRed` が 5筒・5索以外(赤5萬・非5・字牌等)に付いていても赤素材は存在しないため、
- * 表示層は赤扱い(色付き素材・赤枠・「赤」バッジ・`(赤ドラ)`)を**発火させない**。
- * これにより牌面・バッジ・ラベルの整合を保つ(issue #146: `isRed` 非整合の解消)。
- */
-export function isRedDora(tile: TileData): boolean {
-  return (
-    tile.isRed === true &&
-    tile.rank === 5 &&
-    (tile.suit === "pin" || tile.suit === "sou")
-  );
-}
 
 /**
  * 牌面の解決結果。素材が実在すれば `image`、カタログ外は `fallback`(可視プレースホルダ)。
