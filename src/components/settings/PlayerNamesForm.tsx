@@ -53,11 +53,14 @@ export function PlayerNamesForm() {
   const [draft, setDraft] = useState<PlayerNames | null>(null);
   const [status, setStatus] = useState<SaveStatus>({ kind: "idle" });
   const values = draft ?? saved;
-  // IME変換中(未確定)かどうか。ネイティブの `maxlength` は未確定文字列に適用されず
+  // IME変換中(未確定)の入力欄。ネイティブの `maxlength` は未確定文字列に適用されず
   // 確定時に初めて効くが、React の `onChange` は未確定入力でも発火する。ここで
   // 切り詰めてしまうと「日本語入力テスト」(確定後8書記素)のように**読みだけが上限を
   // 超える**入力で変換が壊れるため、確定するまでは上限を当てない(#484)。
-  const composing = useRef(false);
+  // 真偽値ではなく index を持つことで、変換途中に別の欄へフォーカスが移っても
+  // (`compositionend` が来ないブラウザでも)他の欄の上限が外れたままにならない。
+  // なお保存時は `resolvePlayerNames` が必ず切り詰めるので、上限超過が永続化されることはない。
+  const composingIndex = useRef<number | null>(null);
 
   const updateAt = (index: number, value: string, isComposing: boolean) => {
     const next = [...values] as unknown as [string, string, string, string];
@@ -113,14 +116,18 @@ export function PlayerNamesForm() {
                   autoComplete="off"
                   aria-describedby={hintId}
                   onCompositionStart={() => {
-                    composing.current = true;
+                    composingIndex.current = index;
                   }}
                   onCompositionEnd={(event) => {
-                    composing.current = false;
+                    composingIndex.current = null;
                     updateAt(index, event.currentTarget.value, false);
                   }}
                   onChange={(event) =>
-                    updateAt(index, event.target.value, composing.current)
+                    updateAt(
+                      index,
+                      event.target.value,
+                      composingIndex.current === index,
+                    )
                   }
                   className="w-full rounded-lg border border-control-border bg-transparent px-3 py-2 text-base"
                 />

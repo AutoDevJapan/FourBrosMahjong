@@ -126,6 +126,21 @@ describe("PlayerNamesForm", () => {
     expect(input).toHaveValue(converted);
   });
 
+  it("変換中でも他の入力欄には上限が効く(#484)", () => {
+    render(<PlayerNamesForm />);
+    const composingInput = inputFor("対局者2");
+    const otherInput = inputFor("対局者3");
+    const tooLong = "あ".repeat(MAX_PLAYER_NAME_LENGTH + 3);
+
+    // 「対局者2」を変換中のまま「対局者3」へ入力しても、上限が外れてはいけない。
+    fireEvent.compositionStart(composingInput);
+    fireEvent.change(composingInput, { target: { value: tooLong } });
+    fireEvent.change(otherInput, { target: { value: tooLong } });
+
+    expect(composingInput).toHaveValue(tooLong);
+    expect(otherInput.value).toHaveLength(MAX_PLAYER_NAME_LENGTH);
+  });
+
   it("変換確定後に上限を超えた文字列は切り詰める(#484)", () => {
     render(<PlayerNamesForm />);
     const input = inputFor("対局者2");
