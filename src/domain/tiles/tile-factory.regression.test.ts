@@ -37,7 +37,10 @@ const FACTORY = "domain/tiles/tile.ts";
 const TILE_LITERAL_ROOTS = ["domain"] as const;
 
 /**
- * 赤5判定の走査対象。**表示層まで含める**(issue #485)。
+ * 赤扱いの走査対象。**表示層まで含める**(issue #485)。
+ * {@link redFiveRule}(判定の再実装)と {@link rawIsRedRead}(`.isRed` の直読み / issue #490)
+ * が共有する。走査範囲を1本にしておくと、`src/` 直下の補集合ガード(下のテスト)が
+ * 両方の検出器を同時に守る。
  *
  * `components/common/tileImage.ts` が独自の赤5判定(`rank === 5 && (pin|sou)`)を
  * 持っていたため、同じ入力が「画面では非赤・得点では赤1翻」に割れていた。
@@ -88,6 +91,50 @@ const tileLiteral = () => /\bisRed\s*[:,}]/g;
 const redFiveRule = () => /RED_FIVE_SUITS|\brank\s*===\s*5\b/g;
 
 /**
+ * `.isRed` の**直読み**を検出する(issue #490)。
+ *
+ * {@link redFiveRule} は「牌種で赤5を判定し直す」形しか見ないため、`if (tile.isRed)` の
+ * ように**フラグをそのまま赤ドラの意味で使う**違反(#490 の `ai.ts` の `valueOf`)は
+ * 構造上すり抜ける。この検出器はプロパティ読み出しそのものを拾い、正当な用途を
+ * {@link ALLOWED_RAW_IS_RED_READS} で個別に許可する。
+ *
+ * 線引きは `tiles/tile.ts` の JSDoc(issue #485)と同じ:
+ * **赤ドラとしての意味づけ**(得点への加算・表示の赤扱い・打点温存)は `isRedDora` に
+ * 委ねる = 禁止 / **フラグの値そのもの**を扱う用途(同一性比較・識別キー・整列・
+ * 投影・保存値の検証)は許可。
+ *
+ * `.` を必須にしているのでオブジェクトリテラルのキー(`isRed:` / shorthand)は拾わない
+ * — そちらは {@link tileLiteral} の担当。`\b` があるので `.isRedDora(...)` にも当たらない。
+ */
+const rawIsRedRead = () => /\.isRed\b/g;
+
+/**
+ * `.isRed` を直読みしてよい既知の箇所(`SRC` 相対パス + 該当行)。
+ *
+ * 下の検査は「検出結果 == この配列」という**完全一致**なので、両方向が固定される:
+ * 新しい直読みが増えれば余分な要素として、ここから根拠を消せば不足要素として落ちる。
+ * 1行に2回読む箇所は**同じ要素が2回**並ぶ(既存行に読み出しを足しても検出される)。
+ */
+const ALLOWED_RAW_IS_RED_READS: readonly string[] = [
+  // 牌の同一性比較・識別キー。赤フラグの値そのものを見る(赤ドラの意味づけではない)。
+  'domain/game/ai.ts: const idKey = `${tile.suit}-${tile.rank}-${tile.isRed ? "r" : ""}`;',
+  "domain/game/engine.ts: return a.suit === b.suit && a.rank === b.rank && !!a.isRed === !!b.isRed;",
+  "domain/game/engine.ts: return a.suit === b.suit && a.rank === b.rank && !!a.isRed === !!b.isRed;",
+  "domain/game/engine.ts: const key = `${t.suit}-${t.rank}-${t.isRed ? 1 : 0}`;",
+  // 打牌候補の同一性一致(赤・非赤を取り違えないための比較)。
+  "components/game/GameBoard.tsx: candidate.isRed === !!tile.isRed,",
+  "components/game/GameBoard.tsx: candidate.isRed === !!tile.isRed,",
+  // 復元ジャーナルの保存値検証(不変条件を破った値を fail-closed で弾く)。
+  'components/game/gamePersistence.ts: typeof tile.isRed === "boolean" &&',
+  "components/game/gamePersistence.ts: tile.isRed === createTile(suit, rank).isRed",
+  "components/game/gamePersistence.ts: tile.isRed === createTile(suit, rank).isRed",
+  // Tile → TileData の投影と、表示ソートのタイブレーク。
+  "components/game/gameView.ts: return { suit: tile.suit, rank: tile.rank, isRed: tile.isRed };",
+  "components/game/gameView.ts: Number(a.isRed) - Number(b.isRed),",
+  "components/game/gameView.ts: Number(a.isRed) - Number(b.isRed),",
+];
+
+/**
  * 行コメント / ブロックコメントを落とす。
  *
  * JSDoc で `{ suit, rank, isRed: … }` のように**書き方を説明する**のは自然な行為で、
@@ -136,6 +183,27 @@ function offenders(re: () => RegExp, roots: readonly string[]): string[] {
   return found;
 }
 
+/**
+ * {@link offenders} と同じ走査で、マッチ箇所を**該当行ごと**に `path: line` で集める。
+ *
+ * 許可リストと突き合わせる用途では「何にマッチしたか」(`.isRed`)ではなく
+ * 「どう使っているか」が判断材料なので、行そのものを鍵にする。1行に複数マッチが
+ * あれば同じ要素が複数回並ぶ(既存行への読み出し追加も差分として現れる)。
+ */
+function offenderLines(re: () => RegExp, roots: readonly string[]): string[] {
+  const found: string[] = [];
+  for (const rel of productionFiles(roots)) {
+    if (rel === FACTORY) continue;
+    for (const line of stripComments(
+      readFileSync(join(SRC, rel), "utf8"),
+    ).split("\n")) {
+      const hits = [...line.matchAll(re())].length;
+      for (let i = 0; i < hits; i++) found.push(`${rel}: ${line.trim()}`);
+    }
+  }
+  return found;
+}
+
 describe("牌ファクトリの単一起点(issue #375)", () => {
   it("列挙対象に本番ファイルが実在する(走査が空振りしていない)", () => {
     // 相対パスの起点や除外条件を壊すと offenders が常に空になり、
@@ -149,7 +217,7 @@ describe("牌ファクトリの単一起点(issue #375)", () => {
     expect(files.some((f) => /\.(test|spec)\.tsx?$/.test(f))).toBe(false);
   });
 
-  it("赤5判定の走査はドメインと表示層(.tsx を含む)の両方に届く(issue #485)", () => {
+  it("赤扱いの走査はドメインと表示層(.tsx を含む)の両方に届く(issue #485 / #490)", () => {
     // 表示層を足したつもりでドメインを落とすと、issue #375 が直した元の退行
     // (ドメイン内での赤5判定の再実装)が丸ごと素通りする。offenders は FACTORY を
     // 無条件に skip するため、この取りこぼしはどのテストにも現れない。
@@ -171,7 +239,8 @@ describe("牌ファクトリの単一起点(issue #375)", () => {
     // RED_FIVE_ROOTS はハードコードした許可リストなので、「ルートを消す」退行は
     // 上のテストが捕まえるが、「新しいルートが増える」退行は誰も捕まえない。
     // 将来 src/lib のようなディレクトリが足されると、そこだけ赤5判定を再実装しても
-    // 静かに素通りする。補集合を固定して、追加時に「走査するか」を意識的に決めさせる。
+    // (あるいは `.isRed` を直読みしても)静かに素通りする。補集合を固定して、
+    // 追加時に「走査するか」を意識的に決めさせる。
     //
     // ディレクトリだけでなく `src/` 直下の**ファイル**も固定する。走査ルートは
     // ディレクトリ名の集合なので、`src/foo.ts` に赤5判定を書かれると
@@ -185,8 +254,9 @@ describe("牌ファクトリの単一起点(issue #375)", () => {
     const entries = readdirSync(SRC, { withFileTypes: true });
     const scanned: readonly string[] = RED_FIVE_ROOTS;
     const hint =
-      "src/ 直下に追加したら、赤5判定を走査するなら RED_FIVE_ROOTS へ、" +
-      "走査不要なら理由を添えて UNSCANNED_*_BY_DESIGN へ追記してください(issue #485)。";
+      "src/ 直下に追加したら、赤扱い(赤5判定・`.isRed` 直読み)を走査するなら " +
+      "RED_FIVE_ROOTS へ、走査不要なら理由を添えて UNSCANNED_*_BY_DESIGN へ" +
+      "追記してください(issue #485 / #490)。";
 
     const unscannedDirs = entries
       .filter((e) => e.isDirectory())
@@ -210,11 +280,18 @@ describe("牌ファクトリの単一起点(issue #375)", () => {
     expect("const t = { suit, isRed, rank };").toMatch(tileLiteral()); // 末尾以外
     expect("RED_FIVE_SUITS.has(suit)").toMatch(redFiveRule());
     expect("rank === 5 && isRedSuit(suit)").toMatch(redFiveRule());
+    expect("if (tile.isRed) v += 2;").toMatch(rawIsRedRead()); // #490 の違反そのもの
+    expect("const red = t?.isRed ?? false;").toMatch(rawIsRedRead());
 
     // 牌種(suit+rank)だけの射影は牌の組み立てではないので拾わない。
     expect("tileKey({ suit: tile.suit, rank: tile.rank })").not.toMatch(
       tileLiteral(),
     );
+    // 直読み検出器は「`.` 付きの読み出し」だけを見る。組み立て側のキーは tileLiteral の担当で、
+    // 唯一の述語 `isRedDora` の呼び出しを違反にしてしまうと修正先が無くなる。
+    expect("return { suit, rank, isRed: true };").not.toMatch(rawIsRedRead());
+    expect("if (isRedDora(tile)) v += 2;").not.toMatch(rawIsRedRead());
+    expect("tile.isRedDora").not.toMatch(rawIsRedRead());
   });
 
   it("コメント内の説明は違反として報告しない(偽陽性の抑制)", () => {
@@ -223,6 +300,9 @@ describe("牌ファクトリの単一起点(issue #375)", () => {
     expect(stripComments(jsdoc)).not.toMatch(tileLiteral());
     expect(stripComments("// rank === 5 は書かない")).not.toMatch(
       redFiveRule(),
+    );
+    expect(stripComments("// tile.isRed を直接読まない")).not.toMatch(
+      rawIsRedRead(),
     );
   });
 
@@ -233,6 +313,20 @@ describe("牌ファクトリの単一起点(issue #375)", () => {
       `Tile の組み立ては createTile(${FACTORY})に集約してください。\n` +
         found.join("\n"),
     ).toEqual([]);
+  });
+
+  it("`.isRed` の直読みは許可リストの箇所だけ(issue #490)", () => {
+    // 赤5判定の再実装(redFiveRule)とは別に、「フラグをそのまま赤ドラの意味で使う」形の
+    // 違反を塞ぐ。完全一致で比較するので、許可リストは常に現実と一致していなければならない
+    // (根拠を消せば不足、新しい直読みが増えれば余分として、どちらでも落ちる)。
+    const found = offenderLines(rawIsRedRead, RED_FIVE_ROOTS);
+    expect(
+      [...found].sort(),
+      `赤ドラとしての意味づけは isRedDora(${FACTORY})に委ねてください。\n` +
+        "フラグの値そのものを扱う正当な用途なら、理由を添えて " +
+        "ALLOWED_RAW_IS_RED_READS へ追記してください(issue #490)。\n" +
+        found.join("\n"),
+    ).toEqual([...ALLOWED_RAW_IS_RED_READS].sort());
   });
 
   it("ドメイン・表示層とも tiles/tile.ts 以外で赤5判定を再実装しない", () => {

@@ -35,6 +35,7 @@ import {
 import {
   createTile,
   HONOR,
+  isRedDora,
   type PlayableWind,
   type Suit,
   type Tile,
@@ -548,7 +549,12 @@ export interface DiscardContext {
    * 現物であり続け、他家に鳴かれて河から取り除かれても安全性は変わらない。
    */
   readonly opponentDiscards?: readonly (readonly Tile[])[];
-  /** ドラ実牌の種別キー集合(温存判断用)。赤5は `isRed` で常に価値扱い。省略可。 */
+  /**
+   * ドラ実牌の種別キー集合(温存判断用)。省略可。
+   *
+   * 赤5はこの集合に**含めない**。表ドラとは独立に {@link isRedDora} で判定し、
+   * 温存価値を別枠で加算する(→ {@link valueOf})。
+   */
   readonly doraKinds?: ReadonlySet<string>;
   /**
    * 打牌が禁止された牌種(喰い替え禁止 / #105・#303)。赤フラグは無視して種別で比較する。
@@ -591,13 +597,19 @@ function outsideness(tile: Tile): number {
  *
  * 排他ではないので**赤5かつ表ドラなら 3** になる(本作はオール赤5なので、
  * `pin-5`/`sou-5` が表ドラになれば必ず発生する)。どちらでもない牌は 0。
+ *
+ * 赤5かどうかは `tile.isRed` を直接読まず {@link isRedDora} で判定する(#490)。
+ * `chooseDiscard` は `Tile[]` を受け取る公開関数だが `Tile` に実行時検証は無いため、
+ * `createTile` を経由しない構造的な値(`{ suit: "man", rank: 1, isRed: true }` 等)を
+ * 渡されると、仕様上存在しない赤5へ +2 が付いて打牌選択が歪む。赤ドラとしての
+ * 意味づけはドメインの唯一の述語へ委ねる(規約は `tiles/tile.ts` の JSDoc / #485)。
  */
 function valueOf(
   tile: Tile,
   doraKinds: ReadonlySet<string> | undefined,
 ): number {
   let v = 0;
-  if (tile.isRed) v += 2;
+  if (isRedDora(tile)) v += 2;
   if (doraKinds?.has(tileKey(tile))) v += 1;
   return v;
 }
