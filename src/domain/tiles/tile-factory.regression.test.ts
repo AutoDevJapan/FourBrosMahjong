@@ -162,6 +162,11 @@ const ALLOWED_RAW_IS_RED_READS: readonly string[] = [
  * (URL など)を巻き込んで削りすぎる可能性はあるが、その場合に起きるのは検出漏れだけで、
  * 正しいコードを不当に落とすことはない。
  *
+ * コメントを**空白へ潰す**ため、識別子の途中にブロックコメントを挟んだ書き方
+ * (`tile.` と `isRed` の間にコメントを置く等)は連結されず検出漏れになる
+ * (丸ごと削る旧実装なら拾えた)。逆に `isRed` の途中にコメントを挟んだ字面を誤って
+ * 連結する偽陽性は起きない。どちらも本番コードに該当は無く、下の行対応の保存を優先する。
+ *
  * 落とすのは**改行以外**だけで、コメントの改行はそのまま残す。丸ごと削ると複数行に
  * またがるブロックコメントの前後の行が連結され、{@link scan} が組み立てる「該当行」が
  * 実ソースに存在しない行になってしまうため({@link ALLOWED_RAW_IS_RED_READS} の鍵が壊れる)。
@@ -213,11 +218,23 @@ function lineAt(text: string, index: number): string {
 }
 
 /**
- * 走査対象から `re` にマッチする箇所を集め、`path: <keyOf の結果>` 形式で返す。
+ * 1ファイル分のテキストから `re` のマッチを集める(走査の中核)。
  *
  * 走査はファイル**全文**に対して行う(行ごとに分けない)。{@link tileLiteral} の `\s*` は
  * 改行にも当たるため、`{ suit, rank, isRed\n}` のように折り返された組み立ては行単位の
- * 走査では取りこぼす。この性質は「検出器そのものが違反例を捕まえる(正例)」テストが固定する。
+ * 走査では取りこぼす。ファイル読み込みから切り離してあるのは、この「全文で見る」性質を
+ * テキストを直接与えるテストで固定するため(下の「走査は全文に対して行う」テスト)。
+ */
+function collectIn(
+  text: string,
+  re: () => RegExp,
+  keyOf: (match: RegExpMatchArray, text: string) => string,
+): string[] {
+  return [...text.matchAll(re())].map((m) => keyOf(m, text));
+}
+
+/**
+ * 走査対象の全ファイルへ {@link collectIn} を適用し、`path: <keyOf の結果>` 形式で返す。
  *
  * 鍵の作り方だけが検出器ごとに違うので、`keyOf` にマッチと全文を渡して呼び出し側へ委ねる
  * (行が要らない検査で {@link lineAt} を無駄に走らせない)。
@@ -231,8 +248,7 @@ function scan(
   for (const rel of productionFiles(roots)) {
     if (rel === FACTORY) continue;
     const text = stripComments(readFileSync(join(SRC, rel), "utf8"));
-    for (const m of text.matchAll(re()))
-      found.push(`${rel}: ${keyOf(m, text)}`);
+    for (const key of collectIn(text, re, keyOf)) found.push(`${rel}: ${key}`);
   }
   return found;
 }
@@ -353,8 +369,7 @@ describe("牌ファクトリの単一起点(issue #375)", () => {
     expect("return { suit, rank, isRed: false };").toMatch(tileLiteral());
     expect("return { suit, rank, isRed };").toMatch(tileLiteral()); // shorthand
     expect("const t = { suit, isRed, rank };").toMatch(tileLiteral()); // 末尾以外
-    // `\s*` は改行にも当たる。{@link scan} を行単位ループへ書き換えると、この形の
-    // 折り返された組み立てを取りこぼす(本番コードに現存しないので他のテストは落ちない)。
+    // `\s*` は改行にも当たる(走査を行単位へ分けたときに取りこぼす形)。
     expect("return { suit, rank, isRed\n};").toMatch(tileLiteral());
     expect("RED_FIVE_SUITS.has(suit)").toMatch(redFiveRule());
     expect("rank === 5 && isRedSuit(suit)").toMatch(redFiveRule());
@@ -387,6 +402,19 @@ describe("牌ファクトリの単一起点(issue #375)", () => {
     expect(stripComments("// tile.isRed を直接読まない")).not.toMatch(
       rawIsRedRead(),
     );
+  });
+
+  it("走査は全文に対して行う(行単位へ分割すると折り返しを取りこぼす)", () => {
+    // 正規表現が改行をまたげること(上の正例)と、走査がその性質を活かしていることは別。
+    // 折り返された `Tile` の組み立ては本番コードに現存しないので、collectIn を行単位
+    // ループへ書き換えても他のテストは落ちない。ここで走査の側を直接固定する。
+    const text = "const a = 1;\nreturn { suit, rank, isRed\n};";
+    expect(collectIn(text, tileLiteral, (m) => m[0])).toHaveLength(1);
+    // 行に分けると 0 件になることを、同じ入力で対比して示す。
+    const perLine = text
+      .split("\n")
+      .flatMap((line) => collectIn(line, tileLiteral, (m) => m[0]));
+    expect(perLine).toHaveLength(0);
   });
 
   it("lineAt は先頭・改行直後・末尾行(改行なし)で正しい行を返す", () => {
