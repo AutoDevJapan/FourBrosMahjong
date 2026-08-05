@@ -57,7 +57,9 @@ describe("赤扱いは表示層と得点ドメインで一致する(issue #485)"
       { suit: "honor", rank: 1, isRed: true },
       false,
     ],
-  ])("%s: 表示の赤扱いと赤ドラ翻がどちらも %s になる", (_label, tile, red) => {
+    // `%s` は引数を順に消費するため、2つ目を書くと `red` ではなく `tile` が
+    // 描画される。ラベルだけに絞り、期待値は失敗時の差分から読む。
+  ])("%s: 表示の赤扱いと赤ドラ翻が一致する", (_label, tile, red) => {
     expect(displayTreatsAsRed(tile)).toBe(red);
     expect(
       countDoraHan({

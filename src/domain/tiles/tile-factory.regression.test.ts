@@ -167,24 +167,39 @@ describe("牌ファクトリの単一起点(issue #375)", () => {
     expect(files.some((f) => /\.(test|spec)\.tsx?$/.test(f))).toBe(false);
   });
 
-  it("`src/` 直下に走査対象外のディレクトリが増えたら気づける", () => {
+  it("`src/` 直下に走査対象外のディレクトリ・ファイルが増えたら気づける", () => {
     // RED_FIVE_ROOTS はハードコードした許可リストなので、「ルートを消す」退行は
     // 上のテストが捕まえるが、「新しいルートが増える」退行は誰も捕まえない。
     // 将来 src/lib のようなディレクトリが足されると、そこだけ赤5判定を再実装しても
     // 静かに素通りする。補集合を固定して、追加時に「走査するか」を意識的に決めさせる。
-    const UNSCANNED_BY_DESIGN = [
+    //
+    // ディレクトリだけでなく `src/` 直下の**ファイル**も固定する。走査ルートは
+    // ディレクトリ名の集合なので、`src/foo.ts` に赤5判定を書かれると
+    // 走査対象にも補集合にも入らず完全に素通りするため(実測で確認済み)。
+    const UNSCANNED_DIRS_BY_DESIGN = [
       "test", // テスト基盤のみ。牌ロジックを持たない。
     ] as const;
+    /** `src/` 直下の非走査ファイル(フレームワーク都合。牌ロジックを持たない)。 */
+    const UNSCANNED_FILES_BY_DESIGN = ["global.d.ts", "proxy.ts"] as const;
 
-    const srcDirs = readdirSync(SRC, { withFileTypes: true })
+    const entries = readdirSync(SRC, { withFileTypes: true });
+    const scanned: readonly string[] = RED_FIVE_ROOTS;
+    const hint =
+      "src/ 直下に追加したら、赤5判定を走査するなら RED_FIVE_ROOTS へ、" +
+      "走査不要なら理由を添えて UNSCANNED_*_BY_DESIGN へ追記してください(issue #485)。";
+
+    const unscannedDirs = entries
       .filter((e) => e.isDirectory())
       .map((e) => e.name)
+      .filter((d) => !scanned.includes(d))
       .sort();
-    const scanned: readonly string[] = RED_FIVE_ROOTS;
+    expect(unscannedDirs, hint).toEqual([...UNSCANNED_DIRS_BY_DESIGN].sort());
 
-    expect(srcDirs.filter((d) => !scanned.includes(d))).toEqual([
-      ...UNSCANNED_BY_DESIGN,
-    ]);
+    const srcFiles = entries
+      .filter((e) => e.isFile())
+      .map((e) => e.name)
+      .sort();
+    expect(srcFiles, hint).toEqual([...UNSCANNED_FILES_BY_DESIGN].sort());
   });
 
   it("検出器そのものが違反例を捕まえる(正例)", () => {

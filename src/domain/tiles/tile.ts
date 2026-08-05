@@ -36,7 +36,8 @@ export type Suit = "man" | "pin" | "sou" | "honor";
  * `game/engine.ts`(牌一致判定・識別キー)、`game/ai.ts`(識別キー)、
  * `components/game/gameView.ts`(表示ソートのタイブレーク・`TileData` への投影)、
  * `components/game/GameBoard.tsx`(候補一致)、`components/game/gamePersistence.ts`
- * (復元ジャーナルの保存値検証)。
+ * (復元ジャーナルの保存値検証)。この列挙は暫定で、`game/ai.ts` に残る意味論的な
+ * 読み出し(温存価値の赤5加算)は #490 で整理する。
  */
 export interface Tile {
   readonly suit: Suit;
