@@ -115,7 +115,8 @@ export default function MatchHistoryList() {
   useEffect(() => {
     if (!pendingFocusRef.current) return;
     pendingFocusRef.current = false;
-    // 空状態が無ければ削除ボタンへ。どちらも無い状況は作らない ─ <body> へ落とすと
+    // 空状態が無ければ削除ボタンへ。削除成功時は必ず確認UIを畳む(= `confirmingClear`
+    // が false)ため、entries の有無によらず一方は描かれている。<body> へ落とすと
     // キーボード利用者が現在位置を失う(スペック5「復帰先が到達不能なときは連鎖する」)。
     (emptyStateRef.current ?? clearButtonRef.current)?.focus();
   });
