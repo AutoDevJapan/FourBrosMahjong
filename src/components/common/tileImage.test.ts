@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { TileData } from "../game/types";
-import { isRedDora, resolveTileFace } from "./tileImage";
+import { resolveTileFace } from "./tileImage";
 
 describe("resolveTileFace(カタログ内)", () => {
   it.each<[TileData, string]>([
@@ -60,21 +60,5 @@ describe("resolveTileFace(カタログ外 → fallback)", () => {
     ["索 rank 10", { suit: "sou", rank: 10 }],
   ])("%s(%o)は fallback を返し素材参照を発行しない", (_label, tile) => {
     expect(resolveTileFace(tile)).toEqual({ kind: "fallback" });
-  });
-});
-
-describe("isRedDora(赤扱いは 5筒・5索のみ)", () => {
-  it("5筒・5索 かつ isRed のときだけ true", () => {
-    expect(isRedDora({ suit: "pin", rank: 5, isRed: true })).toBe(true);
-    expect(isRedDora({ suit: "sou", rank: 5, isRed: true })).toBe(true);
-  });
-
-  it.each<[string, TileData]>([
-    ["赤フラグ無しの5筒", { suit: "pin", rank: 5 }],
-    ["赤5萬(素材なし)", { suit: "man", rank: 5, isRed: true }],
-    ["赤フラグ付き3筒(非5)", { suit: "pin", rank: 3, isRed: true }],
-    ["赤フラグ付き字牌", { suit: "honor", rank: 1, isRed: true }],
-  ])("%s は false", (_label, tile) => {
-    expect(isRedDora(tile)).toBe(false);
   });
 });

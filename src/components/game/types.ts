@@ -21,6 +21,9 @@ type Suit = "man" | "pin" | "sou" | "honor";
  * - `man`(萬子)はサンマでは rank ∈ {1, 9} のみだが、表示側では制約しない。
  * - `honor`(字牌)の rank は 1〜7(東=1・南=2・西=3・北=4・白=5・發=6・中=7)。
  * - `isRed` はオール赤5(5筒・5索は常に赤)。表示は色ではなく形状差+`aria-label`で伝える(スペック5 5.2.1)。
+ *   赤扱い(色付き素材・赤枠・「赤」バッジ・`(赤ドラ)`)の判定はこのフラグ単独では行わず、
+ *   ドメインの `isRedDora`(`@/domain/tiles/tile`)へ委ねる。表示層で判定を再実装すると
+ *   得点側の赤ドラ翻と割れるため(issue #485)。
  */
 export interface TileData {
   readonly suit: Suit;

@@ -16,8 +16,9 @@
  *
  * 値渡しのみの純表示コンポーネントのため Server Component として実装できる(スペック6 6.6)。
  */
+import { isRedDora } from "@/domain/tiles/tile";
 import type { TileData } from "../game/types";
-import { isRedDora, resolveTileFace } from "./tileImage";
+import { resolveTileFace } from "./tileImage";
 import { FACE_DOWN_LABEL, tileLabel } from "./tileLabel";
 
 export interface TileProps {
@@ -87,6 +88,7 @@ export default function Tile({
 
   // 赤扱い(色付き素材・赤枠・「赤」バッジ・(赤ドラ)ラベル)は赤素材が実在する 5筒・5索のみ。
   // `isRed` がそれ以外に付いても発火させず、牌面・バッジ・ラベルの整合を保つ(issue #146)。
+  // 判定はドメインの isRedDora が唯一の情報源で、得点側の赤ドラ翻と共有する(issue #485)。
   const isRed = isRedDora(tile);
   const borderClass = isRed
     ? "border-2 border-tile-accent-red"
