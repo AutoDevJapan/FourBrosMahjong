@@ -1,12 +1,19 @@
 // @vitest-environment jsdom
 
-import { fireEvent, render, screen, within } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import {
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   appendHistory,
   MATCH_HISTORY_KEY,
   type MatchHistoryEntry,
 } from "@/components/game/matchHistory";
+import { restoreWebLocks, stubWebLocks } from "@/test/webLocksStub";
 import MatchHistoryList from "./MatchHistoryList";
 
 function entry(
@@ -39,10 +46,22 @@ const formatted = (finishedAt: number) =>
     timeStyle: "short",
   }).format(new Date(finishedAt));
 
+const originalLocksDescriptor = Object.getOwnPropertyDescriptor(
+  navigator,
+  "locks",
+);
+
+// 全件削除は Web Locks の排他区間で実行される(#482)。jsdom には `navigator.locks` が
+// 無いため、追記側テストと共有の stub を差し込む。
+beforeEach(() => {
+  stubWebLocks();
+});
+
 afterEach(() => {
   window.localStorage.clear();
   // スパイの復元をテスト本体末尾に置くと、手前の expect が落ちた際に次のテストへ漏れる。
   vi.restoreAllMocks();
+  restoreWebLocks(originalLocksDescriptor);
 });
 
 describe("MatchHistoryList (#293)", () => {
@@ -109,9 +128,11 @@ describe("MatchHistoryList (#293)", () => {
     ).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "削除する" }));
 
-    expect(window.localStorage.getItem(MATCH_HISTORY_KEY)).toBeNull();
+    await waitFor(() =>
+      expect(window.localStorage.getItem(MATCH_HISTORY_KEY)).toBeNull(),
+    );
     expect(
-      screen.getByText(/保存された戦績はまだありません/),
+      await screen.findByText(/保存された戦績はまだありません/),
     ).toBeInTheDocument();
     expect(
       screen.getByText("保存されていた戦績をすべて削除しました。"),
@@ -168,12 +189,41 @@ describe("MatchHistoryList (#293)", () => {
       screen.getByRole("list", { name: "保存された半荘結果" }),
     ).toBeInTheDocument();
     expect(
-      screen.getByText(/この端末では戦績を削除できませんでした/),
+      await screen.findByText(/この端末では戦績を削除できませんでした/),
     ).toBeInTheDocument();
     // 確認UIは畳まない。畳むと押したボタンが消え、フォーカスが body へ落ちる。
     expect(confirmButton).toBeInTheDocument();
     expect(confirmButton).toHaveFocus();
     expect(document.body).not.toHaveFocus();
+  });
+
+  it("Web Locksが使えない環境では削除成功と読み上げない(#482)", async () => {
+    appendHistory(window.localStorage, entry(1, 1_753_000_000_000));
+    // secure context 外など `navigator.locks` が無い環境。排他できないため削除しない。
+    Reflect.deleteProperty(navigator, "locks");
+
+    render(<MatchHistoryList />);
+    fireEvent.click(
+      await screen.findByRole("button", { name: "戦績をすべて削除" }),
+    );
+    const confirmButton = screen.getByRole("button", { name: "削除する" });
+    // 実ブラウザではクリック時にボタンへフォーカスが載る(jsdom は載せない)。
+    confirmButton.focus();
+    fireEvent.click(confirmButton);
+
+    expect(
+      await screen.findByText(/この端末では戦績を削除できませんでした/),
+    ).toBeInTheDocument();
+    // 保存も一覧もそのまま残る。「削除しました」と読み上げてはいけない。
+    expect(window.localStorage.getItem(MATCH_HISTORY_KEY)).not.toBeNull();
+    expect(
+      screen.getByRole("list", { name: "保存された半荘結果" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByText("保存されていた戦績をすべて削除しました。"),
+    ).not.toBeInTheDocument();
+    // 成功時と同じフォーカス契約 ─ 確認UIは畳まず、body へ落とさない。
+    expect(confirmButton).toHaveFocus();
   });
 
   it("全件削除後はフォーカスを空状態へ移し、bodyへ落とさない", async () => {
@@ -186,10 +236,54 @@ describe("MatchHistoryList (#293)", () => {
     // 押した「削除する」ボタンごとセクションが消えるため、フォーカスの行き先が要る。
     fireEvent.click(screen.getByRole("button", { name: "削除する" }));
 
-    const emptyState = screen
-      .getByText(/保存された戦績はまだありません/)
-      .closest("div");
+    const emptyState = (
+      await screen.findByText(/保存された戦績はまだありません/)
+    ).closest("div");
     expect(emptyState).toHaveFocus();
     expect(document.body).not.toHaveFocus();
+  });
+
+  it("削除完了までに別タブの保存が届いてもフォーカスをbodyへ落とさない(#482)", async () => {
+    appendHistory(window.localStorage, entry(1, 1_753_000_000_000));
+    // 削除の lock を解放した直後に別タブの終局保存が入り、一覧が再び描かれる状況。
+    // 空状態が存在しないため、着地点が無いとフォーカスは <body> へ落ちる。
+    stubWebLocks(async (_name, callback) => {
+      const result = await callback();
+      appendHistory(window.localStorage, entry(2, 1_753_100_000_000, "二郎"));
+      return result;
+    });
+
+    render(<MatchHistoryList />);
+    fireEvent.click(
+      await screen.findByRole("button", { name: "戦績をすべて削除" }),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "削除する" }));
+
+    const fallback = await screen.findByRole("button", {
+      name: "戦績をすべて削除",
+    });
+    await waitFor(() => expect(fallback).toHaveFocus());
+    expect(document.body).not.toHaveFocus();
+  });
+
+  it("着地点へ到達できない場合は黙らず開発ビルドで警告する(#482)", async () => {
+    appendHistory(window.localStorage, entry(1, 1_753_000_000_000));
+    // DOM に繋がっていても hidden / inert 配下では focus() が no-op になる(#377)。
+    // jsdom では再現できないため、focus() 自体を無効化して同じ状況を作る。
+    vi.spyOn(HTMLElement.prototype, "focus").mockImplementation(() => {});
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    render(<MatchHistoryList />);
+    fireEvent.click(
+      await screen.findByRole("button", { name: "戦績をすべて削除" }),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "削除する" }));
+
+    await screen.findByText(/保存された戦績はまだありません/);
+    await waitFor(() =>
+      expect(warn).toHaveBeenCalledWith(
+        expect.stringContaining("フォーカス着地点へ到達できませんでした"),
+      ),
+    );
   });
 });

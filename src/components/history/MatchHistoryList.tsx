@@ -19,7 +19,7 @@
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { localStorageOrNull } from "@/components/common/browserStorage";
 import {
-  clearHistory,
+  clearHistoryAcrossTabs,
   getHistorySnapshot,
   getServerHistorySnapshot,
   MAX_HISTORY_ENTRIES,
@@ -105,6 +105,9 @@ export default function MatchHistoryList() {
   // 全件削除すると「削除する」ボタンごと一覧セクションが消えるため、フォーカスが
   // body へ落ちてキーボード利用者が文脈を失う。削除直後だけ空状態へフォーカスを移す。
   const emptyStateRef = useRef<HTMLDivElement>(null);
+  // 削除完了までに別タブの終局保存が届くと一覧が再び描かれ、空状態が存在しない。
+  // その場合の着地点(名前とロールを持つ「戦績をすべて削除」ボタン)。
+  const clearButtonRef = useRef<HTMLButtonElement>(null);
   // 「削除直後の1回だけ」を表す一過性のフラグ。state にすると描画に影響しない値で
   // 再描画が走るうえ、効果内での state 更新になるため ref で持つ。
   const pendingFocusRef = useRef(false);
@@ -112,16 +115,31 @@ export default function MatchHistoryList() {
   useEffect(() => {
     if (!pendingFocusRef.current) return;
     pendingFocusRef.current = false;
-    emptyStateRef.current?.focus();
+    // 着地点は空状態が第一候補。削除完了までに別タブの終局保存が届くと一覧が再び描かれ、
+    // 空状態が存在しないため、そのときは「戦績をすべて削除」ボタンへ連鎖する。
+    // 到達可否は DOM 接続では判定できない(#377)ので、実際に activeElement が移ったかで
+    // 実測してから次の候補へ進む(スペック5 5.2.2 / `Modal` と同じ規約)。
+    for (const candidate of [emptyStateRef.current, clearButtonRef.current]) {
+      if (candidate === null) continue;
+      candidate.focus();
+      if (candidate.ownerDocument.activeElement === candidate) return;
+    }
+    // 削除成功時は必ず確認UIを畳むため、通常はどちらかへ到達する。到達できないのは
+    // 着地点が隠されている等の契約違反であり、黙って <body> へ落とさず知らせる。
+    if (process.env.NODE_ENV !== "production") {
+      console.warn(
+        "MatchHistoryList: 全件削除後のフォーカス着地点へ到達できませんでした(スペック5 5.2.2)。",
+      );
+    }
   });
 
-  const executeClear = () => {
+  const executeClear = async () => {
     const storage = localStorageOrNull();
-    const cleared = storage !== null && clearHistory(storage);
+    const cleared = storage !== null && (await clearHistoryAcrossTabs(storage));
     if (cleared) {
       // 永続化と購読者への通知は分離されているため、削除後に明示的に知らせる(#302)。
       notifyHistoryChanged();
-      // 「削除する」ボタンごと一覧セクションが消えるので、空状態へフォーカスを移す。
+      // 「削除する」ボタンごと一覧セクションが消えるので、着地点へフォーカスを移す。
       setConfirmingClear(false);
       pendingFocusRef.current = true;
       setStatusMessage("保存されていた戦績をすべて削除しました。");
@@ -218,6 +236,7 @@ export default function MatchHistoryList() {
               </div>
             ) : (
               <button
+                ref={clearButtonRef}
                 type="button"
                 onClick={() => {
                   setStatusMessage("");

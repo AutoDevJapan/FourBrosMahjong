@@ -12,6 +12,7 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { useSyncExternalStore } from "react";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { restoreWebLocks, stubWebLocks } from "@/test/webLocksStub";
 import { walkToGameEnd } from "./finishedGameFixture";
 import { GameProvider, useGame } from "./GameProvider";
 import type { GameAction } from "./gamePersistence";
@@ -30,7 +31,10 @@ const originalLocalStorageDescriptor = Object.getOwnPropertyDescriptor(
   "localStorage",
 );
 
-const originalLocks = navigator.locks;
+const originalLocksDescriptor = Object.getOwnPropertyDescriptor(
+  navigator,
+  "locks",
+);
 
 function blockLocalStorage() {
   Object.defineProperty(window, "localStorage", {
@@ -139,20 +143,12 @@ afterEach(() => {
   }
   window.sessionStorage.clear();
   window.localStorage.clear();
-  Object.defineProperty(navigator, "locks", {
-    configurable: true,
-    value: originalLocks,
-  });
+  restoreWebLocks(originalLocksDescriptor);
 });
 
 describe("GameProvider match history recording (#293)", () => {
   beforeEach(() => {
-    Object.defineProperty(navigator, "locks", {
-      configurable: true,
-      value: {
-        request: async (_name: string, callback: () => unknown) => callback(),
-      },
-    });
+    stubWebLocks();
   });
 
   it("終局する最終操作の後に確定結果を戦績へ保存する", async () => {
