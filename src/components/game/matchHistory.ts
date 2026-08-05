@@ -238,7 +238,7 @@ function resolveLockManager(
 ): HistoryLockManager | null {
   if (locks !== undefined) return locks;
   return typeof navigator !== "undefined" && navigator.locks !== undefined
-    ? (navigator.locks as unknown as HistoryLockManager)
+    ? (navigator.locks as HistoryLockManager)
     : null;
 }
 
