@@ -2,7 +2,9 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { DEFAULT_NAMES } from "@/domain/game/engine";
 import {
   isValidPlayerName,
+  limitPlayerName,
   loadPlayerNames,
+  MAX_PLAYER_NAME_CODE_UNITS,
   MAX_PLAYER_NAME_LENGTH,
   PLAYER_NAMES_STORAGE_KEY,
   type PlayerNames,
@@ -129,6 +131,42 @@ describe("isValidPlayerName", () => {
     expect(isValidPlayerName("")).toBe(false);
     expect(isValidPlayerName("あ".repeat(MAX_PLAYER_NAME_LENGTH + 1))).toBe(
       false,
+    );
+  });
+
+  it("巨大入力は書記素分割へ渡さず code unit 長で拒否する(#484)", () => {
+    // 分割コストを払う前に O(1) で弾く防御。上限は 12書記素がどんな構成でも
+    // 収まる 12×32 code unit。
+    expect(isValidPlayerName("あ".repeat(MAX_PLAYER_NAME_CODE_UNITS))).toBe(
+      false, // 書記素数超過で拒否(この経路自体は従来どおり)
+    );
+    expect(isValidPlayerName("あ".repeat(MAX_PLAYER_NAME_CODE_UNITS + 1))).toBe(
+      false,
+    );
+    // 上限ちょうどの1書記素(結合文字を連ねた Zalgo 相当)は通し、1つ超えたら弾く。
+    const oneGrapheme = (units: number) => `あ${"́".repeat(units - 1)}`;
+    expect(isValidPlayerName(oneGrapheme(MAX_PLAYER_NAME_CODE_UNITS))).toBe(
+      true,
+    );
+    expect(isValidPlayerName(oneGrapheme(MAX_PLAYER_NAME_CODE_UNITS + 1))).toBe(
+      false,
+    );
+  });
+});
+
+describe("limitPlayerName", () => {
+  it("巨大な貼り付けは分割前に code unit で切り落とす(#484)", () => {
+    const huge = "あ".repeat(100_000);
+
+    expect(limitPlayerName(huge)).toBe("あ".repeat(MAX_PLAYER_NAME_LENGTH));
+  });
+
+  it("12書記素を超える単一書記素は上限 code unit で切り詰める(#484)", () => {
+    // 1書記素しか無くても、分割へ渡す長さは MAX_PLAYER_NAME_CODE_UNITS までに抑える。
+    const zalgo = `あ${"́".repeat(100_000)}`;
+
+    expect(limitPlayerName(zalgo).length).toBeLessThanOrEqual(
+      MAX_PLAYER_NAME_CODE_UNITS,
     );
   });
 });

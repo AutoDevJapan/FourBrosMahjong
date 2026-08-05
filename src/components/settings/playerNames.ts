@@ -37,7 +37,7 @@ export const MAX_PLAYER_NAME_LENGTH = 12;
  * 保存値をそのまま渡すと分割だけで描画が止まる。1書記素は ZWJ列や tag sequence でも
  * 十数 code unit に収まるため、上限の32倍あれば正規の名前は必ず通る。
  */
-const MAX_PLAYER_NAME_CODE_UNITS = MAX_PLAYER_NAME_LENGTH * 32;
+export const MAX_PLAYER_NAME_CODE_UNITS = MAX_PLAYER_NAME_LENGTH * 32;
 
 /** 不正な UTF-16 を U+FFFD へ置換し、サロゲートペアを分断しない文字列にする。 */
 function toWellFormed(value: string): string {

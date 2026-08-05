@@ -122,6 +122,13 @@ export function PlayerNamesForm() {
                     composingIndex.current = null;
                     updateAt(index, event.currentTarget.value, false);
                   }}
+                  // `compositionend` を落とす IME(一部の Android)でも、
+                  // フォーカスが外れた時点で上限を復帰させる。
+                  onBlur={(event) => {
+                    if (composingIndex.current === null) return;
+                    composingIndex.current = null;
+                    updateAt(index, event.currentTarget.value, false);
+                  }}
                   onChange={(event) =>
                     updateAt(
                       index,

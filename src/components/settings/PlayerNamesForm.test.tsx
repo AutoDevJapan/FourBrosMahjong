@@ -141,6 +141,19 @@ describe("PlayerNamesForm", () => {
     expect(otherInput.value).toHaveLength(MAX_PLAYER_NAME_LENGTH);
   });
 
+  it("compositionEndが来なくてもフォーカスアウトで上限が復帰する(#484)", () => {
+    render(<PlayerNamesForm />);
+    const input = inputFor("対局者2");
+    const tooLong = "あ".repeat(MAX_PLAYER_NAME_LENGTH + 3);
+
+    // 一部のAndroid IMEは compositionend を発火しない。blur で確定扱いにする。
+    fireEvent.compositionStart(input);
+    fireEvent.change(input, { target: { value: tooLong } });
+    fireEvent.blur(input);
+
+    expect(input.value).toHaveLength(MAX_PLAYER_NAME_LENGTH);
+  });
+
   it("変換確定後に上限を超えた文字列は切り詰める(#484)", () => {
     render(<PlayerNamesForm />);
     const input = inputFor("対局者2");
