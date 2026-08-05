@@ -261,12 +261,12 @@ describe("match history persistence (#293)", () => {
     appendHistory(storage, entry(1));
     const locks = new SerialLockManager();
 
-    // 別タブの writer が lock 内で「読み込み → 中断 → 書き戻し」を行う状況を再現する
+    // 別タブの writer が「削除前の snapshot を読み終えた」状態から書き戻す状況を再現する
     // (SerialLockManager は名前によらず全要求を直列化するため、同一 lock の保持を表す)。
-    // 削除が lock 外で先に走ると、writer が読んだ削除前の snapshot が書き戻されて
-    // 削除済み履歴が復活する(issue #482 の事象)。
+    // 削除が lock 外で先に走ると、この古い snapshot が書き戻されて削除済み履歴が
+    // 復活する(issue #482 の事象)。
+    const stale = storage.getItem(MATCH_HISTORY_KEY);
     const writer = locks.request("holder", async () => {
-      const stale = storage.getItem(MATCH_HISTORY_KEY);
       await Promise.resolve();
       if (stale !== null) storage.setItem(MATCH_HISTORY_KEY, stale);
       appendHistory(storage, entry(2));

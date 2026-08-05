@@ -325,8 +325,8 @@ export function clearHistory(storage: Storage): boolean {
  * 追記と同じ Web Lock に参加し、writer が読んだ古い snapshot から削除済み履歴を
  * 復活させる lost update を防ぐ。排他を保証できない環境では削除成功を偽らない。
  *
- * 追記側と同じく lock 内で読み直し、**実際に空になった場合だけ** `true` を返す。
- * `removeItem` が例外を投げずに無視される Storage でも「削除しました」と案内しない。
+ * 追記側と同じく lock 内で読み直し、**読み戻した履歴が空になった場合だけ** `true` を
+ * 返す。`removeItem` が例外を投げずに無視される Storage でも「削除しました」と案内しない。
  */
 export async function clearHistoryAcrossTabs(
   storage: Storage,

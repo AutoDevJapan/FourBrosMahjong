@@ -141,11 +141,15 @@ test.describe("戦績のローカル保存・閲覧(#293)", () => {
     ).toHaveCount(0);
 
     // 解放すると待っていた削除が実行され、空状態へ切り替わる。
-    await holder.evaluate(() =>
-      (
-        window as unknown as { __releaseHistoryLock: () => void }
-      ).__releaseHistoryLock(),
-    );
+    await holder.evaluate(() => {
+      const release = (
+        window as unknown as { __releaseHistoryLock?: () => void }
+      ).__releaseHistoryLock;
+      // 解放関数が消えているのは holder が再読み込みされ lock も一緒に落ちた場合。
+      // その時は上の「削除されない」判定自体が無効なので、原因が判る形で落とす。
+      if (!release) throw new Error("lock を保持していたページが失われました");
+      release();
+    });
     await expect(
       viewer.getByText("保存された戦績はまだありません", { exact: false }),
     ).toBeVisible();

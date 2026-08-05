@@ -13,6 +13,7 @@ import {
   MATCH_HISTORY_KEY,
   type MatchHistoryEntry,
 } from "@/components/game/matchHistory";
+import { restoreWebLocks, stubWebLocks } from "@/test/webLocksStub";
 import MatchHistoryList from "./MatchHistoryList";
 
 function entry(
@@ -50,24 +51,8 @@ const originalLocksDescriptor = Object.getOwnPropertyDescriptor(
   "locks",
 );
 
-/**
- * 全件削除は Web Locks の排他区間で実行される(#482)。jsdom は `navigator.locks` を
- * 実装しないため、最小の lock manager を差し込む。実 API と同じく **必ず Promise を
- * 返す**(同期に返すと解決が1マイクロタスク早まり、フォーカス・読み上げの順序が実機と
- * ずれる)。`GameProvider.history.test.tsx` の stub と同形。
- */
-function stubWebLocks(
-  request: (name: string, callback: () => unknown) => Promise<unknown> = async (
-    _name,
-    callback,
-  ) => callback(),
-): void {
-  Object.defineProperty(navigator, "locks", {
-    configurable: true,
-    value: { request },
-  });
-}
-
+// 全件削除は Web Locks の排他区間で実行される(#482)。jsdom には `navigator.locks` が
+// 無いため、追記側テストと共有の stub を差し込む。
 beforeEach(() => {
   stubWebLocks();
 });
@@ -76,11 +61,7 @@ afterEach(() => {
   window.localStorage.clear();
   // スパイの復元をテスト本体末尾に置くと、手前の expect が落ちた際に次のテストへ漏れる。
   vi.restoreAllMocks();
-  if (originalLocksDescriptor) {
-    Object.defineProperty(navigator, "locks", originalLocksDescriptor);
-  } else {
-    Reflect.deleteProperty(navigator, "locks");
-  }
+  restoreWebLocks(originalLocksDescriptor);
 });
 
 describe("MatchHistoryList (#293)", () => {
@@ -283,5 +264,26 @@ describe("MatchHistoryList (#293)", () => {
     });
     await waitFor(() => expect(fallback).toHaveFocus());
     expect(document.body).not.toHaveFocus();
+  });
+
+  it("着地点へ到達できない場合は黙らず開発ビルドで警告する(#482)", async () => {
+    appendHistory(window.localStorage, entry(1, 1_753_000_000_000));
+    // DOM に繋がっていても hidden / inert 配下では focus() が no-op になる(#377)。
+    // jsdom では再現できないため、focus() 自体を無効化して同じ状況を作る。
+    vi.spyOn(HTMLElement.prototype, "focus").mockImplementation(() => {});
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    render(<MatchHistoryList />);
+    fireEvent.click(
+      await screen.findByRole("button", { name: "戦績をすべて削除" }),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "削除する" }));
+
+    await screen.findByText(/保存された戦績はまだありません/);
+    await waitFor(() =>
+      expect(warn).toHaveBeenCalledWith(
+        expect.stringContaining("フォーカス着地点へ到達できませんでした"),
+      ),
+    );
   });
 });
