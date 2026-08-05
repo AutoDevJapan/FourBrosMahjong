@@ -15,6 +15,7 @@ import {
   changedPaths,
   classifyPath,
   DOCUMENTATION_EXCEPTIONS,
+  resolvePostMergeEvidence,
   resolveScope,
 } from "../../.github/scripts/verification-scope.mjs";
 import playwrightConfig from "../../playwright.config";
@@ -31,7 +32,10 @@ type Step = {
 
 type Workflow = {
   concurrency?: { group?: string; "cancel-in-progress"?: unknown };
-  jobs?: Record<string, { "timeout-minutes"?: unknown; steps?: Step[] }>;
+  jobs?: Record<
+    string,
+    { name?: string; "timeout-minutes"?: unknown; steps?: Step[] }
+  >;
 };
 
 const WORKFLOW_DIR = resolve(process.cwd(), ".github/workflows");
@@ -766,7 +770,11 @@ describe("変更ファイルの取得範囲 (#491)", () => {
   } {
     const dir = mkdtempSync(join(tmpdir(), "scope-diff-"));
     const git = (...args: string[]) =>
-      execFileSync("git", args, { cwd: dir, encoding: "utf8" }).trim();
+      execFileSync("git", args, {
+        cwd: dir,
+        encoding: "utf8",
+        stdio: ["ignore", "pipe", "pipe"],
+      }).trim();
 
     git("init", "--quiet", "--initial-branch", "main");
     git("config", "user.email", "test@example.com");
@@ -827,7 +835,11 @@ describe("変更ファイルの取得範囲 (#491)", () => {
   it("出荷コードを文書へ移動しても、移動元を見落とさない", () => {
     const dir = mkdtempSync(join(tmpdir(), "scope-rename-"));
     const git = (...args: string[]) =>
-      execFileSync("git", args, { cwd: dir, encoding: "utf8" }).trim();
+      execFileSync("git", args, {
+        cwd: dir,
+        encoding: "utf8",
+        stdio: ["ignore", "pipe", "pipe"],
+      }).trim();
     const previous = process.cwd();
     try {
       git("init", "--quiet", "--initial-branch", "main");
@@ -877,5 +889,449 @@ describe("変更ファイルの取得範囲 (#491)", () => {
   it("存在しないリビジョンでも例外にせず null を返す", () => {
     // git が失敗しても判定 step 全体を落とさない (落ちると job が赤くなる)。
     expect(changedPaths("0".repeat(39) + "1", "1".repeat(40))).toBeNull();
+  });
+});
+
+/**
+ * マージ後 push のスキップは「`main` に着地するツリーは直前に PR の checks が緑にした
+ * ツリーと一致する」という前提に立つ。その前提は branch protection が支えているが、
+ * **設定は後から緩められる**。緩んだ瞬間、未検証のコミットが `main` に入っても CI は
+ * 緑のまま素通りする — 誰も気づけない失敗になる (#496)。
+ *
+ * そこでガードは branch protection の *設定* ではなく **検証済みであることの証拠** を見る。
+ * 以下はその証拠が 1 つでも欠けたらスキップしないこと(フェイルセーフ)を固定する。
+ */
+describe("マージ後 push のスキップ前提を実行時に検証する (#496)", () => {
+  const REPO = "AutoDevJapan/FourBrosMahjong";
+  const SHA = "a".repeat(40);
+  const BEFORE = "b".repeat(40);
+  const HEAD = "c".repeat(40);
+  const CHECK = "lint / typecheck / format / test / build";
+
+  /** すべての証拠が揃った状態。各テストはここから 1 つだけ壊す。 */
+  function happyPath(
+    overrides: {
+      pulls?: unknown;
+      checkRuns?: unknown;
+      apiError?: string;
+      gitFails?: string;
+      trees?: Record<string, string>;
+    } = {},
+  ) {
+    const pulls = overrides.pulls ?? [
+      {
+        number: 492,
+        merged_at: "2026-08-05T18:33:23Z",
+        merge_commit_sha: SHA,
+        base: { ref: "main" },
+        head: { sha: HEAD },
+      },
+    ];
+    const checkRuns = overrides.checkRuns ?? {
+      check_runs: [
+        { name: CHECK, conclusion: "success" },
+        { name: "gitleaks", conclusion: "success" },
+      ],
+    };
+    const trees = overrides.trees ?? { [SHA]: "tree1", [HEAD]: "tree1" };
+
+    const api = async (path: string) => {
+      if (overrides.apiError && path.includes(overrides.apiError)) {
+        throw new Error("boom");
+      }
+      if (path.endsWith("/pulls")) return pulls;
+      if (path.endsWith("/check-runs")) return checkRuns;
+      throw new Error(`unexpected path ${path}`);
+    };
+    const git = (args: string[]) => {
+      const command = args.join(" ");
+      if (overrides.gitFails && command.includes(overrides.gitFails)) {
+        throw new Error("git failed");
+      }
+      if (args[0] === "rev-parse") {
+        const sha = args[1].replace("^{tree}", "");
+        const tree = trees[sha];
+        if (!tree) throw new Error("unknown rev");
+        return `${tree}\n`;
+      }
+      return "";
+    };
+    return { api, git };
+  }
+
+  const call = (
+    overrides: Parameters<typeof happyPath>[0] = {},
+    input: Partial<{ forced: boolean; before: string; sha: string }> = {},
+  ) =>
+    resolvePostMergeEvidence({
+      repo: REPO,
+      sha: input.sha ?? SHA,
+      before: input.before ?? BEFORE,
+      forced: input.forced ?? false,
+      branch: "main",
+      checkName: CHECK,
+      ...happyPath(overrides),
+    });
+
+  it("証拠がすべて揃えばスキップを許す", async () => {
+    const result = await call();
+    expect(result).toEqual({
+      skip: true,
+      reason: "verified-by-merged-pull-request",
+    });
+  });
+
+  it.each([
+    [
+      "force push",
+      {} as Parameters<typeof happyPath>[0],
+      { forced: true },
+      "forced-push",
+    ],
+    [
+      "before が全 0 (ブランチ新規作成)",
+      {},
+      { before: "0".repeat(40) },
+      "base-sha-unresolved",
+    ],
+    ["sha が解決できない", {}, { sha: "not-a-sha" }, "head-sha-unresolved"],
+    [
+      "PR 一覧 API が失敗 (権限不足を含む)",
+      { apiError: "/pulls" },
+      {},
+      "pulls-api-failed",
+    ],
+    [
+      "PR 一覧が配列でない",
+      { pulls: { message: "Not Found" } },
+      {},
+      "pulls-response-invalid",
+    ],
+    ["直 push (紐づく PR が無い)", { pulls: [] }, {}, "no-merged-pull-request"],
+    [
+      "PR が未マージ",
+      {
+        pulls: [
+          {
+            number: 1,
+            merged_at: null,
+            merge_commit_sha: SHA,
+            base: { ref: "main" },
+            head: { sha: HEAD },
+          },
+        ],
+      },
+      {},
+      "no-merged-pull-request",
+    ],
+    [
+      "別の commit のマージ (merge_commit_sha 不一致)",
+      {
+        pulls: [
+          {
+            number: 1,
+            merged_at: "x",
+            merge_commit_sha: "d".repeat(40),
+            base: { ref: "main" },
+            head: { sha: HEAD },
+          },
+        ],
+      },
+      {},
+      "no-merged-pull-request",
+    ],
+    [
+      "base が main でない PR",
+      {
+        pulls: [
+          {
+            number: 1,
+            merged_at: "x",
+            merge_commit_sha: SHA,
+            base: { ref: "dev" },
+            head: { sha: HEAD },
+          },
+        ],
+      },
+      {},
+      "no-merged-pull-request",
+    ],
+    [
+      "check-runs API が失敗",
+      { apiError: "/check-runs" },
+      {},
+      "check-runs-api-failed",
+    ],
+    [
+      "check-runs の形が不正",
+      { checkRuns: {} },
+      {},
+      "check-runs-response-invalid",
+    ],
+    [
+      "この job の check run が存在しない",
+      {
+        checkRuns: {
+          check_runs: [{ name: "gitleaks", conclusion: "success" }],
+        },
+      },
+      {},
+      "own-check-run-missing",
+    ],
+    [
+      "この job の check run が失敗している",
+      { checkRuns: { check_runs: [{ name: CHECK, conclusion: "failure" }] } },
+      {},
+      "own-check-run-not-successful",
+    ],
+    [
+      "この job の check run が未完了",
+      { checkRuns: { check_runs: [{ name: CHECK, conclusion: null }] } },
+      {},
+      "own-check-run-not-successful",
+    ],
+    [
+      "PR head の取得に失敗",
+      { gitFails: "fetch" },
+      {},
+      "pull-head-fetch-failed",
+    ],
+    [
+      "陳腐化した PR (before が PR head の祖先でない)",
+      { gitFails: "merge-base" },
+      {},
+      "base-not-ancestor-of-pull-head",
+    ],
+    [
+      "着地したツリーが検証済みツリーと違う",
+      { trees: { [SHA]: "landed", [HEAD]: "verified" } },
+      {},
+      "tree-mismatch",
+    ],
+  ])(
+    "%s のときはスキップせず全ゲートを実行する",
+    async (_label, overrides, input, reason) => {
+      const result = await call(overrides, input);
+      expect(
+        result,
+        "確認できなかった前提を「安全」と読み替えてはいけない",
+      ).toEqual({ skip: false, reason });
+    },
+  );
+
+  /**
+   * 同じ check 名の run が複数ある(再実行など)場合、1 つでも失敗していればスキップしない。
+   */
+  it("同名 check run が複数あり 1 つでも失敗ならスキップしない", async () => {
+    const result = await call({
+      checkRuns: {
+        check_runs: [
+          { name: CHECK, conclusion: "success" },
+          { name: CHECK, conclusion: "failure" },
+        ],
+      },
+    });
+    expect(result.skip).toBe(false);
+    expect(result.reason).toBe("own-check-run-not-successful");
+  });
+});
+
+/**
+ * ガードは「**この job 自身**の check が PR で緑だったか」を見る。job の `name` と
+ * `SCOPE_CHECK_NAME` がずれると、存在しない check 名を探して常に
+ * `own-check-run-missing` になる = ガードは安全側に倒れるが、削減が丸ごと消える。
+ * 静かに効果だけ失う変更なので設定側で固定する (#496)。
+ */
+describe("ガードが参照する check 名が job 名と一致する (#496)", () => {
+  it("SCOPE_CHECK_NAME は job の name と完全一致する", () => {
+    const workflow = readWorkflowFile("ci.yml");
+    let checked = 0;
+    for (const [jobName, definition] of Object.entries(workflow.jobs ?? {})) {
+      const scope = (definition.steps ?? []).find(
+        (step) => step.id === "scope",
+      );
+      if (!scope) continue;
+      checked += 1;
+      expect(
+        scope.env?.SCOPE_CHECK_NAME,
+        `${jobName}: SCOPE_CHECK_NAME が job の name と一致していない`,
+      ).toBe(definition.name);
+      // トークンが無ければ API を呼べず、ガードは常にフェイルセーフ側へ倒れる。
+      expect(
+        scope.env?.GITHUB_TOKEN,
+        `${jobName}: GITHUB_TOKEN が渡されていないとガードが常に失敗する`,
+      ).toBeTypeOf("string");
+      expect(
+        scope.env?.SCOPE_FORCED,
+        `${jobName}: force push を検知できない`,
+      ).toBeTypeOf("string");
+    }
+    expect(checked, "scope step を持つ job が無い").toBe(2);
+  });
+
+  it("ガードに必要な read 権限が付与されている", () => {
+    const workflow = readWorkflowFile("ci.yml") as {
+      permissions?: Record<string, string>;
+    };
+    const permissions = workflow.permissions ?? {};
+    // PR の紐づけと check run の結果を読むために必要。
+    expect(permissions["pull-requests"]).toBe("read");
+    expect(permissions.checks).toBe("read");
+    // 昇格した権限は要らない設計であることを固定する。
+    for (const [scope, level] of Object.entries(permissions)) {
+      expect(level, `${scope}: write 権限は不要なはず`).toBe("read");
+    }
+  });
+});
+
+/**
+ * 上のテストは `git` を差し替えて分岐を網羅するが、**実際に発行する git コマンドが
+ * 意図どおり動くか**は検証していない。`refs/pull/N/merge` は merge 時に削除されるため
+ * 使えず `refs/pull/N/head` を使う、といった前提は実物でしか確かめられない。
+ * 本物のリポジトリで squash マージを再現して固定する (#496)。
+ */
+describe("マージ後ガードの git 操作が実物で動く (#496)", () => {
+  type Repo = {
+    dir: string;
+    landed: string;
+    pullHead: string;
+    before: string;
+    cleanup: () => void;
+  };
+
+  /**
+   * `origin` を持つ実リポジトリを作り、squash マージ相当の履歴を用意する。
+   * @param stale `true` なら PR が古い main のまま取り込まれた(= strict を外した)状況にする。
+   */
+  function createMergedRepository(stale: boolean): Repo {
+    const root = mkdtempSync(join(tmpdir(), "postmerge-"));
+    const origin = join(root, "origin.git");
+    const work = join(root, "work");
+    // git の進捗・警告出力はテストログのノイズにしかならないので捨てる。
+    const quiet = {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "pipe"],
+    } satisfies Parameters<typeof execFileSync>[2];
+    const run = (cwd: string, ...args: string[]) =>
+      execFileSync("git", args, { cwd, ...quiet }).trim();
+
+    execFileSync(
+      "git",
+      ["init", "--quiet", "--bare", "-b", "main", origin],
+      quiet,
+    );
+    execFileSync("git", ["clone", "--quiet", origin, work], quiet);
+    run(work, "config", "user.email", "test@example.com");
+    run(work, "config", "user.name", "test");
+    run(work, "config", "commit.gpgsign", "false");
+
+    writeFileSync(join(work, "a.txt"), "base\n");
+    run(work, "add", "-A");
+    run(work, "commit", "--quiet", "-m", "base");
+    run(work, "push", "--quiet", "origin", "main");
+
+    // PR ブランチ: base を取り込んだ状態で 1 コミット。
+    run(work, "checkout", "--quiet", "-b", "feature");
+    writeFileSync(join(work, "b.txt"), "feature\n");
+    run(work, "add", "-A");
+    run(work, "commit", "--quiet", "-m", "feature");
+    const pullHead = run(work, "rev-parse", "HEAD");
+    // GitHub が保持する PR head ref を再現する。
+    run(work, "push", "--quiet", "origin", `HEAD:refs/pull/492/head`);
+
+    run(work, "checkout", "--quiet", "main");
+    if (stale) {
+      // main が独自に進む = PR は古い main のまま(strict を外した状況)。
+      writeFileSync(join(work, "c.txt"), "advanced on main\n");
+      run(work, "add", "-A");
+      run(work, "commit", "--quiet", "-m", "advance main");
+    }
+    const before = run(work, "rev-parse", "HEAD");
+
+    // squash マージ相当: feature のツリーをそのまま main の上に載せる。
+    run(work, "merge", "--quiet", "--squash", "feature");
+    run(work, "commit", "--quiet", "-m", "squash merge (#492)");
+    const landed = run(work, "rev-parse", "HEAD");
+    run(work, "push", "--quiet", "origin", "main");
+
+    return {
+      dir: work,
+      landed,
+      pullHead,
+      before,
+      cleanup: () => rmSync(root, { recursive: true, force: true }),
+    };
+  }
+
+  /** 本番コードが組み立てた引数をそのまま、対象リポジトリで実行する。 */
+  const gitIn = (dir: string) => (args: string[]) =>
+    execFileSync("git", args, {
+      cwd: dir,
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+
+  function apiFor(repo: Repo, checkName: string) {
+    return async (path: string) => {
+      if (path.endsWith("/pulls"))
+        return [
+          {
+            number: 492,
+            merged_at: "2026-08-05T18:33:23Z",
+            merge_commit_sha: repo.landed,
+            base: { ref: "main" },
+            head: { sha: repo.pullHead },
+          },
+        ];
+      if (path.endsWith("/check-runs"))
+        return { check_runs: [{ name: checkName, conclusion: "success" }] };
+      throw new Error(`unexpected ${path}`);
+    };
+  }
+
+  const CHECK = "lint / typecheck / format / test / build";
+
+  it("最新の main を取り込んだ PR の squash マージはスキップを許す", async () => {
+    const repo = createMergedRepository(false);
+    try {
+      const result = await resolvePostMergeEvidence({
+        repo: "owner/name",
+        sha: repo.landed,
+        before: repo.before,
+        forced: false,
+        branch: "main",
+        checkName: CHECK,
+        api: apiFor(repo, CHECK),
+        git: gitIn(repo.dir),
+      });
+      expect(result).toEqual({
+        skip: true,
+        reason: "verified-by-merged-pull-request",
+      });
+    } finally {
+      repo.cleanup();
+    }
+  });
+
+  it("陳腐化した PR のマージはスキップしない", async () => {
+    // main が進んだ後に古い PR を入れた状況。PR の CI が緑にしたツリーと
+    // 実際に着地したツリーは別物であり、着地内容は誰も検証していない。
+    const repo = createMergedRepository(true);
+    try {
+      const result = await resolvePostMergeEvidence({
+        repo: "owner/name",
+        sha: repo.landed,
+        before: repo.before,
+        forced: false,
+        branch: "main",
+        checkName: CHECK,
+        api: apiFor(repo, CHECK),
+        git: gitIn(repo.dir),
+      });
+      expect(result.skip, "未検証のツリーが検証されずに素通りする").toBe(false);
+      expect(result.reason).toBe("base-not-ancestor-of-pull-head");
+    } finally {
+      repo.cleanup();
+    }
   });
 });
