@@ -61,7 +61,17 @@ export function createLockRequest(): StubLockRequest {
       if (aborted) return;
       // 取得後の中断は無視する(実 API と同じ)。
       options.signal.removeEventListener("abort", onAbort);
-      return Promise.resolve(callback()).then(settle, fail);
+      // `callback()` の**同期 throw** を握らないと、例外が `.then` の外へ抜けて
+      // `result` が永遠に settle しない(テストは失敗ではなくタイムアウトになる)。
+      // 実 API は callback の例外で要求を reject するので、同期例外も拒否へ畳む。
+      // `Promise.resolve().then(callback)` にしないのは、callback の呼び出しが
+      // 1マイクロタスク遅れて実機と観測タイミングがずれるため。
+      try {
+        return Promise.resolve(callback()).then(settle, fail);
+      } catch (error) {
+        fail(error);
+        return;
+      }
     });
     // 次の待機者は「直前の保持者の解放 → この要求の callback 完了」まで待つ。
     // 中断された要求は lock を取得しないので、待ち行列だけを素通りさせる

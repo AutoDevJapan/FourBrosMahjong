@@ -131,16 +131,14 @@ test.describe("戦績のローカル保存・閲覧(#293)", () => {
 
     // 「起きないこと」の確認なので固定時間だけ待つ。lock 外で削除していた頃は
     // クリック直後(数ms)に消えるため、この待機で確実に赤くなる。
-    // 待機は上限時間(`HISTORY_LOCK_TIMEOUT_MS` = 3,000ms / #488)より十分短く保つ
-    // ─ 超えると解放を待たずに削除が失敗し、この後の「解放すると実行される」検証が壊れる。
-    await viewer.waitForTimeout(500);
+    // クリックから解放までは上限時間(`HISTORY_LOCK_TIMEOUT_MS` = 3,000ms / #488)以内に
+    // 収める必要がある ─ 超えると解放を待たずに削除が失敗し、この後の「解放すると
+    // 実行される」検証が壊れる。待機を短くし、往復の多い evaluate は解放後へ回す。
+    await viewer.waitForTimeout(300);
     // 待機中であることが利用者に伝わる(押しっぱなしの無反応画面にしない / #488)。
     await expect(
       viewer.getByRole("button", { name: "削除しています…" }),
     ).toHaveAttribute("aria-disabled", "true");
-    expect(
-      await viewer.evaluate((key) => localStorage.getItem(key), HISTORY_KEY),
-    ).not.toBeNull();
     await expect(items).toHaveCount(1);
     await expect(
       viewer.getByText("保存された戦績はまだありません", { exact: false }),
@@ -162,6 +160,8 @@ test.describe("戦績のローカル保存・閲覧(#293)", () => {
     expect(
       await viewer.evaluate((key) => localStorage.getItem(key), HISTORY_KEY),
     ).toBeNull();
+    // 上限時間で打ち切られていた場合の失敗案内が出ていないこと(= 待って実行された)。
+    await expect(viewer.getByText(/削除できませんでした/)).toHaveCount(0);
   });
 
   test("別タブがlockを解放しなければ上限時間で削除失敗を案内する(#488)", async ({

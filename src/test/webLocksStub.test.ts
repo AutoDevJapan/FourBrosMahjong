@@ -135,6 +135,28 @@ describe("webLocksStub の createLockRequest", () => {
     expect(result).toBe("done");
   });
 
+  it("callback が例外を投げたら要求も失敗する(同期・非同期とも)", async () => {
+    const request = createLockRequest();
+
+    // 同期 throw を `.then` の外へ漏らすと、要求が永遠に settle せず
+    // 「テストがタイムアウトする」形でしか気づけない。
+    await expect(
+      request("same", { signal: never() }, () => {
+        throw new Error("sync boom");
+      }),
+    ).rejects.toThrow("sync boom");
+    await expect(
+      request("same", { signal: never() }, () =>
+        Promise.reject(new Error("async boom")),
+      ),
+    ).rejects.toThrow("async boom");
+
+    // 例外で lock が固まらない(後続は取得できる)。
+    await expect(
+      request("same", { signal: never() }, () => "next"),
+    ).resolves.toBe("next");
+  });
+
   it("要求前に中断済みの signal は即座に失敗する", async () => {
     const request = createLockRequest();
     const controller = new AbortController();

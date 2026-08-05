@@ -127,6 +127,9 @@ describe("MatchHistoryList (#293)", () => {
       screen.getByText(/保存されているすべての戦績.*を削除します/),
     ).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "削除する" }));
+    // lock が空いていれば削除はミリ秒で終わる。進行中を即座に読み上げると
+    // `role="status"` が1フレームに2回更新される(スペック5 5.2.3 / #488)。
+    expect(screen.getByRole("status").textContent).toBe("");
 
     await waitFor(() =>
       expect(window.localStorage.getItem(MATCH_HISTORY_KEY)).toBeNull(),
@@ -238,7 +241,7 @@ describe("MatchHistoryList (#293)", () => {
     fireEvent.click(confirmButton);
 
     expect(
-      await screen.findByText(/他のタブが戦績を更新中のため/),
+      await screen.findByText(/他のタブが戦績を更新中/),
     ).toBeInTheDocument();
     // 排他できていないので保存も一覧もそのまま残る(#482 の fail-closed)。
     expect(window.localStorage.getItem(MATCH_HISTORY_KEY)).not.toBeNull();
@@ -275,11 +278,12 @@ describe("MatchHistoryList (#293)", () => {
     confirmButton.focus();
     fireEvent.click(confirmButton);
 
-    // 視覚(ラベル)と読み上げ(role="status")の双方へ進行中を伝える。
+    // 視覚(ラベル)は即座に、読み上げ(role="status")は待たされたときだけ伝える。
     const busy = await screen.findByRole("button", { name: "削除しています…" });
-    expect(screen.getByRole("status")).toHaveTextContent(
-      "戦績を削除しています…",
-    );
+    expect(screen.getByRole("status").textContent).toBe("");
+    expect(
+      await screen.findByText("戦績を削除しています…"),
+    ).toBeInTheDocument();
     // 操作不能は aria-disabled で表す。`disabled` にすると押した瞬間にフォーカスが
     // body へ落ちるため(削除後の着地点まで文脈が途切れる)。
     expect(busy).toHaveAttribute("aria-disabled", "true");
@@ -315,7 +319,7 @@ describe("MatchHistoryList (#293)", () => {
     fireEvent.click(screen.getByRole("button", { name: "戦績をすべて削除" }));
     fireEvent.click(screen.getByRole("button", { name: "削除する" }));
 
-    await screen.findByText(/他のタブが戦績を更新中のため/);
+    await screen.findByText(/他のタブが戦績を更新中/);
     // 削除失敗は一覧の見た目を変えないため、sr-only のままだと晴眼の利用者へ
     // まったく伝わらない。
     expect(screen.getByRole("status")).not.toHaveClass("sr-only");

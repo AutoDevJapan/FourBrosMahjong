@@ -268,6 +268,9 @@ describe("match history persistence (#293)", () => {
     // 名前が食い違うと排他区間が分かれ、直列化そのものが効かなくなる。
     expect(locks.names).toHaveLength(2);
     expect(new Set(locks.names).size).toBe(1);
+    // 実値も固定する。E2E(`e2e/history.spec.ts`)は別タブから同じ名前の lock を
+    // 実 API で保持するため、改名すると E2E が「削除できてしまう」形で崩れる。
+    expect(locks.names[0]).toBe("four-bros-mahjong.history.write.v1");
   });
 
   it("先着の追記が終わるまで削除は待ち、最終状態は空になる(#482)", async () => {
@@ -425,6 +428,34 @@ describe("match history persistence (#293)", () => {
       expect(await clearing).toBe("lock-busy");
       // 排他できていない以上、履歴は消さない(#482 の fail-closed を維持する)。
       expect(loadHistory(storage).map((item) => item.seed)).toEqual([1]);
+    });
+
+    it("排他区間の実行が上限時間より長引いても打ち切らない", async () => {
+      vi.useFakeTimers();
+      const storage = new MemoryStorage();
+      appendHistory(storage, entry(1));
+      // lock はすぐ取得できるが、解放(= request の解決)が上限時間より後になる manager。
+      const slow: HistoryLockManager = {
+        request: <T>(
+          _name: string,
+          _options: HistoryLockOptions,
+          callback: () => T | PromiseLike<T>,
+        ) =>
+          Promise.resolve(callback()).then(
+            (value) =>
+              new Promise<T>((resolve) => {
+                setTimeout(() => resolve(value), HISTORY_LOCK_TIMEOUT_MS * 2);
+              }),
+          ),
+      };
+
+      const clearing = clearHistoryAcrossTabs(storage, slow);
+      // 取得できた時点でタイマーは解除済み(上限時間は「取得できるまで」に掛かる)。
+      await vi.advanceTimersByTimeAsync(HISTORY_LOCK_TIMEOUT_MS);
+      expect(loadHistory(storage)).toEqual([]);
+
+      await vi.advanceTimersByTimeAsync(HISTORY_LOCK_TIMEOUT_MS);
+      expect(await clearing).toBe("cleared");
     });
 
     it("lockを取得できた場合は上限時間のタイマーを残さない", async () => {

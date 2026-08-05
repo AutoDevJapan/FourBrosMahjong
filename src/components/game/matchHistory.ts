@@ -250,9 +250,12 @@ function resolveLockManager(
  * `setTimeout` を使うのは、テストが偽タイマーで上限時間そのものを決定的に固定できる
  * ようにするため(`AbortSignal.timeout` の内部タイマーは差し替えられない)。
  *
- * 待機中の中断だけが有効で、取得後の中断は実 API 側で無視される。したがって排他区間の
- * 実行が上限時間より長引いても、途中で打ち切られて中途半端な書き込みが残ることはない。
- * タイマーは成否によらず `finally` で解除する(取得済みの lock へ無用な abort を投げない)。
+ * **上限時間は「取得できるまで」にだけ掛ける。** lock を取得した時点(callback の先頭)で
+ * タイマーを解除するので、排他区間の実行が上限時間より長引いても中断されない。仕様上は
+ * 取得後の abort が無視されるため `finally` の解除だけでも足りるが、取得と上限時間が
+ * 競り合った瞬間の挙動を実装依存にしない ─ もし取得後の abort で要求が失敗する実装が
+ * あると、削除は「消えているのに失敗として案内する」最悪の形になる。
+ * `finally` の解除は取得できなかった経路のために残す。
  */
 async function withHistoryLock<T>(
   lockManager: HistoryLockManager,
@@ -272,7 +275,11 @@ async function withHistoryLock<T>(
     return await lockManager.request(
       MATCH_HISTORY_LOCK,
       { signal: controller.signal },
-      callback,
+      () => {
+        // 取得できた = 上限時間の役目は終わり。以降は中断しない。
+        clearTimeout(timer);
+        return callback();
+      },
     );
   } catch {
     // 中断(上限時間超過)と lock API 自体の失敗を同じ「排他できなかった」に畳む。
