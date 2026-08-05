@@ -121,6 +121,12 @@ export default function MatchHistoryList() {
   );
   const [confirmingClear, setConfirmingClear] = useState(false);
   const [statusMessage, setStatusMessage] = useState("");
+  // 削除は Web Lock の取得を待つ非同期処理で、最大 `HISTORY_LOCK_TIMEOUT_MS` 掛かる
+  // (issue #488)。待機中は「反応しない画面」に見えるため、進行中であることを示す。
+  const [clearing, setClearing] = useState(false);
+  // 連打の抑止は ref で行う。同一タスク内の2回目のクリックでは `clearing` の
+  // 再描画が済んでおらず、state を見るハンドラは古い値(false)を読んでしまう。
+  const clearingRef = useRef(false);
   // 全件削除すると「削除する」ボタンごと一覧セクションが消えるため、フォーカスが
   // body へ落ちてキーボード利用者が文脈を失う。削除直後だけ空状態へフォーカスを移す。
   const emptyStateRef = useRef<HTMLDivElement>(null);
@@ -153,25 +159,35 @@ export default function MatchHistoryList() {
   });
 
   const executeClear = async () => {
-    const storage = localStorageOrNull();
-    // Storage の getter 自体が例外を投げる環境も「ストレージを操作できない」に含める。
-    const result: HistoryClearResult =
-      storage === null
-        ? "storage-failed"
-        : await clearHistoryAcrossTabs(storage);
-    if (result === "cleared") {
-      // 永続化と購読者への通知は分離されているため、削除後に明示的に知らせる(#302)。
-      notifyHistoryChanged();
-      // 「削除する」ボタンごと一覧セクションが消えるので、着地点へフォーカスを移す。
-      setConfirmingClear(false);
-      pendingFocusRef.current = true;
-      setStatusMessage("保存されていた戦績をすべて削除しました。");
-      return;
+    // 待機中の再クリックは無視する(要求を積み上げない / issue #488)。
+    if (clearingRef.current) return;
+    clearingRef.current = true;
+    setClearing(true);
+    setStatusMessage("戦績を削除しています…");
+    try {
+      const storage = localStorageOrNull();
+      // Storage の getter 自体が例外を投げる環境も「ストレージを操作できない」に含める。
+      const result: HistoryClearResult =
+        storage === null
+          ? "storage-failed"
+          : await clearHistoryAcrossTabs(storage);
+      if (result === "cleared") {
+        // 永続化と購読者への通知は分離されているため、削除後に明示的に知らせる(#302)。
+        notifyHistoryChanged();
+        // 「削除する」ボタンごと一覧セクションが消えるので、着地点へフォーカスを移す。
+        setConfirmingClear(false);
+        pendingFocusRef.current = true;
+        setStatusMessage("保存されていた戦績をすべて削除しました。");
+        return;
+      }
+      // 削除できなかった場合は一覧が残る。「削除しました」と読み上げると実態と食い違う。
+      // 確認UIも畳まない ─ 畳むと押した「削除する」ボタンが消える一方で空状態も描かれず、
+      // フォーカスの行き先が無くなって body へ落ちるため(成功時と同じ a11y 契約を守る)。
+      setStatusMessage(CLEAR_FAILURE_MESSAGE[result]);
+    } finally {
+      clearingRef.current = false;
+      setClearing(false);
     }
-    // 削除できなかった場合は一覧が残る。「削除しました」と読み上げると実態と食い違う。
-    // 確認UIも畳まない ─ 畳むと押した「削除する」ボタンが消える一方で空状態も描かれず、
-    // フォーカスの行き先が無くなって body へ落ちるため(成功時と同じ a11y 契約を守る)。
-    setStatusMessage(CLEAR_FAILURE_MESSAGE[result]);
   };
 
   if (entries === null) {
@@ -187,8 +203,20 @@ export default function MatchHistoryList() {
 
   return (
     <div className="flex flex-col gap-6">
-      {/* 削除実行などの結果を読み上げで通知する(表示内容は下の一覧が担う)。 */}
-      <p role="status" className="sr-only">
+      {/*
+        削除の進行中・結果を通知する。読み上げ用に `role="status"` を常設したまま、
+        メッセージがあるときは**目でも読める**ように可視化する(スペック5 5.2.2 /
+        issue #488)。sr-only のままだと、削除失敗や進行中であることが晴眼の利用者へ
+        まったく伝わらない(成功時だけは一覧の消失という視覚的変化がある)。
+      */}
+      <p
+        role="status"
+        className={
+          statusMessage === ""
+            ? "sr-only"
+            : "rounded-lg border border-foreground/15 p-4 text-sm text-foreground"
+        }
+      >
         {statusMessage}
       </p>
 
@@ -238,18 +266,35 @@ export default function MatchHistoryList() {
                   保存されているすべての戦績(この端末の
                   {entries.length}件)を削除します。よろしいですか?
                 </p>
+                {/*
+                  待機中の操作不能は `disabled` ではなく `aria-disabled` + ハンドラ側の
+                  ガードで表す。`disabled` にすると押した瞬間にボタンがフォーカスを失って
+                  <body> へ落ち、削除後の着地点まで文脈が途切れる(スペック5 5.2.2 の
+                  フォーカス契約 / #482)。視覚にはラベルの変化とカーソルで伝える。
+                */}
                 <div className="flex flex-wrap gap-3">
                   <button
                     type="button"
                     onClick={executeClear}
-                    className="rounded-full border border-danger px-4 py-2 text-sm font-medium text-danger hover:bg-danger/10"
+                    aria-disabled={clearing || undefined}
+                    className={`rounded-full border border-danger px-4 py-2 text-sm font-medium text-danger ${
+                      clearing ? "cursor-progress" : "hover:bg-danger/10"
+                    }`}
                   >
-                    削除する
+                    {clearing ? "削除しています…" : "削除する"}
                   </button>
                   <button
                     type="button"
-                    onClick={() => setConfirmingClear(false)}
-                    className="rounded-full border border-control-border px-4 py-2 text-sm hover:bg-foreground/5"
+                    // 待機中にキャンセルで確認UIを畳むと、押した「削除する」ボタンが
+                    // 消える一方で削除はまだ終わっておらず、フォーカスの行き先が無い。
+                    onClick={() => {
+                      if (clearingRef.current) return;
+                      setConfirmingClear(false);
+                    }}
+                    aria-disabled={clearing || undefined}
+                    className={`rounded-full border border-control-border px-4 py-2 text-sm ${
+                      clearing ? "cursor-progress" : "hover:bg-foreground/5"
+                    }`}
                   >
                     キャンセル
                   </button>

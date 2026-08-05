@@ -18,7 +18,7 @@
  */
 
 /** `navigator.locks.request` の options のうち、テスト対象が使う最小形。 */
-export interface StubLockOptions {
+interface StubLockOptions {
   readonly signal: AbortSignal;
 }
 

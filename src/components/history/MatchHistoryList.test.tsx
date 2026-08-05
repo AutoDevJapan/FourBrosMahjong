@@ -252,6 +252,75 @@ describe("MatchHistoryList (#293)", () => {
     expect(confirmButton).toHaveFocus();
   });
 
+  it("削除の待機中は進行中を伝え、連打しても要求を積み上げない(#488)", async () => {
+    appendHistory(window.localStorage, entry(1, 1_753_000_000_000));
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let requests = 0;
+    // 別タブが lock を保持していて、取得までに時間が掛かる状況。
+    stubWebLocks(async (_name, _options, callback) => {
+      requests++;
+      await held;
+      return callback();
+    });
+
+    render(<MatchHistoryList />);
+    fireEvent.click(
+      await screen.findByRole("button", { name: "戦績をすべて削除" }),
+    );
+    const confirmButton = screen.getByRole("button", { name: "削除する" });
+    // 実ブラウザではクリック時にボタンへフォーカスが載る(jsdom は載せない)。
+    confirmButton.focus();
+    fireEvent.click(confirmButton);
+
+    // 視覚(ラベル)と読み上げ(role="status")の双方へ進行中を伝える。
+    const busy = await screen.findByRole("button", { name: "削除しています…" });
+    expect(screen.getByRole("status")).toHaveTextContent(
+      "戦績を削除しています…",
+    );
+    // 操作不能は aria-disabled で表す。`disabled` にすると押した瞬間にフォーカスが
+    // body へ落ちるため(削除後の着地点まで文脈が途切れる)。
+    expect(busy).toHaveAttribute("aria-disabled", "true");
+    expect(busy).toHaveFocus();
+
+    fireEvent.click(busy);
+    fireEvent.click(busy);
+    expect(requests).toBe(1);
+
+    // 待機中のキャンセルも効かない ─ 確認UIを畳むとフォーカスの行き先が無くなる。
+    fireEvent.click(screen.getByRole("button", { name: "キャンセル" }));
+    expect(
+      screen.getByRole("button", { name: "削除しています…" }),
+    ).toBeInTheDocument();
+
+    release();
+    expect(
+      await screen.findByText(/保存された戦績はまだありません/),
+    ).toBeInTheDocument();
+    expect(document.body).not.toHaveFocus();
+  });
+
+  it("通知は読み上げ専用にせず、目でも読める形で表示する(#488)", async () => {
+    appendHistory(window.localStorage, entry(1, 1_753_000_000_000));
+    stubWebLocks(() =>
+      Promise.reject(new DOMException("timed out", "TimeoutError")),
+    );
+
+    render(<MatchHistoryList />);
+    // メッセージが無い間は読み上げ用に常設するだけ(視覚的には出さない)。
+    expect(await screen.findByRole("status")).toHaveClass("sr-only");
+
+    fireEvent.click(screen.getByRole("button", { name: "戦績をすべて削除" }));
+    fireEvent.click(screen.getByRole("button", { name: "削除する" }));
+
+    await screen.findByText(/他のタブが戦績を更新中のため/);
+    // 削除失敗は一覧の見た目を変えないため、sr-only のままだと晴眼の利用者へ
+    // まったく伝わらない。
+    expect(screen.getByRole("status")).not.toHaveClass("sr-only");
+  });
+
   it("全件削除後はフォーカスを空状態へ移し、bodyへ落とさない", async () => {
     appendHistory(window.localStorage, entry(1, 1_753_000_000_000));
 
