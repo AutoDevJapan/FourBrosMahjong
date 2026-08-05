@@ -25,6 +25,10 @@
 - デプロイ構成の ADR(`documents/adr/0001-deploy-architecture-and-preview-policy.md`)を追加。prd 構成(Vercel フロント + Railway バックエンドは将来配置先)と Vercel Preview 方針を明文化 (#69)。
 - カスタムドメイン公開手順(`documents/guides/custom-domain-setup.md`)と `documents/adr/` `documents/guides/` の索引 README を追加 (#69)。
 
+### Fixed
+
+- 赤ドラ翻の判定を牌種(5筒・5索)込みへ修正。`createTile` を経由しない構造的入力が仕様外の `isRed` を持っても、得点(`countDoraHan`)と表示が同じ述語 `isRedDora` で一致するようにした。赤5判定の重複を検出する回帰スキャンの範囲も表示層まで拡張 (#485)。
+
 ### Changed
 
 - `docs/デプロイ環境運用.md` をインフラ実態に合わせて更新。バックエンド(Railway)の位置づけとカスタムドメイン公開の節を追加し、`config.godd` / `AGENTS.md` のスタック定義と整合 (#69)。

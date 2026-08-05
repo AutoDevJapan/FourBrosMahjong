@@ -111,7 +111,11 @@ classDiagram
 - `Player.points` は抜け番中に変化しない。
 - `DoraSet.count` は 1〜3 のいずれか。裏ドラ枚数は表と同数。
 - 赤5は5筒・5索に限る。
-  > この不変条件の**唯一の定義元**は `src/domain/tiles/tile.ts` の `createTile(suit, rank)`(issue #375 / #379)。牌種(`suit`+`rank`)から `Tile` を組み立てる本番処理は UI 境界を含めてこのファクトリを経由し、`{ suit, rank, isRed: … }` を直に書かない(`src/domain/tiles/tile-factory.regression.test.ts` が `src/domain/` を機械的に検査する)。例外はテスト専用の独立オラクル `src/domain/hand/__oracle__/`(本番へ依存しないことが検証価値の源泉のため、意図的に重複させる)。
+  > この不変条件の**唯一の定義元**は `src/domain/tiles/tile.ts`(issue #375 / #379 / #485)。同ファイル内の内部式 `isRedFiveKind(suit, rank)` を、次の2つの公開関数が共有する。
+  > - **生成**: `createTile(suit, rank)` — 牌種から `Tile` を組み立て `isRed` を確定させる。牌種から `Tile` を作る本番処理は UI 境界を含めてこのファクトリを経由し、`{ suit, rank, isRed: … }` を直に書かない。
+  > - **判定**: `isRedDora(tile)` — 既存の値が赤ドラかを判定する。`Tile` は実行時検証を持たない構造型で、`createTile` を経由しない値(復元データ・外部入力・表示用 `TileData`)は仕様外の `isRed` を持ち得るため、**牌種を確認せず `tile.isRed` を信じない**。得点(`domain/dora/han.ts` の赤ドラ翻)と表示(`components/common/` の色付き素材・赤枠・バッジ・`aria-label`)はこの述語を共有し、同じ入力に同じ答えを返す。
+  >
+  > `src/domain/tiles/tile-factory.regression.test.ts` がこれを機械的に検査する。`Tile` の組み立て(`isRed:` リテラル)は `src/domain/` を、赤5判定の再実装は `src/domain/` に加えて `src/components/` `src/app/` を走査する(表示層まで広げたのは、そこでの重複が issue #485 の原因だったため)。例外はテスト専用の独立オラクル `src/domain/hand/__oracle__/`(本番へ依存しないことが検証価値の源泉のため、意図的に重複させる)。
   > UI の操作入力は `suit` / `rank` を正として `createTile` で `isRed` を正規化する。一方、`sessionStorage` の復元ジャーナルは保存済み `isRed` が `createTile` の結果と一致する場合だけ受理する。矛盾した旧データを黙って修復・再生すると保存時と異なる操作になるため、破損データとして fail-closed で拒否し、新規対局へフォールバックする(issue #379)。
 - 常に着席3人(東/南/西)+抜け番1人の計4人。`benchWarmer` は席(`Seat`)を持たない。
 - 抜け番は**直前局の親**(親流れ時)。連荘中は席・抜け番・`roundNumber` を据え置く。

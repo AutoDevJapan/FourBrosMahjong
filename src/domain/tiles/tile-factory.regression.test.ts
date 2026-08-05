@@ -27,8 +27,12 @@ const FACTORY = "domain/tiles/tile.ts";
 
 /**
  * `Tile` 組み立ての走査対象。ドメイン本番コードのみ(issue #375 の完了条件と一致)。
- * 表示層のビューモデル `TileData` は `isRed` が任意の**投影**で `Tile` そのものではないため、
- * ここで組み立てを禁じる対象ではない。
+ *
+ * 表示層を含めないのは、ビューモデル `TileData` が `isRed` 任意の**投影**であって
+ * `Tile` そのものではないため。例えば `components/game/gameView.ts` の
+ * `{ suit, rank, isRed: tile.isRed }` は `Tile` → `TileData` の正当な写像で、
+ * 表示層まで走査すると確実に偽陽性になる。ドメインへ戻す唯一の境界
+ * (同ファイルの `toTile()`)は `createTile` を使っており、穴は空いていない。
  */
 const TILE_LITERAL_ROOTS = ["domain"] as const;
 
@@ -39,6 +43,10 @@ const TILE_LITERAL_ROOTS = ["domain"] as const;
  * 持っていたため、同じ入力が「画面では非赤・得点では赤1翻」に割れていた。
  * ドメイン限定の走査ではこの重複を検出できなかったので、判定の再実装は
  * 表示層(`components` / `app`)でも退行として扱う。
+ *
+ * {@link TILE_LITERAL_ROOTS} の**上位集合**であること(= ドメインを必ず含むこと)は
+ * 下のガードで固定する。表示層を足したつもりでドメインを落とすと、issue #375 が
+ * 直した元の退行がまるごと素通りするため。
  */
 const RED_FIVE_ROOTS = ["domain", "components", "app"] as const;
 
@@ -61,9 +69,17 @@ const tileLiteral = () => /\bisRed\s*[:,}]/g;
  * `RED_FIVE_SUITS` のような命名済みの集合と、`rank === 5` のインライン展開の両方を拾う
  * (旧 `engine.riichi-ankan.test.ts` は後者の形で重複していた)。
  *
- * 本ドメインで rank 5 に特別な意味があるのは赤5だけなので、`rank === 5` は赤5判定の
+ * ドメインで rank 5 に特別な意味があるのは赤5だけなので、`rank === 5` は赤5判定の
  * シグナルとして扱ってよい。字牌の白も rank 5 だが、`HONOR.WHITE` という記号で書く規約
  * (`tiles/tile.ts` / `hand/tile-identity.ts`)のためリテラル 5 とは衝突しない。
+ * 表示層でも白は `HONOR_NAME` / `HONOR_FILE` の索引で扱う(`components/common/tileLabel.ts` /
+ * `tileImage.ts`)。仮に白の判定をリテラルで書きたくなったら、この検出器を緩めるのではなく
+ * `HONOR.WHITE` を import して書くこと。
+ *
+ * ⚠️ 走査対象に表示層({@link RED_FIVE_ROOTS})を含めたことで、`rank` は牌の位だけでなく
+ * **順位**の意味でも現れる(`components/result/RankingTable.tsx` 等の `player.rank === 1`)。
+ * 四人回しの順位は 1〜4 で 5 を取り得ないため今は衝突しないが、順位の値域が変わったら
+ * この検出器の前提も見直すこと。
  *
  * ⚠️ この検出器は識別子名 `rank` に依存するため、`r === 5` のように別名へ束ねられると
  * すり抜ける。上の {@link tileLiteral}(`Tile` の組み立てそのものを見る)と合わせた
@@ -130,17 +146,25 @@ describe("牌ファクトリの単一起点(issue #375)", () => {
     expect(files).toContain("domain/game/ai.ts");
     expect(files).toContain("domain/dora/indicator.ts");
     expect(files.some((f) => f.includes("__oracle__"))).toBe(false);
-    expect(files.some((f) => /\.test\.tsx?$/.test(f))).toBe(false);
+    expect(files.some((f) => /\.(test|spec)\.tsx?$/.test(f))).toBe(false);
   });
 
-  it("赤5判定の走査は表示層(.tsx を含む)まで届く(issue #485)", () => {
-    // ドメイン限定の走査では tileImage.ts の重複を見逃した。
-    // 走査ルートを縮められたら失敗するよう、表示層の実在ファイルを固定する。
+  it("赤5判定の走査はドメインと表示層(.tsx を含む)の両方に届く(issue #485)", () => {
+    // 表示層を足したつもりでドメインを落とすと、issue #375 が直した元の退行
+    // (ドメイン内での赤5判定の再実装)が丸ごと素通りする。offenders は FACTORY を
+    // 無条件に skip するため、この取りこぼしはどのテストにも現れない。
+    // 「ドメイン ⊆ 赤5走査」を直接固定して、片側だけ縮める変更を失敗させる。
+    expect(TILE_LITERAL_ROOTS.every((r) => RED_FIVE_ROOTS.includes(r))).toBe(
+      true,
+    );
+
     const files = productionFiles(RED_FIVE_ROOTS);
-    expect(files).toContain("components/common/tileImage.ts");
-    expect(files).toContain("components/common/Tile.tsx");
-    expect(files).toContain("app/game/page.tsx");
-    expect(files.some((f) => /\.test\.tsx?$/.test(f))).toBe(false);
+    expect(files).toContain(FACTORY); // ドメインルートの生存
+    expect(files).toContain("domain/game/ai.ts");
+    expect(files).toContain("components/common/tileImage.ts"); // 表示層(.ts)
+    expect(files).toContain("components/common/Tile.tsx"); // 表示層(.tsx)
+    expect(files).toContain("app/game/page.tsx"); // App Router
+    expect(files.some((f) => /\.(test|spec)\.tsx?$/.test(f))).toBe(false);
   });
 
   it("検出器そのものが違反例を捕まえる(正例)", () => {

@@ -122,6 +122,22 @@ describe("isRedDora(赤扱い判定の唯一の述語 / issue #485)", () => {
     expect(isRedDora({ suit, rank })).toBe(false); // 表示用 TileData は isRed 省略可
   });
 
+  // 外部入力を受ける前提の関数なので、判定は truthy ではなく厳密に `=== true`。
+  // `!!tile.isRed` へ緩める退行をここで捕まえる。
+  it("truthy だが true ではない isRed は赤扱いしない", () => {
+    const bogus = {
+      suit: "pin" as Suit,
+      rank: 5,
+      isRed: 1 as unknown as boolean,
+    };
+    expect(isRedDora(bogus)).toBe(false);
+    expect(isRedDora({ ...bogus, isRed: "true" as unknown as boolean })).toBe(
+      false,
+    );
+  });
+
+  // このループは赤5ルールを独立に検証するものではない(両者は同じ内部式を共有する)。
+  // 目的は「生成と判定が将来切り離されたら落ちる」ことの固定。
   it("createTile の不変条件と一致する(判定と生成が同じ規則を共有する)", () => {
     const suits: Suit[] = ["man", "pin", "sou", "honor"];
     for (const suit of suits) {

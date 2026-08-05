@@ -28,9 +28,12 @@ export type Suit = "man" | "pin" | "sou" | "honor";
  *   (スペック4 4.4 不変条件「赤5は5筒・5索に限る」)。
  *
  * 牌種から生成するときは {@link createTile} を使うこと(不変条件の唯一の定義元)。
- * 逆に、既にある値が赤かを**判定**するときは `tile.isRed` を直接読まず
- * {@link isRedDora} を使うこと。この interface に実行時検証は無く、`createTile` を
- * 経由しない構造的な値は不変条件を破った `isRed` を持ち得るため(issue #485)。
+ * 逆に、既にある値を**赤ドラとして意味づける**とき(得点への加算・表示の赤扱い)は
+ * `tile.isRed` を直接読まず {@link isRedDora} を使うこと。この interface に実行時検証は
+ * 無く、`createTile` を経由しない構造的な値は不変条件を破った `isRed` を持ち得るため
+ * (issue #485)。牌の同一性比較・整列・保存値の検証のように「フラグの値そのもの」を
+ * 扱う用途(`game/engine.ts` の牌一致判定、`components/game/gamePersistence.ts` の
+ * 復元検証など)はこの限りでなく、生の `isRed` を読んでよい。
  */
 export interface Tile {
   readonly suit: Suit;
@@ -66,6 +69,12 @@ type RedDoraCandidate = Pick<Tile, "suit" | "rank"> &
  * 得点(`dora/han.ts` の赤ドラ翻)と表示(`components/common/` の色付き素材・
  * 赤枠・「赤」バッジ・`(赤ドラ)` ラベル)が**同じ入力に同じ答えを出す**ことを保証する
  * (issue #146 / #485)。
+ *
+ * 判定は **`isRed` フラグ AND 牌種** の連言で、牌種だけでは赤へ**昇格させない**。
+ * つまり `isRedDora({ suit: "pin", rank: 5 })` は `false` で、`createTile("pin", 5).isRed`
+ * (常に `true`)とは意図的に異なる。`createTile` は牌種から `isRed` を**生成**する側、
+ * こちらは与えられた値を**判定**する側で役割が違い、判定側が勝手に昇格させると
+ * 入力より得点が増える方向に壊れるため、保守的に倒している。
  *
  * @example
  * isRedDora({ suit: "pin", rank: 5, isRed: true }); // true
