@@ -25,13 +25,13 @@
 - デプロイ構成の ADR(`documents/adr/0001-deploy-architecture-and-preview-policy.md`)を追加。prd 構成(Vercel フロント + Railway バックエンドは将来配置先)と Vercel Preview 方針を明文化 (#69)。
 - カスタムドメイン公開手順(`documents/guides/custom-domain-setup.md`)と `documents/adr/` `documents/guides/` の索引 README を追加 (#69)。
 
-### Fixed
-
-- 対局者名の12文字上限をgrapheme cluster単位へ統一し、絵文字・結合文字をUTF-16境界で分断せず設定・再読込・盤面表示できるよう修正 (#484)。
-
 ### Changed
 
 - `docs/デプロイ環境運用.md` をインフラ実態に合わせて更新。バックエンド(Railway)の位置づけとカスタムドメイン公開の節を追加し、`config.godd` / `AGENTS.md` のスタック定義と整合 (#69)。
+
+### Fixed
+
+- 対局者名の12文字上限を書記素クラスタ(grapheme cluster)単位へ統一し、絵文字・結合文字をUTF-16境界で分断せず設定・再読込・盤面表示できるよう修正 (#484)。修正前に保存された半端なサロゲート入りの名前は、対局ジャーナルの読み込み時に U+FFFD へ正規化して受け入れる(進行中の半荘を失わせない)。
 
 ## [0.1.0] - 2026-07-10
 

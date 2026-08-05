@@ -84,16 +84,29 @@ export function playerNameGraphemes(value: string): string[] {
   return fallbackGraphemes(wellFormed);
 }
 
-/** 入力中・保存時で共用する、書記素クラスタ単位の上限適用。 */
+/**
+ * 入力中・保存時で共用する、書記素クラスタ単位の上限適用。
+ *
+ * `playerNameGraphemes` が先に well-formed 化するため、戻り値に lone surrogate は残らない
+ * (#484 修正前の code unit 切り詰めが残した半端なサロゲートは U+FFFD へ寄せられる)。
+ */
 export function limitPlayerName(value: string): string {
   return playerNameGraphemes(value).slice(0, MAX_PLAYER_NAME_LENGTH).join("");
 }
 
-/** 永続化境界で用いる名前の非空・上限・well-formed 検証。 */
+/**
+ * 永続化境界(`sessionStorage` の対局ジャーナル)で用いる名前の検証。
+ *
+ * 見るのは「非空」と「書記素クラスタが上限以下」の2点だけで、**lone surrogate は拒否しない**。
+ * #484 の修正前は UTF-16 code unit で切り詰めていたため、既存の保存値には末尾が半端な
+ * サロゲートになったもの(例: `"12345678901😀"` → `"12345678901\uD83D"`)が実在し得る。
+ * これを不正として弾くと、#484 に当たったユーザーだけが進行中の半荘を失う。
+ * 表示名は Wall/RNG・操作列の再生結果に影響しないので、拒否ではなく読み込み側で
+ * `limitPlayerName` により U+FFFD へ正規化して受け入れる(v1→v2 移行と同じ方針)。
+ */
 export function isValidPlayerName(value: string): boolean {
   return (
     value.length > 0 &&
-    !/[\uD800-\uDFFF]/u.test(value) &&
     playerNameGraphemes(value).length <= MAX_PLAYER_NAME_LENGTH
   );
 }

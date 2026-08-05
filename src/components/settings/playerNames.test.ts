@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { DEFAULT_NAMES } from "@/domain/game/engine";
 import {
+  isValidPlayerName,
   loadPlayerNames,
   MAX_PLAYER_NAME_LENGTH,
   PLAYER_NAMES_STORAGE_KEY,
@@ -72,6 +73,18 @@ describe("sanitizePlayerName", () => {
     );
   });
 
+  it("壊れた入力からlone surrogateを出力しない(#484)", () => {
+    expect(sanitizePlayerName("名前\uD83D")).toBe("名前�");
+    expect(sanitizePlayerName("名前\uD83D")).not.toMatch(/[\uD800-\uDFFF]/u);
+  });
+
+  it("空文字・空白のみはnull(既定名フォールバック用)", () => {
+    expect(sanitizePlayerName("")).toBeNull();
+    expect(sanitizePlayerName("   \n ")).toBeNull();
+  });
+});
+
+describe("playerNameGraphemes", () => {
   it("結合文字とZWJ絵文字をそれぞれ1書記素として数える(#484)", () => {
     const combined = "か\u3099";
     expect(
@@ -81,22 +94,42 @@ describe("sanitizePlayerName", () => {
   });
 
   it("Intl.Segmenter非対応環境でも結合文字・ZWJ・国旗を分断しない(#484)", () => {
-    vi.stubGlobal("Intl", { ...Intl, Segmenter: undefined });
+    // `Intl` のプロパティは enumerable でないためスプレッドでは複製できない。
+    // `Intl` をプロトタイプにして `Segmenter` だけを隠し、他の Intl API は残す。
+    vi.stubGlobal(
+      "Intl",
+      Object.create(Intl, { Segmenter: { value: undefined } }),
+    );
     expect(playerNameGraphemes("か\u3099👨‍👩‍👧‍👦🇯🇵")).toEqual([
       "か\u3099",
       "👨‍👩‍👧‍👦",
       "🇯🇵",
     ]);
   });
+});
 
-  it("壊れた入力からlone surrogateを出力しない(#484)", () => {
-    expect(sanitizePlayerName("名前\uD83D")).toBe("名前�");
-    expect(sanitizePlayerName("名前\uD83D")).not.toMatch(/[\uD800-\uDFFF]/u);
+describe("isValidPlayerName", () => {
+  it("12書記素の絵文字名を許可し、13書記素目は拒否する(#484)", () => {
+    expect(isValidPlayerName("😀".repeat(MAX_PLAYER_NAME_LENGTH))).toBe(true);
+    expect(isValidPlayerName("😀".repeat(MAX_PLAYER_NAME_LENGTH + 1))).toBe(
+      false,
+    );
   });
 
-  it("空文字・空白のみはnull(既定名フォールバック用)", () => {
-    expect(sanitizePlayerName("")).toBeNull();
-    expect(sanitizePlayerName("   \n ")).toBeNull();
+  it("修正前のcode unit切り詰めが残したlone surrogateを拒否しない(#484)", () => {
+    // 修正前の `slice(0, 12)` は絵文字を分断し、保存値に半端なサロゲートを残した。
+    // これを不正扱いにすると、`sessionStorage` のジャーナル(進行中の半荘)と
+    // `localStorage` の戦績が読み込み時に丸ごと破棄されてしまう。
+    const legacy = "12345678901😀".slice(0, MAX_PLAYER_NAME_LENGTH);
+    expect(legacy).toMatch(/[\uD800-\uDFFF]/u);
+    expect(isValidPlayerName(legacy)).toBe(true);
+  });
+
+  it("空文字と上限超過は拒否する", () => {
+    expect(isValidPlayerName("")).toBe(false);
+    expect(isValidPlayerName("あ".repeat(MAX_PLAYER_NAME_LENGTH + 1))).toBe(
+      false,
+    );
   });
 });
 
