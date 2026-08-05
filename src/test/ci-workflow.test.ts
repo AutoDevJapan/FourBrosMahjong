@@ -1,8 +1,18 @@
-import { readdirSync, readFileSync } from "node:fs";
-import { resolve } from "node:path";
+import { execFileSync } from "node:child_process";
+import {
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
+import { tmpdir } from "node:os";
+import { join, resolve } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { parse } from "yaml";
 import {
+  changedPaths,
   classifyPath,
   DOCUMENTATION_EXCEPTIONS,
   resolveScope,
@@ -643,5 +653,90 @@ describe("release ワークフローの多重起動制御 (#491)", () => {
       concurrency?.["cancel-in-progress"],
       "Release 作成を中断するとタグと Release が乖離する",
     ).toBe(false);
+  });
+});
+
+/**
+ * 変更ファイルの取得は「この PR 自身が持ち込んだ変更」でなければならない。
+ *
+ * 2 点リーダ (`base..head`) は base 側が進むとその変更まで差分に現れる。本リポジトリは
+ * 複数レーンが並行して main へマージするため、2 点だと**文書のみの PR でも他レーンが
+ * 変更した出荷コードが混ざり、スキップ判定がほぼ発火しなくなる**。CI は緑のまま
+ * 削減効果だけが静かに消えるので、実際の git リポジトリを作って固定する。
+ */
+describe("変更ファイルの取得範囲 (#491)", () => {
+  /** base 側が独自に進んだ状況を再現した一時リポジトリを作る。 */
+  function createRepository(): {
+    dir: string;
+    baseTip: string;
+    head: string;
+  } {
+    const dir = mkdtempSync(join(tmpdir(), "scope-diff-"));
+    const git = (...args: string[]) =>
+      execFileSync("git", args, { cwd: dir, encoding: "utf8" }).trim();
+
+    git("init", "--quiet", "--initial-branch", "main");
+    git("config", "user.email", "test@example.com");
+    git("config", "user.name", "test");
+    git("config", "commit.gpgsign", "false");
+
+    mkdirSync(join(dir, "docs"));
+    mkdirSync(join(dir, "src"));
+    writeFileSync(join(dir, "docs/note.md"), "base\n");
+    writeFileSync(join(dir, "src/app.ts"), "base\n");
+    git("add", "-A");
+    git("commit", "--quiet", "-m", "base");
+
+    // 機能ブランチ: 文書だけを変更する。
+    git("checkout", "--quiet", "-b", "feature");
+    writeFileSync(join(dir, "docs/note.md"), "changed\n");
+    git("commit", "--quiet", "-am", "docs only");
+    const head = git("rev-parse", "HEAD");
+
+    // base 側が別レーンのマージで進み、出荷コードが変わる。
+    git("checkout", "--quiet", "main");
+    writeFileSync(join(dir, "src/app.ts"), "advanced by another lane\n");
+    git("commit", "--quiet", "-am", "unrelated code change on base");
+    const baseTip = git("rev-parse", "HEAD");
+
+    return { dir, baseTip, head };
+  }
+
+  it("base が進んでも、その変更を自分の差分に含めない", () => {
+    const { dir, baseTip, head } = createRepository();
+    const previous = process.cwd();
+    try {
+      process.chdir(dir);
+      const paths = changedPaths(baseTip, head);
+      expect(
+        paths,
+        "merge-base からの差分 (3 点リーダ) でなければ base 側の変更が混ざる",
+      ).toEqual(["docs/note.md"]);
+
+      // 判定結果としても「文書のみ」に落ちること。
+      expect(
+        resolveScope({ job: "ci", paths, postMergeDuplicate: false }).verify,
+        "base 側の出荷コード変更が混ざると、文書のみの PR でもスキップが発火しない",
+      ).toBe(false);
+    } finally {
+      process.chdir(previous);
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it.each([
+    ["base が全 0 (新規ブランチ)", "0".repeat(40), "a".repeat(40)],
+    ["SHA ではない値", "HEAD~1", "HEAD"],
+    ["未定義", undefined, undefined],
+  ])(
+    "%s のときは null を返してフェイルオープンさせる",
+    (_label, base, head) => {
+      expect(changedPaths(base, head)).toBeNull();
+    },
+  );
+
+  it("存在しないリビジョンでも例外にせず null を返す", () => {
+    // git が失敗しても判定 step 全体を落とさない (落ちると job が赤くなる)。
+    expect(changedPaths("0".repeat(39) + "1", "1".repeat(40))).toBeNull();
   });
 });

@@ -135,14 +135,21 @@ export function resolveScope({ job, paths, postMergeDuplicate }) {
 export const SCOPE_OUTPUT_KEYS = /** @type {const} */ (["setup", "verify"]);
 
 /**
- * `git diff --name-only <base>..<head>` で変更ファイルを取得する。
+ * この PR / push が持ち込んだ変更ファイルを取得する。
  * 特定できなければ `null` を返し、呼び出し側でフェイルオープンさせる。
+ *
+ * **3 点リーダ (`...`) を使う理由**: 2 点 (`base..head`) は「base の先端」と「head」の
+ * 単純な差分なので、**base 側が進むとその変更まで差分に現れる**。本リポジトリは
+ * 複数レーンが並行して main へマージするため、2 点だと文書のみの PR でも他レーンが
+ * 変更した出荷コードが混ざり、スキップ判定がほぼ発火しなくなる (実測で確認)。
+ * 3 点は merge-base からの差分 = **この PR 自身が持ち込んだ変更**であり、
+ * GitHub の PR 画面が表示する差分と一致する。
  *
  * @param {string | undefined} baseSha
  * @param {string | undefined} headSha
  * @returns {string[] | null}
  */
-function changedPaths(baseSha, headSha) {
+export function changedPaths(baseSha, headSha) {
   // 新規ブランチへの push では `github.event.before` が全 0 になり、比較対象が無い。
   /** @param {string | undefined} sha */
   const isUsable = (sha) =>
@@ -153,7 +160,7 @@ function changedPaths(baseSha, headSha) {
   try {
     const output = execFileSync(
       "git",
-      ["diff", "--name-only", "-z", `${baseSha}..${headSha}`],
+      ["diff", "--name-only", "-z", `${baseSha}...${headSha}`],
       { encoding: "utf8", maxBuffer: 32 * 1024 * 1024 },
     );
     // `-z` で NUL 区切りにする。パスに改行や非 ASCII (本リポジトリは日本語ファイル名を含む)
