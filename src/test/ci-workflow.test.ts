@@ -400,31 +400,57 @@ describe("変更パスによる実行範囲の絞り込み (#491)", () => {
   );
 
   /**
-   * 依存とブラウザの導入は「検証する」か「キャッシュがまだ無い」ときだけ必要。
+   * ブラウザの導入は「検証する」か「キャッシュがまだ無い」ときだけ必要。
    * マージ後 push でキャッシュが既にヒットしている場合、入れても使わず保存もしないため
-   * 丸ごと無駄になる (#491)。
+   * 丸ごと無駄になる (#491)。実測で 31〜99 秒を占める最大の無駄。
    */
-  it("導入コマンドはキャッシュミス時のみ実行される", () => {
+  it("ブラウザの導入はキャッシュミス時のみ実行される", () => {
     const workflow = readWorkflowFile("ci.yml");
     let checked = 0;
     for (const [jobName, definition] of Object.entries(workflow.jobs ?? {})) {
       for (const step of definition.steps ?? []) {
-        const run = step.run?.trim();
-        if (!run) continue;
-        if (!/pnpm install|playwright install/.test(run)) continue;
+        if (!step.run?.includes("playwright install")) continue;
         checked += 1;
         expect(
           step.if ?? "",
-          `${jobName} / ${step.name}: 検証しない run では cache-hit のときに省略されるべき`,
+          `${jobName} / ${step.name}: 検証しない run では cache-hit のとき省略されるべき`,
         ).toMatch(
           /steps\.scope\.outputs\.verify == 'true' \|\| steps\.[\w-]+\.outputs\.cache-hit != 'true'/,
         );
       }
     }
-    expect(
-      checked,
-      "導入コマンドを 1 つも検出できなかった",
-    ).toBeGreaterThanOrEqual(3);
+    expect(checked, "playwright install を 1 つも検出できなかった").toBe(2);
+  });
+
+  /**
+   * `pnpm exec playwright install` は node_modules を必要とする。
+   * `pnpm install` にブラウザ側より狭い条件を付けると、「pnpm キャッシュはヒットしたが
+   * Playwright キャッシュは外れた」(2 つのキャッシュは同じキーでも LRU で独立に退避
+   * されうる: #380) の組み合わせで **node_modules 無しに playwright install が走って落ちる**。
+   * 実際にこの条件を入れかけたため、順序の前提をテストで固定する。
+   */
+  it("playwright install が走りうる場面では必ず依存が導入されている", () => {
+    const workflow = readWorkflowFile("ci.yml");
+    for (const [jobName, definition] of Object.entries(workflow.jobs ?? {})) {
+      const steps = definition.steps ?? [];
+      const browserInstall = steps.find((step) =>
+        step.run?.includes("playwright install"),
+      );
+      if (!browserInstall) continue;
+      const dependencyInstall = steps.find((step) =>
+        step.run?.includes("pnpm install"),
+      );
+      expect(
+        dependencyInstall,
+        `${jobName}: playwright install の前に pnpm install が無い`,
+      ).toBeDefined();
+      // 依存の導入は `setup` 全体で走らなければならない。ブラウザ側と同じ
+      // cache-hit 条件を付けると、キャッシュが片方だけ外れたときに破綻する。
+      expect(
+        dependencyInstall?.if ?? "",
+        `${jobName}: pnpm install はブラウザ側より狭い条件にしてはならない(node_modules 無しで playwright install が走る)`,
+      ).toBe("steps.scope.outputs.setup == 'true'");
+    }
   });
 
   /**

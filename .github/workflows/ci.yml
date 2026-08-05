@@ -102,10 +102,12 @@ jobs:
           path: ${{ steps.pnpm-store.outputs.path }}
           key: pnpm-store-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
 
-      # マージ後 push は検証しないので node_modules を使わない。キャッシュが既にヒットして
-      # いれば保存する中身も無いため、install 自体を丸ごと省く (#491)。
+      # `setup` のときは常に実行する。後続の `pnpm exec playwright install` が node_modules を
+      # 必要とするため、「pnpm キャッシュはヒットしたが Playwright キャッシュは外れた」
+      # (2 つのキャッシュは同じキーでも LRU で独立に退避されうる: #380) の組み合わせで
+      # node_modules 無しに playwright install が走って落ちる。実測 3 秒なので条件は付けない。
       - name: Install dependencies
-        if: steps.scope.outputs.verify == 'true' || steps.pnpm-cache.outputs.cache-hit != 'true'
+        if: steps.scope.outputs.setup == 'true'
         run: pnpm install --frozen-lockfile
 
       # pnpm store のキーは e2e job と共通のため、保存は ci job のみが行う。
@@ -248,10 +250,12 @@ jobs:
           path: ${{ steps.pnpm-store.outputs.path }}
           key: pnpm-store-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
 
-      # マージ後 push は検証しないので node_modules を使わない。キャッシュが既にヒットして
-      # いれば保存する中身も無いため、install 自体を丸ごと省く (#491)。
+      # `setup` のときは常に実行する。後続の `pnpm exec playwright install` が node_modules を
+      # 必要とするため、「pnpm キャッシュはヒットしたが Playwright キャッシュは外れた」
+      # (2 つのキャッシュは同じキーでも LRU で独立に退避されうる: #380) の組み合わせで
+      # node_modules 無しに playwright install が走って落ちる。実測 3 秒なので条件は付けない。
       - name: Install dependencies
-        if: steps.scope.outputs.verify == 'true' || steps.pnpm-cache.outputs.cache-hit != 'true'
+        if: steps.scope.outputs.setup == 'true'
         run: pnpm install --frozen-lockfile
 
       # ブラウザバイナリ (~/.cache/ms-playwright) を pnpm-lock.yaml のハッシュ (= @playwright/test の
