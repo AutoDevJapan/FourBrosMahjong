@@ -37,11 +37,16 @@ export default defineConfig({
   // `fullyParallel: true` によりローカルでは既定の 50% = 複数 worker で日常的に並列実行
   // されている。つまり並列安全性は確立済みで、CI だけが直列で走っていた。
   //
-  // ローカル実測(同一 spec 群 / `CI=1` / 139 passed・3 skipped、flake 0):
-  //   workers=1 → 136.2s (CPU 130.7s) / workers=2 → 71.8s (CPU 138.2s) / workers=4 → 59.1s (CPU 169.9s)
-  // 2 worker で **1.90 倍**速くなる一方 CPU 総量の増加は +6% に留まる。4 worker は CPU を
-  // +30% 使うため 2 コア runner では競合でタイムアウト耐性を削る。したがって過剰購読は
-  // せず「コア数ぴったり」を指定する。パーセント指定なので runner が増強されれば自動追従する。
+  // ただし **効果は限定的**であることが CI 実測で判明している。ローカル(8 コア)の測定は
+  // 2 コア runner を代表しない — ローカルの「2 worker」は 8 コアを使えるため競合しないが、
+  // 実際の runner では 2 worker が同じ 2 コアを奪い合う。
+  //   ローカル(8 コア): workers=1 → 136.2s / 2 → 71.8s (1.90x) / 4 → 59.1s (2.31x)
+  //   CI(2 コア)     : workers=1 → 266s   / 2 → 243s (1.09x)  ← 実効はこちら
+  // CI では -23 秒に留まる(1 worker + Next dev server で既に CPU がほぼ飽和しているため)。
+  // 劣化も flaky も無いので維持するが、**この設定単体で課金分の切り上げは跨がない**。
+  // 4 worker への過剰購読は CPU が飽和している以上さらなる短縮を見込みにくく、競合で
+  // タイムアウト耐性を削るため採らない。パーセント指定なので runner 増強には自動追従する。
+  // 詳細は docs/品質ツール運用方針.md §7.3。
   workers: process.env.CI ? "100%" : undefined,
   reporter: process.env.CI
     ? [["list"], ["github"], ["html", { open: "never" }]]
