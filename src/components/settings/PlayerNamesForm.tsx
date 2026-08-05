@@ -98,7 +98,7 @@ export function PlayerNamesForm() {
           先頭が自家(あなた)で、残り3人が他家です。空欄のまま保存すると既定名(
           {DEFAULT_NAMES.join("・")})に戻ります。1人あたり
           {MAX_PLAYER_NAME_LENGTH}
-          文字（絵文字や結合文字は見た目の1文字として数えます）までです。変更は次に開始する半荘から反映されます。
+          文字(絵文字や結合文字は見た目の1文字として数えます)までです。変更は次に開始する半荘から反映されます。
         </p>
 
         <div className="flex flex-col gap-3">
