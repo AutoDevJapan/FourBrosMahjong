@@ -54,9 +54,39 @@ describe("ai: 打点温存の赤5判定(issue #490)", () => {
     });
   });
 
+  it("同種で赤フラグだけ違う2枚は6段すべて同点になり、手牌の並び順で決着する", () => {
+    // ADR-0002 優先度6 の「赤の有無は優先度3で分離済みなのでここへ到達しない」は、
+    // **正当な入力に限った話**である。候補の重複除去は赤フラグ込みの識別キーなので、
+    // 仕様外の赤フラグが混じると同じ牌種の赤・非赤が別候補として並び、赤判定を
+    // isRedDora へ寄せた結果 6 段すべて同点になる。決着は Array#sort の安定性による
+    // 候補生成順(= 手牌の並び)で、engine 内では並びが決定的なので seed 再現性は保たれる。
+    // 修正前は赤フラグ側に +2 が付いて分離されるため、並びに関わらず非赤が切られていた。
+    const PLAIN_MAN1: Tile = { suit: "man", rank: 1, isRed: false };
+    // 2向聴以遠(受け入れゲート外)で、外側度が最大かつ最小 tileKey が man-1 になる手牌。
+    const rest = () => parseTiles("1479p 25p 145799s");
+    expect(rest()).toHaveLength(12);
+
+    const redFirst = chooseDiscard({
+      tiles: [FAKE_RED_MAN1, PLAIN_MAN1, ...rest()],
+    });
+    const plainFirst = chooseDiscard({
+      tiles: [PLAIN_MAN1, FAKE_RED_MAN1, ...rest()],
+    });
+    for (const chosen of [redFirst, plainFirst]) {
+      expect({ suit: chosen.suit, rank: chosen.rank }).toEqual({
+        suit: "man",
+        rank: 1,
+      });
+    }
+    expect(redFirst.isRed).toBe(true);
+    expect(plainFirst.isRed).toBe(false);
+  });
+
   it("正当な赤5(5筒)は従来どおり +2 で温存される(対照)", () => {
     // 上のテストが「赤判定を丸ごと消す」実装でも通ってしまわないよう、+2 が
-    // 生きていることを同じ比較キー段で固定する。
+    // 生きていることを同じ比較キー段で固定する(`ai.adr-contract.test.ts` の
+    // 「第3キー = 打点温存」も同じ性質を別の手牌で固定している。片方の意図を
+    // 変えるときはもう片方も見直すこと)。
     // 111m 999m 東東東 南南南 = 4面子。残り 5p(赤)/ 7s の単騎二択で、向聴・受け入れ
     // (どちらも数牌と繋がらない孤立単騎で 3 枚)・安全度・外側度(ともに中張牌で 0)が
     // 同点。温存価値だけが差になり、これを外すと辞書順(pin-5 < sou-7)で赤5筒が切られる。

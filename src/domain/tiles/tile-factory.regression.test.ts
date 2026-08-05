@@ -112,6 +112,9 @@ const redFiveRule = () => /RED_FIVE_SUITS|\brank\s*===\s*5\b/g;
  * ⚠️ 構文解析ではなく字面の走査なので、`const { isRed } = tile;`(分割代入)や
  * `Object.entries(tile)` 経由の読み出し、別名への束縛はすり抜ける
  * (分割代入はドメインに限り {@link tileLiteral} の `isRed }` が拾う)。
+ * 逆に `{ ["isRed"]: true }` のような計算プロパティキーは**組み立て**なのに直読みとして
+ * 報告される(現状 `src` に該当は無く、添字記法の分岐は純粋に防御的)。偽陽性が出ても
+ * 人間が許可リストで裁定できるので、検出器はここでは緩めない。
  * {@link tileLiteral} / {@link redFiveRule} と同じく**多層防御の1枚**であって、
  * 単体で完全性を主張するものではない。下の許可リストが「完全一致」で固定するのは
  * **この検出器が見える範囲**であり、赤扱いの全経路ではない。
@@ -125,10 +128,12 @@ const rawIsRedRead = () => /\.isRed\b|\[\s*["']isRed["']\s*\]/g;
  * 新しい直読みが増えれば余分な要素として、ここから根拠を消せば不足要素として落ちる。
  * 1行に2回読む箇所は**同じ要素が2回**並ぶ(既存行に読み出しを足しても検出される)。
  *
- * 鍵に**行の字面**を使っているので、対象行の折り返し位置が変わる(整形・リネーム)と
- * ここも直す必要がある。行そのものを鍵にするのは、許可の可否が「どう使っているか」で
- * 決まり、パスやマッチ文字列だけでは判断できないため。失敗時は検出結果の全行を
- * メッセージに出すので、差し替えは目視で完結する。
+ * 鍵に**行の字面**(正確には {@link stripComments} 適用後の行)を使っているので、対象行の
+ * 折り返し位置が変わる(整形・リネーム)とここも直す必要がある。行内コメントを含む行は
+ * その部分が空白へ潰れるため実ソース行と一字一句同じにはならないが、検出結果と許可リストは
+ * 同じ変換後テキストを見るので自己整合する。行そのものを鍵にするのは、許可の可否が
+ * 「どう使っているか」で決まり、パスやマッチ文字列だけでは判断できないため。失敗時は
+ * 対称差(余分 / 不足)をメッセージに出すので、差し替えは目視で完結する。
  */
 const ALLOWED_RAW_IS_RED_READS: readonly string[] = [
   // 牌の同一性比較・識別キー。赤フラグの値そのものを見る(赤ドラの意味づけではない)。
@@ -195,49 +200,46 @@ function productionFiles(roots: readonly string[]): string[] {
   return out;
 }
 
-/** `text` 中の位置 `index` を含む1行(前後を改行で切り出して trim)。 */
+/**
+ * `text` 中の位置 `index` を含む1行(前後を改行で切り出して trim)。
+ *
+ * `index` が改行直後でも末尾行(終端に改行が無い)でも、その位置を含む行を返す。
+ * 許可リストの鍵そのものを作る関数なので、境界のずれは許可リスト全体を壊す。
+ */
 function lineAt(text: string, index: number): string {
   const start = text.lastIndexOf("\n", index) + 1;
   const end = text.indexOf("\n", index);
   return text.slice(start, end === -1 ? undefined : end).trim();
 }
 
-/** {@link scan} が呼び出し側へ渡すマッチ情報。鍵の作り方だけが検出器ごとに違う。 */
-interface Hit {
-  /** マッチした文字列そのもの(例: `.isRed`)。 */
-  readonly match: string;
-  /** マッチ開始位置を含む1行。「どう使っているか」を判断する用。 */
-  readonly line: string;
-}
-
 /**
  * 走査対象から `re` にマッチする箇所を集め、`path: <keyOf の結果>` 形式で返す。
  *
- * 走査はファイル全文に対して行う(行ごとに分けない)。`tileLiteral` の `\s*` は改行にも
- * 当たるため、`{ suit, rank, isRed\n}` のように折り返された組み立てを行単位の走査では
- * 取りこぼすため。
+ * 走査はファイル**全文**に対して行う(行ごとに分けない)。{@link tileLiteral} の `\s*` は
+ * 改行にも当たるため、`{ suit, rank, isRed\n}` のように折り返された組み立ては行単位の
+ * 走査では取りこぼす。この性質は「検出器そのものが違反例を捕まえる(正例)」テストが固定する。
+ *
+ * 鍵の作り方だけが検出器ごとに違うので、`keyOf` にマッチと全文を渡して呼び出し側へ委ねる
+ * (行が要らない検査で {@link lineAt} を無駄に走らせない)。
  */
 function scan(
   re: () => RegExp,
   roots: readonly string[],
-  keyOf: (hit: Hit) => string,
+  keyOf: (match: RegExpMatchArray, text: string) => string,
 ): string[] {
   const found: string[] = [];
   for (const rel of productionFiles(roots)) {
     if (rel === FACTORY) continue;
     const text = stripComments(readFileSync(join(SRC, rel), "utf8"));
-    for (const m of text.matchAll(re())) {
-      found.push(
-        `${rel}: ${keyOf({ match: m[0], line: lineAt(text, m.index ?? 0) })}`,
-      );
-    }
+    for (const m of text.matchAll(re()))
+      found.push(`${rel}: ${keyOf(m, text)}`);
   }
   return found;
 }
 
 /** 「どこかに違反がある」だけを見る検査用。マッチ文字列を鍵にする。 */
 function offenders(re: () => RegExp, roots: readonly string[]): string[] {
-  return scan(re, roots, (hit) => hit.match);
+  return scan(re, roots, (m) => m[0]);
 }
 
 /**
@@ -247,7 +249,16 @@ function offenders(re: () => RegExp, roots: readonly string[]): string[] {
  * 1行に複数マッチがあれば同じ要素が複数回並ぶ(既存行への読み出し追加も差分に出る)。
  */
 function offenderLines(re: () => RegExp, roots: readonly string[]): string[] {
-  return scan(re, roots, (hit) => hit.line);
+  return scan(re, roots, (m, text) => {
+    // `matchAll` は必ず index を持つが型上は任意。既定値で埋めると 1 行目を指す鍵が
+    // 静かに作られるので、黙って誤魔化さず落とす。
+    if (m.index === undefined) {
+      throw new Error(
+        "matchAll がマッチ位置を返さない(走査の前提が壊れている)",
+      );
+    }
+    return lineAt(text, m.index);
+  });
 }
 
 /** 多重集合としての対称差を「+ 余分 / − 不足」で並べる(失敗時の直しやすさのため)。 */
@@ -342,6 +353,9 @@ describe("牌ファクトリの単一起点(issue #375)", () => {
     expect("return { suit, rank, isRed: false };").toMatch(tileLiteral());
     expect("return { suit, rank, isRed };").toMatch(tileLiteral()); // shorthand
     expect("const t = { suit, isRed, rank };").toMatch(tileLiteral()); // 末尾以外
+    // `\s*` は改行にも当たる。{@link scan} を行単位ループへ書き換えると、この形の
+    // 折り返された組み立てを取りこぼす(本番コードに現存しないので他のテストは落ちない)。
+    expect("return { suit, rank, isRed\n};").toMatch(tileLiteral());
     expect("RED_FIVE_SUITS.has(suit)").toMatch(redFiveRule());
     expect("rank === 5 && isRedSuit(suit)").toMatch(redFiveRule());
     expect("if (tile.isRed) v += 2;").toMatch(rawIsRedRead()); // #490 の違反そのもの
@@ -375,6 +389,24 @@ describe("牌ファクトリの単一起点(issue #375)", () => {
     );
   });
 
+  it("lineAt は先頭・改行直後・末尾行(改行なし)で正しい行を返す", () => {
+    // 許可リストの鍵そのものを作る関数。境界を1文字ずらすと許可リスト全体が壊れる。
+    const text = "a.isRed;\nb.isRed;\nc.isRed;";
+    expect(lineAt(text, 0)).toBe("a.isRed;");
+    expect(lineAt(text, text.indexOf("b"))).toBe("b.isRed;");
+    expect(lineAt(text, text.indexOf("c"))).toBe("c.isRed;");
+  });
+
+  it("multisetDiff は余分・不足を多重度込みで並べる", () => {
+    // 失敗メッセージ専用なので判定には効かず、壊れても他のテストは落ちない。
+    expect(multisetDiff(["a", "a", "b"], ["a", "c"])).toEqual([
+      "+ 許可されていない直読み: a",
+      "+ 許可されていない直読み: b",
+      "- 許可リストに残っている根拠なし: c",
+    ]);
+    expect(multisetDiff(["a"], ["a"])).toEqual([]);
+  });
+
   it("コメント除去で行の対応が崩れない(許可リストの鍵の安定性)", () => {
     // ブロックコメントを丸ごと削ると前後の行が連結され、`ALLOWED_RAW_IS_RED_READS` の
     // 鍵が「実ソースに存在しない行」になる。改行を保存していることを直接固定する。
@@ -399,13 +431,19 @@ describe("牌ファクトリの単一起点(issue #375)", () => {
     // 違反を塞ぐ。完全一致で比較するので、許可リストは常に現実と一致していなければならない
     // (根拠を消せば不足、新しい直読みが増えれば余分として、どちらでも落ちる)。
     const found = offenderLines(rawIsRedRead, RED_FIVE_ROOTS);
+    const actual = [...found].sort();
+    const expected = [...ALLOWED_RAW_IS_RED_READS].sort();
+    // 差分の整形は不一致のときだけ行う(第2引数は毎回評価されるため)。
+    const diff =
+      actual.join("\n") === expected.join("\n")
+        ? ""
+        : multisetDiff(found, ALLOWED_RAW_IS_RED_READS).join("\n");
     expect(
-      [...found].sort(),
+      actual,
       `赤ドラとしての意味づけは isRedDora(${FACTORY})に委ねてください。\n` +
         "フラグの値そのものを扱う正当な用途なら、理由を添えて " +
-        "ALLOWED_RAW_IS_RED_READS へ追記してください(issue #490)。\n" +
-        multisetDiff(found, ALLOWED_RAW_IS_RED_READS).join("\n"),
-    ).toEqual([...ALLOWED_RAW_IS_RED_READS].sort());
+        `ALLOWED_RAW_IS_RED_READS へ追記してください(issue #490)。\n${diff}`,
+    ).toEqual(expected);
   });
 
   it("ドメイン・表示層とも tiles/tile.ts 以外で赤5判定を再実装しない", () => {
