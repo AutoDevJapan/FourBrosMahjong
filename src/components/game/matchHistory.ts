@@ -188,9 +188,42 @@ export type HistoryPersistenceResult = "appended" | "already-exists" | "failed";
 /** Web Locks で使う origin 内共通名。戦績 JSON の read-modify-write 全体を直列化する。 */
 const MATCH_HISTORY_LOCK = "four-bros-mahjong.history.write.v1";
 
-/** テストで決定的な lock manager を注入できる最小インターフェース。 */
+/**
+ * lock 取得を諦めるまでの上限時間(ms)。追記・削除で共通(issue #488)。
+ *
+ * `navigator.locks.request` は待ち時間の上限を持たないため、別タブがフリーズした・
+ * bfcache へ入った等で lock を保持し続けると、追記も削除も永遠に完了しない。
+ *
+ * 正常系の保持時間は「localStorage の getItem → JSON.parse → setItem」1往復ぶん
+ * (128KB 上限 = ミリ秒未満)であり、この値はその数千倍にあたる。したがって
+ * ここに到達するのは競合ではなく異常事態であり、待たせ続けるより失敗として
+ * 案内した方が利用者は次の行動(タブを閉じる・再試行)を選べる。
+ */
+export const HISTORY_LOCK_TIMEOUT_MS = 3_000;
+
+/**
+ * `navigator.locks.request` の options のうち、この実装が使う部分。
+ *
+ * 実 API は `mode` / `ifAvailable` / `steal` も取るが、戦績の排他は「排他モードで
+ * 上限時間つきに待つ」以外を必要としないため `signal` だけをモデル化する。
+ * `signal` の中断は**待機中にのみ**効き、lock 取得後の中断は無視される(実 API と同じ)。
+ */
+export interface HistoryLockOptions {
+  readonly signal: AbortSignal;
+}
+
+/**
+ * テストで決定的な lock manager を注入できる最小インターフェース。
+ *
+ * 実 API と同じ options 形式(`request(name, options, callback)`)で受ける。
+ * 2引数形式しか表現できないと `signal` を渡す先が無く、上限時間を持てない(#488)。
+ */
 export interface HistoryLockManager {
-  request<T>(name: string, callback: () => T | PromiseLike<T>): Promise<T>;
+  request<T>(
+    name: string,
+    options: HistoryLockOptions,
+    callback: () => T | PromiseLike<T>,
+  ): Promise<T>;
 }
 
 /**
@@ -207,6 +240,54 @@ function resolveLockManager(
   return typeof navigator !== "undefined" && navigator.locks !== undefined
     ? (navigator.locks as HistoryLockManager)
     : null;
+}
+
+/**
+ * 戦績 lock の排他区間で `callback` を実行する。取得できないまま
+ * `HISTORY_LOCK_TIMEOUT_MS` を過ぎたら待機を中断し、`onUnavailable()` の値を返す(#488)。
+ *
+ * 中断は `AbortSignal` で行う。`AbortSignal.timeout` ではなく `AbortController` +
+ * `setTimeout` を使うのは、テストが偽タイマーで上限時間そのものを決定的に固定できる
+ * ようにするため(`AbortSignal.timeout` の内部タイマーは差し替えられない)。
+ *
+ * **上限時間は「取得できるまで」にだけ掛ける。** lock を取得した時点(callback の先頭)で
+ * タイマーを解除するので、排他区間の実行が上限時間より長引いても中断されない。仕様上は
+ * 取得後の abort が無視されるため `finally` の解除だけでも足りるが、取得と上限時間が
+ * 競り合った瞬間の挙動を実装依存にしない ─ もし取得後の abort で要求が失敗する実装が
+ * あると、削除は「消えているのに失敗として案内する」最悪の形になる。
+ * `finally` の解除は取得できなかった経路のために残す。
+ */
+async function withHistoryLock<T>(
+  lockManager: HistoryLockManager,
+  callback: () => T,
+  onUnavailable: () => T,
+): Promise<T> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => {
+    controller.abort(
+      new DOMException(
+        `history lock was not acquired within ${HISTORY_LOCK_TIMEOUT_MS}ms`,
+        "TimeoutError",
+      ),
+    );
+  }, HISTORY_LOCK_TIMEOUT_MS);
+  try {
+    return await lockManager.request(
+      MATCH_HISTORY_LOCK,
+      { signal: controller.signal },
+      () => {
+        // 取得できた = 上限時間の役目は終わり。以降は中断しない。
+        clearTimeout(timer);
+        return callback();
+      },
+    );
+  } catch {
+    // 中断(上限時間超過)と lock API 自体の失敗を同じ「排他できなかった」に畳む。
+    // callback は例外を投げない(内部で握り潰す)ため、ここへ来るのは取得側の失敗のみ。
+    return onUnavailable();
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 /**
@@ -268,6 +349,13 @@ export function persistHistory(
  * スナップショットで上書きしない。lock API が無い・取得処理が失敗した場合は、保存成功を
  * 偽らず `failed` とする。GameProvider は既存の復旧導線（終局 journal の再読込）と
  * 保存失敗表示を維持するため、無排他の危険な書き込みへはフォールバックしない。
+ *
+ * **追記の fail-closed は削除の fail-open(`clearHistoryAcrossTabs` / ADR-0004)の前提**
+ * である。排他 API が無いオリジンでは追記が一切成功しないからこそ、同じ環境の削除には
+ * 競合する writer が存在しない。ここを fail-open へ変えるなら削除側も見直すこと。
+ *
+ * 別タブが lock を保持し続ける場合は `HISTORY_LOCK_TIMEOUT_MS` で待機を打ち切り `failed`
+ * とする(#488)。終局済みジャーナルは残るため、リロード復元時に同じ seed で再追記される。
  */
 export async function persistHistoryAcrossTabs(
   storage: Storage,
@@ -276,8 +364,9 @@ export async function persistHistoryAcrossTabs(
 ): Promise<HistoryPersistenceResult> {
   const lockManager = resolveLockManager(locks);
   if (lockManager === null) return "failed";
-  try {
-    return await lockManager.request(MATCH_HISTORY_LOCK, () => {
+  return withHistoryLock(
+    lockManager,
+    () => {
       const result = persistHistory(storage, entry);
       if (result === "failed") return result;
       // lock callback 内で再読込し、自分の結果が実際に残っている場合だけ成功を返す。
@@ -286,10 +375,9 @@ export async function persistHistoryAcrossTabs(
       )
         ? result
         : "failed";
-    });
-  } catch {
-    return "failed";
-  }
+    },
+    () => "failed",
+  );
 }
 
 /** 保存内容を実際に追記した場合だけ true を返す従来API。 */
@@ -320,30 +408,65 @@ export function clearHistory(storage: Storage): boolean {
 }
 
 /**
+ * 全件削除の結果。失敗は理由で区別する(issue #489)。
+ *
+ * 「排他できなかった」と「ストレージを操作できなかった」では利用者が取るべき行動が
+ * 違う(前者は他タブを閉じて再試行、後者はブラウザのストレージ設定の確認)ため、
+ * boolean へ畳まず理由を返す。
+ */
+export type HistoryClearResult =
+  /** 削除して、読み戻しても空であることを確認できた。 */
+  | "cleared"
+  /** lock を取得できなかった(別タブが保持中 / 上限時間超過)。保存内容は変えていない。 */
+  | "lock-busy"
+  /** `removeItem` が失敗した、または削除後も履歴が残っている。 */
+  | "storage-failed";
+
+/**
+ * 戦績を消去し、読み戻して実際に空になったことまで確認する。
+ *
+ * `removeItem` が例外を投げずに無視される Storage でも「削除しました」と案内しない。
+ * 例外は内部で握り潰すため、この関数は決して throw しない(排他区間の callback として
+ * 使うため。`withHistoryLock` の catch が lock 失敗と混ざらないようにする)。
+ */
+function clearAndVerify(storage: Storage): HistoryClearResult {
+  if (!clearHistory(storage)) return "storage-failed";
+  return loadHistory(storage).length === 0 ? "cleared" : "storage-failed";
+}
+
+/**
  * 複数タブの終局保存と競合せずに戦績を全件削除する。
  *
  * 追記と同じ Web Lock に参加し、writer が読んだ古い snapshot から削除済み履歴を
- * 復活させる lost update を防ぐ。排他を保証できない環境では削除成功を偽らない。
+ * 復活させる lost update を防ぐ(#482)。lock を取得できなかった場合は削除成功を
+ * 偽らず `"lock-busy"` を返す ─ 別タブが現に保持している可能性があるため
+ * (別タブが保持し続ける場合は `HISTORY_LOCK_TIMEOUT_MS` で待機を打ち切る / #488)。
  *
- * 追記側と同じく lock 内で読み直し、**読み戻した履歴が空になった場合だけ** `true` を
- * 返す。`removeItem` が例外を投げずに無視される Storage でも「削除しました」と案内しない。
+ * **例外は「Web Locks API そのものが無い環境」**(非セキュアコンテキスト = 平文 http)。
+ * このときだけ lock 無しで削除する(fail-open / ADR-0004 / #489)。根拠:
+ *
+ * - secure context の判定はオリジン単位で、`localStorage` の分離単位も同じオリジン。
+ *   つまり同じ戦績を共有するタブは全て同じ判定になる。
+ * - `navigator.locks` が無いオリジンでは `persistHistoryAcrossTabs` が必ず `"failed"`
+ *   を返す(追記は fail-closed のまま)。したがって**削除と競合する writer は存在し得ない**。
+ * - 削除はユーザーが明示要求する操作であり、排他できないことを理由に拒み続けると
+ *   「自分のデータを消せない」状態が固定される。
+ *
+ * この安全性は追記側の fail-closed に依存する。追記を fail-open へ変える場合は
+ * ここも同時に見直すこと(ADR-0004)。
  */
 export async function clearHistoryAcrossTabs(
   storage: Storage,
   locks?: HistoryLockManager | null,
-): Promise<boolean> {
+): Promise<HistoryClearResult> {
   const lockManager = resolveLockManager(locks);
-  if (lockManager === null) return false;
-  try {
-    return await lockManager.request(MATCH_HISTORY_LOCK, () => {
-      if (!clearHistory(storage)) return false;
-      // lock 内で読み直し、実際に空になった場合だけ成功を返す(追記側と対称)。
-      // 削除できていないのに「削除しました」と案内すると実態と食い違う。
-      return loadHistory(storage).length === 0;
-    });
-  } catch {
-    return false;
-  }
+  if (lockManager === null) return clearAndVerify(storage);
+  return withHistoryLock(
+    lockManager,
+    // lock 内で読み直し、実際に空になった場合だけ成功を返す(追記側と対称)。
+    () => clearAndVerify(storage),
+    () => "lock-busy",
+  );
 }
 
 // ---------------------------------------------------------------------------
