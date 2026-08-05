@@ -56,11 +56,19 @@ export interface MatchHistoryEntry {
 /** 4兄弟の人数(保存レコードの `players` 長の不変条件)。 */
 const PLAYER_COUNT = 4;
 /**
- * 想定外に長い名前(改竄・破損)を拒否する上限。
- * ユーザー設定の上限は12文字(`MAX_PLAYER_NAME_LENGTH` / #291)なので、
- * 正規の名前は必ず収まる。ここは防御用に余裕を持たせた値。
+ * 想定外に長い名前(改竄・破損)を拒否する上限(UTF-16 code unit)。
+ *
+ * ユーザー設定の上限は12**書記素クラスタ**(`MAX_PLAYER_NAME_LENGTH` / #291, #484)。
+ * 1書記素は ZWJ列や tag sequence で十数 code unit になり得る(家族絵文字1つ = 11、
+ * tag sequence の地域旗1つ = 14)ため、書記素数から code unit 数は一意に決まらない。
+ * 12書記素がどんな構成でも確実に収まる余裕として 12×32 を取る。
+ *
+ * 設定側の上限そのものは**意図的にここへ持ち込まない**。戦績は確定済みの表示
+ * スナップショットであり、設定フォームの入力規則を再適用する場所ではない。
+ * `MAX_PLAYER_NAME_LENGTH` を将来下げたときに保存済みの戦績が全件無効化される
+ * (`parseHistory` が null を返し `loadHistory` が保存キーごと削除する)のを避ける。
  */
-const MAX_NAME_LENGTH = 32;
+const MAX_NAME_LENGTH = 12 * 32;
 /**
  * `Date` が表現できる epoch ミリ秒の上限(±8.64e15)。
  * `Number.isSafeInteger` だけでは 2^53-1 まで通ってしまい、`new Date()` が

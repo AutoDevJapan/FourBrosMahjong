@@ -30,6 +30,15 @@ export const PLAYER_NAMES_STORAGE_KEY = "four-bros-mahjong.playerNames.v1";
  */
 export const MAX_PLAYER_NAME_LENGTH = 12;
 
+/**
+ * 書記素分割にかける入力の UTF-16 code unit 上限。
+ *
+ * `Intl.Segmenter` は入力長に比例したコストを払うので、数MBの貼り付けや改竄された
+ * 保存値をそのまま渡すと分割だけで描画が止まる。1書記素は ZWJ列や tag sequence でも
+ * 十数 code unit に収まるため、上限の32倍あれば正規の名前は必ず通る。
+ */
+const MAX_PLAYER_NAME_CODE_UNITS = MAX_PLAYER_NAME_LENGTH * 32;
+
 /** 不正な UTF-16 を U+FFFD へ置換し、サロゲートペアを分断しない文字列にする。 */
 function toWellFormed(value: string): string {
   let result = "";
@@ -54,7 +63,18 @@ const extendsPreviousGrapheme = (value: string) =>
   /[\uFE0E\uFE0F]/u.test(value) ||
   /[\u{1F3FB}-\u{1F3FF}]/u.test(value);
 
-/** `Intl.Segmenter` 非対応環境向けの決定的 fallback。 */
+/**
+ * `Intl.Segmenter` 非対応環境向けの決定的 fallback。
+ *
+ * 表示名の切り詰め(UAX#29 の近似)に必要な範囲だけを扱う ─ 結合文字(`\p{Mark}`)、
+ * variation selector、emoji modifier(skin tone)、ZWJ列、国旗(regional indicator)ペア。
+ *
+ * 次は UAX#29 と一致しない: tag sequence の地域旗(🏴󠁧󠁢󠁥󠁮󠁧󠁿)、分解ハングル(L+V+T)、
+ * CRLF、Indic の virama 合字、タイ語 SARA AM、ZWNJ。いずれも過剰分割side(1書記素を
+ * 複数と数える)なので上限が厳しくなるだけで、サロゲート分断は起きない。
+ * `Intl.Segmenter` は2020年以降の全ブラウザにあり本経路は実質到達しないため、
+ * 完全な UAX#29 実装は持たない。**汎用の書記素分割としては転用しないこと。**
+ */
 function fallbackGraphemes(value: string): string[] {
   const result: string[] = [];
   for (const point of value) {
@@ -91,7 +111,10 @@ export function playerNameGraphemes(value: string): string[] {
  * (#484 修正前の code unit 切り詰めが残した半端なサロゲートは U+FFFD へ寄せられる)。
  */
 export function limitPlayerName(value: string): string {
-  return playerNameGraphemes(value).slice(0, MAX_PLAYER_NAME_LENGTH).join("");
+  // 先頭12書記素しか使わないので、巨大な貼り付けは分割前に code unit で切り落とす。
+  return playerNameGraphemes(value.slice(0, MAX_PLAYER_NAME_CODE_UNITS))
+    .slice(0, MAX_PLAYER_NAME_LENGTH)
+    .join("");
 }
 
 /**
@@ -103,10 +126,14 @@ export function limitPlayerName(value: string): string {
  * これを不正として弾くと、#484 に当たったユーザーだけが進行中の半荘を失う。
  * 表示名は Wall/RNG・操作列の再生結果に影響しないので、拒否ではなく読み込み側で
  * `limitPlayerName` により U+FFFD へ正規化して受け入れる(v1→v2 移行と同じ方針)。
+ *
+ * 巨大入力は書記素分割へ渡す前に code unit 長で O(1) 却下する(改竄されたジャーナルに
+ * 50万文字の名前を仕込まれても、分割コストを払わずに拒否できる)。
  */
 export function isValidPlayerName(value: string): boolean {
   return (
     value.length > 0 &&
+    value.length <= MAX_PLAYER_NAME_CODE_UNITS &&
     playerNameGraphemes(value).length <= MAX_PLAYER_NAME_LENGTH
   );
 }

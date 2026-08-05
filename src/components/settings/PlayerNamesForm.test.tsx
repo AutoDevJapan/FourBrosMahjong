@@ -94,15 +94,48 @@ describe("PlayerNamesForm", () => {
     expect(input.value).toHaveLength(MAX_PLAYER_NAME_LENGTH);
   });
 
-  it("入力欄も保存処理と同じ書記素単位で絵文字を制限する(#484)", () => {
+  it("入力欄も保存処理と同じ書記素単位で絵文字を制限する(#484)", async () => {
+    const user = userEvent.setup();
     render(<PlayerNamesForm />);
     const input = inputFor("対局者2");
     const withinLimit = `${"あ".repeat(11)}😀`;
 
-    fireEvent.change(input, { target: { value: `${withinLimit}超過` } });
+    // 貼り付けで検証する。`fireEvent.change` はネイティブの `maxlength` を素通しするため、
+    // 上限がJS側で効いていることの証拠にならない。
+    await user.clear(input);
+    await user.click(input);
+    await user.paste(`${withinLimit}超過`);
 
     expect(input).toHaveValue(withinLimit);
     expect(input.value).not.toMatch(/[\uD800-\uDFFF]/u);
+  });
+
+  it("IME変換中は上限で切り詰めず、確定時に適用する(#484)", () => {
+    render(<PlayerNamesForm />);
+    const input = inputFor("対局者2");
+    // 確定後は8書記素でも、読みは13書記素ある。変換中に切り詰めると変換が壊れる。
+    const reading = "にほんごにゅうりょくてすと";
+    const converted = "日本語入力テスト";
+
+    fireEvent.compositionStart(input);
+    fireEvent.change(input, { target: { value: reading } });
+    expect(input, "変換中は読みをそのまま保持する").toHaveValue(reading);
+
+    fireEvent.change(input, { target: { value: converted } });
+    fireEvent.compositionEnd(input, { target: { value: converted } });
+    expect(input).toHaveValue(converted);
+  });
+
+  it("変換確定後に上限を超えた文字列は切り詰める(#484)", () => {
+    render(<PlayerNamesForm />);
+    const input = inputFor("対局者2");
+    const tooLong = "あ".repeat(MAX_PLAYER_NAME_LENGTH + 3);
+
+    fireEvent.compositionStart(input);
+    fireEvent.change(input, { target: { value: tooLong } });
+    fireEvent.compositionEnd(input, { target: { value: tooLong } });
+
+    expect(input.value).toHaveLength(MAX_PLAYER_NAME_LENGTH);
   });
 
   it("グループと各入力がアクセシブルな名前を持つ(スペック5 5.2)", () => {

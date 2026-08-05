@@ -21,7 +21,7 @@
  * - 空欄は既定名へフォールバックする旨を `aria-describedby` の説明文で事前に伝える。
  */
 
-import { useId, useState, useSyncExternalStore } from "react";
+import { useId, useRef, useState, useSyncExternalStore } from "react";
 import { localStorageOrNull } from "@/components/common/browserStorage";
 import {
   DEFAULT_NAMES,
@@ -53,10 +53,15 @@ export function PlayerNamesForm() {
   const [draft, setDraft] = useState<PlayerNames | null>(null);
   const [status, setStatus] = useState<SaveStatus>({ kind: "idle" });
   const values = draft ?? saved;
+  // IME変換中(未確定)かどうか。ネイティブの `maxlength` は未確定文字列に適用されず
+  // 確定時に初めて効くが、React の `onChange` は未確定入力でも発火する。ここで
+  // 切り詰めてしまうと「日本語入力テスト」(確定後8書記素)のように**読みだけが上限を
+  // 超える**入力で変換が壊れるため、確定するまでは上限を当てない(#484)。
+  const composing = useRef(false);
 
-  const updateAt = (index: number, value: string) => {
+  const updateAt = (index: number, value: string, isComposing: boolean) => {
     const next = [...values] as unknown as [string, string, string, string];
-    next[index] = limitPlayerName(value);
+    next[index] = isComposing ? value : limitPlayerName(value);
     setDraft(next);
     setStatus({ kind: "idle" });
   };
@@ -107,7 +112,16 @@ export function PlayerNamesForm() {
                   value={values[index]}
                   autoComplete="off"
                   aria-describedby={hintId}
-                  onChange={(event) => updateAt(index, event.target.value)}
+                  onCompositionStart={() => {
+                    composing.current = true;
+                  }}
+                  onCompositionEnd={(event) => {
+                    composing.current = false;
+                    updateAt(index, event.currentTarget.value, false);
+                  }}
+                  onChange={(event) =>
+                    updateAt(index, event.target.value, composing.current)
+                  }
                   className="w-full rounded-lg border border-control-border bg-transparent px-3 py-2 text-base"
                 />
               </div>

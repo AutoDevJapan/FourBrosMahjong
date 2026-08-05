@@ -80,7 +80,14 @@ describe("GameProvider 対局者名の反映 (#291)", () => {
     storeNames([unicodeName, "B", "C", "D"]);
 
     expect(renderNames()).toContain(unicodeName);
+
+    // リロード相当。設定を差し替えることで、2回目の描画が localStorage の読み直しではなく
+    // sessionStorage のジャーナル復元を通っていることを確定させる。
     cleanup();
-    expect(renderNames()).toContain(unicodeName);
+    storeNames(["別人1", "別人2", "別人3", "別人4"]);
+    const after = renderNames();
+
+    expect(after).toContain(unicodeName);
+    expect(after).not.toContain("別人1");
   });
 });
