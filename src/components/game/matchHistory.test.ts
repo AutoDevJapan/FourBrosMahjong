@@ -435,26 +435,34 @@ describe("match history persistence (#293)", () => {
       const storage = new MemoryStorage();
       appendHistory(storage, entry(1));
       // lock はすぐ取得できるが、解放(= request の解決)が上限時間より後になる manager。
-      const slow: HistoryLockManager = {
+      // **取得後の abort を無視しない**(= 仕様どおりに振る舞わない実装)ことで、
+      // 「取得できた時点でタイマーを解除する」実装だけが成功する状況を作る。
+      // signal を捨てる manager だと、タイマーを解除しなくてもテストが通ってしまう。
+      const abortsAfterGrant: HistoryLockManager = {
         request: <T>(
           _name: string,
-          _options: HistoryLockOptions,
+          options: HistoryLockOptions,
           callback: () => T | PromiseLike<T>,
         ) =>
-          Promise.resolve(callback()).then(
-            (value) =>
-              new Promise<T>((resolve) => {
-                setTimeout(() => resolve(value), HISTORY_LOCK_TIMEOUT_MS * 2);
-              }),
-          ),
+          new Promise<T>((resolve, reject) => {
+            // 取得 = その場で排他区間を実行する。
+            const value = callback();
+            options.signal.addEventListener(
+              "abort",
+              () => reject(options.signal.reason),
+              { once: true },
+            );
+            setTimeout(() => resolve(value as T), HISTORY_LOCK_TIMEOUT_MS * 2);
+          }),
       };
 
-      const clearing = clearHistoryAcrossTabs(storage, slow);
+      const clearing = clearHistoryAcrossTabs(storage, abortsAfterGrant);
       // 取得できた時点でタイマーは解除済み(上限時間は「取得できるまで」に掛かる)。
       await vi.advanceTimersByTimeAsync(HISTORY_LOCK_TIMEOUT_MS);
       expect(loadHistory(storage)).toEqual([]);
 
       await vi.advanceTimersByTimeAsync(HISTORY_LOCK_TIMEOUT_MS);
+      // 解除し損ねると「削除は済んでいるのに lock-busy と案内する」最悪形になる。
       expect(await clearing).toBe("cleared");
     });
 

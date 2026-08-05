@@ -279,8 +279,10 @@ describe("MatchHistoryList (#293)", () => {
     fireEvent.click(confirmButton);
 
     // 視覚(ラベル)は即座に、読み上げ(role="status")は待たされたときだけ伝える。
-    const busy = await screen.findByRole("button", { name: "削除しています…" });
+    // 「まだ読み上げていない」判定は猶予(150ms)との実時間レースになるため、
+    // 非同期クエリを挟まずクリック直後に同期で確かめる。
     expect(screen.getByRole("status").textContent).toBe("");
+    const busy = screen.getByRole("button", { name: "削除しています…" });
     expect(
       await screen.findByText("戦績を削除しています…"),
     ).toBeInTheDocument();
