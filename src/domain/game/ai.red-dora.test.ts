@@ -45,7 +45,7 @@ describe("ai: 打点温存の赤5判定(issue #490)", () => {
     });
 
     // 赤フラグの有無で答えが変わらないこと(= フラグを見ていないこと)まで固定する。
-    const plain = [...parseTiles("123p 456p 789p 234s 9m 1m")];
+    const plain = parseTiles("123p 456p 789p 234s 9m 1m");
     expect(plain).toHaveLength(14);
     const chosenPlain = chooseDiscard({ tiles: plain });
     expect({ suit: chosenPlain.suit, rank: chosenPlain.rank }).toEqual({

@@ -103,16 +103,20 @@ const redFiveRule = () => /RED_FIVE_SUITS|\brank\s*===\s*5\b/g;
  * 委ねる = 禁止 / **フラグの値そのもの**を扱う用途(同一性比較・識別キー・整列・
  * 投影・保存値の検証)は許可。
  *
- * `.` を必須にしているのでオブジェクトリテラルのキー(`isRed:` / shorthand)は拾わない
+ * ドット記法(`tile.isRed`)と添字記法(`tile["isRed"]`)の両方を見る。`.`(または `[`)を
+ * 必須にしているのでオブジェクトリテラルのキー(`isRed:` / shorthand)は拾わない
  * — そちらは {@link tileLiteral} の担当。`\b` があるので `.isRedDora(...)` にも当たらない。
+ * 添字側は `["isRed"]` 単独の形だけを見るので、`hasOnlyKeys(tile, ["suit", "rank", "isRed"])`
+ * のような**キー名の列挙**(`gamePersistence.ts`)は拾わない。
  *
- * ⚠️ 構文解析ではなく字面の走査なので、`const { isRed } = tile;`(分割代入)・
- * `tile["isRed"]`(添字アクセス)・別名への束縛を経由した読み出しはすり抜ける。
+ * ⚠️ 構文解析ではなく字面の走査なので、`const { isRed } = tile;`(分割代入)や
+ * `Object.entries(tile)` 経由の読み出し、別名への束縛はすり抜ける
+ * (分割代入はドメインに限り {@link tileLiteral} の `isRed }` が拾う)。
  * {@link tileLiteral} / {@link redFiveRule} と同じく**多層防御の1枚**であって、
  * 単体で完全性を主張するものではない。下の許可リストが「完全一致」で固定するのは
  * **この検出器が見える範囲**であり、赤扱いの全経路ではない。
  */
-const rawIsRedRead = () => /\.isRed\b/g;
+const rawIsRedRead = () => /\.isRed\b|\[\s*["']isRed["']\s*\]/g;
 
 /**
  * `.isRed` を直読みしてよい既知の箇所(`SRC` 相対パス + 該当行)。
@@ -152,9 +156,17 @@ const ALLOWED_RAW_IS_RED_READS: readonly string[] = [
  * それを違反として報告すると誰も直せない偽陽性になる。逆に文字列リテラル中の `//`
  * (URL など)を巻き込んで削りすぎる可能性はあるが、その場合に起きるのは検出漏れだけで、
  * 正しいコードを不当に落とすことはない。
+ *
+ * 落とすのは**改行以外**だけで、コメントの改行はそのまま残す。丸ごと削ると複数行に
+ * またがるブロックコメントの前後の行が連結され、{@link scan} が組み立てる「該当行」が
+ * 実ソースに存在しない行になってしまうため({@link ALLOWED_RAW_IS_RED_READS} の鍵が壊れる)。
+ * 行コメント / ブロックコメントの**どちらを先に食うか**は元の1本の交替で決まる順序を保つ
+ * (2パスに分けると `// … /* …` のような行で挙動が変わる)。
  */
 function stripComments(source: string): string {
-  return source.replace(/\/\*[\s\S]*?\*\/|\/\/.*/g, "");
+  return source.replace(/\/\*[\s\S]*?\*\/|\/\/.*/g, (m) =>
+    m.replace(/[^\n]/g, " "),
+  );
 }
 
 /**
@@ -183,36 +195,77 @@ function productionFiles(roots: readonly string[]): string[] {
   return out;
 }
 
-/** 走査対象から `re` にマッチする箇所を `path: matched` 形式で集める。 */
-function offenders(re: () => RegExp, roots: readonly string[]): string[] {
+/** `text` 中の位置 `index` を含む1行(前後を改行で切り出して trim)。 */
+function lineAt(text: string, index: number): string {
+  const start = text.lastIndexOf("\n", index) + 1;
+  const end = text.indexOf("\n", index);
+  return text.slice(start, end === -1 ? undefined : end).trim();
+}
+
+/** {@link scan} が呼び出し側へ渡すマッチ情報。鍵の作り方だけが検出器ごとに違う。 */
+interface Hit {
+  /** マッチした文字列そのもの(例: `.isRed`)。 */
+  readonly match: string;
+  /** マッチ開始位置を含む1行。「どう使っているか」を判断する用。 */
+  readonly line: string;
+}
+
+/**
+ * 走査対象から `re` にマッチする箇所を集め、`path: <keyOf の結果>` 形式で返す。
+ *
+ * 走査はファイル全文に対して行う(行ごとに分けない)。`tileLiteral` の `\s*` は改行にも
+ * 当たるため、`{ suit, rank, isRed\n}` のように折り返された組み立てを行単位の走査では
+ * 取りこぼすため。
+ */
+function scan(
+  re: () => RegExp,
+  roots: readonly string[],
+  keyOf: (hit: Hit) => string,
+): string[] {
   const found: string[] = [];
   for (const rel of productionFiles(roots)) {
     if (rel === FACTORY) continue;
     const text = stripComments(readFileSync(join(SRC, rel), "utf8"));
-    for (const m of text.matchAll(re())) found.push(`${rel}: ${m[0]}`);
+    for (const m of text.matchAll(re())) {
+      found.push(
+        `${rel}: ${keyOf({ match: m[0], line: lineAt(text, m.index ?? 0) })}`,
+      );
+    }
   }
   return found;
 }
 
+/** 「どこかに違反がある」だけを見る検査用。マッチ文字列を鍵にする。 */
+function offenders(re: () => RegExp, roots: readonly string[]): string[] {
+  return scan(re, roots, (hit) => hit.match);
+}
+
 /**
- * {@link offenders} と同じ走査で、マッチ箇所を**該当行ごと**に `path: line` で集める。
+ * 許可リストと突き合わせる検査用。**該当行**を鍵にする。
  *
- * 許可リストと突き合わせる用途では「何にマッチしたか」(`.isRed`)ではなく
- * 「どう使っているか」が判断材料なので、行そのものを鍵にする。1行に複数マッチが
- * あれば同じ要素が複数回並ぶ(既存行への読み出し追加も差分として現れる)。
+ * 許可の可否は「何にマッチしたか」(`.isRed`)ではなく「どう使っているか」で決まるため。
+ * 1行に複数マッチがあれば同じ要素が複数回並ぶ(既存行への読み出し追加も差分に出る)。
  */
 function offenderLines(re: () => RegExp, roots: readonly string[]): string[] {
-  const found: string[] = [];
-  for (const rel of productionFiles(roots)) {
-    if (rel === FACTORY) continue;
-    for (const line of stripComments(
-      readFileSync(join(SRC, rel), "utf8"),
-    ).split("\n")) {
-      const hits = [...line.matchAll(re())].length;
-      for (let i = 0; i < hits; i++) found.push(`${rel}: ${line.trim()}`);
-    }
+  return scan(re, roots, (hit) => hit.line);
+}
+
+/** 多重集合としての対称差を「+ 余分 / − 不足」で並べる(失敗時の直しやすさのため)。 */
+function multisetDiff(
+  actual: readonly string[],
+  allowed: readonly string[],
+): string[] {
+  const remaining = [...allowed];
+  const extra: string[] = [];
+  for (const a of actual) {
+    const i = remaining.indexOf(a);
+    if (i === -1) extra.push(a);
+    else remaining.splice(i, 1);
   }
-  return found;
+  return [
+    ...extra.map((e) => `+ 許可されていない直読み: ${e}`),
+    ...remaining.map((m) => `- 許可リストに残っている根拠なし: ${m}`),
+  ];
 }
 
 describe("牌ファクトリの単一起点(issue #375)", () => {
@@ -293,6 +346,7 @@ describe("牌ファクトリの単一起点(issue #375)", () => {
     expect("rank === 5 && isRedSuit(suit)").toMatch(redFiveRule());
     expect("if (tile.isRed) v += 2;").toMatch(rawIsRedRead()); // #490 の違反そのもの
     expect("const red = t?.isRed ?? false;").toMatch(rawIsRedRead());
+    expect('if (tile["isRed"]) v += 2;').toMatch(rawIsRedRead()); // 添字記法
 
     // 牌種(suit+rank)だけの射影は牌の組み立てではないので拾わない。
     expect("tileKey({ suit: tile.suit, rank: tile.rank })").not.toMatch(
@@ -303,6 +357,10 @@ describe("牌ファクトリの単一起点(issue #375)", () => {
     expect("return { suit, rank, isRed: true };").not.toMatch(rawIsRedRead());
     expect("if (isRedDora(tile)) v += 2;").not.toMatch(rawIsRedRead());
     expect("tile.isRedDora").not.toMatch(rawIsRedRead());
+    // キー名の列挙(gamePersistence.ts の hasOnlyKeys)は読み出しではない。
+    expect('hasOnlyKeys(tile, ["suit", "rank", "isRed"])').not.toMatch(
+      rawIsRedRead(),
+    );
   });
 
   it("コメント内の説明は違反として報告しない(偽陽性の抑制)", () => {
@@ -315,6 +373,16 @@ describe("牌ファクトリの単一起点(issue #375)", () => {
     expect(stripComments("// tile.isRed を直接読まない")).not.toMatch(
       rawIsRedRead(),
     );
+  });
+
+  it("コメント除去で行の対応が崩れない(許可リストの鍵の安定性)", () => {
+    // ブロックコメントを丸ごと削ると前後の行が連結され、`ALLOWED_RAW_IS_RED_READS` の
+    // 鍵が「実ソースに存在しない行」になる。改行を保存していることを直接固定する。
+    const src = "const a = tile.isRed; /* 長い\n説明 */ const b = 1;\n";
+    const lines = stripComments(src).split("\n");
+    expect(lines).toHaveLength(src.split("\n").length);
+    expect(lines[0].trim()).toBe("const a = tile.isRed;");
+    expect(lines[1].trim()).toBe("const b = 1;");
   });
 
   it("ドメイン本番コードは tiles/tile.ts 以外で Tile を組み立てない", () => {
@@ -336,7 +404,7 @@ describe("牌ファクトリの単一起点(issue #375)", () => {
       `赤ドラとしての意味づけは isRedDora(${FACTORY})に委ねてください。\n` +
         "フラグの値そのものを扱う正当な用途なら、理由を添えて " +
         "ALLOWED_RAW_IS_RED_READS へ追記してください(issue #490)。\n" +
-        found.join("\n"),
+        multisetDiff(found, ALLOWED_RAW_IS_RED_READS).join("\n"),
     ).toEqual([...ALLOWED_RAW_IS_RED_READS].sort());
   });
 
