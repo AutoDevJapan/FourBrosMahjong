@@ -401,32 +401,64 @@ export function clearHistory(storage: Storage): boolean {
 }
 
 /**
+ * 全件削除の結果。失敗は理由で区別する(issue #489)。
+ *
+ * 「排他できなかった」と「ストレージを操作できなかった」では利用者が取るべき行動が
+ * 違う(前者は他タブを閉じて再試行、後者はブラウザのストレージ設定の確認)ため、
+ * boolean へ畳まず理由を返す。
+ */
+export type HistoryClearResult =
+  /** 削除して、読み戻しても空であることを確認できた。 */
+  | "cleared"
+  /** lock を取得できなかった(別タブが保持中 / 上限時間超過)。保存内容は変えていない。 */
+  | "lock-busy"
+  /** `removeItem` が失敗した、または削除後も履歴が残っている。 */
+  | "storage-failed";
+
+/**
+ * 戦績を消去し、読み戻して実際に空になったことまで確認する。
+ *
+ * `removeItem` が例外を投げずに無視される Storage でも「削除しました」と案内しない。
+ * 例外は内部で握り潰すため、この関数は決して throw しない(排他区間の callback として
+ * 使うため。`withHistoryLock` の catch が lock 失敗と混ざらないようにする)。
+ */
+function clearAndVerify(storage: Storage): HistoryClearResult {
+  if (!clearHistory(storage)) return "storage-failed";
+  return loadHistory(storage).length === 0 ? "cleared" : "storage-failed";
+}
+
+/**
  * 複数タブの終局保存と競合せずに戦績を全件削除する。
  *
  * 追記と同じ Web Lock に参加し、writer が読んだ古い snapshot から削除済み履歴を
- * 復活させる lost update を防ぐ。排他を保証できない環境では削除成功を偽らない。
+ * 復活させる lost update を防ぐ(#482)。lock を取得できなかった場合は削除成功を
+ * 偽らず `"lock-busy"` を返す ─ 別タブが現に保持している可能性があるため
+ * (別タブが保持し続ける場合は `HISTORY_LOCK_TIMEOUT_MS` で待機を打ち切る / #488)。
  *
- * 追記側と同じく lock 内で読み直し、**読み戻した履歴が空になった場合だけ** `true` を
- * 返す。`removeItem` が例外を投げずに無視される Storage でも「削除しました」と案内しない。
+ * **例外は「Web Locks API そのものが無い環境」**(非セキュアコンテキスト = 平文 http)。
+ * このときだけ lock 無しで削除する(fail-open / ADR-0004 / #489)。根拠:
  *
- * 別タブが lock を保持し続ける場合は `HISTORY_LOCK_TIMEOUT_MS` で待機を打ち切って `false`
- * を返す(#488)。保存内容は変えないため、利用者は原因を取り除いて再実行できる。
+ * - secure context の判定はオリジン単位で、`localStorage` の分離単位も同じオリジン。
+ *   つまり同じ戦績を共有するタブは全て同じ判定になる。
+ * - `navigator.locks` が無いオリジンでは `persistHistoryAcrossTabs` が必ず `"failed"`
+ *   を返す(追記は fail-closed のまま)。したがって**削除と競合する writer は存在し得ない**。
+ * - 削除はユーザーが明示要求する操作であり、排他できないことを理由に拒み続けると
+ *   「自分のデータを消せない」状態が固定される。
+ *
+ * この安全性は追記側の fail-closed に依存する。追記を fail-open へ変える場合は
+ * ここも同時に見直すこと(ADR-0004)。
  */
 export async function clearHistoryAcrossTabs(
   storage: Storage,
   locks?: HistoryLockManager | null,
-): Promise<boolean> {
+): Promise<HistoryClearResult> {
   const lockManager = resolveLockManager(locks);
-  if (lockManager === null) return false;
+  if (lockManager === null) return clearAndVerify(storage);
   return withHistoryLock(
     lockManager,
-    () => {
-      if (!clearHistory(storage)) return false;
-      // lock 内で読み直し、実際に空になった場合だけ成功を返す(追記側と対称)。
-      // 削除できていないのに「削除しました」と案内すると実態と食い違う。
-      return loadHistory(storage).length === 0;
-    },
-    () => false,
+    // lock 内で読み直し、実際に空になった場合だけ成功を返す(追記側と対称)。
+    () => clearAndVerify(storage),
+    () => "lock-busy",
   );
 }
 

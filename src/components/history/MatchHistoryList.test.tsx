@@ -188,8 +188,9 @@ describe("MatchHistoryList (#293)", () => {
     expect(
       screen.getByRole("list", { name: "保存された半荘結果" }),
     ).toBeInTheDocument();
+    // 原因はストレージ操作の失敗。接続方式(#489)ではなくストレージ設定を案内する。
     expect(
-      await screen.findByText(/この端末では戦績を削除できませんでした/),
+      await screen.findByText(/この端末のストレージを操作できず/),
     ).toBeInTheDocument();
     // 確認UIは畳まない。畳むと押したボタンが消え、フォーカスが body へ落ちる。
     expect(confirmButton).toBeInTheDocument();
@@ -197,10 +198,35 @@ describe("MatchHistoryList (#293)", () => {
     expect(document.body).not.toHaveFocus();
   });
 
-  it("Web Locksが使えない環境では削除成功と読み上げない(#482)", async () => {
+  it("Web Locksが無い環境(平文http)でも削除できる(#489 / ADR-0004)", async () => {
     appendHistory(window.localStorage, entry(1, 1_753_000_000_000));
-    // secure context 外など `navigator.locks` が無い環境。排他できないため削除しない。
+    // secure context 外では `navigator.locks` が存在しない。同じオリジンでは追記も
+    // 必ず失敗する = 書き戻す writer が居ないため、削除は lock 無しで実行する。
     Reflect.deleteProperty(navigator, "locks");
+
+    render(<MatchHistoryList />);
+    fireEvent.click(
+      await screen.findByRole("button", { name: "戦績をすべて削除" }),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "削除する" }));
+
+    expect(
+      await screen.findByText(/保存された戦績はまだありません/),
+    ).toBeInTheDocument();
+    expect(window.localStorage.getItem(MATCH_HISTORY_KEY)).toBeNull();
+    expect(
+      screen.getByText("保存されていた戦績をすべて削除しました。"),
+    ).toBeInTheDocument();
+    // 削除失敗の案内(#489 で誤案内だった文面を含む)は一切出さない。
+    expect(screen.queryByText(/削除できませんでした/)).toBeNull();
+  });
+
+  it("別タブがlockを保持している場合は原因を他タブとして案内する(#488/#489)", async () => {
+    appendHistory(window.localStorage, entry(1, 1_753_000_000_000));
+    // 上限時間まで待っても取得できなかった場合と同じ経路(request が中断で失敗する)。
+    stubWebLocks(() =>
+      Promise.reject(new DOMException("timed out", "TimeoutError")),
+    );
 
     render(<MatchHistoryList />);
     fireEvent.click(
@@ -212,9 +238,9 @@ describe("MatchHistoryList (#293)", () => {
     fireEvent.click(confirmButton);
 
     expect(
-      await screen.findByText(/この端末では戦績を削除できませんでした/),
+      await screen.findByText(/他のタブが戦績を更新中のため/),
     ).toBeInTheDocument();
-    // 保存も一覧もそのまま残る。「削除しました」と読み上げてはいけない。
+    // 排他できていないので保存も一覧もそのまま残る(#482 の fail-closed)。
     expect(window.localStorage.getItem(MATCH_HISTORY_KEY)).not.toBeNull();
     expect(
       screen.getByRole("list", { name: "保存された半荘結果" }),

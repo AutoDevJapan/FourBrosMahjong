@@ -22,6 +22,7 @@ import {
   clearHistoryAcrossTabs,
   getHistorySnapshot,
   getServerHistorySnapshot,
+  type HistoryClearResult,
   MAX_HISTORY_ENTRIES,
   type MatchHistoryEntry,
   notifyHistoryChanged,
@@ -40,6 +41,24 @@ const finishedAtFormat = new Intl.DateTimeFormat("ja-JP", {
   dateStyle: "medium",
   timeStyle: "short",
 });
+
+/**
+ * 削除できなかった場合の案内(issue #489)。
+ *
+ * 原因ごとに**利用者が取るべき行動が違う**ため文面を分ける。以前は理由を問わず
+ * 「ブラウザの設定を確認してください」と案内していたが、非セキュアコンテキスト
+ * (平文 http)では設定をいくら見ても解決せず、誤案内になっていた。
+ * なお非セキュアコンテキストは ADR-0004 により失敗しなくなったため、ここには現れない。
+ */
+const CLEAR_FAILURE_MESSAGE: Record<
+  Exclude<HistoryClearResult, "cleared">,
+  string
+> = {
+  "lock-busy":
+    "他のタブが戦績を更新中のため、削除できませんでした。他のタブを閉じるか、しばらく待ってからもう一度お試しください。",
+  "storage-failed":
+    "この端末のストレージを操作できず、戦績を削除できませんでした。ブラウザのストレージ設定(プライベートモードや空き容量)を確認してください。",
+};
 
 /** 半荘1件の見出し+展開内訳。 */
 function HistoryItem({ entry }: { entry: MatchHistoryEntry }) {
@@ -135,8 +154,12 @@ export default function MatchHistoryList() {
 
   const executeClear = async () => {
     const storage = localStorageOrNull();
-    const cleared = storage !== null && (await clearHistoryAcrossTabs(storage));
-    if (cleared) {
+    // Storage の getter 自体が例外を投げる環境も「ストレージを操作できない」に含める。
+    const result: HistoryClearResult =
+      storage === null
+        ? "storage-failed"
+        : await clearHistoryAcrossTabs(storage);
+    if (result === "cleared") {
       // 永続化と購読者への通知は分離されているため、削除後に明示的に知らせる(#302)。
       notifyHistoryChanged();
       // 「削除する」ボタンごと一覧セクションが消えるので、着地点へフォーカスを移す。
@@ -148,9 +171,7 @@ export default function MatchHistoryList() {
     // 削除できなかった場合は一覧が残る。「削除しました」と読み上げると実態と食い違う。
     // 確認UIも畳まない ─ 畳むと押した「削除する」ボタンが消える一方で空状態も描かれず、
     // フォーカスの行き先が無くなって body へ落ちるため(成功時と同じ a11y 契約を守る)。
-    setStatusMessage(
-      "この端末では戦績を削除できませんでした。ブラウザの設定を確認してください。",
-    );
+    setStatusMessage(CLEAR_FAILURE_MESSAGE[result]);
   };
 
   if (entries === null) {

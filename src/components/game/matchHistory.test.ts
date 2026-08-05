@@ -263,7 +263,7 @@ describe("match history persistence (#293)", () => {
     expect(await persistHistoryAcrossTabs(storage, entry(1), locks)).toBe(
       "appended",
     );
-    expect(await clearHistoryAcrossTabs(storage, locks)).toBe(true);
+    expect(await clearHistoryAcrossTabs(storage, locks)).toBe("cleared");
 
     // 名前が食い違うと排他区間が分かれ、直列化そのものが効かなくなる。
     expect(locks.names).toHaveLength(2);
@@ -281,7 +281,7 @@ describe("match history persistence (#293)", () => {
     ]);
 
     expect(written).toBe("appended");
-    expect(cleared).toBe(true);
+    expect(cleared).toBe("cleared");
     expect(loadHistory(storage)).toEqual([]);
   });
 
@@ -308,19 +308,55 @@ describe("match history persistence (#293)", () => {
     const clearing = clearHistoryAcrossTabs(storage, locks);
 
     await writer;
-    expect(await clearing).toBe(true);
+    expect(await clearing).toBe("cleared");
     expect(loadHistory(storage)).toEqual([]);
   });
 
-  it("削除のlock不在・取得失敗では成功を返さない(#482)", async () => {
+  it("削除のlock取得に失敗した場合は成功を返さない(#482)", async () => {
     const storage = new MemoryStorage();
     appendHistory(storage, entry(1));
-    expect(await clearHistoryAcrossTabs(storage, null)).toBe(false);
+    // lock API はあるが取得できない = 別タブが保持している可能性がある。fail-closed。
     const broken: HistoryLockManager = {
       request: () => Promise.reject(new Error("locks unavailable")),
     };
-    expect(await clearHistoryAcrossTabs(storage, broken)).toBe(false);
+    expect(await clearHistoryAcrossTabs(storage, broken)).toBe("lock-busy");
     expect(loadHistory(storage).map((item) => item.seed)).toEqual([1]);
+  });
+
+  describe("非セキュアコンテキストの削除(#489 / ADR-0004)", () => {
+    it("lock API 自体が無い環境では lock 無しで削除する(fail-open)", async () => {
+      const storage = new MemoryStorage();
+      appendHistory(storage, entry(1));
+
+      // 平文 http など `navigator.locks` が undefined の環境。排他できないが、
+      // 同じ環境では追記も成功しないため書き戻す writer が存在しない(ADR-0004)。
+      expect(await clearHistoryAcrossTabs(storage, null)).toBe("cleared");
+      expect(loadHistory(storage)).toEqual([]);
+    });
+
+    it("削除の fail-open は「同じ環境では追記が必ず失敗する」ことに依存する", async () => {
+      const storage = new MemoryStorage();
+      appendHistory(storage, entry(1));
+
+      // ここが "appended" になる日が来たら、削除の fail-open は競合相手が居ない前提を
+      // 失う。ADR-0004 の結合をテストとして固定する。
+      expect(await persistHistoryAcrossTabs(storage, entry(2), null)).toBe(
+        "failed",
+      );
+      expect(loadHistory(storage).map((item) => item.seed)).toEqual([1]);
+    });
+
+    it("lock 無しでも削除できなければ storage-failed を返す", async () => {
+      const storage = new MemoryStorage();
+      appendHistory(storage, entry(1));
+      const silent: Storage = Object.assign(Object.create(storage), {
+        // 例外は投げないが実際には消えない。
+        removeItem: () => undefined,
+      });
+
+      expect(await clearHistoryAcrossTabs(silent, null)).toBe("storage-failed");
+      expect(loadHistory(storage).map((item) => item.seed)).toEqual([1]);
+    });
   });
 
   it("removeItemが例外なく無視される環境では削除成功としない(#482)", async () => {
@@ -339,7 +375,7 @@ describe("match history persistence (#293)", () => {
     };
 
     expect(await clearHistoryAcrossTabs(silent, new SerialLockManager())).toBe(
-      false,
+      "storage-failed",
     );
     expect(loadHistory(storage).map((item) => item.seed)).toEqual([1]);
   });
@@ -386,7 +422,7 @@ describe("match history persistence (#293)", () => {
       expect(settled).toBe(false);
 
       await vi.advanceTimersByTimeAsync(1);
-      expect(await clearing).toBe(false);
+      expect(await clearing).toBe("lock-busy");
       // 排他できていない以上、履歴は消さない(#482 の fail-closed を維持する)。
       expect(loadHistory(storage).map((item) => item.seed)).toEqual([1]);
     });
@@ -399,7 +435,7 @@ describe("match history persistence (#293)", () => {
       expect(await persistHistoryAcrossTabs(storage, entry(1), locks)).toBe(
         "appended",
       );
-      expect(await clearHistoryAcrossTabs(storage, locks)).toBe(true);
+      expect(await clearHistoryAcrossTabs(storage, locks)).toBe("cleared");
 
       // 解除し損ねると、取得済みの lock へ無用な abort を投げるタイマーが残る。
       expect(vi.getTimerCount()).toBe(0);
