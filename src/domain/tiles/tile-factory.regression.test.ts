@@ -167,6 +167,26 @@ describe("牌ファクトリの単一起点(issue #375)", () => {
     expect(files.some((f) => /\.(test|spec)\.tsx?$/.test(f))).toBe(false);
   });
 
+  it("`src/` 直下に走査対象外のディレクトリが増えたら気づける", () => {
+    // RED_FIVE_ROOTS はハードコードした許可リストなので、「ルートを消す」退行は
+    // 上のテストが捕まえるが、「新しいルートが増える」退行は誰も捕まえない。
+    // 将来 src/lib のようなディレクトリが足されると、そこだけ赤5判定を再実装しても
+    // 静かに素通りする。補集合を固定して、追加時に「走査するか」を意識的に決めさせる。
+    const UNSCANNED_BY_DESIGN = [
+      "test", // テスト基盤のみ。牌ロジックを持たない。
+    ] as const;
+
+    const srcDirs = readdirSync(SRC, { withFileTypes: true })
+      .filter((e) => e.isDirectory())
+      .map((e) => e.name)
+      .sort();
+    const scanned: readonly string[] = RED_FIVE_ROOTS;
+
+    expect(srcDirs.filter((d) => !scanned.includes(d))).toEqual([
+      ...UNSCANNED_BY_DESIGN,
+    ]);
+  });
+
   it("検出器そのものが違反例を捕まえる(正例)", () => {
     // 走査対象が正しくても正規表現が壊れれば検査は静かに恒真化する。
     // 「捕まえたい書き方」を直接当てて、検出器の生存を独立に固定する。

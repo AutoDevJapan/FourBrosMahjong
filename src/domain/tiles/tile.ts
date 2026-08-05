@@ -32,8 +32,11 @@ export type Suit = "man" | "pin" | "sou" | "honor";
  * `tile.isRed` を直接読まず {@link isRedDora} を使うこと。この interface に実行時検証は
  * 無く、`createTile` を経由しない構造的な値は不変条件を破った `isRed` を持ち得るため
  * (issue #485)。牌の同一性比較・整列・保存値の検証のように「フラグの値そのもの」を
- * 扱う用途(`game/engine.ts` の牌一致判定、`components/game/gamePersistence.ts` の
- * 復元検証など)はこの限りでなく、生の `isRed` を読んでよい。
+ * 扱う用途はこの限りでなく、生の `isRed` を読んでよい。該当する既知の箇所は
+ * `game/engine.ts`(牌一致判定・識別キー)、`game/ai.ts`(識別キー)、
+ * `components/game/gameView.ts`(表示ソートのタイブレーク・`TileData` への投影)、
+ * `components/game/GameBoard.tsx`(候補一致)、`components/game/gamePersistence.ts`
+ * (復元ジャーナルの保存値検証)。
  */
 export interface Tile {
   readonly suit: Suit;
