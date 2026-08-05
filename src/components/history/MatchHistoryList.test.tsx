@@ -50,11 +50,26 @@ const originalLocksDescriptor = Object.getOwnPropertyDescriptor(
   "locks",
 );
 
-beforeEach(() => {
+/**
+ * 全件削除は Web Locks の排他区間で実行される(#482)。jsdom は `navigator.locks` を
+ * 実装しないため、最小の lock manager を差し込む。実 API と同じく **必ず Promise を
+ * 返す**(同期に返すと解決が1マイクロタスク早まり、フォーカス・読み上げの順序が実機と
+ * ずれる)。`GameProvider.history.test.tsx` の stub と同形。
+ */
+function stubWebLocks(
+  request: (name: string, callback: () => unknown) => Promise<unknown> = async (
+    _name,
+    callback,
+  ) => callback(),
+): void {
   Object.defineProperty(navigator, "locks", {
     configurable: true,
-    value: { request: (_name: string, callback: () => unknown) => callback() },
+    value: { request },
   });
+}
+
+beforeEach(() => {
+  stubWebLocks();
 });
 
 afterEach(() => {
@@ -201,6 +216,35 @@ describe("MatchHistoryList (#293)", () => {
     expect(document.body).not.toHaveFocus();
   });
 
+  it("Web Locksが使えない環境では削除成功と読み上げない(#482)", async () => {
+    appendHistory(window.localStorage, entry(1, 1_753_000_000_000));
+    // secure context 外など `navigator.locks` が無い環境。排他できないため削除しない。
+    Reflect.deleteProperty(navigator, "locks");
+
+    render(<MatchHistoryList />);
+    fireEvent.click(
+      await screen.findByRole("button", { name: "戦績をすべて削除" }),
+    );
+    const confirmButton = screen.getByRole("button", { name: "削除する" });
+    // 実ブラウザではクリック時にボタンへフォーカスが載る(jsdom は載せない)。
+    confirmButton.focus();
+    fireEvent.click(confirmButton);
+
+    expect(
+      await screen.findByText(/この端末では戦績を削除できませんでした/),
+    ).toBeInTheDocument();
+    // 保存も一覧もそのまま残る。「削除しました」と読み上げてはいけない。
+    expect(window.localStorage.getItem(MATCH_HISTORY_KEY)).not.toBeNull();
+    expect(
+      screen.getByRole("list", { name: "保存された半荘結果" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByText("保存されていた戦績をすべて削除しました。"),
+    ).not.toBeInTheDocument();
+    // 成功時と同じフォーカス契約 ─ 確認UIは畳まず、body へ落とさない。
+    expect(confirmButton).toHaveFocus();
+  });
+
   it("全件削除後はフォーカスを空状態へ移し、bodyへ落とさない", async () => {
     appendHistory(window.localStorage, entry(1, 1_753_000_000_000));
 
@@ -215,6 +259,29 @@ describe("MatchHistoryList (#293)", () => {
       await screen.findByText(/保存された戦績はまだありません/)
     ).closest("div");
     expect(emptyState).toHaveFocus();
+    expect(document.body).not.toHaveFocus();
+  });
+
+  it("削除完了までに別タブの保存が届いてもフォーカスをbodyへ落とさない(#482)", async () => {
+    appendHistory(window.localStorage, entry(1, 1_753_000_000_000));
+    // 削除の lock を解放した直後に別タブの終局保存が入り、一覧が再び描かれる状況。
+    // 空状態が存在しないため、着地点が無いとフォーカスは <body> へ落ちる。
+    stubWebLocks(async (_name, callback) => {
+      const result = await callback();
+      appendHistory(window.localStorage, entry(2, 1_753_100_000_000, "二郎"));
+      return result;
+    });
+
+    render(<MatchHistoryList />);
+    fireEvent.click(
+      await screen.findByRole("button", { name: "戦績をすべて削除" }),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "削除する" }));
+
+    const fallback = await screen.findByRole("button", {
+      name: "戦績をすべて削除",
+    });
+    await waitFor(() => expect(fallback).toHaveFocus());
     expect(document.body).not.toHaveFocus();
   });
 });

@@ -2,6 +2,53 @@ import { expect, test } from "@playwright/test";
 import { walkToGameEnd } from "@/components/game/finishedGameFixture";
 
 const HISTORY_KEY = "four-bros-mahjong.history.v1";
+/** `matchHistory.ts` の `MATCH_HISTORY_LOCK`(モジュール外へは公開しないため実値を持つ)。 */
+const HISTORY_LOCK = "four-bros-mahjong.history.write.v1";
+
+/** 保存済み戦績1件ぶんの `localStorage` 値(engine の確定結果と同形)。 */
+const SAVED_HISTORY = JSON.stringify({
+  version: 1,
+  entries: [
+    {
+      seed: 1,
+      finishedAt: 1_753_000_000_000,
+      players: [
+        {
+          name: "一郎",
+          rank: 1,
+          rawScore: 23_000,
+          uma: 10_000,
+          bonus: 0,
+          soshiiTotal: 33_000,
+        },
+        {
+          name: "二郎",
+          rank: 2,
+          rawScore: 8_000,
+          uma: 5_000,
+          bonus: 0,
+          soshiiTotal: 13_000,
+        },
+        {
+          name: "三郎",
+          rank: 3,
+          rawScore: -11_000,
+          uma: -5_000,
+          bonus: 0,
+          soshiiTotal: -16_000,
+        },
+        {
+          name: "四郎",
+          rank: 4,
+          rawScore: -20_000,
+          uma: -10_000,
+          bonus: 0,
+          soshiiTotal: -30_000,
+        },
+      ],
+    },
+  ],
+});
 
 test.describe("戦績のローカル保存・閲覧(#293)", () => {
   test("同一ブラウザの2タブが同時に終局復元しても両方の戦績を残す(#363)", async ({
@@ -41,6 +88,70 @@ test.describe("戦績のローカル保存・閲覧(#293)", () => {
     await expect(
       second.getByText("この端末に今回の戦績を保存できませんでした。"),
     ).toHaveCount(0);
+  });
+
+  test("別タブが履歴lockを保持している間は全件削除を実行しない(#482)", async ({
+    context,
+  }) => {
+    // 別タブ(終局保存中の /game 相当)が実ブラウザの Web Locks を保持し続ける状況を作る。
+    // 単体テストは注入した lock manager で契約を固定するため、実 API 経由の直列化は
+    // ここでしか確かめられない。
+    const holder = await context.newPage();
+    await holder.goto("/");
+    await holder.evaluate(
+      (lock) =>
+        new Promise<void>((acquired) => {
+          navigator.locks.request(
+            lock,
+            () =>
+              new Promise<void>((release) => {
+                (
+                  window as unknown as { __releaseHistoryLock: () => void }
+                ).__releaseHistoryLock = release;
+                acquired();
+              }),
+          );
+        }),
+      HISTORY_LOCK,
+    );
+
+    const viewer = await context.newPage();
+    await viewer.addInitScript(
+      ({ key, value }) => localStorage.setItem(key, value),
+      { key: HISTORY_KEY, value: SAVED_HISTORY },
+    );
+    await viewer.goto("/history");
+    const items = viewer
+      .getByRole("list", { name: "保存された半荘結果" })
+      .getByRole("listitem");
+    await expect(items).toHaveCount(1);
+
+    await viewer.getByRole("button", { name: "戦績をすべて削除" }).click();
+    await viewer.getByRole("button", { name: "削除する" }).click();
+
+    // 「起きないこと」の確認なので固定時間だけ待つ。lock 外で削除していた頃は
+    // クリック直後(数ms)に消えるため、この待機で確実に赤くなる。
+    await viewer.waitForTimeout(500);
+    expect(
+      await viewer.evaluate((key) => localStorage.getItem(key), HISTORY_KEY),
+    ).not.toBeNull();
+    await expect(items).toHaveCount(1);
+    await expect(
+      viewer.getByText("保存された戦績はまだありません", { exact: false }),
+    ).toHaveCount(0);
+
+    // 解放すると待っていた削除が実行され、空状態へ切り替わる。
+    await holder.evaluate(() =>
+      (
+        window as unknown as { __releaseHistoryLock: () => void }
+      ).__releaseHistoryLock(),
+    );
+    await expect(
+      viewer.getByText("保存された戦績はまだありません", { exact: false }),
+    ).toBeVisible();
+    expect(
+      await viewer.evaluate((key) => localStorage.getItem(key), HISTORY_KEY),
+    ).toBeNull();
   });
 
   for (const failure of ["SecurityError", "QuotaExceededError"] as const) {

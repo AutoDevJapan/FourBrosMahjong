@@ -39,8 +39,14 @@ class MemoryStorage implements Storage {
 /** Web Locks の排他実行を決定的に再現する FIFO lock manager。 */
 class SerialLockManager implements HistoryLockManager {
   private tail: Promise<void> = Promise.resolve();
+  /**
+   * 要求された lock 名(到着順)。この manager は名前によらず全要求を直列化するため、
+   * 「追記と削除が同じ lock を共有する」不変条件はここを検証して固定する。
+   */
+  readonly names: string[] = [];
 
-  request<T>(_name: string, callback: () => T | PromiseLike<T>): Promise<T> {
+  request<T>(name: string, callback: () => T | PromiseLike<T>): Promise<T> {
+    this.names.push(name);
     const result = this.tail.then(callback);
     this.tail = result.then(
       () => undefined,
@@ -221,7 +227,21 @@ describe("match history persistence (#293)", () => {
     expect(loadHistory(storage)).toEqual([]);
   });
 
-  it("追記が先・削除が後なら最終状態は空になる(#482)", async () => {
+  it("追記と削除は同じ名前の lock を共有する(#482)", async () => {
+    const storage = new MemoryStorage();
+    const locks = new SerialLockManager();
+
+    expect(await persistHistoryAcrossTabs(storage, entry(1), locks)).toBe(
+      "appended",
+    );
+    expect(await clearHistoryAcrossTabs(storage, locks)).toBe(true);
+
+    // 名前が食い違うと排他区間が分かれ、直列化そのものが効かなくなる。
+    expect(locks.names).toHaveLength(2);
+    expect(new Set(locks.names).size).toBe(1);
+  });
+
+  it("先着の追記が終わるまで削除は待ち、最終状態は空になる(#482)", async () => {
     const storage = new MemoryStorage();
     appendHistory(storage, entry(1));
     const locks = new SerialLockManager();
@@ -236,19 +256,26 @@ describe("match history persistence (#293)", () => {
     expect(loadHistory(storage)).toEqual([]);
   });
 
-  it("削除が先・追記が後なら削除前の履歴は復活しない(#482)", async () => {
+  it("lock保持中のwriterが読んだ古いsnapshotから削除済み履歴を復活させない(#482)", async () => {
     const storage = new MemoryStorage();
     appendHistory(storage, entry(1));
     const locks = new SerialLockManager();
 
-    const [cleared, written] = await Promise.all([
-      clearHistoryAcrossTabs(storage, locks),
-      persistHistoryAcrossTabs(storage, entry(2), locks),
-    ]);
+    // 別タブの writer が lock 内で「読み込み → 中断 → 書き戻し」を行う状況を再現する
+    // (SerialLockManager は名前によらず全要求を直列化するため、同一 lock の保持を表す)。
+    // 削除が lock 外で先に走ると、writer が読んだ削除前の snapshot が書き戻されて
+    // 削除済み履歴が復活する(issue #482 の事象)。
+    const writer = locks.request("holder", async () => {
+      const stale = storage.getItem(MATCH_HISTORY_KEY);
+      await Promise.resolve();
+      if (stale !== null) storage.setItem(MATCH_HISTORY_KEY, stale);
+      appendHistory(storage, entry(2));
+    });
+    const clearing = clearHistoryAcrossTabs(storage, locks);
 
-    expect(cleared).toBe(true);
-    expect(written).toBe("appended");
-    expect(loadHistory(storage).map((item) => item.seed)).toEqual([2]);
+    await writer;
+    expect(await clearing).toBe(true);
+    expect(loadHistory(storage)).toEqual([]);
   });
 
   it("削除のlock不在・取得失敗では成功を返さない(#482)", async () => {
@@ -259,6 +286,27 @@ describe("match history persistence (#293)", () => {
       request: () => Promise.reject(new Error("locks unavailable")),
     };
     expect(await clearHistoryAcrossTabs(storage, broken)).toBe(false);
+    expect(loadHistory(storage).map((item) => item.seed)).toEqual([1]);
+  });
+
+  it("removeItemが例外なく無視される環境では削除成功としない(#482)", async () => {
+    const storage = new MemoryStorage();
+    appendHistory(storage, entry(1));
+    const silent: Storage = {
+      get length() {
+        return storage.length;
+      },
+      clear: () => storage.clear(),
+      getItem: (key) => storage.getItem(key),
+      key: (index) => storage.key(index),
+      setItem: (key, value) => storage.setItem(key, value),
+      // 例外は投げないが実際には消えない(= `clearHistory` は true を返す)。
+      removeItem: () => undefined,
+    };
+
+    expect(await clearHistoryAcrossTabs(silent, new SerialLockManager())).toBe(
+      false,
+    );
     expect(loadHistory(storage).map((item) => item.seed)).toEqual([1]);
   });
 

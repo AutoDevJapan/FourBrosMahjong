@@ -18,7 +18,7 @@
 | ルール説明 | `/rules` | `docs/四兄弟麻雀ルール.md` に基づくルール要約を表示する(閲覧専用) | Server |
 | 対局画面 | `/game` | 四人回しサンマの対局本体。卓・各家の手牌/河/得点・ドラ・卓情報・操作パネルを表示する | Server shell + Client island |
 | 結果画面 | `/game/result` | 半荘終了時の最終順位・ソシー内訳(素点+ウマ+祝儀)を表示する | Client |
-| 戦績 | `/history` | `localStorage` に保存された半荘結果(最終順位・ソシー内訳・終了日時)を新しい順に一覧・閲覧し、全件削除できる(issue #293)。保存は半荘終了時に `GameProvider` が自動で行い、直近20件を上限に最古から破棄する | Server shell + Client island |
+| 戦績 | `/history` | `localStorage` に保存された半荘結果(最終順位・ソシー内訳・終了日時)を新しい順に一覧・閲覧し、全件削除できる(issue #293)。保存は半荘終了時に `GameProvider` が自動で行い、直近20件を上限に最古から破棄する。全件削除は失敗し得るため、成功したときだけ削除完了として通知する(issue #482 / 6.9) | Server shell + Client island |
 | 設定 | `/settings` | ダークモード手動切替(スペック5 5.4.1)と対局者名の設定(6.2.1)、戦績ページへの導線 | Server shell + Client island |
 
 ### 6.2.1 対局者名の設定(issue #291)

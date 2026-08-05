@@ -180,25 +180,8 @@ function save(storage: Storage, entries: readonly MatchHistoryEntry[]): void {
 }
 
 /**
- * 半荘結果を戦績の先頭(最新)へ追記する。
- *
- * - 保存前に読み込みと同じ検証をかけ、`parseHistory` が受理できない値は書き込まない。
- *   書き込めてしまうと次回読み込みで全体が破損扱いになり、過去の記録ごと消える
- *   (`?seed=` で uint32 超の seed を与えた非production対局などが実際に該当する)。
- * - 同一 seed の記録が既にあれば何もしない(終局済みジャーナルのリロード再生対策)。
- * - `MAX_HISTORY_ENTRIES` を超える分は最古から破棄する。
- * - 保存容量が不足した場合は件数を半減させながら再試行し、**保存できる範囲の履歴を
- *   最大限残す**(最新結果を最優先しつつ、過去の記録を不必要に全消ししない)。
- *   1件でも保存できない環境では諦める(対局自体は継続できる)。
- *
- * 戦績を追記できたかを返す(`clearHistory` と同じ方針)。呼び出し側はこの返り値を見て
- * `notifyHistoryChanged()` を呼び、購読者へ通知する(issue #310)。検証を通らない値・
- * 重複 seed・保存失敗ではいずれも追記されないため `false` を返す。
- *
- * 保証は**片方向**である ─ `true` なら保存内容は必ず変化しているが、`false` は
- * 「変化していない」を意味しない。破損データが残っていた場合、`loadHistory` が
- * その削除を行った上で追記に失敗し得る。ただしこのとき購読者から見える値は前後とも
- * 空配列(破損データは `getHistorySnapshot` でも空に落ちる)なので、通知の取りこぼしにはならない。
+ * 戦績追記の詳細結果。GameProvider は「既に保存済み」と「保存失敗」を区別して
+ * 結果画面へ正しい状態を渡す必要があるため、boolean 版とは別に公開する(#358)。
  */
 export type HistoryPersistenceResult = "appended" | "already-exists" | "failed";
 
@@ -211,8 +194,44 @@ export interface HistoryLockManager {
 }
 
 /**
- * 戦績追記の詳細結果。GameProvider は「既に保存済み」と「保存失敗」を区別して
- * 結果画面へ正しい状態を渡す必要があるため、boolean 版とは別に公開する(#358)。
+ * 排他区間に使う lock manager を決める。
+ *
+ * 引数省略時はこのブラウザの Web Locks を使い、非対応(secure context 外を含む)なら
+ * `null` を返す。明示的に `null` を渡した場合はそのまま `null`(= 排他不能)とする。
+ * 追記と削除で解決規則が食い違うと片方だけが lock 外へ漏れるため、両者で共有する。
+ */
+function resolveLockManager(
+  locks: HistoryLockManager | null | undefined,
+): HistoryLockManager | null {
+  if (locks !== undefined) return locks;
+  return typeof navigator !== "undefined" && navigator.locks !== undefined
+    ? (navigator.locks as HistoryLockManager)
+    : null;
+}
+
+/**
+ * 半荘結果を戦績の先頭(最新)へ追記する。
+ *
+ * - 保存前に読み込みと同じ検証をかけ、`parseHistory` が受理できない値は書き込まない。
+ *   書き込めてしまうと次回読み込みで全体が破損扱いになり、過去の記録ごと消える
+ *   (`?seed=` で uint32 超の seed を与えた非production対局などが実際に該当する)。
+ * - 同一 seed の記録が既にあれば何もしない(終局済みジャーナルのリロード再生対策)。
+ * - `MAX_HISTORY_ENTRIES` を超える分は最古から破棄する。
+ * - 保存容量が不足した場合は件数を半減させながら再試行し、**保存できる範囲の履歴を
+ *   最大限残す**(最新結果を最優先しつつ、過去の記録を不必要に全消ししない)。
+ *   1件でも保存できない環境では諦める(対局自体は継続できる)。
+ *
+ * 追記できたかを返す(`clearHistory` と同じ方針)。呼び出し側はこの返り値を見て
+ * `notifyHistoryChanged()` を呼び、購読者へ通知する(issue #310)。検証を通らない値と
+ * 保存失敗は `"failed"`、重複 seed は `"already-exists"` で、いずれも追記しない。
+ *
+ * 保証は**片方向**である ─ `"appended"` なら保存内容は必ず変化しているが、それ以外は
+ * 「変化していない」を意味しない。破損データが残っていた場合、`loadHistory` が
+ * その削除を行った上で追記に失敗し得る。ただしこのとき購読者から見える値は前後とも
+ * 空配列(破損データは `getHistorySnapshot` でも空に落ちる)なので、通知の取りこぼしにはならない。
+ *
+ * **排他制御を持たない下位API。** 複数タブから呼ぶと read-modify-write が競合するため、
+ * アプリからは `persistHistoryAcrossTabs` を使う。
  */
 export function persistHistory(
   storage: Storage,
@@ -255,12 +274,7 @@ export async function persistHistoryAcrossTabs(
   entry: MatchHistoryEntry,
   locks?: HistoryLockManager | null,
 ): Promise<HistoryPersistenceResult> {
-  const lockManager =
-    locks === undefined
-      ? typeof navigator !== "undefined" && navigator.locks !== undefined
-        ? (navigator.locks as HistoryLockManager)
-        : null
-      : locks;
+  const lockManager = resolveLockManager(locks);
   if (lockManager === null) return "failed";
   try {
     return await lockManager.request(MATCH_HISTORY_LOCK, () => {
@@ -291,6 +305,9 @@ export function appendHistory(
  *
  * 返り値で成否を伝えるのは `savePlayerNames` と同じ方針。呼び出し側は「削除しました」と
  * いう通知を実態と食い違わせずに出し分けられる。
+ *
+ * **排他制御を持たない下位API。** UI から呼ぶと別タブの終局保存と競合するため、画面からは
+ * `clearHistoryAcrossTabs` を使う(`persistHistory` と `persistHistoryAcrossTabs` の関係と同じ)。
  */
 export function clearHistory(storage: Storage): boolean {
   try {
@@ -307,22 +324,23 @@ export function clearHistory(storage: Storage): boolean {
  *
  * 追記と同じ Web Lock に参加し、writer が読んだ古い snapshot から削除済み履歴を
  * 復活させる lost update を防ぐ。排他を保証できない環境では削除成功を偽らない。
+ *
+ * 追記側と同じく lock 内で読み直し、**実際に空になった場合だけ** `true` を返す。
+ * `removeItem` が例外を投げずに無視される Storage でも「削除しました」と案内しない。
  */
 export async function clearHistoryAcrossTabs(
   storage: Storage,
   locks?: HistoryLockManager | null,
 ): Promise<boolean> {
-  const lockManager =
-    locks === undefined
-      ? typeof navigator !== "undefined" && navigator.locks !== undefined
-        ? (navigator.locks as HistoryLockManager)
-        : null
-      : locks;
+  const lockManager = resolveLockManager(locks);
   if (lockManager === null) return false;
   try {
-    return await lockManager.request(MATCH_HISTORY_LOCK, () =>
-      clearHistory(storage),
-    );
+    return await lockManager.request(MATCH_HISTORY_LOCK, () => {
+      if (!clearHistory(storage)) return false;
+      // lock 内で読み直し、実際に空になった場合だけ成功を返す(追記側と対称)。
+      // 削除できていないのに「削除しました」と案内すると実態と食い違う。
+      return loadHistory(storage).length === 0;
+    });
   } catch {
     return false;
   }
@@ -356,11 +374,12 @@ function onStorageEvent(event: StorageEvent): void {
 /**
  * 保存内容を変更したことを購読者へ知らせる。
  *
- * 永続化API(`appendHistory` / `clearHistory`)は `Storage` を引数に取る純粋な入出力に
- * 留め、モジュールグローバルなストアへの通知はこの関数に分離している(責務の分離)。
+ * 永続化API(`persistHistoryAcrossTabs` / `clearHistoryAcrossTabs` とその下位API)は
+ * `Storage` を引数に取る入出力に留め、モジュールグローバルなストアへの通知はこの関数に
+ * 分離している(責務の分離)。
  *
- * 追記(`appendHistory`)・削除(`clearHistory`)のどちらの経路でも、**保存内容を実際に
- * 書き換えたとき(= 返り値が `true`)に呼ぶ**。通知経路を対称にしておくことで、戦績の
+ * 追記・削除のどちらの経路でも、**保存内容を実際に書き換えたとき(= 追記なら
+ * `"appended"`、削除なら `true`)に呼ぶ**。通知経路を対称にしておくことで、戦績の
  * 購読者と `GameProvider` が将来同じ画面に同居しても「保存したのに一覧が更新されない」
  * 無音のバグにならない(issue #310)。
  *

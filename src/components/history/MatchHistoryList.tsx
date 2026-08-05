@@ -105,6 +105,9 @@ export default function MatchHistoryList() {
   // 全件削除すると「削除する」ボタンごと一覧セクションが消えるため、フォーカスが
   // body へ落ちてキーボード利用者が文脈を失う。削除直後だけ空状態へフォーカスを移す。
   const emptyStateRef = useRef<HTMLDivElement>(null);
+  // 削除完了までに別タブの終局保存が届くと一覧が再び描かれ、空状態が存在しない。
+  // その場合の着地点(名前とロールを持つ「戦績をすべて削除」ボタン)。
+  const clearButtonRef = useRef<HTMLButtonElement>(null);
   // 「削除直後の1回だけ」を表す一過性のフラグ。state にすると描画に影響しない値で
   // 再描画が走るうえ、効果内での state 更新になるため ref で持つ。
   const pendingFocusRef = useRef(false);
@@ -112,19 +115,23 @@ export default function MatchHistoryList() {
   useEffect(() => {
     if (!pendingFocusRef.current) return;
     pendingFocusRef.current = false;
-    emptyStateRef.current?.focus();
+    // 空状態が無ければ削除ボタンへ。どちらも無い状況は作らない ─ <body> へ落とすと
+    // キーボード利用者が現在位置を失う(スペック5「復帰先が到達不能なときは連鎖する」)。
+    (emptyStateRef.current ?? clearButtonRef.current)?.focus();
   });
 
   const executeClear = async () => {
     const storage = localStorageOrNull();
     const cleared = storage !== null && (await clearHistoryAcrossTabs(storage));
     if (cleared) {
-      // 永続化と購読者への通知は分離されているため、削除後に明示的に知らせる(#302)。
-      notifyHistoryChanged();
       // 「削除する」ボタンごと一覧セクションが消えるので、空状態へフォーカスを移す。
+      // 購読者への通知より先にフラグを立てる ─ 通知は再描画を要求するため、後置きだと
+      // 効果の実行順がバッチングの実装詳細に依存する。
       setConfirmingClear(false);
       pendingFocusRef.current = true;
       setStatusMessage("保存されていた戦績をすべて削除しました。");
+      // 永続化と購読者への通知は分離されているため、削除後に明示的に知らせる(#302)。
+      notifyHistoryChanged();
       return;
     }
     // 削除できなかった場合は一覧が残る。「削除しました」と読み上げると実態と食い違う。
@@ -218,6 +225,7 @@ export default function MatchHistoryList() {
               </div>
             ) : (
               <button
+                ref={clearButtonRef}
                 type="button"
                 onClick={() => {
                   setStatusMessage("");
