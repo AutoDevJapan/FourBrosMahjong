@@ -31,6 +31,18 @@ export default defineConfig({
   fullyParallel: true,
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 2 : 0,
+  // Playwright 既定の `"50%"` は `floor(cpus × 0.5)` なので、2 コアの GitHub ホスト
+  // runner では **1 worker = 完全な直列実行**になる(CI ログの `Running 143 tests using
+  // 1 worker` が実測値)。E2E は待ち時間(ページ遷移・networkidle・axe 走査)が支配的で、
+  // `fullyParallel: true` によりローカルでは既定の 50% = 複数 worker で日常的に並列実行
+  // されている。つまり並列安全性は確立済みで、CI だけが直列で走っていた。
+  //
+  // ローカル実測(同一 spec 群 / `CI=1` / 139 passed・3 skipped、flake 0):
+  //   workers=1 → 136.2s (CPU 130.7s) / workers=2 → 71.8s (CPU 138.2s) / workers=4 → 59.1s (CPU 169.9s)
+  // 2 worker で **1.90 倍**速くなる一方 CPU 総量の増加は +6% に留まる。4 worker は CPU を
+  // +30% 使うため 2 コア runner では競合でタイムアウト耐性を削る。したがって過剰購読は
+  // せず「コア数ぴったり」を指定する。パーセント指定なので runner が増強されれば自動追従する。
+  workers: process.env.CI ? "100%" : undefined,
   reporter: process.env.CI
     ? [["list"], ["github"], ["html", { open: "never" }]]
     : "html",

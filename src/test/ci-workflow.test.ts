@@ -1,20 +1,40 @@
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { parse } from "yaml";
+import {
+  classifyPath,
+  DOCUMENTATION_EXCEPTIONS,
+  resolveScope,
+} from "../../.github/scripts/verification-scope.mjs";
+import playwrightConfig from "../../playwright.config";
 
 type Step = {
   name?: string;
   uses?: string;
   run?: string;
+  id?: string;
   if?: string;
   env?: Record<string, unknown>;
   with?: Record<string, unknown>;
 };
 
 type Workflow = {
+  concurrency?: { group?: string; "cancel-in-progress"?: unknown };
   jobs?: Record<string, { "timeout-minutes"?: unknown; steps?: Step[] }>;
 };
+
+const WORKFLOW_DIR = resolve(process.cwd(), ".github/workflows");
+
+function workflowFilenames(): string[] {
+  return readdirSync(WORKFLOW_DIR).filter((entry) => entry.endsWith(".yml"));
+}
+
+function readWorkflowFile(filename: string): Workflow {
+  return parse(
+    readFileSync(resolve(WORKFLOW_DIR, filename), "utf8"),
+  ) as Workflow;
+}
 
 /** Playwright のブラウザバイナリを置く共有キャッシュパス。 */
 const PLAYWRIGHT_CACHE_PATH = "~/.cache/ms-playwright";
@@ -254,5 +274,374 @@ describe("Actions cache budget (#380)", () => {
         ).toBeUndefined();
       }
     }
+  });
+});
+
+/**
+ * Actions の課金は **job 単位で分に切り上げ**られるため、判定 job + gate job を足す構成は
+ * 1 run あたり常に +2 分を上乗せする。本リポジトリの job 時間ではその上乗せがスキップの節約を
+ * ほぼ食い潰すので、判定は各 job の先頭 step で行い重い step だけを `if:` で落とす (#491)。
+ *
+ * この形は「job 自体は常に実行され常に成功を報告する」ことが前提であり、そこが崩れると
+ * required status check が永久に pending になる。以下はその前提と、
+ * 「重い step が確実にゲートされている」ことを固定する。
+ */
+describe("変更パスによる実行範囲の絞り込み (#491)", () => {
+  const SCOPE_STEP_ID = "scope";
+
+  /** 判定 step を持つべき job と、その `SCOPE_JOB` 値。 */
+  const SCOPED_JOBS = { ci: "ci", e2e: "e2e" } as const;
+
+  it.each(Object.entries(SCOPED_JOBS))(
+    "%s job は先頭で実行範囲を判定する",
+    (jobName, scopeJob) => {
+      const steps = readWorkflowFile("ci.yml").jobs?.[jobName]?.steps ?? [];
+      const scope = steps.find((step) => step.id === SCOPE_STEP_ID);
+      expect(
+        scope,
+        `${jobName}: id: ${SCOPE_STEP_ID} の step が無い`,
+      ).toBeDefined();
+      expect(scope?.run).toContain(".github/scripts/verification-scope.mjs");
+      expect(
+        scope?.env?.SCOPE_JOB,
+        `${jobName}: SCOPE_JOB が判定スクリプトへ渡されていない`,
+      ).toBe(scopeJob);
+
+      // 判定は checkout 直後でなければ、重い step の前に結果が出ない。
+      expect(steps.indexOf(scope as Step)).toBe(1);
+    },
+  );
+
+  it.each(Object.keys(SCOPED_JOBS))(
+    "%s job の checkout は判定に必要な履歴を取得している",
+    (jobName) => {
+      const steps = readWorkflowFile("ci.yml").jobs?.[jobName]?.steps ?? [];
+      const checkout = steps.find((step) =>
+        step.uses?.startsWith("actions/checkout@"),
+      );
+      // 浅い clone だと base..head を diff できず、判定が常にフェイルオープンになる。
+      // 「安全側に倒れるので気づけない」ため、設定側で固定する。
+      expect(
+        checkout?.with?.["fetch-depth"],
+        `${jobName}: fetch-depth: 0 が無いと base..head を diff できず判定が常に無効化される`,
+      ).toBe(0);
+    },
+  );
+
+  /**
+   * ゲートし忘れた重い step は「常に実行される」= 削減がそのまま無効化される。
+   * しかも CI は緑のままなので気づけない。実行コマンドを列挙して漏れを検出する。
+   */
+  it("重い検証コマンドはすべて verify でゲートされている", () => {
+    const HEAVY = [
+      "pnpm lint",
+      "pnpm typecheck",
+      "pnpm check",
+      "pnpm test",
+      "pnpm knip",
+      "pnpm depcruise",
+      "pnpm build",
+      "pnpm test:e2e",
+      "pnpm test:e2e:prod:prebuilt",
+      "pnpm install",
+      "playwright install",
+    ];
+    const workflow = readWorkflowFile("ci.yml");
+    for (const [jobName, definition] of Object.entries(workflow.jobs ?? {})) {
+      for (const step of definition.steps ?? []) {
+        const run = step.run?.trim();
+        if (!run) continue;
+        const heavy = HEAVY.find((command) =>
+          new RegExp(
+            `(^|\\s)${command.replace(/\s+/g, "\\s+")}(\\s|$)`,
+            "m",
+          ).test(run),
+        );
+        if (!heavy) continue;
+        expect(
+          step.if ?? "",
+          `${jobName} / ${step.name}: 「${heavy}」がゲートされていない(変更と無関係でも常に実行される)`,
+        ).toMatch(/steps\.scope\.outputs\.(setup|verify) == 'true'/);
+      }
+    }
+  });
+
+  /**
+   * `verify` が false でも `setup` は true になりうる (マージ後 push のキャッシュ投入)。
+   * 逆に `setup` が false なら依存が入っていないため `verify` も false でなければならない。
+   */
+  it("setup を伴わない verify は存在しない", () => {
+    for (const job of ["ci", "e2e"] as const) {
+      for (const postMergeDuplicate of [false, true]) {
+        for (const paths of [
+          null,
+          [],
+          ["docs/README.md"],
+          ["src/domain/game/engine.test.ts"],
+          ["src/domain/hand/yaku.ts"],
+          ["e2e/game.spec.ts"],
+        ]) {
+          const { setup, verify } = resolveScope({
+            job,
+            paths,
+            postMergeDuplicate,
+          });
+          if (verify) {
+            expect(
+              setup,
+              `${job}: verify=true なのに setup=false (依存が無い状態で検証コマンドが走る)`,
+            ).toBe(true);
+          }
+        }
+      }
+    }
+  });
+});
+
+/**
+ * 判定ロジックそのものの契約。ここが緩むと「検証すべき変更を検証しない」に直結する。
+ */
+describe("verification-scope の分類契約 (#491)", () => {
+  it.each([
+    // [説明, パス, 期待する分類]
+    ["仕様書", "documents/spec/game-flow.md", "documentation"],
+    ["ルートの md", "CLAUDE.md", "documentation"],
+    ["単体テスト", "src/domain/game/engine.test.ts", "unit-test"],
+    ["コンポーネントテスト", "src/components/game/Board.test.tsx", "unit-test"],
+    [
+      "テスト専用 fixture",
+      "src/domain/game/__testing__/engine-fixtures.ts",
+      "unit-test",
+    ],
+    ["オラクル", "src/domain/hand/__oracle__/generator.ts", "unit-test"],
+    ["E2E spec", "e2e/game.spec.ts", "e2e-asset"],
+    ["Playwright 設定", "playwright.config.ts", "e2e-asset"],
+    ["出荷コード", "src/domain/hand/yaku.ts", "code"],
+    ["ワークフロー", ".github/workflows/ci.yml", "code"],
+    ["ロックファイル", "pnpm-lock.yaml", "code"],
+  ])("%s は %s → %s", (_label, path, expected) => {
+    expect(classifyPath(path)).toBe(expected);
+  });
+
+  /**
+   * `e2e/**` の spec は `*.spec.ts` にも一致するため、判定順を間違えると
+   * 「E2E spec を変更したのに E2E が走らない」という最悪の取りこぼしになる。
+   */
+  it("E2E spec は単体テストとして扱われない", () => {
+    expect(
+      resolveScope({
+        job: "e2e",
+        paths: ["e2e/game.spec.ts"],
+        postMergeDuplicate: false,
+      }).verify,
+    ).toBe(true);
+  });
+
+  it.each([
+    ["変更を特定できない", null],
+    ["変更が空", []],
+  ])("%s ときは全検証を実行する(フェイルオープン)", (_label, paths) => {
+    for (const job of ["ci", "e2e"] as const) {
+      expect(
+        resolveScope({ job, paths, postMergeDuplicate: false }).verify,
+        `${job}: 判定不能をスキップ扱いにすると検証の穴が静かに開く`,
+      ).toBe(true);
+    }
+  });
+
+  it("文書のみの変更は ci も e2e も検証しない", () => {
+    const paths = ["documents/spec/game-flow.md", "CLAUDE.md"];
+    for (const job of ["ci", "e2e"] as const) {
+      expect(
+        resolveScope({ job, paths, postMergeDuplicate: false }).verify,
+      ).toBe(false);
+    }
+  });
+
+  it("単体テストのみの変更は ci は検証し e2e は検証しない", () => {
+    const paths = [
+      "src/domain/game/engine.test.ts",
+      "documents/spec/game-flow.md",
+    ];
+    expect(
+      resolveScope({ job: "ci", paths, postMergeDuplicate: false }).verify,
+    ).toBe(true);
+    expect(
+      resolveScope({ job: "e2e", paths, postMergeDuplicate: false }).verify,
+    ).toBe(false);
+  });
+
+  it("マージ後 push は検証せずキャッシュ投入だけを行う", () => {
+    for (const job of ["ci", "e2e"] as const) {
+      const scope = resolveScope({
+        job,
+        paths: ["src/domain/hand/yaku.ts"],
+        postMergeDuplicate: true,
+      });
+      expect(scope.verify, `${job}: 同一ツリーは PR 側で検証済み`).toBe(false);
+      expect(
+        scope.setup,
+        `${job}: main が導入を止めると全 PR がキャッシュを復元できなくなる (#380)`,
+      ).toBe(true);
+    }
+  });
+});
+
+/**
+ * **この検査が本命の安全網**。
+ *
+ * `docs/**` や `*.md` を一律で「文書」と見なすと、`docs/四兄弟麻雀ルール.md` のように
+ * **テストが内容を読んでいるファイル**まで検証対象から外れる。CI は緑のままなので、
+ * 「ルール文書を書き換えたのに /rules との整合検査が走らなかった」という失敗は
+ * 誰にも気づかれない。除外一覧が実態と一致していることを機械的に固定する。
+ */
+describe("文書スキップがテストの前提を壊していない (#491)", () => {
+  /** `src/**` のテストが `resolve(process.cwd(), "…")` で読んでいるリポジトリ相対パス。 */
+  function repositoryPathsReadByTests(): string[] {
+    const found = new Set<string>();
+    const walk = (dir: string) => {
+      for (const entry of readdirSync(dir, { withFileTypes: true })) {
+        const path = resolve(dir, entry.name);
+        if (entry.isDirectory()) {
+          walk(path);
+        } else if (/\.tsx?$/.test(entry.name)) {
+          const source = readFileSync(path, "utf8");
+          for (const match of source.matchAll(
+            /process\.cwd\(\)\s*,\s*"([^"]+)"/g,
+          )) {
+            found.add(match[1]);
+          }
+        }
+      }
+    };
+    walk(resolve(process.cwd(), "src"));
+    return [...found];
+  }
+
+  it("テストが読むファイルは文書として黙殺されない", () => {
+    const read = repositoryPathsReadByTests();
+    // 走査自体が壊れて 0 件になれば、この検査は何も守らなくなる。
+    expect(
+      read.length,
+      "src 配下から process.cwd() 参照を 1 件も抽出できなかった(走査が壊れている)",
+    ).toBeGreaterThanOrEqual(4);
+
+    for (const path of read) {
+      expect(
+        classifyPath(path),
+        `${path}: テストが読んでいるのに文書として扱われている。` +
+          "この変更だけの PR では CI がスキップされ、検証が静かに失われる。" +
+          "verification-scope.mjs の DOCUMENTATION_EXCEPTIONS に追加すること",
+      ).not.toBe("documentation");
+    }
+  });
+
+  it("除外一覧に不要な項目が残っていない", () => {
+    const read = new Set(repositoryPathsReadByTests());
+    for (const path of DOCUMENTATION_EXCEPTIONS) {
+      expect(
+        read.has(path),
+        `${path}: どのテストからも読まれていない。除外は検証コスト増に直結するため、不要になったら消す`,
+      ).toBe(true);
+    }
+  });
+});
+
+/**
+ * Playwright 既定の `"50%"` は 2 コア runner で 1 worker = 完全な直列実行になる。
+ * これは「遅いだけで緑」なので、設定が戻っても誰も気づけない。実測 (workers=1: 136.2s /
+ * workers=2: 71.8s) の 1.90 倍を失わないよう、CI での明示指定を固定する (#491)。
+ */
+describe("CI での Playwright 並列度 (#491)", () => {
+  /** `CI` の有無で設定が変わるため、環境変数を差し替えて評価し直す。 */
+  async function configWith(ci: string | undefined) {
+    if (ci === undefined) vi.stubEnv("CI", "");
+    else vi.stubEnv("CI", ci);
+    vi.resetModules();
+    return (await import("../../playwright.config")).default;
+  }
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    vi.resetModules();
+  });
+
+  it("CI では worker 数を明示している", async () => {
+    const config = await configWith("1");
+    expect(
+      config.workers,
+      "CI で workers を明示しないと Playwright 既定の 50% により 2 コア runner では 1 worker になる",
+    ).toBeDefined();
+    // `"50%"` は既定と同じ = 直列に戻る。パーセント指定なら 100% 以上でなければ意味がない。
+    const workers = config.workers;
+    if (typeof workers === "string") {
+      const percent = Number.parseInt(workers, 10);
+      expect(
+        percent,
+        `workers: "${workers}" は既定 (50%) 以下で、直列実行に逆戻りする`,
+      ).toBeGreaterThanOrEqual(100);
+    } else {
+      expect(workers).toBeGreaterThanOrEqual(2);
+    }
+  });
+
+  it("ローカルでは Playwright の既定に委ねる", async () => {
+    const config = await configWith(undefined);
+    expect(
+      config.workers,
+      "ローカルはマシンによってコア数が異なるため、既定 (50%) に任せる",
+    ).toBeUndefined();
+  });
+
+  it("並列前提の fullyParallel が維持されている", () => {
+    expect(
+      playwrightConfig.fullyParallel,
+      "fullyParallel を落とすと worker を増やしても直列に戻る",
+    ).toBe(true);
+  });
+});
+
+/**
+ * タイムアウトの無い job は、ハングすると既定の 6 時間まで runner を占有し、
+ * その間ずっと課金される。全ワークフローの全 job に上限があることを固定する (#491)。
+ */
+describe("全ワークフローの job にタイムアウトがある (#491)", () => {
+  it("timeout-minutes を宣言していない job が無い", () => {
+    const filenames = workflowFilenames();
+    expect(filenames.length).toBeGreaterThanOrEqual(4);
+
+    for (const filename of filenames) {
+      const jobs = readWorkflowFile(filename).jobs ?? {};
+      expect(
+        Object.keys(jobs).length,
+        `${filename}: job を 1 つも解釈できていない`,
+      ).toBeGreaterThan(0);
+      for (const [jobName, definition] of Object.entries(jobs)) {
+        const timeout = definition["timeout-minutes"];
+        expect(
+          timeout,
+          `${filename} / ${jobName}: timeout-minutes が無い(ハング時に既定の6時間 runner を占有する)`,
+        ).toBeTypeOf("number");
+        expect(timeout).toBeGreaterThan(0);
+        expect(timeout).toBeLessThanOrEqual(60);
+      }
+    }
+  });
+});
+
+/**
+ * リリースは中断すると「タグはあるが Release が無い」中途半端な状態を残すため、
+ * CI と違い進行中の実行をキャンセルしてはならない (#491)。
+ */
+describe("release ワークフローの多重起動制御 (#491)", () => {
+  it("タグ単位で直列化し、進行中はキャンセルしない", () => {
+    const concurrency = readWorkflowFile("release.yml").concurrency;
+    expect(concurrency?.group, "release に concurrency が無い").toContain(
+      "github.ref",
+    );
+    expect(
+      concurrency?.["cancel-in-progress"],
+      "Release 作成を中断するとタグと Release が乖離する",
+    ).toBe(false);
   });
 });
