@@ -79,6 +79,10 @@ const matches = (path, patterns) =>
 export function classifyPath(path) {
   if (matches(path, E2E_ASSET)) return "e2e-asset";
   if (DOCUMENTATION_EXCEPTIONS.includes(path)) return "code";
+  // `public/` は定義上そのまま配信される出荷ツリー。拡張子が .md でも文書ではない
+  // (例: public/tiles/CREDITS.md は /tiles/CREDITS.md として配信され、
+  //  Service Worker の /tiles/ ランタイムルールの対象にもなる)。
+  if (path.startsWith("public/")) return "code";
   if (matches(path, DOCUMENTATION)) return "documentation";
   if (matches(path, UNIT_TEST_ONLY)) return "unit-test";
   return "code";
@@ -145,6 +149,12 @@ export const SCOPE_OUTPUT_KEYS = /** @type {const} */ (["setup", "verify"]);
  * 3 点は merge-base からの差分 = **この PR 自身が持ち込んだ変更**であり、
  * GitHub の PR 画面が表示する差分と一致する。
  *
+ * **`--no-renames` を付ける理由**: git は既定でリネームを検出し、`--name-only` は
+ * **移動先のパスだけ**を出力する。そのため `git mv src/foo.ts docs/foo.md` のような変更が
+ * 「`docs/foo.md` だけが変わった」= 文書のみと誤判定され、**出荷コードが 1 本消えているのに
+ * lint も typecheck も test も build も走らないまま required check が緑になる**。
+ * 検出を切って移動元・移動先の両方を出力させる。
+ *
  * @param {string | undefined} baseSha
  * @param {string | undefined} headSha
  * @returns {string[] | null}
@@ -160,7 +170,7 @@ export function changedPaths(baseSha, headSha) {
   try {
     const output = execFileSync(
       "git",
-      ["diff", "--name-only", "-z", `${baseSha}...${headSha}`],
+      ["diff", "--name-only", "--no-renames", "-z", `${baseSha}...${headSha}`],
       { encoding: "utf8", maxBuffer: 32 * 1024 * 1024 },
     );
     // `-z` で NUL 区切りにする。パスに改行や非 ASCII (本リポジトリは日本語ファイル名を含む)

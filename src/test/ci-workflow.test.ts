@@ -37,7 +37,10 @@ type Workflow = {
 const WORKFLOW_DIR = resolve(process.cwd(), ".github/workflows");
 
 function workflowFilenames(): string[] {
-  return readdirSync(WORKFLOW_DIR).filter((entry) => entry.endsWith(".yml"));
+  // `.yaml` で追加されたワークフローが検査から丸ごと漏れないよう両方を見る。
+  return readdirSync(WORKFLOW_DIR).filter(
+    (entry) => entry.endsWith(".yml") || entry.endsWith(".yaml"),
+  );
 }
 
 function readWorkflowFile(filename: string): Workflow {
@@ -333,7 +336,7 @@ describe("変更パスによる実行範囲の絞り込み (#491)", () => {
       // 「安全側に倒れるので気づけない」ため、設定側で固定する。
       expect(
         checkout?.with?.["fetch-depth"],
-        `${jobName}: fetch-depth: 0 が無いと base..head を diff できず判定が常に無効化される`,
+        `${jobName}: fetch-depth: 0 が無いと merge-base を計算できず判定が常に無効化される`,
       ).toBe(0);
     },
   );
@@ -342,38 +345,86 @@ describe("変更パスによる実行範囲の絞り込み (#491)", () => {
    * ゲートし忘れた重い step は「常に実行される」= 削減がそのまま無効化される。
    * しかも CI は緑のままなので気づけない。実行コマンドを列挙して漏れを検出する。
    */
-  it("重い検証コマンドはすべて verify でゲートされている", () => {
-    const HEAVY = [
-      "pnpm lint",
-      "pnpm typecheck",
-      "pnpm check",
-      "pnpm test",
-      "pnpm knip",
-      "pnpm depcruise",
-      "pnpm build",
-      "pnpm test:e2e",
-      "pnpm test:e2e:prod:prebuilt",
-      "pnpm install",
-      "playwright install",
-    ];
+  /**
+   * 検証コマンドと導入コマンドは**別のゲート**で落とさなければならない。
+   * 片方でも受け入れる緩い検査だと、例えば `pnpm test` が `setup` ゲートに化けても
+   * 素通りし、マージ後 push で毎回テストが走って削減が静かに消える。
+   */
+  it.each([
+    [
+      "verify",
+      [
+        "pnpm lint",
+        "pnpm typecheck",
+        "pnpm check",
+        "pnpm test",
+        "pnpm knip",
+        "pnpm depcruise",
+        "pnpm build",
+        "pnpm test:e2e",
+        "pnpm test:e2e:prod:prebuilt",
+      ],
+    ],
+    ["setup", ["pnpm store path"]],
+  ] as const)(
+    "%s でゲートすべきコマンドが正しいゲートを持つ",
+    (gate, commands) => {
+      const workflow = readWorkflowFile("ci.yml");
+      const seen: string[] = [];
+      for (const [jobName, definition] of Object.entries(workflow.jobs ?? {})) {
+        for (const step of definition.steps ?? []) {
+          const run = step.run?.trim();
+          if (!run) continue;
+          const matched = commands.find((command) =>
+            // `$(pnpm store path --silent)` のようにコマンド置換の中にあっても拾えるよう、
+            // 前後の境界は空白だけでなく括弧・引用符も許す。
+            new RegExp(
+              `(^|[\\s("'])${command.replace(/\s+/g, "\\s+")}([\\s)"']|$)`,
+              "m",
+            ).test(run),
+          );
+          if (!matched) continue;
+          seen.push(matched);
+          expect(
+            step.if ?? "",
+            `${jobName} / ${step.name}: 「${matched}」は ${gate} でゲートされていなければならない`,
+          ).toContain(`steps.scope.outputs.${gate} == 'true'`);
+        }
+      }
+      // 走査が壊れて 0 件になれば、この検査は何も守らない。
+      expect(
+        seen.length,
+        `${gate}: 対象コマンドを 1 つも検出できなかった`,
+      ).toBeGreaterThan(0);
+    },
+  );
+
+  /**
+   * 依存とブラウザの導入は「検証する」か「キャッシュがまだ無い」ときだけ必要。
+   * マージ後 push でキャッシュが既にヒットしている場合、入れても使わず保存もしないため
+   * 丸ごと無駄になる (#491)。
+   */
+  it("導入コマンドはキャッシュミス時のみ実行される", () => {
     const workflow = readWorkflowFile("ci.yml");
+    let checked = 0;
     for (const [jobName, definition] of Object.entries(workflow.jobs ?? {})) {
       for (const step of definition.steps ?? []) {
         const run = step.run?.trim();
         if (!run) continue;
-        const heavy = HEAVY.find((command) =>
-          new RegExp(
-            `(^|\\s)${command.replace(/\s+/g, "\\s+")}(\\s|$)`,
-            "m",
-          ).test(run),
-        );
-        if (!heavy) continue;
+        if (!/pnpm install|playwright install/.test(run)) continue;
+        checked += 1;
         expect(
           step.if ?? "",
-          `${jobName} / ${step.name}: 「${heavy}」がゲートされていない(変更と無関係でも常に実行される)`,
-        ).toMatch(/steps\.scope\.outputs\.(setup|verify) == 'true'/);
+          `${jobName} / ${step.name}: 検証しない run では cache-hit のときに省略されるべき`,
+        ).toMatch(
+          /steps\.scope\.outputs\.verify == 'true' \|\| steps\.[\w-]+\.outputs\.cache-hit != 'true'/,
+        );
       }
     }
+    expect(
+      checked,
+      "導入コマンドを 1 つも検出できなかった",
+    ).toBeGreaterThanOrEqual(3);
   });
 
   /**
@@ -427,6 +478,8 @@ describe("verification-scope の分類契約 (#491)", () => {
     ["E2E spec", "e2e/game.spec.ts", "e2e-asset"],
     ["Playwright 設定", "playwright.config.ts", "e2e-asset"],
     ["出荷コード", "src/domain/hand/yaku.ts", "code"],
+    // public/ は定義上そのまま配信される出荷ツリー。拡張子が .md でも文書ではない。
+    ["public 配下の md", "public/tiles/CREDITS.md", "code"],
     ["ワークフロー", ".github/workflows/ci.yml", "code"],
     ["ロックファイル", "pnpm-lock.yaml", "code"],
   ])("%s は %s → %s", (_label, path, expected) => {
@@ -506,40 +559,54 @@ describe("verification-scope の分類契約 (#491)", () => {
  * 誰にも気づかれない。除外一覧が実態と一致していることを機械的に固定する。
  */
 describe("文書スキップがテストの前提を壊していない (#491)", () => {
-  /** `src/**` のテストが `resolve(process.cwd(), "…")` で読んでいるリポジトリ相対パス。 */
-  function repositoryPathsReadByTests(): string[] {
+  /**
+   * テストコードが**どう解決しているかに関係なく**、文字列リテラルとして現れる
+   * 「文書扱いになりうるリポジトリ相対パス」を集める。
+   *
+   * 解決方法で絞ると идиом の取りこぼしが起きる: 本リポジトリには
+   * `resolve(process.cwd(), "…")` だけでなく `new URL("…", import.meta.url)` や
+   * 独自ヘルパ (`repoPath("…")`) で読むテストが実在し、そのどれかが将来 `.md` を
+   * 読み始めた瞬間に「守っているつもりの検査」が黙って素通りする。
+   * したがって解決方法を問わず `.md` / `docs/` / `documents/` リテラルを全部拾う。
+   */
+  function documentaryLiteralsInTests(): string[] {
     const found = new Set<string>();
     const walk = (dir: string) => {
       for (const entry of readdirSync(dir, { withFileTypes: true })) {
         const path = resolve(dir, entry.name);
         if (entry.isDirectory()) {
           walk(path);
-        } else if (/\.tsx?$/.test(entry.name)) {
-          const source = readFileSync(path, "utf8");
-          for (const match of source.matchAll(
-            /process\.cwd\(\)\s*,\s*"([^"]+)"/g,
-          )) {
-            found.add(match[1]);
-          }
+          continue;
+        }
+        if (!/\.tsx?$/.test(entry.name)) continue;
+        // このファイル自身は分類テストの**入力データ**として `.md` リテラルを並べるため
+        // 除外する。判定対象はあくまで「他のテストが参照している文書」。
+        if (entry.name === "ci-workflow.test.ts") continue;
+        for (const match of readFileSync(path, "utf8").matchAll(
+          /"([^"\n]*\.md)"/g,
+        )) {
+          // 相対指定 (`../../docs/x.md`) はリポジトリ相対へ正規化する。
+          found.add(match[1].replace(/^(?:\.\.\/)+/, ""));
         }
       }
     };
-    walk(resolve(process.cwd(), "src"));
+    // e2e/ のテストも同じ理由で対象にする。
+    for (const root of ["src", "e2e"]) walk(resolve(process.cwd(), root));
     return [...found];
   }
 
-  it("テストが読むファイルは文書として黙殺されない", () => {
-    const read = repositoryPathsReadByTests();
+  it("テストが読む文書は文書として黙殺されない", () => {
+    const literals = documentaryLiteralsInTests();
     // 走査自体が壊れて 0 件になれば、この検査は何も守らなくなる。
     expect(
-      read.length,
-      "src 配下から process.cwd() 参照を 1 件も抽出できなかった(走査が壊れている)",
-    ).toBeGreaterThanOrEqual(4);
+      literals.length,
+      "テストから .md リテラルを 1 件も抽出できなかった(走査が壊れている)",
+    ).toBeGreaterThanOrEqual(2);
 
-    for (const path of read) {
+    for (const path of literals) {
       expect(
         classifyPath(path),
-        `${path}: テストが読んでいるのに文書として扱われている。` +
+        `${path}: テストが参照しているのに文書として扱われている。` +
           "この変更だけの PR では CI がスキップされ、検証が静かに失われる。" +
           "verification-scope.mjs の DOCUMENTATION_EXCEPTIONS に追加すること",
       ).not.toBe("documentation");
@@ -547,11 +614,11 @@ describe("文書スキップがテストの前提を壊していない (#491)", 
   });
 
   it("除外一覧に不要な項目が残っていない", () => {
-    const read = new Set(repositoryPathsReadByTests());
+    const literals = new Set(documentaryLiteralsInTests());
     for (const path of DOCUMENTATION_EXCEPTIONS) {
       expect(
-        read.has(path),
-        `${path}: どのテストからも読まれていない。除外は検証コスト増に直結するため、不要になったら消す`,
+        literals.has(path),
+        `${path}: どのテストからも参照されていない。除外は検証コスト増に直結するため、不要になったら消す`,
       ).toBe(true);
     }
   });
@@ -559,8 +626,8 @@ describe("文書スキップがテストの前提を壊していない (#491)", 
 
 /**
  * Playwright 既定の `"50%"` は 2 コア runner で 1 worker = 完全な直列実行になる。
- * これは「遅いだけで緑」なので、設定が戻っても誰も気づけない。実測 (workers=1: 136.2s /
- * workers=2: 71.8s) の 1.90 倍を失わないよう、CI での明示指定を固定する (#491)。
+ * これは「遅いだけで緑」なので、設定が戻っても誰も気づけない。CI 実測で
+ * 266s → 243s (1.09 倍) の改善があるため、明示指定が消えないよう固定する (#491)。
  */
 describe("CI での Playwright 並列度 (#491)", () => {
   /** `CI` の有無で設定が変わるため、環境変数を差し替えて評価し直す。 */
@@ -718,6 +785,52 @@ describe("変更ファイルの取得範囲 (#491)", () => {
         resolveScope({ job: "ci", paths, postMergeDuplicate: false }).verify,
         "base 側の出荷コード変更が混ざると、文書のみの PR でもスキップが発火しない",
       ).toBe(false);
+    } finally {
+      process.chdir(previous);
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  /**
+   * git は既定でリネームを検出し、`--name-only` は**移動先のパスだけ**を出力する。
+   * そのため `git mv src/foo.ts docs/foo.md` が「文書のみの変更」に化け、
+   * **出荷コードが 1 本消えているのに lint も typecheck も test も build も走らないまま
+   * required check が緑になる**。フェイルオープンでも救えない (分類は成功していて、
+   * ただ間違っているため)。`--no-renames` で移動元も出力させる。
+   */
+  it("出荷コードを文書へ移動しても、移動元を見落とさない", () => {
+    const dir = mkdtempSync(join(tmpdir(), "scope-rename-"));
+    const git = (...args: string[]) =>
+      execFileSync("git", args, { cwd: dir, encoding: "utf8" }).trim();
+    const previous = process.cwd();
+    try {
+      git("init", "--quiet", "--initial-branch", "main");
+      git("config", "user.email", "test@example.com");
+      git("config", "user.name", "test");
+      git("config", "commit.gpgsign", "false");
+      mkdirSync(join(dir, "src"));
+      mkdirSync(join(dir, "docs"));
+      writeFileSync(join(dir, "src/ships.ts"), "export const x = 1;\n");
+      writeFileSync(join(dir, "docs/note.md"), "note\n");
+      git("add", "-A");
+      git("commit", "--quiet", "-m", "base");
+      const base = git("rev-parse", "HEAD");
+
+      git("checkout", "--quiet", "-b", "feature");
+      git("mv", "src/ships.ts", "docs/ships.md");
+      git("commit", "--quiet", "-m", "move shipped module into docs");
+      const head = git("rev-parse", "HEAD");
+
+      process.chdir(dir);
+      const paths = changedPaths(base, head);
+      expect(
+        paths,
+        "リネーム検出を切らないと移動元 (src/ships.ts) が差分から消える",
+      ).toContain("src/ships.ts");
+      expect(
+        resolveScope({ job: "ci", paths, postMergeDuplicate: false }).verify,
+        "出荷コードが消えているのに文書のみと判定され、必須ゲートが何も検証せず緑になる",
+      ).toBe(true);
     } finally {
       process.chdir(previous);
       rmSync(dir, { recursive: true, force: true });

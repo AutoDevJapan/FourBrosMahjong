@@ -52,9 +52,14 @@ jobs:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          # 次の step が base..head を diff するため全履歴が要る。
-          # 取得できなければ判定は「特定不能」としてフェイルオープンし、全検証を実行する。
+          # 次の step が merge-base からの差分 (base...head) を取るため全履歴が要る。
+          # 浅い clone だと merge-base を計算できず、判定は「特定不能」として
+          # フェイルオープンし全検証を実行する (安全側だが削減効果は消える)。
           fetch-depth: 0
+          # 判定に必要なのはコミットとツリーだけで、ファイル内容は要らない
+          # (`--name-only --no-renames` は blob を読まない)。この step は判定前に
+          # 無条件で走る唯一のコストなので、blob の取得を省いて最小化する。
+          filter: blob:none
 
       - name: Resolve verification scope
         id: scope
@@ -97,8 +102,10 @@ jobs:
           path: ${{ steps.pnpm-store.outputs.path }}
           key: pnpm-store-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
 
+      # マージ後 push は検証しないので node_modules を使わない。キャッシュが既にヒットして
+      # いれば保存する中身も無いため、install 自体を丸ごと省く (#491)。
       - name: Install dependencies
-        if: steps.scope.outputs.setup == 'true'
+        if: steps.scope.outputs.verify == 'true' || steps.pnpm-cache.outputs.cache-hit != 'true'
         run: pnpm install --frozen-lockfile
 
       # pnpm store のキーは e2e job と共通のため、保存は ci job のみが行う。
@@ -161,8 +168,9 @@ jobs:
           path: ~/.cache/ms-playwright
           key: playwright-browsers-${{ runner.os }}-chromium-${{ hashFiles('pnpm-lock.yaml') }}
 
+      # 同上。検証しない run でキャッシュも既にあるなら取得する意味が無い (#491)。
       - name: Install Playwright browser for production PWA E2E
-        if: steps.scope.outputs.setup == 'true'
+        if: steps.scope.outputs.verify == 'true' || steps.pwa-playwright-cache.outputs.cache-hit != 'true'
         env:
           DEBIAN_FRONTEND: noninteractive
           NEEDRESTART_MODE: a
@@ -195,9 +203,14 @@ jobs:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          # 次の step が base..head を diff するため全履歴が要る。
-          # 取得できなければ判定は「特定不能」としてフェイルオープンし、全検証を実行する。
+          # 次の step が merge-base からの差分 (base...head) を取るため全履歴が要る。
+          # 浅い clone だと merge-base を計算できず、判定は「特定不能」として
+          # フェイルオープンし全検証を実行する (安全側だが削減効果は消える)。
           fetch-depth: 0
+          # 判定に必要なのはコミットとツリーだけで、ファイル内容は要らない
+          # (`--name-only --no-renames` は blob を読まない)。この step は判定前に
+          # 無条件で走る唯一のコストなので、blob の取得を省いて最小化する。
+          filter: blob:none
 
       - name: Resolve verification scope
         id: scope
@@ -229,13 +242,16 @@ jobs:
 
       - name: Restore pnpm store
         if: steps.scope.outputs.setup == 'true'
+        id: pnpm-cache
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ${{ steps.pnpm-store.outputs.path }}
           key: pnpm-store-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
 
+      # マージ後 push は検証しないので node_modules を使わない。キャッシュが既にヒットして
+      # いれば保存する中身も無いため、install 自体を丸ごと省く (#491)。
       - name: Install dependencies
-        if: steps.scope.outputs.setup == 'true'
+        if: steps.scope.outputs.verify == 'true' || steps.pnpm-cache.outputs.cache-hit != 'true'
         run: pnpm install --frozen-lockfile
 
       # ブラウザバイナリ (~/.cache/ms-playwright) を pnpm-lock.yaml のハッシュ (= @playwright/test の
@@ -254,8 +270,9 @@ jobs:
       # Ubuntu ランナーで --with-deps が apt-get 経由で依存パッケージを更新する際、needrestart が
       # 対話的な再起動確認プロンプトを出して非対話環境でハングすることがあるため、
       # 環境変数で明示的に自動応答させる。
+      # 同上 (#491)。
       - name: Install Playwright browsers (chromium / webkit + OS deps)
-        if: steps.scope.outputs.setup == 'true'
+        if: steps.scope.outputs.verify == 'true' || steps.playwright-cache.outputs.cache-hit != 'true'
         env:
           DEBIAN_FRONTEND: noninteractive
           NEEDRESTART_MODE: a
