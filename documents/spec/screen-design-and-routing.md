@@ -41,6 +41,8 @@
 - Given 絵文字または結合文字を含む名前 / When 12書記素クラスタを超えて入力 / Then 見た目の12文字までを保持し、出力にlone surrogateを含めない(#484)
 - Given `Intl.Segmenter` 非対応環境 / When 結合文字・variation selector・emoji modifier・ZWJ列・国旗ペアを含む名前を制限 / Then fallbackが各列を途中で分断しない(#484)
 - Given #484 修正前に保存された lone surrogate 入りの名前を含む対局ジャーナル / When リロードして復元する / Then ジャーナルを破棄せず、名前を U+FFFD へ正規化して進行中の半荘を再生する(#484)
+- Given 日本語IMEで読みが12書記素を超える語(例: 「にほんごにゅうりょくてすと」→「日本語入力テスト」) / When 変換中に入力して確定する / Then 未確定文字列を切り詰めず変換を壊さない。確定後の文字列にのみ上限を適用する(#484)
+- Given 1書記素が複数 code unit になる名前(家族絵文字・国旗・tag sequence)で12書記素 / When 半荘を終えて戦績へ保存する / Then 保存に失敗せず戦績へ残り、`/history` から読み戻せる(#484)
 
 ## 6.3 画面遷移
 
