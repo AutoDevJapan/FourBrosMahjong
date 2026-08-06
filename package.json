@@ -48,7 +48,7 @@
     "@types/react-dom": "^19",
     "@vitejs/plugin-react": "^6.0.5",
     "@vitest/coverage-v8": "^4.1.10",
-    "dependency-cruiser": "^18.1.0",
+    "dependency-cruiser": "^18.1.1",
     "eslint": "^9",
     "eslint-config-next": "16.2.12",
     "jsdom": "^30.0.1",
