@@ -76,7 +76,7 @@ jobs:
           SCOPE_REF: ${{ github.ref }}
           SCOPE_BASE_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
           SCOPE_HEAD_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
-          # マージ後 push のスキップ前提を実行時に検証するための入力 (#496)。
+          # main / dev / stg へのマージ後 push のスキップ前提を実行時に検証するための入力 (#496)。
           # `SCOPE_CHECK_NAME` は **この job 自身の name**。PR 側で「この job が緑だった」
           # ことを確認するため、job の name を変えたらここも必ず追随させる
           # (src/test/ci-workflow.test.ts が一致を固定する)。
@@ -186,7 +186,7 @@ jobs:
 
       # 同上。検証しない run でキャッシュも既にあるなら取得する意味が無い (#491)。
       - name: Install Playwright browser for production PWA E2E
-        if: steps.scope.outputs.verify == 'true' || steps.pwa-playwright-cache.outputs.cache-hit != 'true'
+        if: steps.scope.outputs.setup == 'true' && (steps.scope.outputs.verify == 'true' || steps.pwa-playwright-cache.outputs.cache-hit != 'true')
         env:
           DEBIAN_FRONTEND: noninteractive
           NEEDRESTART_MODE: a
@@ -236,7 +236,7 @@ jobs:
           SCOPE_REF: ${{ github.ref }}
           SCOPE_BASE_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
           SCOPE_HEAD_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
-          # マージ後 push のスキップ前提を実行時に検証するための入力 (#496)。
+          # main / dev / stg へのマージ後 push のスキップ前提を実行時に検証するための入力 (#496)。
           # `SCOPE_CHECK_NAME` は **この job 自身の name**。PR 側で「この job が緑だった」
           # ことを確認するため、job の name を変えたらここも必ず追随させる
           # (src/test/ci-workflow.test.ts が一致を固定する)。
@@ -297,7 +297,7 @@ jobs:
       # 環境変数で明示的に自動応答させる。
       # 同上 (#491)。
       - name: Install Playwright browsers (chromium / webkit + OS deps)
-        if: steps.scope.outputs.verify == 'true' || steps.playwright-cache.outputs.cache-hit != 'true'
+        if: steps.scope.outputs.setup == 'true' && (steps.scope.outputs.verify == 'true' || steps.playwright-cache.outputs.cache-hit != 'true')
         env:
           DEBIAN_FRONTEND: noninteractive
           NEEDRESTART_MODE: a

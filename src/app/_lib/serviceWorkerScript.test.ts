@@ -404,7 +404,14 @@ describe("buildServiceWorkerScript", () => {
 
   it("runtime cacheは上限超過時に古いentryから削除する", async () => {
     const sw = bootServiceWorker();
-    sw.setFetchImpl(vi.fn(async () => new Response("chunk")));
+    sw.setFetchImpl(
+      vi.fn(
+        async () =>
+          new Response("chunk", {
+            headers: { "Content-Type": "application/javascript" },
+          }),
+      ),
+    );
 
     // 実ブラウザ同様に並列取得しても、write + eviction の直列化で上限を越えない。
     await Promise.all(
@@ -534,7 +541,12 @@ describe("buildServiceWorkerScript", () => {
 
   it("不変アセットはcache-first: 一度キャッシュされたらネットワークへ出ない", async () => {
     const sw = bootServiceWorker();
-    const fetchSpy = vi.fn(async () => new Response("chunk"));
+    const fetchSpy = vi.fn(
+      async () =>
+        new Response("chunk", {
+          headers: { "Content-Type": "application/javascript" },
+        }),
+    );
     sw.setFetchImpl(fetchSpy);
 
     await sw.dispatchFetch(request("/_next/static/chunks/app.js"));
@@ -546,6 +558,35 @@ describe("buildServiceWorkerScript", () => {
     expect(fetchSpy).toHaveBeenCalledTimes(1);
     const response: Response = await second.respondWith.mock.calls[0][0];
     expect(await response.text()).toBe("chunk");
+  });
+
+  it("不変JSへの200 HTML fallbackをキャッシュせず正常応答へ回復する", async () => {
+    const sw = bootServiceWorker();
+    const fetchSpy = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(htmlResponse("fallback"))
+      .mockResolvedValueOnce(
+        new Response("valid chunk", {
+          headers: { "Content-Type": "application/javascript" },
+        }),
+      );
+    sw.setFetchImpl(fetchSpy);
+
+    const first = await sw.dispatchFetch(
+      request("/_next/static/chunks/app.js"),
+    );
+    const firstResponse: Response = await first.respondWith.mock.calls[0][0];
+    expect(await firstResponse.text()).toBe("fallback");
+
+    const second = await sw.dispatchFetch(
+      request("/_next/static/chunks/app.js"),
+    );
+    const secondResponse: Response = await second.respondWith.mock.calls[0][0];
+    expect(await secondResponse.text()).toBe("valid chunk");
+    expect(fetchSpy).toHaveBeenCalledTimes(2);
+
+    await sw.dispatchFetch(request("/_next/static/chunks/app.js"));
+    expect(fetchSpy).toHaveBeenCalledTimes(2);
   });
 
   it("非GET・クロスオリジンのリクエストには介入しない", async () => {
