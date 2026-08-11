@@ -17,6 +17,7 @@ import {
   DOCUMENTATION_EXCEPTIONS,
   EVIDENCE_IO_TIMEOUT_MS,
   githubApi,
+  protectedPushBranch,
   resolvePostMergeEvidence,
   resolveScope,
   runGit,
@@ -911,6 +912,22 @@ describe("マージ後 push のスキップ前提を実行時に検証する (#4
   const BEFORE = "b".repeat(40);
   const HEAD = "c".repeat(40);
   const CHECK = "lint / typecheck / format / test / build";
+
+  it.each([
+    ["main", "refs/heads/main", "main"],
+    ["dev", "refs/heads/dev", "dev"],
+    ["stg", "refs/heads/stg", "stg"],
+  ])("%s への push は証拠検証の対象になる", (_name, ref, expected) => {
+    expect(protectedPushBranch("push", ref)).toBe(expected);
+  });
+
+  it.each([
+    ["PR", "pull_request", "refs/pull/1/merge"],
+    ["未知の branch", "push", "refs/heads/feature/test"],
+    ["tag", "push", "refs/tags/v1.0.0"],
+  ])("%s は証拠検証の対象外", (_name, event, ref) => {
+    expect(protectedPushBranch(event, ref)).toBeNull();
+  });
 
   /** すべての証拠が揃った状態。各テストはここから 1 つだけ壊す。 */
   function happyPath(

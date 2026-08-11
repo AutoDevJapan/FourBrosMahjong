@@ -76,7 +76,7 @@ jobs:
           SCOPE_REF: ${{ github.ref }}
           SCOPE_BASE_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
           SCOPE_HEAD_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
-          # マージ後 push のスキップ前提を実行時に検証するための入力 (#496)。
+          # main / dev / stg へのマージ後 push のスキップ前提を実行時に検証するための入力 (#496)。
           # `SCOPE_CHECK_NAME` は **この job 自身の name**。PR 側で「この job が緑だった」
           # ことを確認するため、job の name を変えたらここも必ず追随させる
           # (src/test/ci-workflow.test.ts が一致を固定する)。
@@ -236,7 +236,7 @@ jobs:
           SCOPE_REF: ${{ github.ref }}
           SCOPE_BASE_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
           SCOPE_HEAD_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
-          # マージ後 push のスキップ前提を実行時に検証するための入力 (#496)。
+          # main / dev / stg へのマージ後 push のスキップ前提を実行時に検証するための入力 (#496)。
           # `SCOPE_CHECK_NAME` は **この job 自身の name**。PR 側で「この job が緑だった」
           # ことを確認するため、job の name を変えたらここも必ず追随させる
           # (src/test/ci-workflow.test.ts が一致を固定する)。
