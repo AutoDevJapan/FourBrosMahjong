@@ -1,6 +1,11 @@
 import { fileURLToPath } from "node:url";
 import react from "@vitejs/plugin-react";
 import { defineConfig } from "vitest/config";
+import { checkNodeVersion } from "./scripts/check-node-version.mjs";
+
+// package scripts の pre-hook だけでなく `pnpm exec vitest` の直接実行も、jsdom を
+// 初期化する前に同じ engines.node 契約で停止させる(issue #495)。
+checkNodeVersion();
 
 /**
  * Test environments are split by file extension so node-based logic tests and
