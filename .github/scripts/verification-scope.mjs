@@ -120,22 +120,28 @@ export function classifyChangedPaths(paths) {
  * @param {"ci" | "e2e"} input.job
  * @param {readonly string[] | null | undefined} input.paths
  * @param {boolean} input.postMergeDuplicate
- *   永続ブランチへのマージ後 push か。対象ブランチは branch protection が
- *   `strict: true` (マージ前に最新であることを要求) / 直 push 禁止 / force push 禁止
- *   なので、着地するツリーは直前に PR の checks が緑にしたツリーと必ず一致する。
- *   したがって検証は重複であり、この run はキャッシュ投入だけを行う。
+ *   永続ブランチへのマージ後 push で、着地treeが直前にchecksを通過したPR headと
+ *   同一だと証拠判定済みか。trueなら検証は重複である。
+ * @param {boolean} [input.seedCaches=false]
+ *   既定ブランチの push として共有キャッシュを投入するか。dev / stg の cache は
+ *   保存しないため、検証済み昇格 push で setup を行っても消費するだけで再利用されない。
  * @returns {{ setup: boolean, verify: boolean }}
  *   `verify`: 検証コマンド (lint/test/build/playwright) を実行するか。
  *   `setup`: 依存とブラウザの導入 (= キャッシュ投入) を行うか。
  */
-export function resolveScope({ job, paths, postMergeDuplicate }) {
+export function resolveScope({
+  job,
+  paths,
+  postMergeDuplicate,
+  seedCaches = false,
+}) {
   const { docsOnly, unitTestOnly } = classifyChangedPaths(paths);
   const irrelevant = job === "e2e" ? unitTestOnly : docsOnly;
   const verify = !irrelevant && !postMergeDuplicate;
-  // マージ後 push は検証しないが、キャッシュの投入だけは行う。
+  // マージ後 push は検証しない。既定ブランチではキャッシュの投入だけを行う。
   // Actions のキャッシュは既定ブランチ (main) で保存したものだけが全 PR から復元できるため
   // (#380)、main の run が導入を止めると全 PR が毎回ダウンロードし直しになる。
-  return { setup: verify || postMergeDuplicate, verify };
+  return { setup: verify || (postMergeDuplicate && seedCaches), verify };
 }
 
 export const SCOPE_OUTPUT_KEYS = /** @type {const} */ (["setup", "verify"]);
@@ -463,6 +469,9 @@ async function main() {
     job,
     paths,
     postMergeDuplicate: Boolean(pushBranch) && evidence.skip,
+    // 保存 step は main 限定。dev / stg で setup しても共有cacheへ保存できず、
+    // 特にbrowser cache miss時のdownloadが完全な浪費になる。
+    seedCaches: pushBranch === "main",
   });
 
   const summary = [
