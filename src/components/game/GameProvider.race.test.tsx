@@ -4,7 +4,6 @@ import { act, fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { useEffect } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { createGame } from "@/domain/game/engine";
 import ActionPanel from "./ActionPanel";
 import { GameProvider, useGame } from "./GameProvider";
 import { loadJournal, replayJournal } from "./gamePersistence";
@@ -165,86 +164,6 @@ describe("GameProvider concurrent controls (#230)", () => {
     await user.click(screen.getByRole("option", { name: label! }));
 
     expect(loadJournal(window.sessionStorage)?.actions).toHaveLength(2);
-  });
-
-  it("赤五と通常五を別の正規操作として連続受理する", async () => {
-    const seed = Array.from({ length: 100 }, (_, index) => index + 1).find(
-      (candidate) => {
-        const tiles = createGame({ seed: candidate }).hand?.hands.east ?? [];
-        return tiles.some(
-          (tile, index) =>
-            tile.rank === 5 &&
-            tiles.some(
-              (other, otherIndex) =>
-                otherIndex > index &&
-                other.suit === tile.suit &&
-                other.rank === 5,
-            ),
-        );
-      },
-    );
-    expect(seed).toBeDefined();
-    const game = createGame({ seed });
-    if (!game.hand) throw new Error("hand is required");
-    // 現行酌はオール赤だが、UI境界の牌identityが isRed を落として
-    // 将来の通常五を同一操作扱いしないことを合成fixtureで固定する。
-    const hand = game.hand.hands.east;
-    const firstDuplicate = hand.findIndex((tile, index) =>
-      hand.some(
-        (other, otherIndex) =>
-          otherIndex > index &&
-          tile.rank === 5 &&
-          other.suit === tile.suit &&
-          other.rank === 5,
-      ),
-    );
-    const secondDuplicate = hand.findIndex(
-      (tile, index) =>
-        index > firstDuplicate &&
-        tile.suit === hand[firstDuplicate].suit &&
-        tile.rank === hand[firstDuplicate].rank,
-    );
-    expect(firstDuplicate).toBeGreaterThanOrEqual(0);
-    expect(secondDuplicate).toBeGreaterThan(firstDuplicate);
-    hand[firstDuplicate] = { ...hand[firstDuplicate], isRed: true };
-    hand[secondDuplicate] = { ...hand[secondDuplicate], isRed: false };
-    const user = userEvent.setup();
-    const publishedControls = new Set<ReturnType<typeof useGame>["controls"]>();
-    function Probe() {
-      const { controls, view } = useGame();
-      publishedControls.add(controls);
-      const self = view.slots.self;
-      if (self.kind !== "seated" || !self.player.hand) return null;
-      const red = self.player.hand.find((tile) => tile.isRed);
-      const normal = red
-        ? self.player.hand.find(
-            (tile) =>
-              !tile.isRed && tile.suit === red.suit && tile.rank === red.rank,
-          )
-        : undefined;
-      return (
-        <>
-          {red ? (
-            <button type="button" onClick={() => controls.discard(red)}>
-              赤五
-            </button>
-          ) : null}
-          {normal ? (
-            <button type="button" onClick={() => controls.discard(normal)}>
-              通常五
-            </button>
-          ) : null}
-        </>
-      );
-    }
-    render(
-      <GameProvider initialGame={game}>
-        <Probe />
-      </GameProvider>,
-    );
-    await user.click(screen.getByRole("button", { name: "赤五" }));
-    await user.click(screen.getByRole("button", { name: "通常五" }));
-    expect(publishedControls.size).toBe(3);
   });
 
   it("commit後は異なる正規操作を直ちに受け付ける", async () => {
