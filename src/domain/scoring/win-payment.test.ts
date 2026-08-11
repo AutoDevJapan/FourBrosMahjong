@@ -20,6 +20,7 @@ function expectZeroSum(deltas: Record<string, number>) {
 const mangan = computeScore({ han: 5, yakumanMultiplier: 0 }, false); // 子満貫
 const dealerMangan = computeScore({ han: 5, yakumanMultiplier: 0 }, true); // 親満貫
 const yakuman = computeScore({ han: 0, yakumanMultiplier: 1 }, false); // 子役満
+const doubleYakuman = computeScore({ han: 0, yakumanMultiplier: 2 }, false); // 子ダブル役満
 
 describe("resolveWinPayment — ロン", () => {
   it("子ロン: 放銃者が全額、他家は0、総和ゼロ", () => {
@@ -219,6 +220,44 @@ describe("resolveWinPayment — 本場・供託", () => {
 });
 
 describe("resolveWinPayment — パオ(責任払い)", () => {
+  describe("複合役満の現行集約挙動(Q37 / #525 未確定)", () => {
+    /**
+     * `resolveWinPayment` は役満の内訳を受け取らず、責任者も1人しか
+     * 表現できない。したがってパオ対象外を含み得るダブル役満でも、
+     * `paoResponsibleId` が渡ると総額全体へ責任払いを適用する。
+     * これは Q37 の裁定ではなく、裁定までの意図せざる変更を検出するための
+     * 現行挙動の可視化である。
+     */
+    it("ロンはダブル役満総額を1人の責任者と放銃者で折半する", () => {
+      const { deltas } = resolveWinPayment({
+        winner: C1,
+        winType: "ron",
+        score: doubleYakuman,
+        discarderId: "child2",
+        others: [D, C2],
+        paoResponsibleId: "dealer",
+      });
+      expect(deltas.child1).toBe(64000);
+      expect(deltas.dealer).toBe(-32000);
+      expect(deltas.child2).toBe(-32000);
+      expectZeroSum(deltas);
+    });
+
+    it("ツモはダブル役満総額を1人の責任者へ寄せる", () => {
+      const { deltas } = resolveWinPayment({
+        winner: C1,
+        winType: "tsumo",
+        score: doubleYakuman,
+        others: [D, C2],
+        paoResponsibleId: "dealer",
+      });
+      expect(deltas.child1).toBe(64000);
+      expect(deltas.dealer).toBe(-64000);
+      expect(deltas.child2).toBe(0);
+      expectZeroSum(deltas);
+    });
+  });
+
   it("パオ・ロン(責任者≠放銃者): 折半 16000/16000", () => {
     const { deltas } = resolveWinPayment({
       winner: C1,
