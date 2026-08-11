@@ -943,6 +943,7 @@ describe("マージ後 push のスキップ前提を実行時に検証する (#4
       apiError?: string;
       gitFails?: string;
       trees?: Record<string, string>;
+      parents?: Record<string, string[]>;
     } = {},
   ) {
     const pulls = overrides.pulls ?? [
@@ -994,6 +995,12 @@ describe("マージ後 push のスキップ前提を実行時に検証する (#4
         if (!tree) throw new Error("unknown rev");
         return `${tree}\n`;
       }
+      if (args[0] === "rev-list") {
+        const sha = args[4];
+        const parents = sha ? overrides.parents?.[sha] : undefined;
+        if (!sha || !parents) throw new Error("unknown commit parents");
+        return `${[sha, ...parents].join(" ")}\n`;
+      }
       return "";
     };
     return { api, git };
@@ -1001,14 +1008,19 @@ describe("マージ後 push のスキップ前提を実行時に検証する (#4
 
   const call = (
     overrides: Parameters<typeof happyPath>[0] = {},
-    input: Partial<{ forced: boolean; before: string; sha: string }> = {},
+    input: Partial<{
+      forced: boolean;
+      before: string;
+      sha: string;
+      branch: "main" | "dev" | "stg";
+    }> = {},
   ) =>
     resolvePostMergeEvidence({
       repo: REPO,
       sha: input.sha ?? SHA,
       before: input.before ?? BEFORE,
       forced: input.forced ?? false,
-      branch: "main",
+      branch: input.branch ?? "main",
       checkName: CHECK,
       ...happyPath(overrides),
     });
@@ -1018,6 +1030,111 @@ describe("マージ後 push のスキップ前提を実行時に検証する (#4
     expect(result).toEqual({
       skip: true,
       reason: "verified-by-merged-pull-request",
+    });
+  });
+
+  it("PR #519型の履歴が分岐したmain→dev昇格を親とtreeの一致で許可する", async () => {
+    const merge = "545e1e05517bee2c526c07596b3fbe7b1b7be56f";
+    const devBefore = "b9a05e53894113613342e9b0cfabe55b8c20df5b";
+    const mainHead = "85efd840ef6c23183a80ad6dd20f6dfb38b09527";
+    const result = await call(
+      {
+        pulls: [
+          {
+            number: 519,
+            merged_at: "2026-08-11T18:03:49Z",
+            merge_commit_sha: merge,
+            base: { ref: "dev" },
+            head: {
+              ref: "main",
+              sha: mainHead,
+              repo: { full_name: REPO },
+            },
+          },
+        ],
+        workflowRun: {
+          event: "pull_request",
+          path: ".github/workflows/ci.yml",
+          head_sha: mainHead,
+          conclusion: "success",
+        },
+        parents: { [merge]: [devBefore, mainHead] },
+        trees: { [merge]: "promoted-tree", [mainHead]: "promoted-tree" },
+      },
+      { sha: merge, before: devBefore, branch: "dev" },
+    );
+    expect(result).toEqual({
+      skip: true,
+      reason: "verified-by-merged-pull-request",
+    });
+  });
+
+  it("devへの任意feature PRは昇格証拠として扱わない", async () => {
+    const result = await call(
+      {
+        pulls: [
+          {
+            number: 520,
+            merged_at: "2026-08-11T18:10:00Z",
+            merge_commit_sha: SHA,
+            base: { ref: "dev" },
+            head: {
+              ref: "feature/arbitrary",
+              sha: HEAD,
+              repo: { full_name: REPO },
+            },
+          },
+        ],
+      },
+      { branch: "dev" },
+    );
+    expect(result).toEqual({
+      skip: false,
+      reason: "no-merged-pull-request",
+    });
+  });
+
+  it("履歴が分岐したdev→stg昇格も親とtreeの一致で許可する", async () => {
+    const result = await call(
+      {
+        pulls: [
+          {
+            number: 521,
+            merged_at: "2026-08-11T19:00:00Z",
+            merge_commit_sha: SHA,
+            base: { ref: "stg" },
+            head: { ref: "dev", sha: HEAD, repo: { full_name: REPO } },
+          },
+        ],
+        parents: { [SHA]: [BEFORE, HEAD] },
+      },
+      { branch: "stg" },
+    );
+    expect(result).toEqual({
+      skip: true,
+      reason: "verified-by-merged-pull-request",
+    });
+  });
+
+  it("昇格mergeの親がpush前tipとsource headに一致しなければ拒否する", async () => {
+    const result = await call(
+      {
+        pulls: [
+          {
+            number: 519,
+            merged_at: "2026-08-11T18:03:49Z",
+            merge_commit_sha: SHA,
+            base: { ref: "dev" },
+            head: { ref: "main", sha: HEAD, repo: { full_name: REPO } },
+          },
+        ],
+        parents: { [SHA]: ["d".repeat(40), HEAD] },
+      },
+      { branch: "dev" },
+    );
+    expect(result).toEqual({
+      skip: false,
+      reason: "merge-parents-mismatch",
     });
   });
 
