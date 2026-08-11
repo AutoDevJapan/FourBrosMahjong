@@ -75,6 +75,9 @@ importers:
       knip:
         specifier: ^6.32.0
         version: 6.32.0
+      semver:
+        specifier: ^7.8.5
+        version: 7.8.5
       tailwindcss:
         specifier: ^4
         version: 4.3.3
