@@ -293,18 +293,14 @@ export async function resolvePostMergeEvidence({
     return { skip: false, reason: "check-runs-response-invalid" };
   const own = runs.filter((run) => run?.name === checkName);
   if (own.length === 0) return { skip: false, reason: "own-check-run-missing" };
-  if (
-    !own.every(
-      (run) =>
-        run?.conclusion === "success" && run?.app?.slug === TRUSTED_CHECK_APP,
-    )
-  )
-    return { skip: false, reason: "own-check-run-not-successful" };
-
   // 名前と app だけでは、同じ repository の別 workflow が作った check を区別できない。
   // details URL から Actions run を引き、その run がこの workflow の pull_request 実行で
-  // 同じ head SHA を検証したことまで確認する。
+  // 同じ head SHA を検証したことまで確認する。同じ SHA にはマージ後 push の同名 check も
+  // 共存しうるため、それは候補から除外し、eligible な PR run が 1 本以上成功していることを
+  // 証拠とする。
+  let successfulEligibleRun = false;
   for (const run of own) {
+    if (run?.app?.slug !== TRUSTED_CHECK_APP) continue;
     const match = String(run?.details_url ?? "").match(
       /\/actions\/runs\/(\d+)(?:\/job\/\d+)?(?:[/?#]|$)/,
     );
@@ -316,14 +312,20 @@ export async function resolvePostMergeEvidence({
     } catch {
       return { skip: false, reason: "check-runs-api-failed" };
     }
-    if (
+    const ineligible =
       workflowRun?.event !== "pull_request" ||
       workflowRun?.path !== TRUSTED_WORKFLOW_PATH ||
-      workflowRun?.head_sha !== headSha ||
-      workflowRun?.conclusion !== "success"
-    )
-      return { skip: false, reason: "own-check-run-not-successful" };
+      workflowRun?.head_sha !== headSha;
+    if (ineligible) continue;
+    if (
+      run?.conclusion === "success" &&
+      workflowRun?.conclusion === "success"
+    ) {
+      successfulEligibleRun = true;
+    }
   }
+  if (!successfulEligibleRun)
+    return { skip: false, reason: "own-check-run-not-successful" };
 
   // PR head の commit は merge 後も `refs/pull/N/head` で取得できる
   // (`refs/pull/N/merge` は merge 時に削除されるため使えない)。

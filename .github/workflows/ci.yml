@@ -186,7 +186,7 @@ jobs:
 
       # 同上。検証しない run でキャッシュも既にあるなら取得する意味が無い (#491)。
       - name: Install Playwright browser for production PWA E2E
-        if: steps.scope.outputs.verify == 'true' || steps.pwa-playwright-cache.outputs.cache-hit != 'true'
+        if: steps.scope.outputs.setup == 'true' && (steps.scope.outputs.verify == 'true' || steps.pwa-playwright-cache.outputs.cache-hit != 'true')
         env:
           DEBIAN_FRONTEND: noninteractive
           NEEDRESTART_MODE: a
@@ -297,7 +297,7 @@ jobs:
       # 環境変数で明示的に自動応答させる。
       # 同上 (#491)。
       - name: Install Playwright browsers (chromium / webkit + OS deps)
-        if: steps.scope.outputs.verify == 'true' || steps.playwright-cache.outputs.cache-hit != 'true'
+        if: steps.scope.outputs.setup == 'true' && (steps.scope.outputs.verify == 'true' || steps.playwright-cache.outputs.cache-hit != 'true')
         env:
           DEBIAN_FRONTEND: noninteractive
           NEEDRESTART_MODE: a
