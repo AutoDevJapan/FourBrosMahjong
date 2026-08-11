@@ -8,10 +8,15 @@ on:
     branches: [main, dev, stg]
   push:
     branches: [main, dev, stg]
+  # GITHUB_TOKEN で自動生成する gitleaks version bump PR は pull_request event を
+  # 再発火しないため、作成元 workflow が同じ head SHA の required check を明示起動する。
+  # event に base/before が無いので scope 判定は fail-open し、全検証を実行する。
+  workflow_dispatch:
 
 # 同一ブランチで新しい push があれば古い実行をキャンセルして無駄を省く
 concurrency:
-  group: ci-${{ github.workflow }}-${{ github.ref }}
+  # 手動起動が同じrefのpush runをキャンセルするとrequired evidenceを失うためeventも分離する。
+  group: ci-${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}
   cancel-in-progress: true
 
 # 最小権限の原則。いずれも read のみ。
