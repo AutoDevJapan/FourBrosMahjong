@@ -5,8 +5,7 @@
  * (シャッフルは別モジュール {@link "../random/shuffle".shuffle} の責務)。
  */
 
-import type { Suit, Tile } from "./tile";
-import { HONOR } from "./tile";
+import { createTile, HONOR, type Suit, type Tile } from "./tile";
 
 /**
  * 使用牌の総数(スペック1 1.2 / スペック4 4.4 不変条件)。
@@ -14,16 +13,15 @@ import { HONOR } from "./tile";
  */
 export const TOTAL_TILE_COUNT = 108;
 
-/** 各牌の重複枚数(すべての種別で4枚)。 */
-const COPIES_PER_TILE = 4;
+/**
+ * 各牌の重複枚数(すべての種別で4枚)。
+ * 受け入れの残り枚数(`4 − 手牌内枚数`)など、山の構成に依存する計算はこの定数を参照する。
+ */
+export const COPIES_PER_TILE = 4;
 
-/** 赤5となるスート(オール赤5: 5筒・5索)。萬子に5は存在しない。 */
-const RED_FIVE_SUITS: ReadonlySet<Suit> = new Set(["pin", "sou"]);
-
+/** 同一牌種を {@link COPIES_PER_TILE} 枚ぶん生成する(赤5は {@link createTile} に委譲)。 */
 function makeCopies(suit: Suit, rank: number): Tile[] {
-  // オール赤5(スペック1 1.2 / スペック4 4.4): 5筒・5索は常に赤。
-  const isRed = rank === 5 && RED_FIVE_SUITS.has(suit);
-  return Array.from({ length: COPIES_PER_TILE }, () => ({ suit, rank, isRed }));
+  return Array.from({ length: COPIES_PER_TILE }, () => createTile(suit, rank));
 }
 
 /**

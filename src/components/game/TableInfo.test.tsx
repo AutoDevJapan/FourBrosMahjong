@@ -19,10 +19,14 @@ describe("TableInfo (spec 6.4.2)", () => {
     expect(screen.getByText("東1局")).toBeInTheDocument();
     expect(screen.getByText("本場")).toBeInTheDocument();
     expect(screen.getByText("供託")).toBeInTheDocument();
-    expect(screen.getByLabelText("残り山 37枚")).toBeInTheDocument();
+    expect(screen.getByText("残り山")).toBeInTheDocument();
+    expect(screen.getByText("37枚")).toBeInTheDocument();
     // honba value
     expect(screen.getByText("2")).toBeInTheDocument();
-    expect(screen.getByLabelText("サイコロ 6と6、ドラ3枚")).toBeInTheDocument();
+    expect(
+      screen.getByText("サイコロ", { selector: "dt" }),
+    ).toBeInTheDocument();
+    expect(screen.getByText("6と6、ドラ3枚")).toBeInTheDocument();
   });
 
   it("labels a south round correctly", () => {
@@ -58,7 +62,25 @@ describe("TableInfo (spec 6.4.2)", () => {
       />,
     );
     expect(
-      screen.getByLabelText(`サイコロ ${dice[0]}と${dice[1]}、ドラ${count}枚`),
+      screen.getByText(`${dice[0]}と${dice[1]}、ドラ${count}枚`),
     ).toBeInTheDocument();
+    expect(screen.getByTestId("dice-info")).not.toHaveAttribute("aria-label");
+  });
+
+  it("generic 要素を aria-label で命名しない(#204)", () => {
+    const { container } = render(
+      <TableInfo
+        info={{
+          roundWind: "east",
+          handNumber: 1,
+          honba: 0,
+          riichiSticks: 0,
+          remainingLiveTiles: 52,
+          dice: [2, 5],
+          doraCount: 1,
+        }}
+      />,
+    );
+    expect(container.querySelector("div[aria-label]")).toBeNull();
   });
 });

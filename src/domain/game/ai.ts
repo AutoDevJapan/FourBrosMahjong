@@ -7,8 +7,10 @@
  * 温存する・危険牌を避ける、を優先度付きで判断する純ロジックへ置き換える。
  *
  * スコープ(過剰設計の回避):
- * - **鳴き(ポン/カン/チー)・リーチの判断は含めない**(別 issue #97 の責務)。門前の打牌選択のみ。
- * - 向聴/受け入れは自家の見えている情報(自分の14枚)のみで算出する。相手の手牌は覗かない。
+ * - 打牌選択に加え、ナシナシで役無しを確定させないための最小限のポン/大明槓判断を扱う。
+ *   リーチ判断は含めない。
+ * - 向聴/受け入れは自家の見えている情報(自分の門前牌と副露数)のみで算出する。
+ *   相手の手牌は覗かない。
  * - サンマの実在牌種(萬子1・9のみ / 字牌 東南西北白發中)に閉じて受け入れを数える
  *   ({@link SANMA_TILE_KINDS})。
  *
@@ -17,20 +19,66 @@
  * 独自準拠する(外部ライブラリ非依存)。
  *
  * 純関数・決定的・React/DOM 非依存。
+ *
+ * **方策の判断と根拠は [ADR-0002](../../../documents/adr/0002-ai-policy.md) に集約している**(#324)。
+ * 打牌の優先度・鳴きの条件・リーチ/カンの抑制方針を変更する場合は、実装と同じ PR で
+ * ADR を更新すること。本モジュールの JSDoc はアルゴリズムの詳細を担当する。
  */
 
-import type { Suit, Tile } from "@/domain/tiles/tile";
+import type { Meld } from "@/domain/hand/meld";
 import {
+  isYakuhaiCandidate,
   isYaochu,
   SANMA_TILE_KINDS,
   tileKey,
 } from "@/domain/hand/tile-identity";
+import {
+  createTile,
+  HONOR,
+  isRedDora,
+  type PlayableWind,
+  type Suit,
+  type Tile,
+} from "@/domain/tiles/tile";
+import { COPIES_PER_TILE } from "@/domain/tiles/tileSet";
+import { BoundedMemo } from "./boundedMemo";
 
-const RED_FIVE_SUITS: ReadonlySet<Suit> = new Set(["pin", "sou"]);
+/** AI が他家の打牌を鳴くか判断するために必要な公開文脈。 */
+export interface CallMeldContext {
+  readonly tile: Tile;
+  readonly melds: readonly Meld[];
+  readonly seatWind: PlayableWind;
+  readonly roundWind: PlayableWind;
+}
 
-/** 種別(suit+rank)から `Tile` を生成(赤5筒/5索は不変条件どおり赤)。 */
-function makeTile(suit: Suit, rank: number): Tile {
-  return { suit, rank, isRed: rank === 5 && RED_FIVE_SUITS.has(suit) };
+/** 三元牌、場風、自風か。役牌候補の共通定義は hand domain に委譲する。 */
+function isValueHonor(
+  tile: Tile,
+  seatWind: PlayableWind,
+  roundWind: PlayableWind,
+): boolean {
+  if (!isYakuhaiCandidate(tile)) return false;
+  return (
+    tile.rank >= HONOR.WHITE ||
+    tile.rank === seatWind ||
+    tile.rank === roundWind
+  );
+}
+
+/**
+ * ナシナシ規則下の AI のポン/大明槓判断。
+ * 今回の鳴きで役牌を確定するか、既に役牌副露があって役が確定済みの場合だけ鳴く。
+ * ドラは役ではなく、鳴いた後は門前へ戻れないため判断材料にしない。
+ */
+export function shouldCallMeld(ctx: CallMeldContext): boolean {
+  if (isValueHonor(ctx.tile, ctx.seatWind, ctx.roundWind)) return true;
+  return ctx.melds.some((meld) => {
+    const representative = meld.tiles[0];
+    return (
+      representative !== undefined &&
+      isValueHonor(representative, ctx.seatWind, ctx.roundWind)
+    );
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -71,9 +119,28 @@ function countsSignature(counts: Counts): string {
 // 向聴数(シャンテン数): 標準形 / 七対子 / 国士 の最小
 // ---------------------------------------------------------------------------
 
-/** 向聴計算のメモ(同一手牌の再計算を避ける)。上限超過でクリア。 */
-const shantenMemo = new Map<string, number>();
-const SHANTEN_MEMO_CAP = 200_000;
+/** 標準形が使える面子の上限(副露と門前の合計)。副露数の正規化上限でもある。 */
+export const MAX_MELD_COUNT = 4;
+
+/** 七対子の成立に必要な対子数 = 種類数。 */
+const CHIITOITSU_PAIRS = 7;
+
+/**
+ * 副露数を 0..{@link MAX_MELD_COUNT} の整数へ正規化する。
+ * 呼び出し側の異常値(負数・小数・上限超過)で向聴/受け入れが静かに壊れないようにする。
+ * {@link shanten} と {@link ukeire} は同じ境界解釈を共有する必要があるため、
+ * 両者はこの1か所を経由する(片方だけ変えると受け入れ候補と最終判定がずれる)。
+ */
+function normalizeMeldCount(meldCount: number): number {
+  return Math.max(0, Math.min(MAX_MELD_COUNT, Math.trunc(meldCount)));
+}
+
+/**
+ * 向聴計算のメモ。古い局面を1件ずつ退避し、半荘を跨ぐheapを固定容量に保つ。
+ * 25,000件は60半荘probeで上限維持と30秒以内の完走を両立した値(#362)。
+ */
+export const SHANTEN_MEMO_CAP = 25_000;
+const shantenMemo = new BoundedMemo<string, number>(SHANTEN_MEMO_CAP);
 
 /**
  * 分解結果 (面子 melds / 塔子 taatsu / 対子 pairs) から標準形の向聴数を求める。
@@ -82,10 +149,14 @@ const SHANTEN_MEMO_CAP = 200_000;
 function leafShanten(melds: number, taatsu: number, pairs: number): number {
   let best = Number.POSITIVE_INFINITY;
   const headOptions = pairs >= 1 ? [true, false] : [false];
+  // 標準形は4面子までしか使えない。牌数と副露数が不整合な呼び出し(public な `shanten` に
+  // 過大な `meldCount` を渡した場合など)で5面子以上が合成されても、向聴が -1(和了)を
+  // 下回る不正値にならないよう頭打ちにする。
+  const effectiveMelds = Math.min(MAX_MELD_COUNT, melds);
   for (const hasHead of headOptions) {
     const poolForMelds = taatsu + pairs - (hasHead ? 1 : 0);
-    const useful = Math.min(poolForMelds, 4 - melds);
-    const s = 8 - 2 * melds - useful - (hasHead ? 1 : 0);
+    const useful = Math.min(poolForMelds, MAX_MELD_COUNT - effectiveMelds);
+    const s = 8 - 2 * effectiveMelds - useful - (hasHead ? 1 : 0);
     if (s < best) best = s;
   }
   return best;
@@ -94,8 +165,31 @@ function leafShanten(melds: number, taatsu: number, pairs: number): number {
 /** 1スートの分解1通り = [面子数, 塔子数, 対子数]。 */
 type SuitDecomp = readonly [number, number, number];
 
-/** スート別分解のメモ(牌種は限られるので、ウォームアップ後はほぼヒットする)。 */
-const suitMemo = new Map<string, SuitDecomp[]>();
+/**
+ * スート別分解のメモ。長時間利用でもmodule-global cacheを固定容量に保つ。
+ * 向聴memoよりvalueが配列で重いため、保持件数を10,000へ抑える。
+ */
+export const SUIT_MEMO_CAP = 10_000;
+const suitMemo = new BoundedMemo<string, SuitDecomp[]>(SUIT_MEMO_CAP);
+
+/** 長時間回帰テスト専用。production UIからは使用しない。 */
+function assertTestEnvironment(): void {
+  if (process.env.NODE_ENV !== "test") {
+    throw new Error("AI memo diagnostics are only available in tests");
+  }
+}
+
+export const aiMemoDiagnosticsForTests = Object.freeze({
+  sizes: () => {
+    assertTestEnvironment();
+    return { shanten: shantenMemo.size, suit: suitMemo.size };
+  },
+  clear: () => {
+    assertTestEnvironment();
+    shantenMemo.clear();
+    suitMemo.clear();
+  },
+});
 
 /**
  * 1スートのカウント配列を面子/塔子/対子へ分解する全通り(パレート最適のみ)。
@@ -201,8 +295,12 @@ function paretoPrune(list: readonly SuitDecomp[]): SuitDecomp[] {
  * 標準形(4面子1雀頭)の向聴数。スートは面子を跨がないためスート独立に分解でき
  * (それぞれメモ済み・パレート枝刈り済みで小さい)、その積を合成して面子/塔子/対子の
  * 合計に対し {@link leafShanten} を最小化する。
+ *
+ * `meldCount` は副露(ポン/カン)済みの確定面子数。面子数へそのまま加算する
+ * (#294: 副露手は門前牌が 13 − 3×副露数 枚しかないため、加算しないと向聴値が飽和して
+ * テンパイ維持打牌と崩し打牌が同点になる)。
  */
-function standardShanten(counts: Counts): number {
+function standardShanten(counts: Counts, meldCount: number): number {
   const man = suitFrontier(counts.man, true);
   const pin = suitFrontier(counts.pin, true);
   const sou = suitFrontier(counts.sou, true);
@@ -213,7 +311,7 @@ function standardShanten(counts: Counts): number {
     for (const dp of pin) {
       for (const ds of sou) {
         for (const dh of honor) {
-          const m = dm[0] + dp[0] + ds[0] + dh[0];
+          const m = meldCount + dm[0] + dp[0] + ds[0] + dh[0];
           const t = dm[1] + dp[1] + ds[1] + dh[1];
           const p = dm[2] + dp[2] + ds[2] + dh[2];
           const s = leafShanten(m, t, p);
@@ -225,8 +323,14 @@ function standardShanten(counts: Counts): number {
   return best;
 }
 
-/** 七対子の向聴数(門前前提)。`6 − 対子数 + max(0, 7 − 種類数)`。 */
-function chiitoitsuShanten(counts: Counts): number {
+/**
+ * 七対子の評価に必要な対子数・種類数。
+ * 向聴式と受け入れ候補の判定が同じ数え方を共有するため、集計はここへ一本化する。
+ */
+function chiitoitsuCounts(counts: Counts): {
+  pairs: number;
+  kinds: number;
+} {
   let pairs = 0;
   let kinds = 0;
   for (const suit of ORDER) {
@@ -235,7 +339,16 @@ function chiitoitsuShanten(counts: Counts): number {
       if (n >= 2) pairs += 1;
     }
   }
-  return 6 - pairs + Math.max(0, 7 - kinds);
+  return { pairs, kinds };
+}
+
+/**
+ * 七対子の向聴数(門前前提)。`6 − 対子数 + max(0, 7 − 種類数)`。
+ * 先頭の 6 はブロック数 − 1(標準の向聴式と同じ形)。
+ */
+function chiitoitsuShanten(counts: Counts): number {
+  const { pairs, kinds } = chiitoitsuCounts(counts);
+  return CHIITOITSU_PAIRS - 1 - pairs + Math.max(0, CHIITOITSU_PAIRS - kinds);
 }
 
 /** 国士無双の向聴数(門前前提)。`13 − 么九種類数 − (么九対子ありなら1)`。 */
@@ -258,6 +371,11 @@ function kokushiShanten(tiles: readonly Tile[]): number {
  * 手牌の向聴数(標準/七対子/国士の最小)。和了= -1、テンパイ= 0。
  * 13枚でも14枚でも計算できる(受け入れ判定では14枚を評価する)。
  *
+ * `meldCount` は副露(ポン/カン)済みの面子数(既定 0 = 門前)。副露手では門前牌が
+ * 13 − 3×副露数 枚しかないため、副露を確定面子として加算しないと向聴値が飽和し、
+ * テンパイ維持打牌と崩し打牌が同点になってしまう(#294)。`meldCount > 0` のときは
+ * 七対子・国士無双が門前専用役のため標準形のみを評価する。
+ *
  * **牌残量を見ない理想化(意図的な設計 / #143)**:
  * 本関数は標準向聴式に基づき、待ち牌の**山残量を考慮しない**。ある牌の**4枚全てが
  * 手牌にある**「デッドウォール待ち」(例: `444p 8888p 789s 東東東` の 8p 単騎)は、
@@ -276,19 +394,23 @@ function kokushiShanten(tiles: readonly Tile[]): number {
  * - **検証整合**: クロス検証オラクル(`__oracle__/shanten-oracle.ts`)も同じ理想化を
  *   共有し、参照ライブラリとはオフラインで別途アンカー済み。ここだけ補正すると両者が乖離する。
  */
-export function shanten(tiles: readonly Tile[]): number {
+export function shanten(tiles: readonly Tile[], meldCount = 0): number {
+  const melds = normalizeMeldCount(meldCount);
   const counts = toCounts(tiles);
-  const key = countsSignature(counts);
+  const key = `${melds}:${countsSignature(counts)}`;
   const cached = shantenMemo.get(key);
   if (cached !== undefined) return cached;
 
-  const s = Math.min(
-    standardShanten(counts),
-    chiitoitsuShanten(counts),
-    kokushiShanten(tiles),
-  );
+  // 七対子・国士無双は門前専用役のため、副露手(meldCount > 0)では標準形のみ評価する。
+  const s =
+    melds > 0
+      ? standardShanten(counts, melds)
+      : Math.min(
+          standardShanten(counts, 0),
+          chiitoitsuShanten(counts),
+          kokushiShanten(tiles),
+        );
 
-  if (shantenMemo.size >= SHANTEN_MEMO_CAP) shantenMemo.clear();
   shantenMemo.set(key, s);
   return s;
 }
@@ -297,28 +419,61 @@ export function shanten(tiles: readonly Tile[]): number {
 // 受け入れ(有効牌)
 // ---------------------------------------------------------------------------
 
-/** ある種別の残り枚数(4枚 − 手牌内枚数)。他家の河は見ない。 */
+/** ある種別の残り枚数(総枚数 − 手牌内枚数)。他家の河は見ない。 */
 function remainingCopies(tiles: readonly Tile[], key: string): number {
   let inHand = 0;
   for (const tile of tiles) if (tileKey(tile) === key) inHand += 1;
-  return 4 - inHand;
+  return COPIES_PER_TILE - inHand;
 }
 
 /**
  * 受け入れ候補になり得る牌種のキー集合。
- * ある牌を引いて向聴が下がるのは、それが手牌のいずれかと面子/塔子/対子を作れるとき、
- * すなわち同種か(数牌なら)同スート±2以内のときに限る。孤立牌は浮くだけで向聴を進めない。
- * 遠い孤立牌を除外することで受け入れ計算の探索母数を約1/3へ削減する(結果は厳密同値)。
+ *
+ * 標準形では、引いた牌が既存牌と面子/塔子/対子を作る必要があるため、同種または
+ * 同スート±2へ厳密に絞れる。一方、七対子は7種類未満なら未所持の任意牌種、国士は
+ * 未所持の么九牌でも向聴が下がる(#368)。特殊形の現在値が全体の最小向聴と同じとき
+ * (次の1枚で全体を進め得るとき)だけ、その役種固有候補を和集合する。
+ *
+ * これにより全牌種走査と同値のまま、通常の標準形では従来の探索母数を維持する。
  */
-function ukeireCandidateKeys(tiles13: readonly Tile[]): Set<string> {
+function ukeireCandidateKeys(
+  tiles13: readonly Tile[],
+  meldCount: number,
+  baseShanten: number,
+): Set<string> {
   const keys = new Set<string>();
   for (const tile of tiles13) {
     if (tile.suit === "honor") {
       keys.add(tileKey(tile));
       continue;
     }
-    for (let r = tile.rank - 2; r <= tile.rank + 2; r++) {
-      if (r >= 1 && r <= 9) keys.add(`${tile.suit}-${r}`);
+    for (let rank = tile.rank - 2; rank <= tile.rank + 2; rank++) {
+      if (rank >= 1 && rank <= 9) keys.add(tileKey({ suit: tile.suit, rank }));
+    }
+  }
+
+  // 七対子・国士は門前専用。副露手では標準形候補だけで完全である。
+  if (meldCount > 0) return keys;
+
+  const counts = toCounts(tiles13);
+  const isMissing = (kind: { suit: Suit; rank: number }): boolean =>
+    counts[kind.suit][kind.rank - 1] === 0;
+
+  // 七対子: 種類数が7未満なら、未所持のどの牌種を引いても種類数が1増えて向聴が下がる。
+  // 7種類以上あれば `max(0, 7 − 種類数)` 項が既に 0 で、新種類は向聴を動かさない。
+  if (chiitoitsuShanten(counts) === baseShanten) {
+    const { kinds } = chiitoitsuCounts(counts);
+    if (kinds < CHIITOITSU_PAIRS) {
+      for (const kind of SANMA_TILE_KINDS) {
+        if (isMissing(kind)) keys.add(tileKey(kind));
+      }
+    }
+  }
+
+  // 国士: 未所持の么九牌は、既存牌と何の関係も無くても種類数を増やして向聴を下げる。
+  if (kokushiShanten(tiles13) === baseShanten) {
+    for (const kind of SANMA_TILE_KINDS) {
+      if (isYaochu(kind) && isMissing(kind)) keys.add(tileKey(kind));
     }
   }
   return keys;
@@ -333,12 +488,22 @@ export interface Ukeire {
 }
 
 /**
- * 13枚の手牌の受け入れを数える。
+ * 13枚(副露手では 13 − 3×副露数 枚)の手牌の受け入れを数える。
  * 「引くと向聴数が下がる」牌種を有効牌とみなし、その延べ残り枚数を合算する。
+ * `meldCount` は副露済み面子数(既定 0 = 門前)。向聴と同じ補正で比較する(#294)。
+ *
+ * **残り枚数の理想化(#143 と同じ方針)**: 残り枚数は門前牌からのみ差し引くため、
+ * 副露牌・河・ドラ表示牌にある同種牌は控除されない(副露手ではやや多めに出る)。
+ * 受け入れは向聴同点の候補同士のタイブレークにしか使われず、順序への影響は小さいため
+ * ここでは補正しない。
+ *
+ * 走査母数は {@link ukeireCandidateKeys} で絞るが、標準形の近傍候補に加えて七対子・国士の
+ * 役種固有候補を含めるため、全27牌種を走査した場合と結果は厳密に一致する(#368)。
  */
-export function ukeire(tiles13: readonly Tile[]): Ukeire {
-  const base = shanten(tiles13);
-  const candidateKeys = ukeireCandidateKeys(tiles13);
+export function ukeire(tiles13: readonly Tile[], meldCount = 0): Ukeire {
+  const melds = normalizeMeldCount(meldCount);
+  const base = shanten(tiles13, melds);
+  const candidateKeys = ukeireCandidateKeys(tiles13, melds, base);
   let kinds = 0;
   let copies = 0;
   for (const kind of SANMA_TILE_KINDS) {
@@ -346,8 +511,8 @@ export function ukeire(tiles13: readonly Tile[]): Ukeire {
     if (!candidateKeys.has(key)) continue; // 孤立牌は向聴を進めない(厳密に除外可)。
     const remaining = remainingCopies(tiles13, key);
     if (remaining <= 0) continue;
-    const drawn = makeTile(kind.suit, kind.rank);
-    if (shanten([...tiles13, drawn]) < base) {
+    const drawn = createTile(kind.suit, kind.rank);
+    if (shanten([...tiles13, drawn], melds) < base) {
       kinds += 1;
       copies += remaining;
     }
@@ -369,12 +534,37 @@ const UKEIRE_SHANTEN_GATE = 1;
 
 /** 打牌選択に渡す状況(自家=AI 手番の視点)。 */
 export interface DiscardContext {
-  /** 手番の全牌(門前手牌13枚 + ツモ牌1枚 = 14枚)。 */
+  /** 手番の全牌(門前手牌 + ツモ牌 = 14 − 3×副露数 枚)。 */
   readonly tiles: readonly Tile[];
-  /** 他家の河(捨て牌の列)。危険牌回避(現物優先)の判断に使う。省略可。 */
+  /**
+   * 副露(ポン/カン)済みの面子数(既定 0 = 門前)。
+   * 向聴・受け入れ評価を副露込みで補正する(#294: 未補正だと副露手で向聴値が飽和し、
+   * テンパイ維持打牌と崩し打牌が同点になってタイブレークがテンパイを壊す)。
+   */
+  readonly meldCount?: number;
+  /**
+   * 他家ごとの**打牌履歴**。危険牌回避(現物優先)の判断に使う。省略可。
+   *
+   * 表示用の河ではなく履歴を渡すこと(#395)。一度打たれた牌はその家に対する
+   * 現物であり続け、他家に鳴かれて河から取り除かれても安全性は変わらない。
+   */
   readonly opponentDiscards?: readonly (readonly Tile[])[];
-  /** ドラ実牌の種別キー集合(温存判断用)。赤5は `isRed` で常に価値扱い。省略可。 */
+  /**
+   * ドラ実牌の種別キー集合(温存判断用)。省略可。
+   *
+   * 赤5はこの集合に**含めない**。表ドラとは独立に {@link isRedDora} で判定し、
+   * 温存価値を別枠で加算する(→ {@link valueOf})。
+   */
   readonly doraKinds?: ReadonlySet<string>;
+  /**
+   * 打牌が禁止された牌種(喰い替え禁止 / #105・#303)。赤フラグは無視して種別で比較する。
+   *
+   * **`tiles` からは取り除かないこと**。禁止牌も手牌の一部として向聴・受け入れの
+   * 評価に参加させ、打牌候補としてのみ除外する。手牌から削ると評価対象が
+   * `14 − 3×副露数` 枚より少なくなり、向聴が実際より悪く出て
+   * {@link UKEIRE_SHANTEN_GATE} の発火条件までずれる(#303)。
+   */
+  readonly forbiddenDiscards?: readonly Tile[];
 }
 
 /** 打牌1候補の評価。優先度順に比較する。 */
@@ -386,11 +576,11 @@ interface Candidate {
   readonly shantenAfter: number;
   /** 打牌後の受け入れ延べ枚数(大きいほど良い)。未算出は -1。 */
   ukeireCopies: number;
-  /** 温存価値(赤5=2・ドラ=1・素牌=0)。小さいほど切ってよい。 */
+  /** 温存価値(赤5 +2・表ドラ +1 の**加算**。小さいほど切ってよい / → {@link valueOf})。 */
   readonly value: number;
   /** 安全度(現物にしている他家の数。大きいほど放銃しにくい)。 */
   readonly safety: number;
-  /** 外側度(字牌 > 老頭 > 端寄り)。同点最終決着用の決定的キー。 */
+  /** 外側度(字牌 > 老頭 > 端寄り)。比較の第5キー(最終決着は牌種キーの辞書順)。 */
   readonly outside: number;
 }
 
@@ -402,18 +592,29 @@ function outsideness(tile: Tile): number {
   return 0;
 }
 
-/** 温存価値(赤5は打点直結で最優先温存、表ドラは次点)。 */
+/**
+ * 温存価値(大きいほど残したい)。赤5で **+2**、表ドラ種別で **+1** の**加算**。
+ *
+ * 排他ではないので**赤5かつ表ドラなら 3** になる(本作はオール赤5なので、
+ * `pin-5`/`sou-5` が表ドラになれば必ず発生する)。どちらでもない牌は 0。
+ *
+ * 赤5かどうかは `tile.isRed` を直接読まず {@link isRedDora} で判定する(#490)。
+ * `chooseDiscard` は `Tile[]` を受け取る公開関数だが `Tile` に実行時検証は無いため、
+ * `createTile` を経由しない構造的な値(`{ suit: "man", rank: 1, isRed: true }` 等)を
+ * 渡されると、仕様上存在しない赤5へ +2 が付いて打牌選択が歪む。赤ドラとしての
+ * 意味づけはドメインの唯一の述語へ委ねる(規約は `tiles/tile.ts` の JSDoc / #485)。
+ */
 function valueOf(
   tile: Tile,
   doraKinds: ReadonlySet<string> | undefined,
 ): number {
   let v = 0;
-  if (tile.isRed) v += 2;
+  if (isRedDora(tile)) v += 2;
   if (doraKinds?.has(tileKey(tile))) v += 1;
   return v;
 }
 
-/** 現物にしている他家の数(その種別を既に河に捨てている他家の数)。 */
+/** 現物にしている他家の数(その種別を既に打っている他家の数 / #395)。 */
 function safetyOf(
   tile: Tile,
   opponentDiscards: readonly (readonly Tile[])[] | undefined,
@@ -428,20 +629,31 @@ function safetyOf(
 }
 
 /**
- * 打牌を選ぶ。優先度(高い順):
+ * 打牌を選ぶ。優先度(高い順 / ADR-0002 と同順):
  * 1. **手牌効率**: 打牌後の向聴数が最小。
- * 2. **受け入れ**: 同向聴なら受け入れ延べ枚数が最大。
- * 3. **打点温存**: 同効率なら赤5・ドラを残す(価値の低い牌を切る)。
- * 4. **危険牌回避**: 同条件なら他家の現物(既出牌)を優先して切る。
- * 5. **決定性**: なお同点なら外側(字牌・端)の牌を切る(seed 再現性の担保)。
+ * 2. **受け入れ**: 同向聴なら受け入れ延べ枚数が最大。ただし算出するのは
+ *    **向聴最小の候補が複数あり、かつ最小向聴が {@link UKEIRE_SHANTEN_GATE} 以下**の
+ *    ときだけ(それ以外は全候補が同点扱いになり、下位キーへ落ちる)。
+ * 3. **打点温存**: 同効率なら赤5・ドラを残す(価値の低い牌を切る / → {@link valueOf})。
+ * 4. **危険牌回避**: 同条件なら他家の現物(既に打たれた牌)を優先して切る。
+ * 5. **外側度**: なお同点なら外側(字牌・端)の牌を切る(→ {@link outsideness})。
+ * 6. **最終安定化**: すべて同点なら牌種キー(`tileKey`)の辞書順で最小の牌を切る。
+ *    ここまで来ても順序が一意に決まるため、同じ seed からは常に同じ打牌になる
+ *    (**seed 再現性の担保はこのキーが受け持つ** / #393)。
  *
  * これにより「有効牌を残す/打点を温存する/危険牌を避ける」がツモ切りより明確に改善する。
  */
 export function chooseDiscard(ctx: DiscardContext): Tile {
   const { tiles, opponentDiscards, doraKinds } = ctx;
+  const meldCount = ctx.meldCount ?? 0;
   if (tiles.length === 0) {
     throw new Error("chooseDiscard: 空の手牌からは打牌できない");
   }
+
+  // 喰い替え禁止牌は候補から外すが `tiles` には残す(#303)。
+  const forbiddenKeys = new Set(
+    (ctx.forbiddenDiscards ?? []).map((t) => tileKey(t)),
+  );
 
   // 同一(suit,rank,isRed)の重複候補は1回だけ評価する。
   const seen = new Set<string>();
@@ -449,6 +661,7 @@ export function chooseDiscard(ctx: DiscardContext): Tile {
 
   for (let i = 0; i < tiles.length; i++) {
     const tile = tiles[i];
+    if (forbiddenKeys.has(tileKey(tile))) continue;
     const idKey = `${tile.suit}-${tile.rank}-${tile.isRed ? "r" : ""}`;
     if (seen.has(idKey)) continue;
     seen.add(idKey);
@@ -457,13 +670,22 @@ export function chooseDiscard(ctx: DiscardContext): Tile {
     candidates.push({
       tile,
       remaining13,
-      shantenAfter: shanten(remaining13),
+      shantenAfter: shanten(remaining13, meldCount),
       // 受け入れは後段(向聴最小の候補)でのみ算出する(計算量削減)。
       ukeireCopies: -1,
       value: valueOf(tile, doraKinds),
       safety: safetyOf(tile, opponentDiscards),
       outside: outsideness(tile),
     });
+  }
+
+  // 喰い替え禁止は1牌種のみで、ポン成立時点で同種4枚のうち3枚は面子へ消費済み。
+  // よって禁止種と一致する手牌は最大1枚、一方 `tiles` は最少でも2枚(4副露時の
+  // 14 − 3×4)あるため、全候補が禁止になることは構造上あり得ない。到達した場合は
+  // 呼び出し側の不整合(禁止牌を誤って渡した)なので、規則違反の打牌を返すより
+  // 明示的に失敗させる。
+  if (candidates.length === 0) {
+    throw new Error("chooseDiscard: 打牌可能な候補が無い(禁止牌の指定が不正)");
   }
 
   // 1. 向聴最小へ絞る。
@@ -475,7 +697,9 @@ export function chooseDiscard(ctx: DiscardContext): Tile {
   //    比較になり打牌選択にほぼ影響しない一方で計算量が跳ね上がるため、そこでは省く
   //    (省略時は打点温存・危険牌回避・外側度で決める)。
   if (best.length > 1 && minShanten <= UKEIRE_SHANTEN_GATE) {
-    for (const c of best) c.ukeireCopies = ukeire(c.remaining13).copies;
+    for (const c of best) {
+      c.ukeireCopies = ukeire(c.remaining13, meldCount).copies;
+    }
   }
 
   best.sort((a, b) => {

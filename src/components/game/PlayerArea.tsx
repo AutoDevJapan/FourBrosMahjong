@@ -15,7 +15,8 @@ import ScoreDisplay from "./ScoreDisplay";
 import StatusBadge from "./StatusBadge";
 import type { SeatedPlayerView, SeatWind, TileData } from "./types";
 
-const SEAT_WIND_LABEL: Record<SeatWind, string> = {
+/** 席風の日本語ラベル。和了者名の席表記(`WinDetails` #259)でも共用する。 */
+export const SEAT_WIND_LABEL: Record<SeatWind, string> = {
   east: "東家",
   south: "南家",
   west: "西家",
@@ -34,6 +35,12 @@ export interface PlayerAreaProps {
   handTileStates?: readonly HandTileState[];
   onBlockedTile?: (message: string) => void;
 }
+
+const FURITEN_LABEL = {
+  discard: "フリテン（捨て牌）",
+  temporary: "フリテン（同巡内）",
+  riichi: "フリテン（リーチ後）",
+} as const;
 
 export default function PlayerArea({
   player,
@@ -76,6 +83,13 @@ export default function PlayerArea({
         ) : null}
         {status?.hasDeclaredRiichi ? (
           <StatusBadge icon="宣" label="リーチ" variant="riichi" />
+        ) : null}
+        {status?.furitenReason ? (
+          <StatusBadge
+            icon="禁"
+            label={FURITEN_LABEL[status.furitenReason]}
+            variant="furiten"
+          />
         ) : null}
       </header>
 

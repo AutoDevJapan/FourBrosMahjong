@@ -10,6 +10,8 @@
  * UI 表示に必要な最小限に絞った表示用ビューモデルとする。
  */
 
+import type { FuritenReason } from "@/domain/hand/furiten";
+
 /** 牌のスート(スペック4 `Suit`)。字牌は `honor`。 */
 type Suit = "man" | "pin" | "sou" | "honor";
 
@@ -19,6 +21,9 @@ type Suit = "man" | "pin" | "sou" | "honor";
  * - `man`(萬子)はサンマでは rank ∈ {1, 9} のみだが、表示側では制約しない。
  * - `honor`(字牌)の rank は 1〜7(東=1・南=2・西=3・北=4・白=5・發=6・中=7)。
  * - `isRed` はオール赤5(5筒・5索は常に赤)。表示は色ではなく形状差+`aria-label`で伝える(スペック5 5.2.1)。
+ *   赤扱い(色付き素材・赤枠・「赤」バッジ・`(赤ドラ)`)の判定はこのフラグ単独では行わず、
+ *   ドメインの `isRedDora`(`@/domain/tiles/tile`)へ委ねる。表示層で判定を再実装すると
+ *   得点側の赤ドラ翻と割れるため(issue #485)。
  */
 export interface TileData {
   readonly suit: Suit;
@@ -43,6 +48,8 @@ interface PlayerStatus {
   readonly isCurrentTurn?: boolean;
   /** リーチ宣言済みか。 */
   readonly hasDeclaredRiichi?: boolean;
+  /** 自家のフリテン理由。表示は色だけに依存せずラベルを併記する。 */
+  readonly furitenReason?: FuritenReason;
 }
 
 /**
@@ -89,6 +96,12 @@ export interface BenchPlayerView {
   readonly name: string;
   /** 抜け番中は変化しない持ち点(スペック4 不変条件)。 */
   readonly points: number;
+  /**
+   * 直近の点差(表示専用)。局中は抜け番の持ち点は変化しない(スペック4 不変条件)が、
+   * 半荘終了(gameEnd)時の残存供託の帰属(Q15/Q20)は抜け番にも及び得るため、
+   * 決着表示の検算可能性(#282)のために着席者と同様に表示する。
+   */
+  readonly pointsDelta?: number;
 }
 
 /**

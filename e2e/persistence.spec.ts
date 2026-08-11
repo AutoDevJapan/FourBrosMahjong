@@ -1,8 +1,6 @@
 import { expect, test } from "@playwright/test";
 import { walkToGameEnd } from "@/components/game/finishedGameFixture";
-
-const visibleHand = (page: import("@playwright/test").Page) =>
-  page.getByRole("listbox", { name: "自家の手牌" }).filter({ visible: true });
+import { advanceUntil, declareRiichi, visibleHand } from "./helpers/gameDriver";
 
 test.describe("対局状態のsession復元(#190)", () => {
   test("打牌後reloadで同じ局面を復元し、別seedは新規開始する", async ({
@@ -44,40 +42,111 @@ test.describe("対局状態のsession復元(#190)", () => {
     await expect(visibleHand(page).getByRole("option")).toHaveCount(14);
   });
 
+  test("リーチ宣言後reloadで宣言状態と手牌を復元する", async ({ page }) => {
+    await page.goto("/game?seed=381");
+    const hand = visibleHand(page);
+
+    // 標準戦略で進めてリーチ可能手番に到達し、「リーチ可」の牌で宣言する。
+    await declareRiichi(page);
+
+    const badge = page
+      .getByRole("region", { name: /^あなた/ })
+      .getByTestId("status-badge-riichi");
+    await expect(badge).toBeVisible();
+    const declaredHand = await hand.getByRole("option").allTextContents();
+    await expect
+      .poll(() =>
+        page.evaluate(() =>
+          JSON.parse(
+            sessionStorage.getItem("four-bros-mahjong.game.v1") ?? "null",
+          )?.actions.some(
+            (action: { type: string }) => action.type === "riichi",
+          ),
+        ),
+      )
+      .toBe(true);
+
+    await page.reload();
+    await expect(badge).toBeVisible();
+    await expect
+      .poll(() => visibleHand(page).getByRole("option").allTextContents())
+      .toEqual(declaredHand);
+  });
+
   test("半荘結果をresult reload後も保持する", async ({ page }) => {
     test.setTimeout(120_000);
-    // 先にロビーを踏んでおき、終局の自動遷移(replace)後の「戻る」到達先を検証可能にする。
+    // 先にロビーを踏んでおき、終局後の「戻る」到達先を検証可能にする。
     await page.goto("/");
     await page.goto("/game?seed=1");
-    const board = page.locator("[data-phase]").first();
-    for (let step = 0; step < 2000; step++) {
-      const phase = await board.getAttribute("data-phase");
-      const pending = await board.getAttribute("data-pending");
-      if (phase === "gameEnd") break;
-      if (phase === "roundEnd") {
-        await page.getByRole("button", { name: "次の局へ" }).first().click();
-      } else if (pending === "humanReact") {
-        await page.getByRole("button", { name: "スルー" }).first().click();
-      } else if (pending === "humanDiscard") {
-        await visibleHand(page)
-          .locator('[role="option"]:not([aria-disabled="true"])')
-          .first()
-          .click();
-      }
-    }
+    // 半荘終了まで合法牌のみで完走する(seed=1 は約113手・9局で決定的に終局)。
+    // gameEnd では最終局の決着表示で停止し(#277: 自動遷移は無い)、ドライバが
+    // 「結果を見る」(push)で結果画面へ進む。
+    await advanceUntil(
+      page,
+      () => new URL(page.url()).pathname === "/game/result",
+      { maxSteps: 2000, legalOnly: true },
+    );
     await expect(page).toHaveURL(/\/game\/result$/);
     await expect(page.getByRole("heading", { name: "最終順位" })).toBeVisible();
     await page.reload();
     await expect(page.getByRole("heading", { name: "最終順位" })).toBeVisible();
 
-    // 終局の自動遷移は replace で履歴を汚さないため、/game のエントリは残らず
-    // 「戻る」1回でロビーへ帰れる(#206: 戻るトラップの解消)。
+    // 「結果を見る」は push 遷移のため /game のエントリが残る。「戻る」で /game
+    // (最終局の決着表示・自動リダイレクトなし)→ もう一度「戻る」でロビーへ脱出できる
+    // (#206 の戻るトラップは再発しない: /game は gameEnd で自動遷移しないため)。
+    await page.goBack();
+    await expect(page).toHaveURL(/\/game(\?.*)?$/);
+    await expect(
+      page.getByRole("button", { name: "結果を見る" }).first(),
+    ).toBeVisible();
     await page.goBack();
     await expect(page).toHaveURL(/\/$/);
   });
 });
 
 test.describe("終局後の /game の出口(#206 / #207)", () => {
+  test("「もう一半荘」後の戻る操作で復元不能な結果画面へ戻らない(issue #353)", async ({
+    page,
+  }) => {
+    await page.addInitScript(
+      (raw) => {
+        sessionStorage.setItem("four-bros-mahjong.game.v1", raw);
+      },
+      JSON.stringify(walkToGameEnd(1).journal),
+    );
+
+    // ロビーを履歴の起点にし、終局画面から結果画面へ進む。
+    await page.goto("/");
+    await page.getByRole("link", { name: /対局を開始/ }).click();
+    await page.getByRole("button", { name: "結果を見る" }).first().click();
+    await expect(page).toHaveURL(/\/game\/result$/);
+    await expect(page.getByRole("heading", { name: "最終順位" })).toBeVisible();
+
+    // 新規半荘は確定結果を上書きするため、結果URLを履歴に残さず /game へ replace する。
+    await page.getByRole("button", { name: "もう一半荘" }).click();
+    await expect(page).toHaveURL(/\/game$/);
+    await expect(page.locator("[data-phase]").first()).toHaveAttribute(
+      "data-phase",
+      "playing",
+    );
+
+    // 戻っても、既に復元不能な /game/result の未確定フォールバックへは入らない。
+    await page.goBack();
+    await expect(page).toHaveURL(/\/game$/);
+    await expect(
+      page.getByText("まだ半荘の結果が確定していません"),
+    ).toHaveCount(0);
+    await expect(page.locator("[data-phase]").first()).toHaveAttribute(
+      "data-phase",
+      "playing",
+    );
+    await page.goBack();
+    await expect(page).toHaveURL(/\/$/);
+    await expect(
+      page.getByRole("heading", { level: 1, name: "四兄弟麻雀" }),
+    ).toBeVisible();
+  });
+
   test("終局journal残存時もロビー「対局を開始」で /game に留まり、戻る・新規半荘開始が機能する", async ({
     page,
   }) => {

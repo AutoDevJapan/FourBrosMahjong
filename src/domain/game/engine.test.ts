@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { TOTAL_POINTS } from "../scoring/settlement";
 import {
   createGame,
   declareTsumo,
@@ -6,6 +7,7 @@ import {
   type EngineState,
   notenPaymentPool,
   passRon,
+  potTotal,
   proceedToNextRound,
 } from "./engine";
 
@@ -25,7 +27,7 @@ function playOut(seed: number, opts: { tsumo?: boolean } = {}): EngineState {
         s = declareTsumo(s);
       } else {
         // drawn は humanDiscard 時に必ず存在する。
-        const drawn = s.hand?.drawn;
+        const drawn = s.hand?.drawn?.tile;
         if (drawn === null || drawn === undefined) {
           throw new Error("humanDiscard without a drawn tile");
         }
@@ -93,17 +95,26 @@ describe("engine: 半荘の状態機械(#67)", () => {
     }
   });
 
-  it("持ち点はゼロサム(半荘を通じ4人合計は 140,000 点で不変)", () => {
+  it("終局時の持ち点は 140,000(場に残る供託も 0 に畳み込まれている)", () => {
+    // 保存則 `Σ持ち点 + 場の供託 = 140,000` は供託の集約で書く(#430)。終局時は残存供託が
+    // すべて畳み込まれるため、場の供託は 0 で持ち点だけで総量に一致する。
+    // 半荘の各遷移での保存則そのものは engine.pot-invariant.test.ts が担保する。
     const s = playOut(99);
     const total = Object.values(s.points).reduce((a, b) => a + b, 0);
-    expect(total).toBe(140000);
+    expect(total + potTotal(s)).toBe(TOTAL_POINTS);
+    expect(potTotal(s)).toBe(0);
   });
 
-  it("進行に伴い場が東→南へ進み、南4(オーラス)まで到達し得る", () => {
-    // 決定的に南場へ到達することを確認(seed により東場で終わらない範囲)。
-    const s = playOut(2024);
-    // 半荘終了時点の局は東1より必ず先へ進んでいる(1局で終わらない)。
-    expect(s.roundsPlayed).toBeGreaterThan(0);
+  it("seed=3: engine の半荘進行が南場へ到達して完走する", () => {
+    // このドライバで seed=3 は南3終了・roundsPlayed=8 まで進む。wind を直接見るため、
+    // 「東場から先へ進まない」退行では roundsPlayed だけが増えても赤になる(#397)。
+    const s = playOut(3);
+    expect(s.phase).toBe("gameEnd");
+    expect(s.round).toMatchObject({ wind: "south", roundNumber: 3 });
+    expect(s.roundsPlayed).toBe(8);
+
+    // 東1→南4 の全ラベル列、席回転、オーラス判定は engine の乱数決着へ依存させず、
+    // round-progression.integration.test.ts が全局親流れの決定的構成で担保する。
   });
 
   it("自家がツモ和了可能なら宣言でき、局が決着する", () => {
@@ -168,7 +179,7 @@ function tallyRounds(seed: number): { wins: number; draws: number } {
       continue;
     }
     if (s.pending?.kind === "humanDiscard") {
-      const drawn = s.hand?.drawn;
+      const drawn = s.hand?.drawn?.tile;
       if (drawn === null || drawn === undefined) {
         throw new Error("humanDiscard without a drawn tile");
       }

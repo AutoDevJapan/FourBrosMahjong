@@ -1,10 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
-  type MeldInput,
   decomposeSevenPairs,
   decomposeStandard,
   decomposeThirteenOrphans,
   isCompleteHand,
+  type MeldInput,
 } from "./decompose";
 import { parseTiles } from "./notation";
 

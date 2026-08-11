@@ -7,14 +7,14 @@
  * 増減は色に依存せず符号+テキストで伝える(スペック5 5.2.1)。
  */
 import type { ResultPlayerView } from "@/components/game/types";
-import { formatSignedSoshii, formatSoshii } from "./soshiiFormat";
+import { formatSignedSoshii } from "./soshiiFormat";
 
 export interface SoshiiBreakdownProps {
   /** 1プレイヤー分の確定済みソシー内訳(表示専用)。 */
   player: ResultPlayerView;
 }
 
-/** 符号付き行(ウマ・祝儀)の値セル。色は補助、符号+スクリーンリーダー文で増減を伝える。 */
+/** 符号付き行(素点・ウマ・祝儀)の値セル。色は補助、符号+スクリーンリーダー文で増減を伝える。 */
 function SignedValue({ value }: { value: number }) {
   const { display, srLabel, isPositive } = formatSignedSoshii(value);
   const colorClass =
@@ -43,7 +43,11 @@ export default function SoshiiBreakdown({ player }: SoshiiBreakdownProps) {
       <dl className="mt-3 flex flex-col gap-1.5 text-sm">
         <div className="flex items-baseline justify-between gap-4">
           <dt className="text-foreground/70">素点</dt>
-          <dd className="font-mono tabular-nums">{formatSoshii(rawScore)}</dd>
+          <dd>
+            {/* 素点は「最終持ち点 − 返し」の増減値(スペック3 3.3①)なので、ウマ・合計と同じ
+                符号付き表記(U+2212)+sr-only 読み上げに統一する(issue #278)。 */}
+            <SignedValue value={rawScore} />
+          </dd>
         </div>
         <div className="flex items-baseline justify-between gap-4">
           <dt className="text-foreground/70">ウマ</dt>

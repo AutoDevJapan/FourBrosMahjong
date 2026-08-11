@@ -11,6 +11,12 @@ on:
       - main
   workflow_dispatch:
 
+# Keep only the newest scan for a given PR or branch. github.ref is unique per
+# PR (refs/pull/<number>/merge) and per branch, so unrelated work is not cancelled.
+concurrency:
+  group: gitleaks-${{ github.ref }}
+  cancel-in-progress: true
+
 # Minimize permissions so fork PRs work without extra grants.
 permissions:
   contents: read
@@ -19,9 +25,11 @@ jobs:
   gitleaks:
     name: gitleaks
     runs-on: ubuntu-latest
+    # 異常時に既定の6時間まで runner を占有させない (#491)。実測は常に 10 秒前後。
+    timeout-minutes: 10
     steps:
       - name: Checkout
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           # Full history so the entire commit log is scanned.
           fetch-depth: 0

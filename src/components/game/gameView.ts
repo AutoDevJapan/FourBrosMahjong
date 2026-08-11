@@ -14,9 +14,10 @@ import {
   type PlayerId,
   seatOfPlayer,
 } from "@/domain/game/engine";
+import { evaluateFuriten } from "@/domain/hand/furiten";
 import { seatingOf } from "@/domain/round/round";
 import type { Seating } from "@/domain/round/seat";
-import type { Tile } from "@/domain/tiles/tile";
+import { createTile, type Tile } from "@/domain/tiles/tile";
 import type {
   BenchPlayerView,
   DoraData,
@@ -37,7 +38,7 @@ function toTileData(tile: Tile): TileData {
 
 /** 表示 `TileData` → ドメイン `Tile`(打牌をエンジンへ戻す際に使用)。 */
 export function toTile(tile: TileData): Tile {
-  return { suit: tile.suit, rank: tile.rank, isRed: tile.isRed ?? false };
+  return createTile(tile.suit, tile.rank);
 }
 
 /** 牌の表示ソート(萬→筒→索→字、同スートは rank 昇順、赤は同種内で後ろ)。 */
@@ -47,7 +48,8 @@ const SUIT_ORDER: Record<Tile["suit"], number> = {
   sou: 2,
   honor: 3,
 };
-function sortTiles(tiles: readonly Tile[]): Tile[] {
+/** 自家手牌と和了形開示(`WinDetails` #259)で共用する表示ソート。 */
+export function sortTiles(tiles: readonly Tile[]): Tile[] {
   return [...tiles].sort(
     (a, b) =>
       SUIT_ORDER[a.suit] - SUIT_ORDER[b.suit] ||
@@ -81,20 +83,26 @@ function buildSlotContent(engine: EngineState, id: PlayerId): SlotContent {
     : seatingOf(engine.round);
   const seat = seatOfPlayer(seating, id);
 
+  // 半荘を終える局は roundEnd を経由せず gameEnd へ直行する(engine spec 2.8)ため、
+  // 最終局の点数増減(±デルタ)は gameEnd でも表示する(#277)。gameEnd の残存供託
+  // 畳み込み(#282)は抜け番にも及び得るため、着席・抜け番の両方で写像する。
+  const showDelta =
+    (engine.phase === "roundEnd" || engine.phase === "gameEnd") &&
+    engine.lastRound
+      ? engine.lastRound.deltas[id]
+      : 0;
+
   if (seat === null) {
     const bench: BenchPlayerView = {
       name: nameOf(engine, id),
       points: engine.points[id],
+      ...(showDelta !== 0 ? { pointsDelta: showDelta } : {}),
     };
     return { kind: "bench", player: bench };
   }
 
   const isSelf = id === HUMAN_ID;
   const isTurn = engine.phase === "playing" && hand?.turn === seat;
-  const showDelta =
-    engine.phase === "roundEnd" && engine.lastRound
-      ? engine.lastRound.deltas[id]
-      : 0;
   const melds = hand
     ? hand.melds[seat].map((m) => ({
         type: m.type,
@@ -102,6 +110,20 @@ function buildSlotContent(engine: EngineState, id: PlayerId): SlotContent {
         concealed: m.concealed,
       }))
     : [];
+  const furiten =
+    isSelf && hand
+      ? evaluateFuriten({
+          concealedTiles: hand.hands[seat],
+          melds: hand.melds[seat].map((meld) => ({
+            tiles: meld.tiles,
+            isKan: meld.type === "kan",
+            concealed: meld.concealed,
+          })),
+          ownDiscardHistory: hand.discardHistory[seat],
+          temporaryMiss: hand.tempMiss[seat],
+          riichiMiss: hand.riichiMiss[seat],
+        })
+      : null;
 
   const seated: SeatedPlayerView = {
     name: nameOf(engine, id),
@@ -112,6 +134,7 @@ function buildSlotContent(engine: EngineState, id: PlayerId): SlotContent {
       isDealer: seat === "east",
       isCurrentTurn: isTurn,
       hasDeclaredRiichi: hand ? hand.riichi[seat] : false,
+      ...(furiten?.reason ? { furitenReason: furiten.reason } : {}),
     },
     ...(melds.length > 0 ? { melds } : {}),
     kitaCount: hand?.kita[seat] ?? 0,
@@ -120,7 +143,7 @@ function buildSlotContent(engine: EngineState, id: PlayerId): SlotContent {
       ? {
           hand: sortTiles([
             ...hand.hands[seat],
-            ...(isTurn && hand.drawn ? [hand.drawn] : []),
+            ...(isTurn && hand.drawn ? [hand.drawn.tile] : []),
           ]).map(toTileData),
         }
       : {
@@ -165,9 +188,11 @@ export function selectView(engine: EngineState): GameViewState {
     doraCount: engine.hand?.doraSet.count ?? 0,
   };
 
-  // 裏ドラはリーチ和了の局終了時のみ開示する(スペック2 2.2)。
+  // 裏ドラはリーチ和了の局終了時のみ開示する(スペック2 2.2)。半荘を終える局は
+  // roundEnd を経由せず gameEnd へ直行する(engine spec 2.8 / #277)ため、最終局の
+  // リーチ和了でも開示できるよう両 phase を対象にする(#290)。
   const revealUra =
-    engine.phase === "roundEnd" &&
+    (engine.phase === "roundEnd" || engine.phase === "gameEnd") &&
     engine.lastRound?.riichiWin === true &&
     engine.hand !== null;
   const dora: DoraData = engine.hand

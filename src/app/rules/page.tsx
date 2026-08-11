@@ -113,8 +113,20 @@ const ruleSections: RuleSection[] = [
         body: "リーチ棒は供託扱い。ダブロン等が発生した場合は上家取り。",
       },
       {
+        label: "リーチの成立",
+        body: "リーチは宣言牌がロンされず通った時点で成立する。宣言牌がロンされた場合はリーチ不成立となり、1,000点は供託しない。",
+      },
+      {
         label: "フリテンリーチ",
         body: "あり(ただしツモ和了のみ可)。",
+      },
+      {
+        label: "槍槓(チャンカン)",
+        body: "あり(加槓牌へのロン=横取り)。国士無双テンパイの他家に限り、暗槓に対しても槍槓ロンできる。",
+      },
+      {
+        label: "リーチ後の暗槓",
+        body: "ツモ牌での暗槓に限り、待ちが変わらず、その4枚が全ての和了形で暗刻として確定している場合のみ可。送り槓・七対子テンパイでの暗槓は不可。",
       },
     ],
   },
@@ -157,6 +169,10 @@ const ruleSections: RuleSection[] = [
         label: "オーラス条件",
         body: "オーラスで親が3万点を超えてトップの場合はそこで終了(和了やめ・テンパイやめ相当)。",
       },
+      {
+        label: "トビ",
+        body: "いずれかのプレイヤーの持ち点がマイナスに達した時点で半荘は即終了。",
+      },
       { label: "チョンボ", body: "供託扱い(暫定運用)。" },
     ],
   },
@@ -183,7 +199,7 @@ export default function RulesPage() {
         <nav aria-label="ページナビゲーション">
           <Link
             href="/"
-            className="inline-flex items-center gap-1 text-sm text-foreground/70 underline underline-offset-4 hover:text-foreground focus-visible:rounded-sm focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-foreground"
+            className="inline-flex items-center gap-1 text-sm text-foreground/70 underline underline-offset-4 hover:text-foreground focus-visible:rounded-sm"
           >
             <span aria-hidden>←</span> ロビーへ戻る
           </Link>
@@ -210,9 +226,9 @@ export default function RulesPage() {
             <details
               key={section.heading}
               open={section.defaultOpen}
-              className="rounded-lg border border-foreground/15"
+              className="rounded-lg border border-control-border"
             >
-              <summary className="cursor-pointer rounded-lg px-4 py-3 font-medium marker:text-foreground/60 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-foreground">
+              <summary className="cursor-pointer rounded-lg px-4 py-3 font-medium marker:text-foreground/60">
                 {section.heading}
               </summary>
               <ul className="flex flex-col gap-2 px-4 pb-4 text-sm/6">
@@ -239,7 +255,7 @@ export default function RulesPage() {
         <footer className="border-t border-foreground/15 pt-6">
           <Link
             href="/"
-            className="inline-flex items-center gap-1 text-sm text-foreground/70 underline underline-offset-4 hover:text-foreground focus-visible:rounded-sm focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-foreground"
+            className="inline-flex items-center gap-1 text-sm text-foreground/70 underline underline-offset-4 hover:text-foreground focus-visible:rounded-sm"
           >
             <span aria-hidden>←</span> ロビーへ戻る
           </Link>

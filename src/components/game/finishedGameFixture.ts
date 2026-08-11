@@ -10,6 +10,7 @@
  */
 import {
   createGame,
+  DEFAULT_NAMES,
   discard,
   type EngineState,
   passRon,
@@ -33,7 +34,7 @@ export function walkToGameEnd(seed: number): FinishedGameFixture {
       actions.push({ type: "nextRound" });
       s = proceedToNextRound(s);
     } else if (s.pending?.kind === "humanDiscard") {
-      const drawn = s.hand?.drawn;
+      const drawn = s.hand?.drawn?.tile;
       if (!drawn) throw new Error("打牌待ちなのにツモ牌がない");
       actions.push({ type: "discard", tile: drawn });
       s = discard(s, drawn);
@@ -45,5 +46,8 @@ export function walkToGameEnd(seed: number): FinishedGameFixture {
     }
   }
   if (s.phase !== "gameEnd") throw new Error("半荘が終了しなかった");
-  return { journal: { version: 1, seed, actions }, state: s };
+  return {
+    journal: { version: 2, seed, names: DEFAULT_NAMES, actions },
+    state: s,
+  };
 }

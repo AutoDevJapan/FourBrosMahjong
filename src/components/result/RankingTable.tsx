@@ -39,7 +39,8 @@ export default function RankingTable({ players }: RankingTableProps) {
           const total = formatSignedSoshii(player.soshiiTotal);
           const isTop = player.rank === 1;
           return (
-            <tr key={player.name} className="border-b border-foreground/10">
+            // 対局者名はユーザー設定で重複し得る(#291)ため一意な rank を key にする。
+            <tr key={player.rank} className="border-b border-foreground/10">
               <th
                 scope="row"
                 className="py-2 pr-3 font-normal whitespace-nowrap"

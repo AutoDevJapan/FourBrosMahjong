@@ -127,8 +127,7 @@ describe("Hand (roving tabindex listbox, spec 5.2.2)", () => {
     expect(tabbable).toHaveLength(1);
     expect(tabbable[0]).toBe(options[options.length - 1]);
 
-    // Tab で手牌へ到達 → Enter で打牌、まで完結できること(スペック5 5.2.2)。
-    await user.tab();
+    // 更新前に手牌内にあった実フォーカスも、クランプ後の末尾牌へ維持する(#248)。
     expect(options[10]).toHaveFocus();
     await user.keyboard("{Enter}");
     expect(onSelect).toHaveBeenCalledWith(10, eleven[10]);
@@ -147,6 +146,42 @@ describe("Hand (roving tabindex listbox, spec 5.2.2)", () => {
     expect(
       options.filter((option) => option.getAttribute("tabindex") === "0"),
     ).toHaveLength(1);
+  });
+
+  it("キーボード打牌で手牌が更新されてもactive optionへ実フォーカスを戻す(#248)", async () => {
+    const user = userEvent.setup();
+    const { rerender } = render(<Hand tiles={tiles} />);
+
+    screen.getAllByRole("option")[0].focus();
+    await user.keyboard("{ArrowRight}");
+    expect(screen.getAllByRole("option")[1]).toHaveFocus();
+
+    // index 1 の打牌により focused node と、それ以降の key/index が変わる。
+    rerender(<Hand tiles={[tiles[0], tiles[2]]} />);
+
+    const updatedOptions = screen.getAllByRole("option");
+    expect(updatedOptions[1]).toHaveFocus();
+    expect(updatedOptions[1]).toHaveAttribute("tabindex", "0");
+  });
+
+  it("手牌外にフォーカスがある更新ではフォーカスを奪わない(#248)", () => {
+    const { rerender } = render(
+      <>
+        <button type="button">手牌外</button>
+        <Hand tiles={tiles} />
+      </>,
+    );
+    const outside = screen.getByRole("button", { name: "手牌外" });
+    outside.focus();
+
+    rerender(
+      <>
+        <button type="button">手牌外</button>
+        <Hand tiles={[tiles[0], tiles[2]]} />
+      </>,
+    );
+
+    expect(outside).toHaveFocus();
   });
 
   it("打牌で手牌が更新されたら、旧indexの選択状態を別の牌へ引き継がない(#214)", async () => {
@@ -171,6 +206,9 @@ describe("Hand (roving tabindex listbox, spec 5.2.2)", () => {
 
     const list = screen.getByRole("list", { name: "自家の手牌" });
     expect(list).toBeInTheDocument();
+    // role クエリは暗黙ロールでも通るため、Safari/VoiceOver 対策の明示ロールは
+    // 属性で回帰検証する(スペック5 5.2.5 / #270)。
+    expect(list).toHaveAttribute("role", "list");
     expect(screen.getAllByRole("listitem")).toHaveLength(tiles.length);
     expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
     expect(screen.queryByRole("option")).not.toBeInTheDocument();

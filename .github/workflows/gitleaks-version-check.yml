@@ -37,6 +37,8 @@ jobs:
   check-version:
     name: Check gitleaks latest release
     runs-on: ubuntu-latest
+    # 月次ジョブでも異常時に既定の6時間まで runner を占有させない (#491)。
+    timeout-minutes: 10
     # このジョブ自体は読み取りのみ。ブランチ作成・PR 作成が必要な場合だけ
     # 昇格した権限で後続ジョブを呼び出す。
     permissions:
@@ -47,7 +49,7 @@ jobs:
       needs_update: ${{ steps.compare.outputs.needs_update }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Compare pinned version with latest release
         id: compare
@@ -85,6 +87,8 @@ jobs:
     needs: check-version
     if: needs.check-version.outputs.needs_update == 'true'
     runs-on: ubuntu-latest
+    # 同上 (#491)。
+    timeout-minutes: 10
     # ブランチの push・PR 作成・gitleaks.yml の手動起動のために書き込み権限が必要。
     # このジョブ (バージョン差分が検出された場合のみ実行) に限定して付与する。
     permissions:
@@ -97,7 +101,7 @@ jobs:
       LATEST_VERSION: ${{ needs.check-version.outputs.latest_version }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Skip if a bump PR is already open
         id: existing

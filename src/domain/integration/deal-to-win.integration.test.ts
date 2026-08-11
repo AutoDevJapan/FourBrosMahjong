@@ -20,13 +20,8 @@ import { isTenpai, waitingTiles } from "../hand/tenpai";
 import { SANMA_TILE_KINDS, sameKind } from "../hand/tile-identity";
 import { analyzeWin, isWinningHand, type WinContext } from "../hand/win";
 import { createSeededRng } from "../random/rng";
-import type { Suit, Tile } from "../tiles/tile";
+import { createTile, type Tile } from "../tiles/tile";
 import { buildWall } from "../wall/wall";
-
-const RED_FIVE_SUITS: ReadonlySet<Suit> = new Set(["pin", "sou"]);
-function makeTile(suit: Suit, rank: number): Tile {
-  return { suit, rank, isRed: rank === 5 && RED_FIVE_SUITS.has(suit) };
-}
 
 /** 手牌中の牌種(赤無視)ごとの枚数。 */
 function kindCounts(tiles: readonly Tile[]): Map<string, number> {
@@ -84,7 +79,7 @@ describe("結合②: 配牌 → 和了判定(deal → tenpai/decompose/win)", ()
         for (const kind of SANMA_TILE_KINDS) {
           const key = `${kind.suit}-${kind.rank}`;
           if ((used.get(key) ?? 0) >= 4) continue; // 4枚使用済みは追加不可
-          const candidate = makeTile(kind.suit, kind.rank);
+          const candidate = createTile(kind.suit, kind.rank);
           const complete = isCompleteHand([...hand, candidate], []);
           // 契約: 「待ち」⇔「その牌を足すと和了形」。
           expect(complete).toBe(waitKeys.has(key));

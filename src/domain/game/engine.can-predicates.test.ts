@@ -10,6 +10,7 @@ import {
   declareKakan,
   type EngineState,
   isHaitei,
+  isHaiteiTsumo,
   type Pending,
 } from "./engine";
 
@@ -45,6 +46,23 @@ describe("isHaitei(ライブ牌0 = 海底)", () => {
     expect(isHaitei(1)).toBe(false);
     expect(isHaitei(2)).toBe(false);
     expect(isHaitei(69)).toBe(false);
+  });
+});
+
+describe("isHaiteiTsumo(海底摸月の文脈)", () => {
+  it("通常ツモでライブ牌0なら海底摸月", () => {
+    expect(isHaiteiTsumo(0, "live")).toBe(true);
+  });
+
+  it("嶺上補充でライブ牌0になっても海底摸月ではない(カン・北抜きのいずれも)", () => {
+    expect(isHaiteiTsumo(0, "kanReplacement")).toBe(false);
+    expect(isHaiteiTsumo(0, "kitaReplacement")).toBe(false);
+  });
+
+  it("ライブ牌が残っていれば通常ツモ・嶺上とも海底摸月ではない", () => {
+    expect(isHaiteiTsumo(1, "live")).toBe(false);
+    expect(isHaiteiTsumo(1, "kanReplacement")).toBe(false);
+    expect(isHaiteiTsumo(1, "kitaReplacement")).toBe(false);
   });
 });
 
@@ -215,7 +233,7 @@ describe("engine 結線: 明槓(加槓)成立後は非門前のためリーチ�
     };
     hand.melds.east = [pon3p];
     hand.hands.east = parseTiles("3p 1m 9m 1s 9s 1p 2p");
-    hand.drawn = parseTile("9m");
+    hand.drawn = { tile: parseTile("9m"), source: "live" };
     hand.turn = "east";
     // 他家は非テンパイに固定(3p の槍槓が発火しないよう)。
     hand.hands.south = parseTiles("2m 4m 6m 8m 2s 4s 6s 8s 2p 4p 6p 8p 1s");

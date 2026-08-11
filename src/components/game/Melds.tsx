@@ -4,8 +4,9 @@
  * 晒した面子を全員分表示する。暗槓は両端2枚を伏せ、内側2枚のみ開示する慣行に従う
  * (ポン・明槓・加槓は全牌開示)。値渡しのみの純表示コンポーネント(スペック6 6.6)。
  */
-import type { MeldView } from "./types";
+
 import Tile from "../common/Tile";
+import type { MeldView } from "./types";
 
 export interface MeldsProps {
   melds: readonly MeldView[];
@@ -18,8 +19,11 @@ const MELD_TYPE_LABEL: Record<MeldView["type"], string> = {
 
 export default function Melds({ melds }: MeldsProps) {
   if (melds.length === 0) return null;
+  // role="list" は冗長だが明示する — Tailwind preflight の list-style 除去により Safari が
+  // list セマンティクスを落とし、VoiceOver がリスト名ごと読まなくなる既知挙動への対処
+  // (スペック5 5.2.5 / #270)。
   return (
-    <ul aria-label="副露" className="flex flex-wrap gap-1.5">
+    <ul role="list" aria-label="副露" className="flex flex-wrap gap-1.5">
       {melds.map((meld, mi) => {
         const label = meld.concealed ? "暗槓" : MELD_TYPE_LABEL[meld.type];
         const last = meld.tiles.length - 1;

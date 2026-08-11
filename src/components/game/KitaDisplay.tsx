@@ -15,13 +15,11 @@ export default function KitaDisplay({
   if (count === 0) return null;
 
   return (
-    <div
-      aria-label={`抜き北 ガリ${count}枚`}
-      className="flex min-w-0 items-center gap-1"
-      data-testid="kita-display"
-    >
+    <div className="flex min-w-0 items-center gap-1" data-testid="kita-display">
       <span className="shrink-0 rounded bg-foreground/10 px-1.5 py-0.5 text-xs font-semibold">
+        <span className="sr-only">抜き北 </span>
         ガリ{count}
+        <span className="sr-only">枚</span>
       </span>
       {!compact ? (
         <span className="flex min-w-0 flex-wrap gap-0.5" aria-hidden="true">

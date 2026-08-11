@@ -3,7 +3,9 @@
  *
  * 名前・固定された持ち点・「抜け番」ラベルを表示する。状態は色のみに依存させず、
  * アイコン+テキストラベルで伝える(スペック5 5.2.1)。持ち点は抜け番中に変化しない
- * (スペック4 不変条件)。誰が抜け番になるかの決定(Q9)には関与しない。
+ * (スペック4 不変条件)が、半荘終了(gameEnd)時の残存供託の帰属(Q15/Q20)は抜け番にも
+ * 及び得るため、点差(`pointsDelta`)は着席者と同様に表示する(#282)。
+ * 誰が抜け番になるかの決定(Q9)には関与しない。
  * 値渡しのみの純表示コンポーネント(スペック6 6.6)。
  *
  * `compact`(スペック6 6.4.3 / スペック5 5.3.2 段階②フォーカス表示): 卓幅 < 360px の
@@ -11,9 +13,10 @@
  * 抜け番だけがフルサイズ大カードで突出しないよう密度を揃える(issue #150 要検討点2)。
  * 「この局は休み」の補足文はコンパクト帯では省き、抜け番バッジで休みを伝える。
  */
-import type { BenchPlayerView } from "./types";
+
 import ScoreDisplay from "./ScoreDisplay";
 import StatusBadge from "./StatusBadge";
+import type { BenchPlayerView } from "./types";
 
 export interface BenchAreaProps {
   player: BenchPlayerView;
@@ -33,7 +36,7 @@ export default function BenchArea({ player, compact = false }: BenchAreaProps) {
           <StatusBadge icon="⏸" label="抜け番" variant="bench" />
           <span className="font-medium">{player.name}</span>
         </header>
-        <ScoreDisplay points={player.points} />
+        <ScoreDisplay points={player.points} delta={player.pointsDelta} />
       </section>
     );
   }
@@ -45,7 +48,7 @@ export default function BenchArea({ player, compact = false }: BenchAreaProps) {
     >
       <StatusBadge icon="⏸" label="抜け番" variant="bench" />
       <p className="font-medium">{player.name}</p>
-      <ScoreDisplay points={player.points} />
+      <ScoreDisplay points={player.points} delta={player.pointsDelta} />
       <p className="text-xs text-foreground/60">この局は休み</p>
     </section>
   );

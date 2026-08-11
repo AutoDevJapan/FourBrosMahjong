@@ -18,8 +18,8 @@
  *   禁止する(`hand.ponnedKind` を `discard` が参照し `isKuikaeForbidden` で no-op)。
  *
  * ## AI
- * - 他家(AI)は**手牌効率(向聴・受け入れ)ベースの打牌**(#98)に加え、合法ならリーチ・ポン・
- *   各種カンも行う(#169)。判断は和了を最優先し、既存の公開可否述語と候補列挙を共有する。
+ * - 他家(AI)は**手牌効率(向聴・受け入れ)ベースの打牌**(#98)に加え、リーチ・各種カンを行う。
+ *   ポン/大明槓は合法性に加え、ナシナシで役無しを固定しない戦略ゲート(#210)を通す。
  * - 加槓に対する槍槓(チャンカン)は**対応済み**(Q17 = 槍槓あり・ユーザー承認 / #115)。加槓宣言時、
  *   その加槓牌でロンできる他家がいれば加槓は不成立(横取り)= 槍槓ロン(`chankan` 1翻)として精算する。
  *   `declareKakan` は自家(p0)専用のため応答者は他家(AI)。
@@ -42,6 +42,11 @@
  *
  * 決定性: `createGame({ seed })` で `createSeededRng` を用いるため、同じ seed + 同じ操作列から
  * 完全に同じ進行が再現できる(ユニットテストの土台)。
+ *
+ * state の所有権: 公開アクションへ渡した `EngineState` は**使い捨て**であり、有効な後続 state は
+ * 返り値だけである(#453 / ADR-0003)。契約と、その違反を即座に落とす仕組みは
+ * {@link publicAction} に集約している。分岐を試したいときは state を複製せず、上記の決定性を
+ * 使って `createGame` から操作列を再生すること。
  */
 
 import { dealStartingHands } from "@/domain/deal/deal";
@@ -52,7 +57,7 @@ import {
   resolveDora,
 } from "@/domain/dora/doraSet";
 import { countDoraHan } from "@/domain/dora/han";
-import { chooseDiscard } from "@/domain/game/ai";
+import { chooseDiscard, shanten, shouldCallMeld } from "@/domain/game/ai";
 import { decomposeAll, type MeldInput } from "@/domain/hand/decompose";
 import { canRon } from "@/domain/hand/furiten";
 import { isKuikaeForbidden } from "@/domain/hand/kuikae";
@@ -83,7 +88,7 @@ import {
   resolveWinPayment,
   type SeatedPlayerRef,
 } from "@/domain/scoring/win-payment";
-import { HONOR, type Tile } from "@/domain/tiles/tile";
+import { HONOR, type PlayableWind, type Tile } from "@/domain/tiles/tile";
 import { buildWall, type Wall, WallEmptyError } from "@/domain/wall/wall";
 
 /** プレイヤー識別子(4兄弟)。`p0` は常に自家(人間)。 */
@@ -108,7 +113,7 @@ const NEXT_SEAT: Record<SeatKey, SeatKey> = {
 };
 
 /** 席風の番号(役判定の照合用: 東1・南2・西3 = `HONOR` 準拠)。 */
-const SEAT_WIND_NUMBER: Record<SeatKey, number> = {
+const SEAT_WIND_NUMBER: Record<SeatKey, PlayableWind> = {
   east: HONOR.EAST,
   south: HONOR.SOUTH,
   west: HONOR.WEST,
@@ -133,6 +138,15 @@ function seatFlags(value = false): SeatFlags {
   return { east: value, south: value, west: value };
 }
 
+/**
+ * ツモ牌の供給元(#415)。
+ *
+ * - `"live"` … ライブ壁からの通常ツモ(`drawn` が無いときの既定値でもある)
+ * - `"kanReplacement"` … カン(暗槓/加槓/大明槓)後の嶺上牌
+ * - `"kitaReplacement"` … 北抜き(ガリ)後の嶺上牌
+ */
+export type DrawSource = "live" | "kanReplacement" | "kitaReplacement";
+
 /** 1局(進行中)の状態。`Wall` を含むため内部は可変に扱う。 */
 interface HandState {
   readonly wall: Wall;
@@ -143,16 +157,41 @@ interface HandState {
   hands: Record<SeatKey, Tile[]>;
   /** 席ごとの副露(ポン・カン)。 */
   melds: Record<SeatKey, Meld[]>;
-  /** 席ごとの河(捨て牌)。 */
+  /**
+   * 席ごとの河(捨て牌)。**表示用**。他家に鳴かれた牌は実体ごと取り除かれる
+   * (現実の卓で鳴かれた牌が副露へ移るのと同じ)。フリテン判定には使わない。
+   */
   discards: Record<SeatKey, Tile[]>;
+  /**
+   * 席ごとの全打牌履歴(#395)。鳴かれても取り除かない**判定用**の SSOT。
+   *
+   * 捨て牌フリテンは恒久(`hand/furiten.ts`)であり、他家の鳴きという自分の意思と
+   * 無関係な事象では解除されない。表示用の `discards` を判定に流用すると、
+   * 鳴かれた瞬間にフリテンが解けて不正ロンが成立する。安全牌(現物)の評価も
+   * 同じ理由で履歴側を見る。
+   */
+  discardHistory: Record<SeatKey, Tile[]>;
   /** 席ごとの北抜き枚数(ガリ)。 */
   kita: Record<SeatKey, number>;
   /** 現在の手番の席。 */
   turn: SeatKey;
-  /** 現在の手番がツモった牌(打牌待ち)。未ツモは null。 */
-  drawn: Tile | null;
-  /** 現在の `drawn` が嶺上牌(カン)由来か(嶺上開花判定)。 */
-  fromKan: boolean;
+  /**
+   * 現在の手番がツモった牌(打牌待ち)と供給元。未ツモは null。
+   *
+   * 役判定は2つの別条件をここから導く:
+   * - **嶺上開花**: `source === "kanReplacement"`。カン限定(spec 3.2「**槓の**
+   *   嶺上牌で和了」)なので、北抜きの嶺上牌には付かない。
+   * - **海底摸月の抑止**: `source !== "live"`。海底摸月は「ライブ壁の最後の1枚を
+   *   ツモった」ことが条件で、嶺上牌のツモは**カン・北抜きのいずれも**対象外
+   *   (`isHaiteiTsumo` の契約 / #396)。
+   *
+   * この2条件は包含関係(カン嶺上 ⊂ 嶺上補充)にあるため、2つの boolean ではなく
+   * 直和型1つで表す(不正な組み合わせを表現不能にする / #415)。
+   *
+   * 牌と供給元を同じ nullable 値に束ねることで、牌がないのに供給元だけが残る状態を
+   * 型で表現不能にする(#440)。
+   */
+  drawn: { readonly tile: Tile; readonly source: DrawSource } | null;
   /** 席ごとのリーチ宣言済みフラグ。 */
   riichi: SeatFlags;
   /** 席ごとのダブルリーチ(初巡・鳴きなしでのリーチ)。 */
@@ -210,10 +249,40 @@ export interface RoundSummary {
   readonly winnerId?: PlayerId;
   /** リーチ和了か(裏ドラ開示の判定に使う)。 */
   readonly riichiWin?: boolean;
+  /**
+   * 半荘終了時に場へ残った供託リーチ棒の帰属記録(#282)。流局(トビ流局含む)で半荘が
+   * 終わり供託が残存したときのみ `endGame` が設定する。残存分は `deltas[recipientId]` へ
+   * 畳み込み済み(和了時の `stickPayout` と同じく供託は複数局分でも受取者のデルタに含める)
+   * のため、本フィールドはその内訳(誰が何本・何点を取得したか)の表示・検算用スナップショット。
+   */
+  readonly residualSticks?: {
+    /** 帰属先(Q15 = 最終持ち点最高 / Q20 = 同点最高は席順上位)。 */
+    readonly recipientId: PlayerId;
+    readonly recipientName: string;
+    /** 残存本数(**リーチ棒の本数**。供託種別を足すときは表示側の拡張が要る → `POT_SOURCES`)。 */
+    readonly sticks: number;
+    /**
+     * 加算点(**場に残っていた供託の合計** = `potTotal`)。現状は供託種別がリーチ棒だけなので
+     * `sticks × 1,000` に一致するが、種別が増えると一致しなくなる(#430)。
+     */
+    readonly points: number;
+  };
   /** 和了時点で固定した、GUI検算用の表示スナップショット。 */
   readonly winDetails?: {
     readonly winType: "tsumo" | "ron";
     readonly dealer: boolean;
+    /** 和了者の表示名(#259)。 */
+    readonly winnerName: string;
+    /** 和了者の席(東=親)。 */
+    readonly winnerSeat: SeatKey;
+    /**
+     * 和了確定時に固定した門前手牌(和了牌を除く。副露・ガリは含まない — それらは
+     * 卓上の既存表示が公開情報として担う)。次局遷移で `hand.hands` は失われるため、
+     * 局終了後の開示(#259)はこのスナップショットを参照する。
+     */
+    readonly hand: readonly Tile[];
+    /** 和了牌(ツモ牌 / ロンした打牌・槍槓牌)。 */
+    readonly winningTile: Tile;
     readonly yaku: readonly {
       readonly name: string;
       readonly han: number;
@@ -231,11 +300,21 @@ export interface RoundSummary {
     readonly yakuman: number;
     readonly category: string;
     readonly honba: number;
+    /**
+     * 和了者が回収した供託の**本数**(= リーチ棒の本数)。
+     *
+     * `stickPayout`(点数)と対で `WinDetails` が「供託回収 N本(N,000点)」と描画するが、
+     * 両者はリーチ棒固有の別ソースであり供託レジストリ(`POT_SOURCES`)を経由しない。
+     * `RoundSummary.residualSticks` の `sticks`/`points` と同型の組で、局中の回収を
+     * 新しい供託種別へ広げる(spec 3.3 の (a))と本数と点数が食い違うため、
+     * そのときは表示側の拡張も要る(#430)。
+     */
     readonly riichiSticks: number;
     readonly payments: readonly {
       readonly name: string;
       readonly amount: number;
     }[];
+    /** 和了者が回収した供託の**点数**({@link riichiSticks} の注記を参照)。 */
     readonly stickPayout: number;
   };
 }
@@ -285,7 +364,15 @@ export type Pending =
 /** 半荘のフェーズ。 */
 export type GamePhase = "playing" | "roundEnd" | "gameEnd";
 
-/** 半荘全体の状態(不変値として React state に載せる。内部の `Wall` のみ可変)。 */
+/**
+ * 半荘全体の状態(React state に載せる値)。
+ *
+ * **不変値ではない**(#453 / ADR-0003)。`readonly` が付くのは参照の付け替えだけで、
+ * `hand`(`HandState`)は全域が in-place 更新され、`hand.wall`(`Wall`)・{@link rng}
+ * (クロージャ)・{@link ledger}(`SoshiiLedger`)は `{ ...state }` では複製されない
+ * 可変リソースである。したがって公開アクションへ渡した state は**使い捨て**で、
+ * 有効な後続 state は返り値だけになる。契約の全体は {@link publicAction} を参照。
+ */
 export interface EngineState {
   readonly players: readonly EnginePlayer[];
   readonly order: PlayerRing<PlayerId>;
@@ -296,7 +383,12 @@ export interface EngineState {
   readonly bonus: Record<PlayerId, number>;
   /** ソシー精算台帳(祝儀は局中、素点+ウマは半荘終了時に適用)。 */
   readonly ledger: SoshiiLedger;
-  /** 供託リーチ棒(和了で回収・流局で持ち越し)。 */
+  /**
+   * 供託リーチ棒の本数(和了で回収・流局で持ち越し)。
+   *
+   * **場に残る供託の一種**であり、点数への換算と半荘終了時の畳み込みは供託レジストリ
+   * `POT_SOURCES` / {@link potTotal} を経由する(#430)。
+   */
   readonly riichiSticks: number;
   readonly rng: Rng;
   readonly hand: HandState | null;
@@ -312,20 +404,24 @@ export interface EngineState {
   readonly roundsPlayed: number;
 }
 
+/** 四人回しの4人の表示名(index 0 = 自家)。 */
+export type PlayerNames = readonly [string, string, string, string];
+
 /** `createGame` のオプション。 */
 export interface CreateGameOptions {
   /** 乱数 seed(既定は現在時刻)。テストでは固定値を渡す。 */
   readonly seed?: number;
   /** 4兄弟の表示名(index 0 = 自家)。 */
-  readonly names?: readonly [string, string, string, string];
+  readonly names?: PlayerNames;
 }
 
-const DEFAULT_NAMES: readonly [string, string, string, string] = [
-  "あなた",
-  "一郎",
-  "二郎",
-  "三郎",
-];
+/**
+ * 表示名の既定値(未設定時の後方互換値)。
+ *
+ * 実在人物名は含めない。本作は非公式ファンメイドであり、番組メンバー名を出荷物へ
+ * 同梱してよいかは未確定(`質問リスト.md` Q28)。実名は `/settings` からユーザーが入力する。
+ */
+export const DEFAULT_NAMES: PlayerNames = ["あなた", "一郎", "二郎", "三郎"];
 
 const ALL_IDS: PlayerRing<PlayerId> = ["p0", "p1", "p2", "p3"];
 
@@ -355,7 +451,7 @@ function humanSeatOf(hand: HandState): SeatKey | null {
 }
 
 /** 場風の番号(東場=東1・南場=南2)。 */
-function roundWindNumber(state: RoundState<PlayerId>): number {
+function roundWindNumber(state: RoundState<PlayerId>): PlayableWind {
   return state.wind === "east" ? HONOR.EAST : HONOR.SOUTH;
 }
 
@@ -388,7 +484,10 @@ function takeKind(
   return { taken, rest };
 }
 
-/** 河から鳴かれた牌(最後の該当牌)を取り除く。 */
+/**
+ * 河(表示用)から鳴かれた牌(最後の該当牌)を取り除く。
+ * 判定用の `discardHistory` は**一切触らない**(捨て牌フリテンは恒久 / #395)。
+ */
 function removeCalledTileFromRiver(
   hand: HandState,
   discarder: SeatKey,
@@ -419,7 +518,21 @@ function nameOf(state: EngineState, id: PlayerId): string {
   return state.players.find((p) => p.id === id)?.name ?? id;
 }
 
-/** ロン判定順(頭ハネ=上家取り): 放銃者の次席から巡目順に2席。 */
+/**
+ * ロン判定順(頭ハネ=上家取り): 放銃者の次席から巡目順に2席。
+ *
+ * SSOT: `docs/四兄弟麻雀ルール.md` §3「ダブロン等が発生した場合は上家取り」/
+ * `documents/spec/game-flow.md` 2.4。複数家が同時にロンできる場合、この順の
+ * **最初の1人だけ**が和了する(呼び出し側は先勝ちで抜ける)。供託・本場も同様に
+ * その1人が取得する。
+ *
+ * 席割りが確定(Q9・Q10)した現在、頭ハネは「席インデックスの環状距離」ではなく
+ * `NEXT_SEAT` の巡目順そのもので表せるため、本関数が唯一の実装である
+ * (かつて `src/domain/hand/head-bump.ts` に席未確定時の抽象版があったが、
+ * engine から未使用の死にコードだったため #311 で削除した)。
+ * 通常打牌・槍槓の両経路の検証は `engine.head-bump.test.ts` /
+ * `engine.chankan.test.ts` を参照。
+ */
 function ronOrder(discarder: SeatKey): [SeatKey, SeatKey] {
   const first = NEXT_SEAT[discarder];
   return [first, NEXT_SEAT[first]];
@@ -444,6 +557,19 @@ function ronOrder(discarder: SeatKey): [SeatKey, SeatKey] {
  */
 export function isHaitei(remainingLiveTiles: number): boolean {
   return remainingLiveTiles === 0;
+}
+
+/**
+ * 通常ツモが海底牌か。嶺上補充(カン・北抜きのいずれも)はライブ牌残数を0にしても
+ * 海底摸月ではない(#396)。
+ *
+ * @param drawSource 現在のツモ牌の供給元(`HandState.drawn.source`)。
+ */
+export function isHaiteiTsumo(
+  remainingLiveTiles: number,
+  drawSource: DrawSource,
+): boolean {
+  return isHaitei(remainingLiveTiles) && drawSource === "live";
 }
 
 /**
@@ -560,10 +686,10 @@ function beginRound(state: EngineState): EngineState {
     hands: { east: dealt[0], south: dealt[1], west: dealt[2] },
     melds: { east: [], south: [], west: [] },
     discards: { east: [], south: [], west: [] },
+    discardHistory: { east: [], south: [], west: [] },
     kita: { east: 0, south: 0, west: 0 },
     turn: "east",
     drawn: null,
-    fromKan: false,
     riichi: seatFlags(),
     doubleRiichi: seatFlags(),
     ippatsu: seatFlags(),
@@ -586,23 +712,40 @@ function beginRound(state: EngineState): EngineState {
   return pump(next);
 }
 
-/** 北抜き(ガリ)を自動処理し、最終的に手番が持つツモ牌を返す。 */
-function autoPullNorth(hand: HandState, seat: SeatKey, tile: Tile): Tile {
+/**
+ * 北抜き(ガリ)を自動処理し、最終的に手番が持つツモ牌を返す。
+ *
+ * `pulled` は**嶺上補充が1回でも走ったか**。返した牌が嶺上牌であることを意味し、
+ * 海底摸月の判定(`isHaiteiTsumo`)を抑止するために呼び出し側へ伝える(#396)。
+ * `false` になるのは**ライブ壁から引いた北をそのまま返した初回のみ**(嶺上が尽きて
+ * 1枚も補充できなかった場合)。一度でも補充できていれば返す牌は嶺上牌なので `true`。
+ */
+function autoPullNorth(
+  hand: HandState,
+  seat: SeatKey,
+  tile: Tile,
+): { tile: Tile; pulled: boolean } {
   let current = tile;
+  let pulled = false;
   // 北(字牌 rank=4)を引く限り抜いて嶺上補充する。王牌が尽きたら打ち切る。
   while (current.suit === "honor" && current.rank === HONOR.NORTH) {
-    hand.kita[seat] += 1;
+    let replacement: Tile;
     try {
-      current = hand.wall.drawReplacement();
+      replacement = hand.wall.drawReplacement();
     } catch (error) {
       if (error instanceof WallEmptyError) {
-        // 嶺上が尽きた極端ケース: 北をそのまま手に残す(実運用では非到達)。
-        return current;
+        // 嶺上が尽きた極端ケース(実運用では非到達): 補充できないので**抜かずに**
+        // 北を手へ残す。ここで `kita` を増やすと抜き北と手牌に二重計上される。
+        // `pulled` は直前までの補充結果を保つ(current が嶺上牌のことがある)。
+        return { tile: current, pulled };
       }
       throw error;
     }
+    hand.kita[seat] += 1;
+    current = replacement;
+    pulled = true;
   }
-  return current;
+  return { tile: current, pulled };
 }
 
 /**
@@ -614,7 +757,7 @@ function autoPullDealtNorths(hand: HandState): void {
     const concealed: Tile[] = [];
     for (const tile of hand.hands[seat]) {
       if (tile.suit === "honor" && tile.rank === HONOR.NORTH) {
-        concealed.push(autoPullNorth(hand, seat, tile));
+        concealed.push(autoPullNorth(hand, seat, tile).tile);
       } else {
         concealed.push(tile);
       }
@@ -623,7 +766,13 @@ function autoPullDealtNorths(hand: HandState): void {
   }
 }
 
-/** カン後の嶺上補充(北抜きも自動処理)。`drawn` と `fromKan` を更新する。 */
+/**
+ * カン後の嶺上補充(北抜きも自動処理)。`drawn` を更新する。
+ *
+ * 嶺上牌が北で続けて抜かれた場合も `"kanReplacement"` のままにする(カンを起点とした
+ * 一連の補充なので嶺上開花の対象)。この解釈は #396 以前からの既存挙動で、spec 3.2 の
+ * 「北抜きの嶺上牌では付かない」との境界は未確定(→ #437)。
+ */
 function drawKanReplacement(hand: HandState, seat: SeatKey): void {
   let tile: Tile;
   try {
@@ -631,15 +780,25 @@ function drawKanReplacement(hand: HandState, seat: SeatKey): void {
   } catch (error) {
     if (error instanceof WallEmptyError) {
       hand.drawn = null;
-      hand.fromKan = false;
       return;
     }
     throw error;
   }
-  hand.drawn = autoPullNorth(hand, seat, tile);
-  hand.fromKan = true;
+  hand.drawn = {
+    tile: autoPullNorth(hand, seat, tile).tile,
+    source: "kanReplacement",
+  };
   hand.tempMiss[seat] = false;
 }
+
+/**
+ * 四槓散了となるカンの総数(複数家にまたがる場合)。
+ *
+ * これは1局で成立し得るカンの上限でもある(5組目の宣言はここで途中流局になり、
+ * 嶺上牌を引かない)。王牌の嶺上供給枚数の見積り(`wall.ts` の
+ * `MAX_REPLACEMENTS_PER_HAND`)の導出元。
+ */
+export const FOUR_KAN_ABORT_THRESHOLD = 4;
 
 /**
  * 複数家にまたがる4組目のカンを四槓散了として途中流局にする。
@@ -657,7 +816,7 @@ function settleFourKanAbortiveDraw(state: EngineState): EngineState | null {
       total + hand.melds[seat].filter((meld) => meld.type === "kan").length,
     0,
   );
-  if (kanCount < 4 || owners.length < 2) return null;
+  if (kanCount < FOUR_KAN_ABORT_THRESHOLD || owners.length < 2) return null;
 
   const deltas = Object.fromEntries(ALL_IDS.map((id) => [id, 0])) as Record<
     PlayerId,
@@ -672,26 +831,76 @@ function settleFourKanAbortiveDraw(state: EngineState): EngineState | null {
 
 /**
  * AI 手番の打牌を手牌効率(向聴・受け入れ)ベースで選ぶ(#98)。
- * 他家の河から現物(危険牌回避)、表ドラ+赤5から打点温存を加味する。
+ * 他家の打牌履歴から現物(危険牌回避 / #395)、表ドラ+赤5から打点温存を加味する。
  * 和了牌の温存は考えない(和了は本関数の前段でツモ宣言済み)。
- * 副露後は門前牌だけを評価対象にし、既存の手牌効率ロジックで打牌を選ぶ。
+ * 副露後は門前牌だけを評価対象にし、副露数 `meldCount` を渡して向聴・受け入れを
+ * 副露込みで補正する(#294: 未補正だと副露手で向聴値が飽和し、AI が自らテンパイを崩す)。
+ *
+ * `engine.ai-furiten-riichi.test.ts` の全席 AI ドライバもこの関数を直接使う。入力文脈を
+ * テスト側でミラーすると `meldCount` / `forbiddenDiscards` が再び乖離するため(#424)。
+ * @internal UI 向け公開アクションではなく、engine と回帰ドライバの方策共有点。
  */
-function chooseAiDiscard(
+export function chooseAiDiscard(
   hand: HandState,
   seat: SeatKey,
   drawn: Tile | null,
+  forbiddenDiscards: readonly Tile[] = [],
 ): Tile {
   const tiles = [...hand.hands[seat], ...(drawn ? [drawn] : [])];
   const opponentDiscards = (["east", "south", "west"] as SeatKey[])
     .filter((s) => s !== seat)
-    .map((s) => hand.discards[s]);
+    // 他家が打った牌はその家に対する現物(安全牌)であり続ける。鳴かれて河から
+    // 消えても安全性は変わらないため、履歴側を見る(#395)。
+    .map((s) => hand.discardHistory[s]);
   const doraKinds = new Set(
     resolveDora(hand.doraSet).omote.map((t) => tileKey(t)),
   );
-  return chooseDiscard({ tiles, opponentDiscards, doraKinds });
+  return chooseDiscard({
+    tiles,
+    meldCount: hand.melds[seat].length,
+    opponentDiscards,
+    doraKinds,
+    forbiddenDiscards,
+  });
 }
 
-/** AIのリーチ宣言。合法な宣言牌のうち手牌効率AIが選んだ牌を切る。 */
+/**
+ * リーチ宣言牌の候補から、宣言後の待ちが自河と交わる(= 捨て牌フリテンになる)牌を
+ * 除いて返す(#295)。フリテンリーチはルール上合法(スペック2 2.4)だが、以後ロン不可の
+ * まま手を固定する明確な悪手であり、他家の当たり牌を「見逃す」ように見えるため、
+ * AI は非フリテンの待ちになる宣言牌のみを選ぶ。純関数・決定的。
+ */
+function nonFuritenRiichiTiles(
+  hand: HandState,
+  seat: SeatKey,
+  candidates: readonly Tile[],
+): Tile[] {
+  if (hand.drawn === null) return [];
+  const melds = meldInputsOf(hand.melds[seat]);
+  const pool = [...hand.hands[seat], hand.drawn.tile];
+  const ownDiscardKeys = new Set(
+    // 鳴かれた牌も恒久フリテンの原因として残る(#395)。
+    hand.discardHistory[seat].map((t) => tileKey(t)),
+  );
+  return candidates.filter((candidate) => {
+    const index = pool.findIndex((t) => sameTile(t, candidate));
+    if (index < 0) return false;
+    const rest = [...pool.slice(0, index), ...pool.slice(index + 1)];
+    // 宣言牌自身も宣言と同時に自河へ載るため、待ちに含まれるならフリテン扱いにする
+    // (役なし完成形をリーチで曲げる場合など、待ちが宣言牌と同種になる形がある)。
+    const candidateKey = tileKey(candidate);
+    return waitingTiles(rest, melds).every((wait) => {
+      const key = tileKey(wait);
+      return key !== candidateKey && !ownDiscardKeys.has(key);
+    });
+  });
+}
+
+/**
+ * AIのリーチ宣言。合法な宣言牌のうち、宣言後の待ちがフリテンにならない牌に限って
+ * 宣言する(#295)。その中に手牌効率AIの選んだ牌があればそれを、なければ先頭を切る。
+ * 全候補がフリテンになる場合はリーチを見送り、呼び出し側の通常打牌(ダマ維持)に委ねる。
+ */
 function applyAiRiichi(state: EngineState, seat: SeatKey): EngineState {
   const hand = state.hand;
   if (hand === null || hand.drawn === null) return state;
@@ -707,12 +916,16 @@ function applyAiRiichi(state: EngineState, seat: SeatKey): EngineState {
   ) {
     return state;
   }
-  const selected = chooseAiDiscard(hand, seat, hand.drawn);
+  const declarable = nonFuritenRiichiTiles(hand, seat, candidates);
+  if (declarable.length === 0) return state;
+  const selected = chooseAiDiscard(hand, seat, hand.drawn.tile);
   const tile =
-    candidates.find((candidate) => sameTile(candidate, selected)) ??
-    candidates[0];
+    declarable.find((candidate) => sameTile(candidate, selected)) ??
+    declarable[0];
   hand.riichi[seat] = true;
-  hand.doubleRiichi[seat] = hand.discards[seat].length === 0 && !hand.callsMade;
+  hand.doubleRiichi[seat] =
+    // 「まだ一度も打牌していない」= 履歴が空(表示用の河は鳴きで減りうる / #395)。
+    hand.discardHistory[seat].length === 0 && !hand.callsMade;
   hand.pendingRiichiSeat = seat;
   const callsMadeBeforeDeclaration = hand.callsMade;
   const discarded = applyDiscard(state, seat, tile);
@@ -783,7 +996,7 @@ function completeAiAnkan(
 ): EngineState {
   const hand = state.hand;
   if (hand === null || hand.drawn === null) return state;
-  const pool = [...hand.hands[seat], hand.drawn];
+  const pool = [...hand.hands[seat], hand.drawn.tile];
   const { taken, rest } = takeKind(pool, tile, 4);
   if (taken.length < 4) return state;
   hand.hands[seat] = rest;
@@ -812,7 +1025,7 @@ function completeAiKakan(
     (meld) => meld.type === "pon" && sameKind(meld.tiles[0], tile),
   );
   if (target === undefined) return state;
-  const pool = [...hand.hands[seat], hand.drawn];
+  const pool = [...hand.hands[seat], hand.drawn.tile];
   const { taken, rest } = takeKind(pool, tile, 1);
   if (taken.length < 1) return state;
   const kakanTile = taken[0];
@@ -846,7 +1059,7 @@ function applyAiAnkan(
 ): EngineState {
   const hand = state.hand;
   if (hand === null || hand.drawn === null) return state;
-  const pool = [...hand.hands[seat], hand.drawn];
+  const pool = [...hand.hands[seat], hand.drawn.tile];
   const { taken } = takeKind(pool, tile, 4);
   if (taken.length < 4) return state;
   const chankan = resolveChankan(state, seat, taken[0], "ankan");
@@ -869,7 +1082,7 @@ function applyAiKakan(
     (meld) => meld.type === "pon" && sameKind(meld.tiles[0], tile),
   );
   if (target === undefined) return state;
-  const { taken } = takeKind([...hand.hands[seat], hand.drawn], tile, 1);
+  const { taken } = takeKind([...hand.hands[seat], hand.drawn.tile], tile, 1);
   if (taken.length < 1) return state;
   const chankan = resolveChankan(state, seat, taken[0], "kakan");
   if (chankan !== null) return chankan;
@@ -903,7 +1116,6 @@ function applyAiCall(
   hand.pendingDiscard = null;
   hand.passedRonSeats = [];
   hand.drawn = null;
-  hand.fromKan = false;
   hand.turn = caller;
   if (kan) {
     const abortiveDraw = settleFourKanAbortiveDraw(state);
@@ -911,15 +1123,30 @@ function applyAiCall(
     drawKanReplacement(hand, caller);
     return state;
   }
-  // 現物喰い替えは禁止。ポンで同種牌は2枚消費済みなので、残る場合も候補から除く。
-  const legal = hand.hands[caller].filter(
-    (candidate) => !sameKind(candidate, tile),
-  );
-  const chosen = chooseAiDiscard(
-    { ...hand, hands: { ...hand.hands, [caller]: legal } },
-    caller,
-    null,
-  );
+  // 現物喰い替えは禁止(#105 / スペック1 1.4)。禁止牌は手牌から削らず
+  // `forbiddenDiscards` として渡す。削ると `14 − 3×副露数` 枚に満たない手牌で
+  // 向聴が評価される(#303)。
+  //
+  // 禁止牌の指定は現状**防御的**(到達不能)である。理由は #322 の前後で変わった:
+  //
+  // - #322 以前: `canPon`(need 2)と `canKan`(need 3)は同じガードを共有するため、
+  //   3枚以上あれば必ず `kan=true` で上の分岐へ抜けた。つまり同種ちょうど2枚しか
+  //   到達せず、門前に4枚目が残らなかった。
+  // - #322 以降: 「向聴を悪化させる大明槓はポンへ落とす」判断により、同種3枚持ちの
+  //   ままポンへ到達する経路が実在する(4,000半荘で86件)。門前に4枚目が残るように
+  //   なったが、**その4枚目が打牌に選ばれることはない**。ポンへ落とすのは
+  //   {@link kanKeepsShanten} が「4枚目を切った形(= 大明槓後の形)より厳密に良い
+  //   打牌が存在する」と判定したときに限られ、{@link chooseDiscard} は向聴を最優先
+  //   するため、常にその厳密に良い牌を選ぶからである。
+  //
+  // したがって喰い替えは向聴評価の側で既に排除されており、本指定はその不変条件が
+  // 崩れた場合(打点優先の打牌方策など)への保険として残している。#325 では、この経路でも
+  // `chooseDiscard` に渡す手牌から禁止牌を削らず `14 − 3×副露数` 枚を保つ境界契約を
+  // engine レイヤの回帰テストで固定している。
+  //
+  // なお AI は人間側の `hand.ponnedKind`(`discard()` の no-op ガード用)を立てない。
+  // 鳴きから打牌までが本関数内で同期的に完結し、公開境界の `discard()` を通らないため。
+  const chosen = chooseAiDiscard(hand, caller, null, [tile]);
   return applyDiscard(state, caller, chosen);
 }
 
@@ -943,18 +1170,26 @@ function pump(state: EngineState): EngineState {
         return settleDraw(s);
       }
       const raw = hand.wall.draw();
-      hand.drawn = autoPullNorth(hand, seat, raw);
-      hand.fromKan = false;
+      const pull = autoPullNorth(hand, seat, raw);
+      hand.drawn = {
+        tile: pull.tile,
+        // 北抜きの嶺上牌も嶺上補充由来。海底摸月を付けてはならない(#396)。
+        source: pull.pulled ? "kitaReplacement" : "live",
+      };
       hand.tempMiss[seat] = false; // 同巡内フリテンは次の自ツモで解消。
     }
 
-    const haitei = isHaitei(hand.wall.remainingLiveTiles);
+    const wallExhausted = isHaitei(hand.wall.remainingLiveTiles);
+    const haitei = isHaiteiTsumo(
+      hand.wall.remainingLiveTiles,
+      hand.drawn.source,
+    );
 
     if (isHuman) {
       if (hand.riichi[seat]) {
         // リーチ後は自動ツモ切りが基本(ツモ和了のみ選択の余地)。ただし送り槓に
         // ならない暗槓は許可する(標準慣行 / Q18・#116)。
-        const tsumo = analyzeTsumo(s, seat, hand.drawn, haitei);
+        const tsumo = analyzeTsumo(s, seat, hand.drawn.tile, haitei);
         const ankanTiles = riichiAnkanTiles(hand, seat);
         if (tsumo !== null || ankanTiles.length > 0) {
           return {
@@ -971,7 +1206,7 @@ function pump(state: EngineState): EngineState {
             },
           };
         }
-        s = applyDiscard(s, seat, hand.drawn);
+        s = applyDiscard(s, seat, hand.drawn.tile);
         if (s.phase !== "playing" || s.pending !== null) return s;
         continue;
       }
@@ -979,12 +1214,12 @@ function pump(state: EngineState): EngineState {
     }
 
     // AI: ツモ和了できるなら宣言。
-    const aiTsumo = analyzeTsumo(s, seat, hand.drawn, haitei);
+    const aiTsumo = analyzeTsumo(s, seat, hand.drawn.tile, haitei);
     if (aiTsumo !== null) {
       return settleWin(s, {
         winnerSeat: seat,
         winType: "tsumo",
-        winningTile: hand.drawn,
+        winningTile: hand.drawn.tile,
         analysis: aiTsumo,
         haitei,
       });
@@ -998,21 +1233,28 @@ function pump(state: EngineState): EngineState {
         if (s.phase !== "playing" || s.pending !== null) return s;
         continue;
       }
-      s = applyDiscard(s, seat, hand.drawn);
+      s = applyDiscard(s, seat, hand.drawn.tile);
       if (s.phase !== "playing" || s.pending !== null) return s;
       continue;
     }
 
     // AI: 海底でなければ加槓→暗槓の順で合法なカンを宣言する。
-    if (canKanOnDrawTurn(hand.drawn !== null, haitei)) {
-      const pool = [...hand.hands[seat], hand.drawn];
-      const kakan = kakanCandidates(hand, seat, pool);
+    if (canKanOnDrawTurn(hand.drawn !== null, wallExhausted)) {
+      const pool = [...hand.hands[seat], hand.drawn.tile];
+      const meldCount = hand.melds[seat].length;
+      // 向聴を悪化させるカンは宣言しない(#304)。ドラ増加より手を崩さないことを優先する。
+      const kakan = kakanCandidates(hand, seat, pool).filter((t) =>
+        kanKeepsShanten(pool, meldCount, t, "kakan"),
+      );
       if (kakan.length > 0) {
         s = applyAiKakan(s, seat, kakan[0]);
         if (s.phase !== "playing" || s.pending !== null) return s;
         continue;
       }
-      const ankan = ankanCandidates(pool);
+      // 暗槓候補の評価は加槓が無いときだけ行う(向聴評価は candidate 数ぶん走るため)。
+      const ankan = ankanCandidates(pool).filter((t) =>
+        kanKeepsShanten(pool, meldCount, t, "ankan"),
+      );
       if (ankan.length > 0) {
         s = applyAiAnkan(s, seat, ankan[0]);
         if (s.phase !== "playing" || s.pending !== null) return s;
@@ -1028,7 +1270,7 @@ function pump(state: EngineState): EngineState {
       continue;
     }
 
-    const chosen = chooseAiDiscard(hand, seat, hand.drawn);
+    const chosen = chooseAiDiscard(hand, seat, hand.drawn.tile);
     s = applyDiscard(s, seat, chosen);
     if (s.phase !== "playing" || s.pending !== null) return s;
   }
@@ -1039,7 +1281,7 @@ function pump(state: EngineState): EngineState {
 function riichiDiscardTiles(hand: HandState, seat: SeatKey): Tile[] {
   if (hand.drawn === null) return [];
   const melds = meldInputsOf(hand.melds[seat]);
-  const pool = [...hand.hands[seat], hand.drawn];
+  const pool = [...hand.hands[seat], hand.drawn.tile];
   const result: Tile[] = [];
   const seen = new Set<string>();
   for (let i = 0; i < pool.length; i++) {
@@ -1051,6 +1293,88 @@ function riichiDiscardTiles(hand: HandState, seat: SeatKey): Tile[] {
     if (isTenpai(rest, melds)) result.push(t);
   }
   return result;
+}
+
+/**
+ * カン宣言が手牌の向聴を悪化させないかを判定する(#304 / 大明槓は #322)。純関数・決定的。
+ *
+ * 方策としての位置づけ・閾値を設けない根拠・定量検証の結果は
+ * [ADR-0002](../../../documents/adr/0002-ai-policy.md) を参照。
+ *
+ * 順子・塔子に使っている牌を槓に回すと、その牌が面子として固定されて待ちが崩れる
+ * (例: `456s` を持った状態で4枚目の `5s` を暗槓すると `4s` `6s` が孤立する)。
+ * 合法なら無条件に宣言していたため、AI が自らテンパイを落としていた。
+ *
+ * 比較は**打牌後13枚相当**の向聴に揃える(嶺上牌はこの時点で未知のため評価に含めない):
+ * - カンしない場合の最良値 = `min over 打牌 d of shanten(pool − d, 副露数)`
+ * - **暗槓**: 同種4枚を門前から抜き面子が1つ増える → `shanten(pool − 4枚, 副露数 + 1)`
+ * - **加槓**: 既存ポンへ4枚目を移すだけで面子数は不変 → `shanten(pool − 1枚, 副露数)`
+ *
+ * 加槓後の形は「その4枚目を打牌した場合」と同一なので、最良打牌が別牌なら悪化と出る。
+ *
+ * ## 大明槓(#322)
+ *
+ * 他家の打牌を明槓する場合、「カンしない」の対案は**打牌しないこと**ではなく
+ * **同じ牌をポンすること**である({@link shouldCallMeld} が真の局面でのみ呼ばれるため、
+ * 鳴くこと自体は既に決まっている)。したがって基準値はポン後の最良打牌に取る:
+ *
+ * - 大明槓: 同種4枚(手牌3枚 + 鳴いた1枚)が抜けて面子が1つ増える → `shanten(pool − 4枚, 副露数 + 1)`
+ * - ポン: 同種3枚が抜けて面子が1つ増え、手牌に4枚目が残る
+ *   → `min over 打牌 d of shanten(pool − 3枚 − d, 副露数 + 1)`
+ *
+ * 基準値の打牌候補には**4枚目(鳴いた牌と同種)も含めてよい**。現物喰い替え禁止(#105)で
+ * その打牌は実際には選べないが、除外しても判定結果は変わらないため明示的な除外を置いて
+ * いない: 「ポンして4枚目を切った形」は大明槓後の形と牌姿が同一で `afterKan` に等しく、
+ * 基準値は最小値を取るので `afterKan <= min(bestPon, afterKan) ⟺ afterKan <= bestPon`
+ * が恒等的に成り立つ(除外の有無で分岐しない)。実際に除外コードを外すミューテーションを
+ * 掛けても本判定のテストは落ちない。
+ *
+ * 悪化する場合は**鳴きを見送るのではなくポンへ落とす**。役牌の役を確定させる目的
+ * ({@link shouldCallMeld})は達成しつつ、4枚目を手牌に残して面子・塔子として使える。
+ *
+ * ## 適用範囲
+ *
+ * - **リーチ後の暗槓**には掛けない。{@link canAnkanAfterRiichi} が待ち牌集合の不変を
+ *   要求するため向聴は 0 のまま保証されており、本判定は常に真になる(無意味)。
+ * - **人間(p0)**には掛けない。AI の方策であり、UI の選択肢を狭めてはならない。
+ *
+ * @param pool 評価対象の14枚相当。自ツモ番は「門前手牌 + ツモ牌」、大明槓は
+ *   「門前手牌 + 鳴いた牌」(いずれも `14 − 3×副露数` 枚)。
+ */
+function kanKeepsShanten(
+  pool: readonly Tile[],
+  meldCount: number,
+  tile: Tile,
+  kind: "ankan" | "kakan" | "daiminkan",
+): boolean {
+  const need = kind === "kakan" ? 1 : 4;
+  const { taken, rest } = takeKind(pool, tile, need);
+  if (taken.length < need) return false;
+
+  // 基準値(カンしない場合の最良の13枚相当)。自ツモ番は「打牌するだけ」、
+  // 大明槓は「ポンして打牌する」が対案なので、評価するプールと副露数が異なる。
+  let basePool = pool;
+  let baseMelds = meldCount;
+  if (kind === "daiminkan") {
+    // ポン後の手牌 = 4枚のうち3枚を面子へ送り、4枚目を手牌に残した形。
+    // `shanten` は赤フラグを見ないため、どの1枚を残すかは結果に影響しない。
+    basePool = [...rest, taken[3]];
+    baseMelds = meldCount + 1;
+  }
+
+  // 打牌候補は種別(赤フラグ無視)で1回だけ評価する({@link chooseDiscard} と同じ粒度)。
+  // `tileKey` も `shanten` も赤フラグを見ないため、この重複排除は厳密に等価。
+  let bestWithoutKan = Number.POSITIVE_INFINITY;
+  const seen = new Set<string>();
+  for (let i = 0; i < basePool.length; i++) {
+    if (!seen.add(tileKey(basePool[i]))) continue;
+    const without = [...basePool.slice(0, i), ...basePool.slice(i + 1)];
+    const s = shanten(without, baseMelds);
+    if (s < bestWithoutKan) bestWithoutKan = s;
+  }
+  const afterKan =
+    kind === "kakan" ? shanten(rest, meldCount) : shanten(rest, meldCount + 1);
+  return afterKan <= bestWithoutKan;
 }
 
 /** 手牌プール中で4枚揃う牌種(暗槓候補)を列挙する。 */
@@ -1134,7 +1458,7 @@ export function canAnkanAfterRiichi(
  * 判定は {@link canAnkanAfterRiichi}(標準慣行 / Q18)。
  */
 function riichiAnkanTiles(hand: HandState, seat: SeatKey): Tile[] {
-  const drawn = hand.drawn;
+  const drawn = hand.drawn?.tile ?? null;
   if (drawn === null) return [];
   // 海底(ライブ牌 0 = 嶺上を引けない)ではカン不可(標準慣行・#128)。
   if (isHaitei(hand.wall.remainingLiveTiles)) return [];
@@ -1156,8 +1480,13 @@ function kakanCandidates(hand: HandState, seat: SeatKey, pool: Tile[]): Tile[] {
 function buildHumanPending(state: EngineState, seat: SeatKey): Pending {
   const hand = state.hand;
   if (hand === null) return null;
-  const drawn = hand.drawn;
-  const haitei = isHaitei(hand.wall.remainingLiveTiles);
+  const drawState = hand.drawn;
+  const drawn = drawState?.tile ?? null;
+  const wallExhausted = isHaitei(hand.wall.remainingLiveTiles);
+  const haitei =
+    drawState !== null
+      ? isHaiteiTsumo(hand.wall.remainingLiveTiles, drawState.source)
+      : false;
   const canTsumo =
     drawn !== null && analyzeTsumo(state, seat, drawn, haitei) !== null;
 
@@ -1170,7 +1499,7 @@ function buildHumanPending(state: EngineState, seat: SeatKey): Pending {
     drawn !== null && menzen && state.points[occupant] >= RIICHI_STICK_POINTS;
   const riichiTiles = riichiEligible ? riichiDiscardTiles(hand, seat) : [];
   // 海底(ライブ牌 0 = 嶺上を引けない)ではカン(暗槓・加槓)不可(標準慣行・#128)。
-  const canKan = canKanOnDrawTurn(drawn !== null, haitei);
+  const canKan = canKanOnDrawTurn(drawn !== null, wallExhausted);
   const ankanTiles = canKan ? ankanCandidates(pool) : [];
   const kakanTiles = canKan ? kakanCandidates(hand, seat, pool) : [];
   // 喰い替え禁止: ポン直後のみ、ポンした牌と同種の打牌を禁止(現物喰い替え / スペック1 1.4)。
@@ -1205,7 +1534,7 @@ function applyDiscard(
   const hand = state.hand;
   if (hand === null) return state;
   // 手牌(+ツモ)から捨て牌1枚を取り除く。
-  const pool = [...hand.hands[seat], hand.drawn].filter(
+  const pool = [...hand.hands[seat], hand.drawn?.tile ?? null].filter(
     (t): t is Tile => t !== null,
   );
   const removeAt = pool.findIndex((t) => sameTile(t, tile));
@@ -1214,8 +1543,8 @@ function applyDiscard(
   pool.splice(idx, 1);
   hand.hands[seat] = pool;
   hand.discards[seat] = [...hand.discards[seat], discarded];
+  hand.discardHistory[seat] = [...hand.discardHistory[seat], discarded];
   hand.drawn = null;
-  hand.fromKan = false;
   hand.ponnedKind = null; // 打牌で喰い替え禁止の窓(ポン直後の1打)を閉じる。
   hand.ippatsu[seat] = false; // 自分の打牌で一発の権利は消える。
   hand.pendingDiscard = { seat, tile: discarded };
@@ -1340,7 +1669,32 @@ function resolveDiscard(state: EngineState): EngineState {
         },
       };
     }
-    return applyAiCall(resolvedState, candidate, discarder, tile, canKan);
+    if (
+      !shouldCallMeld({
+        tile,
+        melds: hand.melds[candidate],
+        seatWind: SEAT_WIND_NUMBER[candidate],
+        roundWind: roundWindNumber(state.round),
+      })
+    ) {
+      continue;
+    }
+    // 向聴を悪化させる大明槓はポンへ落とす(#322)。対案は「鳴かない」ではなく
+    // 「ポンする」なので、4枚目を手牌に残せるぶんポンが優越しうる。
+    const useKan =
+      canKan &&
+      // `!canPon` は防御的(到達不能)。`canCallMeldOnDiscard` は `need` 以外のガード
+      // (`isDiscarder` / `inRiichi` / `haitei`)が同一なので `canKan` ⇒ `canPon` が
+      // 恒真であり、「ポン不可でカン可」の局面は存在しない。落とし先が無いまま
+      // カンを見送る事故を防ぐために残している。
+      (!canPon ||
+        kanKeepsShanten(
+          [...hand.hands[candidate], tile],
+          hand.melds[candidate].length,
+          tile,
+          "daiminkan",
+        ));
+    return applyAiCall(resolvedState, candidate, discarder, tile, useKan);
   }
 
   // 3. ロン・鳴きなし → 手番送り。
@@ -1363,7 +1717,8 @@ function analyzeTsumo(
 ): WinAnalysis | null {
   const hand = state.hand;
   if (hand === null) return null;
-  const blessing = blessingForTsumo(seat, hand.discards, hand.callsMade);
+  // 天和/地和は「自分がまだ打牌していない」ことが条件のため打牌履歴を渡す(#395)。
+  const blessing = blessingForTsumo(seat, hand.discardHistory, hand.callsMade);
   return analyzeWin({
     concealedTiles: [...hand.hands[seat], winningTile],
     melds: hand.melds[seat],
@@ -1375,7 +1730,7 @@ function analyzeTsumo(
     doubleRiichi: hand.doubleRiichi[seat],
     ippatsu: hand.ippatsu[seat],
     haitei,
-    rinshan: hand.fromKan,
+    rinshan: hand.drawn?.source === "kanReplacement",
     blessing,
   });
 }
@@ -1383,13 +1738,17 @@ function analyzeTsumo(
 /**
  * 天和/地和の権利を実対局状態から導く。
  * 東の初回自摸は天和、南/西の最初の自摸は地和。いずれも局中の鳴きで消滅する。
+ *
+ * @param discardHistory 席ごとの**打牌履歴**(`HandState.discardHistory`)。条件は
+ *   「その席がまだ一度も打牌していない」ことなので、鳴きで牌が抜ける表示用の河
+ *   (`HandState.discards`)を渡してはならない(#395)。
  */
 export function blessingForTsumo(
   seat: SeatKey,
-  discards: Readonly<Record<SeatKey, readonly Tile[]>>,
+  discardHistory: Readonly<Record<SeatKey, readonly Tile[]>>,
   callsMade: boolean,
 ): "heaven" | "earth" | undefined {
-  if (callsMade || discards[seat].length !== 0) return undefined;
+  if (callsMade || discardHistory[seat].length !== 0) return undefined;
   return seat === "east" ? "heaven" : "earth";
 }
 
@@ -1412,7 +1771,8 @@ function analyzeRon(
     {
       concealedTiles: hand.hands[seat],
       melds: meldInputsOf(hand.melds[seat]),
-      ownDiscards: hand.discards[seat],
+      // 鳴かれて河から消えた牌も捨て牌フリテンの対象として残す(#395)。
+      ownDiscardHistory: hand.discardHistory[seat],
       temporaryMiss: hand.tempMiss[seat],
       riichiMiss: hand.riichiMiss[seat],
     },
@@ -1563,6 +1923,11 @@ function settleWin(state: EngineState, win: WinInput): EngineState {
         winDetails: {
           winType,
           dealer: isDealerWin,
+          winnerName: nameOf(state, winnerId),
+          winnerSeat,
+          // 次局遷移で hand.hands は破棄されるため、和了確定時にコピーで固定する(#259)。
+          hand: [...hand.hands[winnerSeat]],
+          winningTile,
           yaku: analysis.yaku.map(({ name, han, yakuman }) => ({
             name,
             han,
@@ -1727,8 +2092,104 @@ export function finishRound(
   return gameEnds ? endGame(base) : base;
 }
 
+// ---------------------------------------------------------------------------
+// 供託(場に残る点棒)の集約
+// ---------------------------------------------------------------------------
+
 /**
- * 残存供託リーチ棒の帰属先 = 抜け番を含む4兄弟全員の最終持ち点で**最高**のプレイヤーID。
+ * 場に残る供託(点棒)1種別の記述子。
+ *
+ * `Σ持ち点 + 場の供託 = 140,000`(spec 3.3「供託の集約と保存則」)を保つため、**プレイヤーの
+ * 持ち点から場へ移した点棒はすべてここに列挙されていなければならない**。列挙漏れがあると
+ * `endGame` の畳み込みから外れ、精算入口({@link SoshiiLedger.applyUma} /
+ * {@link SoshiiLedger.applyRawScore})が `RangeError` を投げて対局中にクラッシュする(#430)。
+ */
+export interface PotSource {
+  /** 現在この種別で場に残っている点数(残存なしなら 0)。 */
+  readonly points: (state: EngineState) => number;
+  /**
+   * この種別の供託を場から下ろした状態。
+   *
+   * **自分のカウンタ以外を変えてはならない**。特に `points`(持ち点)と `lastRound` は
+   * `endGame` が畳み込み後の値で明示的に上書きするため、ここでの変更は黙って捨てられる。
+   * 下ろした点数を帰属先の持ち点へ加算するのは呼び出し側(`endGame`)の責務。
+   *
+   * **自種別のカウンタが 0 のときは受け取った `state` をそのまま(同一参照で)返すこと**
+   * (判定は「点数換算が 0 か」ではなく「カウンタが 0 か」で行う。点数換算 0 でもカウンタが
+   * 残る種別を将来足したときに下ろし損ねないため)。呼び出し側は合計が 0 でも無条件に呼ぶ
+   * ({@link withdrawPot})ので、この要求により **no-op が no-op のまま保たれる** — つまり
+   * `withdrawPot(s) === s` が「場に供託が無い」ことの判定に使える。この契約は
+   * `engine.pot-invariant.test.ts`(「供託レジストリの契約」)が全種別に対して検査する。
+   */
+  readonly withdraw: (state: EngineState) => EngineState;
+}
+
+/**
+ * 場に残る供託の全種別レジストリ(**単一の「供託」概念**)。
+ *
+ * 現状で場に残り得るのはリーチ棒だけだが、`質問リスト.md` Q29(チョンボ罰符)が
+ * 「供託方式」で確定した場合など、**保存則と畳み込みに関しては新しい供託種別を
+ * ここへ1エントリ追加するだけ**でよい。{@link potTotal} / `withdrawPot` を経由する
+ * `endGame` の畳み込みと、`engine.pot-invariant.test.ts` の不変条件テストが
+ * 自動的に新種別を対象に含める(#430)。決着表示の内訳
+ * (`RoundSummary.residualSticks`)は自動では追随しない(`endGame` 内の注記を参照)。
+ *
+ * **帰属先について**: `endGame` は集約した供託を {@link residualPotRecipient}
+ * (Q15 = 1位取得 / Q20 = 同点最高は席順上位)へまとめて渡す。この帰属規則は spec 3.4 で
+ * **リーチ棒について**確定したものなので、これと異なる帰属規則を持つ種別を追加するときは
+ * 規則の裁定(→ `質問リスト.md`)と本レジストリの拡張(種別ごとの帰属先)が併せて必要になる。
+ * ただし**合計の保存(= クラッシュしないこと)は帰属先によらず本レジストリだけで担保される**。
+ *
+ * **局中の回収・表示について**: 和了時の供託回収(`settleWin` → `resolveWinPayment` の
+ * `stickPayout`)、卓上の供託表示(`gameView` → `TableInfo`)、和了表示の内訳
+ * ({@link RoundSummary.winDetails} の `riichiSticks`/`stickPayout`)はいずれもリーチ棒固有の
+ * 経路で、本レジストリを経由しない。新種別を和了者の回収対象に含めるか・表示に出すかは
+ * 種別ごとの判断であり、含めなくても供託は場に残り続けて終局時に畳み込まれるため
+ * **保存則は破れない**(安全側)。詳細は spec 3.3「供託の集約と保存則」。
+ *
+ * **本レジストリで自動化されるのは「保存則」と「終局時の畳み込み」だけ**である点に注意
+ * (レジストリの存在が登録忘れそのものを防ぐわけではない。登録漏れは
+ * `engine.pot-invariant.test.ts` の走査が**踏む経路であれば** red になるが、
+ * 現状 engine から到達不能な経路(Q29 のチョンボ罰符など)は検出できない)。
+ */
+export const POT_SOURCES: readonly PotSource[] = [
+  // 供託リーチ棒(`state.riichiSticks` 本 × 1,000点)。
+  {
+    points: (state) => state.riichiSticks * RIICHI_STICK_POINTS,
+    withdraw: (state) =>
+      state.riichiSticks === 0 ? state : { ...state, riichiSticks: 0 },
+  },
+];
+
+/**
+ * いま場に残っている供託の合計点(全種別の総和)。
+ *
+ * 半荘中を通じて `Σ持ち点 + potTotal(state) = 140,000`(`TOTAL_POINTS`)が成立する(#430)。
+ *
+ * 描画・進行はどれも個別カウンタ(`state.riichiSticks`)を直接読むため production の
+ * 呼び出し元は `endGame` のみ。**保存則を検査するテストのために公開**している
+ * (`finishRound` と同じ扱い)。
+ */
+export function potTotal(state: EngineState): number {
+  return POT_SOURCES.reduce((sum, source) => sum + source.points(state), 0);
+}
+
+/**
+ * 全種別の供託を場から下ろす(点数は呼び出し側が帰属先の持ち点へ移す)。
+ *
+ * 合計 0 でも**無条件に呼んでよい**({@link PotSource.withdraw} がカウンタ 0 のとき同一参照を
+ * 返す契約のため)。逆に呼び出し側で `potTotal > 0` を条件にすると、「点数換算は 0 だが
+ * カウンタは残っている」種別を将来足したときに場から下ろし損ねる。
+ *
+ * production の呼び出し元は `endGame` のみ。**レジストリの契約を検査するテストのために公開**
+ * している({@link potTotal} と同じ扱い)。
+ */
+export function withdrawPot(state: EngineState): EngineState {
+  return POT_SOURCES.reduce((acc, source) => source.withdraw(acc), state);
+}
+
+/**
+ * 残存供託の帰属先 = 抜け番を含む4兄弟全員の最終持ち点で**最高**のプレイヤーID。
  *
  * 単独最高ならその1人(Q15 確定・1位取得 / #130)。**同点最高(単独1位が存在しない)場合は
  * 席順(固定円環 `order` の先頭 = 起家に近い順 = 供託の上家取り慣行に準ずる)で最上位の1人**を
@@ -1737,7 +2198,7 @@ export function finishRound(
  * `order[0]` が起家(初局の親)で半荘を通じ不変(`round/seat` の `PlayerRing`)。実装は席順に
  * 走査し、**厳密に**高い持ち点でのみ更新する(同点は先着 = 席順上位を保持)ため一意に決まる。
  */
-function residualRiichiRecipient(
+function residualPotRecipient(
   order: PlayerRing<PlayerId>,
   points: Record<PlayerId, number>,
 ): PlayerId {
@@ -1750,20 +2211,47 @@ function residualRiichiRecipient(
 
 /** 半荘を締め、ソシー精算(素点+ウマ+オカ+祝儀)を確定する。 */
 function endGame(state: EngineState): EngineState {
-  // 半荘終了時に場へ残った供託リーチ棒(`state.riichiSticks` > 0)は、**最終持ち点が最高**
-  // (抜け番含む全員に対する厳密比較 = Q19 整合)のプレイヤーの素点へ加算する(Q15 確定・
-  // ユーザー承認 2026-07-17 = 1位取得 / issue #130)。**同点最高で単独1位が存在しない場合は
-  // 席順(起家に近い順)で最上位の1人が総取り**する(Q20 確定・ユーザー承認 2026-07-17 =
-  // 同点最高のうち席順上位が総取り / issue #131)。`settleWin` は和了者が供託を回収して 0 に
-  // するため、残存するのは最終局が `settleDraw`(流局・トビ流局含む)で終わったとき。帰属先が
-  // 一意に定まるためソシー合計は常に zero-sum を保つ(消失で総和が目減りしない)。
-  const residual = state.riichiSticks * RIICHI_STICK_POINTS;
+  // 半荘終了時に場へ残った供託(`potTotal(state)` > 0。現状の種別はリーチ棒のみ)は、
+  // **最終持ち点が最高**(抜け番含む全員に対する厳密比較 = Q19 整合)のプレイヤーの素点へ
+  // 加算する(Q15 確定・ユーザー承認 2026-07-17 = 1位取得 / issue #130)。**同点最高で
+  // 単独1位が存在しない場合は席順(起家に近い順)で最上位の1人が総取り**する(Q20 確定・
+  // ユーザー承認 2026-07-17 = 同点最高のうち席順上位が総取り / issue #131)。`settleWin` は
+  // 和了者が供託を回収して 0 にするため、残存するのは最終局が `settleDraw`(流局・トビ流局
+  // 含む)で終わったとき。帰属先が一意に定まるためソシー合計は常に zero-sum を保つ
+  // (消失で総和が目減りしない)。
+  //
+  // 畳み込みは種別ごとではなく供託レジストリ(`POT_SOURCES`)の**集約**に対して行う。
+  // 新しい供託種別を追加しても `potTotal`/`withdrawPot` 経由で自動的に畳み込まれ、
+  // 精算入口の `Σ持ち点 = 140,000` 検証が破れない(#430)。
+  const residual = potTotal(state);
+  const withdrawn = withdrawPot(state);
   const points: Record<PlayerId, number> = { ...state.points };
-  let riichiSticks = state.riichiSticks;
+  let lastRound = state.lastRound;
   if (residual > 0) {
-    const recipient = residualRiichiRecipient(state.order, points);
+    const recipient = residualPotRecipient(state.order, points);
     points[recipient] += residual;
-    riichiSticks = 0; // 供託を素点へ移し、場から下ろす。
+    // gameEnd の決着表示は「局開始持ち点 + 表示デルタ = 表示持ち点」「供託カウント 0 と整合」
+    // を保つ必要がある(#282)。和了決着では複数局分の供託回収(`stickPayout`)が和了者の
+    // デルタに含まれるのと同じ扱いで、残存供託の受取も最終局デルタへ畳み込み、内訳を
+    // `residualSticks` に記録して hint 表示・事後検算を可能にする。
+    // `sticks`(本数)は**リーチ棒の本数**であり、点数 `residual` は供託全体の合計。
+    // 種別が増えたら内訳表示(`RoundSummary.residualSticks`)側の拡張も要る
+    // (合計の保存は上の集約だけで担保されるため、表示の拡張漏れでは破れない)。
+    if (lastRound !== null) {
+      lastRound = {
+        ...lastRound,
+        deltas: {
+          ...lastRound.deltas,
+          [recipient]: lastRound.deltas[recipient] + residual,
+        },
+        residualSticks: {
+          recipientId: recipient,
+          recipientName: nameOf(state, recipient),
+          sticks: state.riichiSticks,
+          points: residual,
+        },
+      };
+    }
   }
 
   const finalPoints = ALL_IDS.map((id) => ({
@@ -1789,9 +2277,9 @@ function endGame(state: EngineState): EngineState {
   });
 
   return {
-    ...state,
+    ...withdrawn,
     points,
-    riichiSticks,
+    lastRound,
     phase: "gameEnd",
     pending: null,
     result,
@@ -1802,8 +2290,83 @@ function endGame(state: EngineState): EngineState {
 // 公開アクション(UI から呼ぶ操作)
 // ---------------------------------------------------------------------------
 
+/**
+ * 公開アクションへ渡して遷移に使い終えた `EngineState` を、**再び**アクションへ
+ * 渡したときに投げる(#453)。契約の全体は {@link publicAction} と
+ * `documents/adr/0003-engine-state-ownership.md` を参照。
+ */
+export class EngineStateConsumedError extends Error {
+  constructor(action: string) {
+    super(
+      `EngineState was already consumed by a previous action; ${action}() received a stale state. ` +
+        "Engine actions take ownership of the state passed in: only the returned state is valid. " +
+        "(入力 state は使い捨て。分岐を試したいときは createGame から操作列を再生すること。)",
+    );
+    this.name = "EngineStateConsumedError";
+  }
+}
+
+/**
+ * 遷移に使い終えた(= 所有権が engine 側へ移った)`EngineState` の集合。
+ *
+ * `EngineState` そのものをキーにするため {@link WeakSet} を使う。参照が切れた state は
+ * 自動的に外れるので、長い半荘でも保持コストが増えない。
+ */
+const consumedStates = new WeakSet<EngineState>();
+
+/**
+ * 公開アクションに**所有権契約**を被せる(#453 / ADR-0003)。
+ *
+ * ## 契約: 入力 state は使い捨て(engine が所有権を取る)
+ *
+ * アクションが遷移を起こしたとき、有効な後続 state は**返り値だけ**である。入力 state は
+ * その場で不定になる: engine は `hand` を in-place 更新し、`hand.wall`(`Wall`)・
+ * `state.rng`(クロージャ)・`state.ledger`(`SoshiiLedger`)は新旧 state で共有される
+ * 可変リソースなので、`{ ...state }` では複製されない。よって「返り値を捨てれば入力は
+ * 元のまま」は成り立たない。
+ *
+ * これは選択ではなく構造から来ている。`hand` だけ複製すると「手牌は元のまま・山だけ
+ * 進んだ」state ができ、牌の保存則(総数108)が静かに破れるぶん**元の破壊より危険**になる。
+ *
+ * ## 本ラッパの役割: 契約違反を静かに進行させず即座に落とす
+ *
+ * #453 の実害は破壊性そのものではなく、違反が**無症状のまま進行し**「局が終わらない /
+ * テストが遅い」という別の症状に化けることだった(実際に同一局で 500 巡以上ツモ切りが
+ * 続いた)。そこで遷移を起こした入力 state を消費済みとして記録し、再投入を
+ * {@link EngineStateConsumedError} で即座に拒否する。
+ *
+ * **読み取りは常に自由**(遷移の前後を差分で観測するテストを壊さない)。裏を返すと、
+ * 返り値を捨てて入力 state を**読むだけ**のコードは依然として中途半端な値を読む。
+ * その残存穴は ADR-0003 の「この決定で解決しないこと」に明記している。
+ *
+ * ## 非合法手の no-op は消費しない
+ *
+ * 非合法手は入力 state を**同一参照のまま**返す(#105 の喰い替え no-op、UI 側の
+ * `nextEngine === engine` による journal 記録抑止がこれに依存する)。遷移が起きていない
+ * = 何も消費していないので、続けて別のアクションを呼べる。
+ *
+ * ## 適用の形
+ *
+ * 実装本体は `*Impl` として**インデントを変えずに**残し、公開名だけを本関数で包む
+ * (`export const discard = publicAction("discard", discardImpl)`)。公開アクションを
+ * 追加するときも同じ形にすること — ここを通さないと契約が掛からない。
+ */
+function publicAction<Args extends readonly unknown[]>(
+  name: string,
+  run: (state: EngineState, ...args: Args) => EngineState,
+): (state: EngineState, ...args: Args) => EngineState {
+  return (state, ...args) => {
+    if (consumedStates.has(state)) throw new EngineStateConsumedError(name);
+    const next = run(state, ...args);
+    if (next !== state) consumedStates.add(state);
+    return next;
+  };
+}
+
 /** 自家の打牌。`tile` は表示手牌から選ばれた牌(リーチ後は無視され `drawn` を切る)。 */
-export function discard(state: EngineState, tile: Tile): EngineState {
+export const discard = publicAction("discard", discardImpl);
+
+function discardImpl(state: EngineState, tile: Tile): EngineState {
   if (
     state.phase !== "playing" ||
     state.pending?.kind !== "humanDiscard" ||
@@ -1814,7 +2377,17 @@ export function discard(state: EngineState, tile: Tile): EngineState {
   const seat = seatOfPlayer(state.hand.seating, HUMAN_ID);
   if (seat === null || state.hand.turn !== seat) return state;
   const useTile =
-    state.pending.locked && state.hand.drawn !== null ? state.hand.drawn : tile;
+    state.pending.locked && state.hand.drawn !== null
+      ? state.hand.drawn.tile
+      : tile;
+  // UI や永続化ジャーナルから存在しない牌を渡されても、applyDiscard の内部
+  // フォールバック（末尾牌）で別の牌を捨てて状態を壊さないよう公開境界で拒否する。
+  const available = [
+    ...state.hand.hands[seat],
+    ...(state.hand.drawn === null ? [] : [state.hand.drawn.tile]),
+  ];
+  if (!available.some((candidate) => sameTile(candidate, useTile)))
+    return state;
   // 喰い替え禁止(現物): ポン直後にポンした牌と同種を切るのは非合法手 → no-op で拒否。
   const ponnedKind = state.hand.ponnedKind;
   if (ponnedKind !== null && isKuikaeForbidden(ponnedKind, useTile)) {
@@ -1825,7 +2398,9 @@ export function discard(state: EngineState, tile: Tile): EngineState {
 }
 
 /** 自家のツモ切り(リーチ後にツモ和了しないとき用)。 */
-export function tsumogiri(state: EngineState): EngineState {
+export const tsumogiri = publicAction("tsumogiri", tsumogiriImpl);
+
+function tsumogiriImpl(state: EngineState): EngineState {
   if (
     state.phase !== "playing" ||
     state.pending?.kind !== "humanDiscard" ||
@@ -1839,13 +2414,15 @@ export function tsumogiri(state: EngineState): EngineState {
   const after = applyDiscard(
     { ...state, pending: null },
     seat,
-    state.hand.drawn,
+    state.hand.drawn.tile,
   );
   return pump(after);
 }
 
 /** 自家のリーチ宣言(門前テンパイ・1,000点供託)。`tile` は宣言牌(捨て牌)。 */
-export function declareRiichi(state: EngineState, tile: Tile): EngineState {
+export const declareRiichi = publicAction("declareRiichi", declareRiichiImpl);
+
+function declareRiichiImpl(state: EngineState, tile: Tile): EngineState {
   if (
     state.phase !== "playing" ||
     state.pending?.kind !== "humanDiscard" ||
@@ -1865,7 +2442,9 @@ export function declareRiichi(state: EngineState, tile: Tile): EngineState {
   const hand = state.hand;
   hand.riichi[seat] = true;
   // ダブルリーチ = 自分の第一打・鳴きなし。
-  hand.doubleRiichi[seat] = hand.discards[seat].length === 0 && !hand.callsMade;
+  hand.doubleRiichi[seat] =
+    // 「まだ一度も打牌していない」= 履歴が空(表示用の河は鳴きで減りうる / #395)。
+    hand.discardHistory[seat].length === 0 && !hand.callsMade;
   hand.pendingRiichiSeat = seat;
   const callsMadeBeforeDeclaration = hand.callsMade;
 
@@ -1905,7 +2484,9 @@ function recordPaoResponsible(
 }
 
 /** 自家のポン(直前の他家打牌に対して)。 */
-export function declarePon(state: EngineState): EngineState {
+export const declarePon = publicAction("declarePon", declarePonImpl);
+
+function declarePonImpl(state: EngineState): EngineState {
   if (
     state.phase !== "playing" ||
     state.pending?.kind !== "humanReact" ||
@@ -1937,7 +2518,6 @@ export function declarePon(state: EngineState): EngineState {
   hand.pendingDiscard = null;
   hand.passedRonSeats = [];
   hand.drawn = null;
-  hand.fromKan = false;
   hand.turn = seat;
   // 喰い替え禁止: 直後の打牌でこの牌種(ポンした牌)を切れないよう記録する(スペック1 1.4)。
   hand.ponnedKind = tile;
@@ -1946,7 +2526,9 @@ export function declarePon(state: EngineState): EngineState {
 }
 
 /** 自家の明槓(大明槓・直前の他家打牌に対して)。 */
-export function declareKan(state: EngineState): EngineState {
+export const declareKan = publicAction("declareKan", declareKanImpl);
+
+function declareKanImpl(state: EngineState): EngineState {
   if (
     state.phase !== "playing" ||
     state.pending?.kind !== "humanReact" ||
@@ -1977,6 +2559,7 @@ export function declareKan(state: EngineState): EngineState {
   hand.callsMade = true;
   hand.pendingDiscard = null;
   hand.passedRonSeats = [];
+  hand.drawn = null;
   hand.turn = seat;
   const abortiveDraw = settleFourKanAbortiveDraw(state);
   if (abortiveDraw !== null) return abortiveDraw;
@@ -1985,7 +2568,9 @@ export function declareKan(state: EngineState): EngineState {
 }
 
 /** 自家の暗槓(自ツモ番)。`tile` は槓子にする牌種。 */
-export function declareAnkan(state: EngineState, tile: Tile): EngineState {
+export const declareAnkan = publicAction("declareAnkan", declareAnkanImpl);
+
+function declareAnkanImpl(state: EngineState, tile: Tile): EngineState {
   if (
     state.phase !== "playing" ||
     state.pending?.kind !== "humanDiscard" ||
@@ -2002,7 +2587,7 @@ export function declareAnkan(state: EngineState, tile: Tile): EngineState {
   const seat = humanSeatOf(hand);
   if (seat === null || hand.turn !== seat || hand.drawn === null) return state;
 
-  const pool = [...hand.hands[seat], hand.drawn];
+  const pool = [...hand.hands[seat], hand.drawn.tile];
   const { taken, rest } = takeKind(pool, tile, 4);
   if (taken.length < 4) return state;
 
@@ -2039,7 +2624,9 @@ export function declareAnkan(state: EngineState, tile: Tile): EngineState {
 }
 
 /** 自家の加槓(自ツモ番・既存ポンに4枚目)。`tile` は加える牌。 */
-export function declareKakan(state: EngineState, tile: Tile): EngineState {
+export const declareKakan = publicAction("declareKakan", declareKakanImpl);
+
+function declareKakanImpl(state: EngineState, tile: Tile): EngineState {
   if (
     state.phase !== "playing" ||
     state.pending?.kind !== "humanDiscard" ||
@@ -2056,7 +2643,7 @@ export function declareKakan(state: EngineState, tile: Tile): EngineState {
   const seat = humanSeatOf(hand);
   if (seat === null || hand.turn !== seat || hand.drawn === null) return state;
 
-  const pool = [...hand.hands[seat], hand.drawn];
+  const pool = [...hand.hands[seat], hand.drawn.tile];
   const target = hand.melds[seat].find(
     (m) => m.type === "pon" && sameKind(m.tiles[0], tile),
   );
@@ -2096,7 +2683,9 @@ export function declareKakan(state: EngineState, tile: Tile): EngineState {
 }
 
 /** 自家のツモ和了宣言。 */
-export function declareTsumo(state: EngineState): EngineState {
+export const declareTsumo = publicAction("declareTsumo", declareTsumoImpl);
+
+function declareTsumoImpl(state: EngineState): EngineState {
   if (
     state.phase !== "playing" ||
     state.pending?.kind !== "humanDiscard" ||
@@ -2108,15 +2697,18 @@ export function declareTsumo(state: EngineState): EngineState {
   }
   const seat = seatOfPlayer(state.hand.seating, HUMAN_ID);
   if (seat === null) return state;
-  const haitei = isHaitei(state.hand.wall.remainingLiveTiles);
-  const analysis = analyzeTsumo(state, seat, state.hand.drawn, haitei);
+  const haitei = isHaiteiTsumo(
+    state.hand.wall.remainingLiveTiles,
+    state.hand.drawn.source,
+  );
+  const analysis = analyzeTsumo(state, seat, state.hand.drawn.tile, haitei);
   if (analysis === null) return state;
   return settleWin(
     { ...state, pending: null },
     {
       winnerSeat: seat,
       winType: "tsumo",
-      winningTile: state.hand.drawn,
+      winningTile: state.hand.drawn.tile,
       analysis,
       haitei,
     },
@@ -2124,7 +2716,9 @@ export function declareTsumo(state: EngineState): EngineState {
 }
 
 /** 自家のロン和了宣言(通常ロン / 槍槓ロン)。 */
-export function declareRon(state: EngineState): EngineState {
+export const declareRon = publicAction("declareRon", declareRonImpl);
+
+function declareRonImpl(state: EngineState): EngineState {
   if (
     state.phase !== "playing" ||
     state.pending?.kind !== "humanReact" ||
@@ -2160,7 +2754,9 @@ export function declareRon(state: EngineState): EngineState {
 }
 
 /** 自家のロン/鳴き見送り(スルー)。頭ハネの残り候補を解決して進行を続ける。 */
-export function passRon(state: EngineState): EngineState {
+export const passRon = publicAction("passRon", passRonImpl);
+
+function passRonImpl(state: EngineState): EngineState {
   if (
     state.phase !== "playing" ||
     state.pending?.kind !== "humanReact" ||
@@ -2205,7 +2801,12 @@ export function passRon(state: EngineState): EngineState {
 }
 
 /** 局終了後、次局を開始する(半荘終了時は何もしない)。 */
-export function proceedToNextRound(state: EngineState): EngineState {
+export const proceedToNextRound = publicAction(
+  "proceedToNextRound",
+  proceedToNextRoundImpl,
+);
+
+function proceedToNextRoundImpl(state: EngineState): EngineState {
   if (state.phase !== "roundEnd") return state;
   if (state.nextRoundState === null) return state; // 終了済み(通常 gameEnd 済み)
   const next: EngineState = {
