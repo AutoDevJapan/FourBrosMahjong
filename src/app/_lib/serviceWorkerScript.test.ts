@@ -117,7 +117,12 @@ interface FetchEvent {
 
 /** スクリプトを偽グローバルで評価し、登録されたイベントハンドラを収集する。 */
 function bootServiceWorker({ version = "v1" } = {}) {
-  let fetchImpl: typeof fetch = vi.fn(async () => new Response("ok"));
+  let fetchImpl: typeof fetch = vi.fn(async (input) => {
+    const url = new URL(String(input), ORIGIN);
+    return PRECACHE_ROUTES.includes(url.pathname)
+      ? htmlResponse("ok")
+      : new Response("ok");
+  });
   const cacheStorage = new FakeCacheStorage(() => fetchImpl);
   const listeners = new Map<string, (event: unknown) => void>();
   const scope = {
@@ -168,6 +173,15 @@ function htmlResponse(body: string): Response {
   return new Response(body, { headers: { "Content-Type": "text/html" } });
 }
 
+function buildAssetResponse(pathname: string, body = "asset"): Response {
+  const contentType = pathname.endsWith(".css")
+    ? "text/css"
+    : pathname.endsWith(".woff2")
+      ? "font/woff2"
+      : "application/javascript";
+  return new Response(body, { headers: { "Content-Type": contentType } });
+}
+
 describe("resolveServiceWorkerVersion", () => {
   it("VercelビルドではコミットSHA先頭12桁を使う", () => {
     expect(
@@ -214,6 +228,119 @@ describe("buildServiceWorkerScript", () => {
     );
     expect(precache?.store.has(`${ORIGIN}/game`)).toBe(true);
     expect(buildServiceWorkerScript("v1")).not.toContain("skipWaiting");
+  });
+
+  it("初回install時にAppシェルHTMLが参照するbuild固有JS/CSS/fontをプリキャッシュする(#506)", async () => {
+    const sw = bootServiceWorker();
+    const fetchSpy = vi.fn(async (input: RequestInfo | URL) => {
+      const url = new URL(String(input), ORIGIN);
+      if (PRECACHE_ROUTES.includes(url.pathname)) {
+        return htmlResponse(`
+          <link rel="stylesheet" href="/_next/static/css/app.abc.css">
+          <link rel="preload" href="/_next/static/media/game.def.woff2" as="font">
+          <script src="/_next/static/chunks/app.123.js"></script>
+          <script src="/_next/static/chunks/app.123.js#duplicate"></script>
+          <script src="https://cdn.example.net/_next/static/foreign.js"></script>
+          <script src="/api/not-a-build-asset"></script>
+        `);
+      }
+      return buildAssetResponse(url.pathname, `asset:${url.pathname}`);
+    });
+    sw.setFetchImpl(fetchSpy as typeof fetch);
+
+    await sw.dispatchLifecycle("install");
+
+    const precache = sw.cacheStorage.caches.get("fbm-precache-v1");
+    for (const path of [
+      "/_next/static/css/app.abc.css",
+      "/_next/static/media/game.def.woff2",
+      "/_next/static/chunks/app.123.js",
+    ]) {
+      expect(precache?.store.has(`${ORIGIN}${path}`)).toBe(true);
+    }
+    expect(
+      precache?.store.has("https://cdn.example.net/_next/static/foreign.js"),
+    ).toBe(false);
+    expect(precache?.store.has(`${ORIGIN}/api/not-a-build-asset`)).toBe(false);
+    expect(
+      fetchSpy.mock.calls.filter(
+        ([input]) =>
+          new URL(String(input), ORIGIN).pathname ===
+          "/_next/static/chunks/app.123.js",
+      ),
+    ).toHaveLength(1);
+  });
+
+  it("必要build assetの取得失敗時はinstall自体を失敗させる(#506)", async () => {
+    const sw = bootServiceWorker();
+    sw.setFetchImpl(
+      vi.fn(async (input) => {
+        const url = new URL(String(input), ORIGIN);
+        if (PRECACHE_ROUTES.includes(url.pathname)) {
+          return htmlResponse(
+            '<script src="/_next/static/chunks/missing.js"></script>',
+          );
+        }
+        if (url.pathname === "/_next/static/chunks/missing.js") {
+          return new Response("missing", {
+            status: 404,
+            headers: { "Content-Type": "application/javascript" },
+          });
+        }
+        return new Response("asset");
+      }),
+    );
+
+    await expect(sw.dispatchLifecycle("install")).rejects.toThrow(
+      "Invalid precached build asset response",
+    );
+    expect(sw.cacheStorage.caches.has("fbm-precache-v1")).toBe(false);
+  });
+
+  it("App shellが2xx HTMLでなければinstallを失敗させ部分cacheを削除する", async () => {
+    const sw = bootServiceWorker();
+    sw.setFetchImpl(
+      vi.fn(async (input) => {
+        const url = new URL(String(input), ORIGIN);
+        if (url.pathname === "/game") {
+          return new Response("login", {
+            status: 200,
+            headers: { "Content-Type": "text/plain" },
+          });
+        }
+        return PRECACHE_ROUTES.includes(url.pathname)
+          ? htmlResponse("shell")
+          : new Response("asset");
+      }),
+    );
+
+    await expect(sw.dispatchLifecycle("install")).rejects.toThrow(
+      "Invalid precached App shell response: /game",
+    );
+    expect(sw.cacheStorage.caches.has("fbm-precache-v1")).toBe(false);
+  });
+
+  it("build assetの拡張子とContent-Typeが一致しなければinstallを失敗させる", async () => {
+    const sw = bootServiceWorker();
+    sw.setFetchImpl(
+      vi.fn(async (input) => {
+        const url = new URL(String(input), ORIGIN);
+        if (PRECACHE_ROUTES.includes(url.pathname)) {
+          return htmlResponse(
+            '<script src="/_next/static/chunks/app.js"></script>',
+          );
+        }
+        if (url.pathname.endsWith("app.js")) {
+          return htmlResponse("login fallback");
+        }
+        return new Response("asset");
+      }),
+    );
+
+    await expect(sw.dispatchLifecycle("install")).rejects.toThrow(
+      "Invalid precached build asset response",
+    );
+    expect(sw.cacheStorage.caches.has("fbm-precache-v1")).toBe(false);
   });
 
   it("waiting中は旧chunk cacheを残し、activate後にだけ旧fbm-*を回収する(#349)", async () => {
@@ -331,7 +458,7 @@ describe("buildServiceWorkerScript", () => {
 
   it("既知routeのRSC取得後もcanonical HTML cacheを維持してoffline navigationへ返す(#355)", async () => {
     const sw = bootServiceWorker();
-    sw.setFetchImpl(vi.fn(async () => new Response("precached-html")));
+    sw.setFetchImpl(vi.fn(async () => htmlResponse("precached-html")));
     await sw.dispatchLifecycle("install");
 
     sw.setFetchImpl(vi.fn(async () => htmlResponse("fresh-html")));
@@ -376,7 +503,7 @@ describe("buildServiceWorkerScript", () => {
   it("オフラインのナビゲーションはプリキャッシュ済みHTMLで応答する(#292回帰防止)", async () => {
     const sw = bootServiceWorker();
     sw.setFetchImpl(
-      vi.fn(async (input) => new Response(`precached:${String(input)}`)),
+      vi.fn(async (input) => htmlResponse(`precached:${String(input)}`)),
     );
     await sw.dispatchLifecycle("install");
     sw.setFetchImpl(OFFLINE);
@@ -386,13 +513,13 @@ describe("buildServiceWorkerScript", () => {
     );
 
     const response: Response = await event.respondWith.mock.calls[0][0];
-    expect(await response.text()).toBe(`precached:${ORIGIN}/game`);
+    expect(await response.text()).toBe("precached:/game");
   });
 
   it("オフラインで未キャッシュのパスへのナビゲーションは / へフォールバックする", async () => {
     const sw = bootServiceWorker();
     sw.setFetchImpl(
-      vi.fn(async (input) => new Response(`precached:${String(input)}`)),
+      vi.fn(async (input) => htmlResponse(`precached:${String(input)}`)),
     );
     await sw.dispatchLifecycle("install");
     sw.setFetchImpl(OFFLINE);
@@ -402,7 +529,7 @@ describe("buildServiceWorkerScript", () => {
     );
 
     const response: Response = await event.respondWith.mock.calls[0][0];
-    expect(await response.text()).toBe(`precached:${ORIGIN}/`);
+    expect(await response.text()).toBe("precached:/");
   });
 
   it("不変アセットはcache-first: 一度キャッシュされたらネットワークへ出ない", async () => {

@@ -14,6 +14,9 @@
  * - ナビゲーション(HTML): network-first。オンライン時は常に最新シェルを取得し、
  *   オフライン時のみキャッシュ(最後は `/` へフォールバック)で応答する。
  * - `/_next/static/`(コンテンツハッシュ付き)・牌 SVG・アイコン: cache-first(実質不変)。
+ *   install 時には各 App シェル HTML が直接参照する build 固有 JS/CSS/font も
+ *   抽出して保存する。初回登録ページは旧ページ保護のため SW 非制御なので、
+ *   runtime cache だけでは追加のオンライン再読込みなしのオフライン起動を保証できない。
  * - その他の同一オリジン GET(RSC/API/未知URL等): キャッシュせずブラウザへ委譲。
  *   未知URLへのナビゲーションだけは、オフライン時の `/` fallback のため仲介する。
  *
@@ -71,7 +74,6 @@ export function resolveServiceWorkerVersion(
 
 /** 生成した SW スクリプト(JavaScript ソース文字列)を返す。 */
 export function buildServiceWorkerScript(version: string): string {
-  const precacheUrls = [...PRECACHE_ROUTES, ...PRECACHE_ASSETS];
   return `/* 四兄弟麻雀 service worker (generated: src/app/sw.js/route.ts, issue #292) */
 "use strict";
 
@@ -79,7 +81,7 @@ const VERSION = ${JSON.stringify(version)};
 const OWNED_CACHE_PREFIX = "fbm-";
 const PRECACHE = OWNED_CACHE_PREFIX + "precache-" + VERSION;
 const RUNTIME = OWNED_CACHE_PREFIX + "runtime-" + VERSION;
-const PRECACHE_URLS = ${JSON.stringify(precacheUrls)};
+const PRECACHE_ASSET_URLS = ${JSON.stringify(PRECACHE_ASSETS)};
 const CACHEABLE_ROUTE_PATHS = new Set(${JSON.stringify(PRECACHE_ROUTES)});
 const CACHEABLE_ASSET_PATHS = new Set(${JSON.stringify(PRECACHE_ASSETS)});
 const MAX_RUNTIME_ENTRIES = ${MAX_RUNTIME_ENTRIES};
@@ -88,6 +90,114 @@ const NAVIGATION_FALLBACK_URL = "/";
 // cache.put + eviction を直列化する。同時 fetch が各々「上限未満」と判定してから
 // 書き込む競合を防ぎ、完了後の件数上限を常に維持する。
 let cacheWriteChain = Promise.resolve();
+
+/**
+ * App シェル HTML が直接参照する同一 origin の Next build asset を抽出する。
+ *
+ * ServiceWorkerGlobalScope に DOMParser は無いため、Next が生成する quoted
+ * src/href 属性だけを小さく読む。URL は URL API で正規化し、攻撃者が指定した
+ * external URL や通常 API を install が取得しないよう origin + pathname の両方を制限する。
+ */
+function buildAssetUrlsFromHtml(html, baseUrl) {
+  const assets = new Set();
+  const attribute = /\\b(?:src|href)\\s*=\\s*["']([^"']+)["']/gi;
+  for (const match of html.matchAll(attribute)) {
+    try {
+      const url = new URL(match[1], baseUrl);
+      if (
+        url.origin === self.location.origin &&
+        url.pathname.startsWith("/_next/static/")
+      ) {
+        url.hash = "";
+        assets.add(url.href);
+      }
+    } catch {
+      // 壊れた URL 属性はブラウザと同じく無視する。
+    }
+  }
+  return assets;
+}
+
+function normalizedContentType(response) {
+  return (response.headers.get("Content-Type") || "")
+    .split(";", 1)[0]
+    .trim()
+    .toLowerCase();
+}
+
+function isSuccessfulHtml(response) {
+  return (
+    response.status >= 200 &&
+    response.status < 300 &&
+    normalizedContentType(response) === "text/html"
+  );
+}
+
+function expectedBuildAssetTypes(pathname) {
+  const extension = pathname.slice(pathname.lastIndexOf(".")).toLowerCase();
+  return {
+    ".js": ["application/javascript", "text/javascript"],
+    ".css": ["text/css"],
+    ".woff": ["font/woff", "application/font-woff"],
+    ".woff2": ["font/woff2"],
+    ".ttf": ["font/ttf", "application/x-font-ttf"],
+    ".otf": ["font/otf", "application/x-font-opentype"],
+    ".svg": ["image/svg+xml"],
+    ".png": ["image/png"],
+    ".jpg": ["image/jpeg"],
+    ".jpeg": ["image/jpeg"],
+    ".gif": ["image/gif"],
+    ".webp": ["image/webp"],
+    ".avif": ["image/avif"],
+    ".ico": ["image/x-icon", "image/vnd.microsoft.icon"],
+  }[extension] || [];
+}
+
+function isSuccessfulBuildAsset(response, assetUrl) {
+  const expected = expectedBuildAssetTypes(new URL(assetUrl).pathname);
+  return (
+    response.status >= 200 &&
+    response.status < 300 &&
+    expected.includes(normalizedContentType(response))
+  );
+}
+
+async function precacheAppShell() {
+  const cache = await self.caches.open(PRECACHE);
+  try {
+    // 固定素材は Cache API の atomic な addAll に任せる。App shell は status と
+    // Content-Type を検証してから保存し、200 のログイン画面等を shell と誤認しない。
+    await cache.addAll(PRECACHE_ASSET_URLS);
+    const buildAssets = new Set();
+    for (const route of CACHEABLE_ROUTE_PATHS) {
+      const response = await self.fetch(route);
+      if (!isSuccessfulHtml(response)) {
+        throw new TypeError("Invalid precached App shell response: " + route);
+      }
+      await cache.put(route, response.clone());
+      const html = await response.text();
+      const baseUrl = response.url || new URL(route, self.location).href;
+      for (const asset of buildAssetUrlsFromHtml(html, baseUrl)) {
+        buildAssets.add(asset);
+      }
+    }
+
+    // 応答を個別に検証してから保存する。拡張子と MIME が一致しない200応答
+    // (HTML fallback等)も install 成功扱いにしない。
+    for (const asset of buildAssets) {
+      const response = await self.fetch(asset);
+      if (!isSuccessfulBuildAsset(response, asset)) {
+        throw new TypeError("Invalid precached build asset response: " + asset);
+      }
+      await cache.put(asset, response);
+    }
+  } catch (error) {
+    // install は再試行され得る。同versionの部分cacheを残すと後続監査や容量を汚すため、
+    // 失敗した世代を丸ごと回収してからrejectする。
+    await self.caches.delete(PRECACHE).catch(() => {});
+    throw error;
+  }
+}
 
 /** コンテンツハッシュ付き・または実質不変の静的アセットか。 */
 function isImmutableAsset(pathname) {
@@ -184,9 +294,7 @@ async function cacheFirst(request, cacheKey) {
 }
 
 self.addEventListener("install", (event) => {
-  event.waitUntil(
-    self.caches.open(PRECACHE).then((cache) => cache.addAll(PRECACHE_URLS)),
-  );
+  event.waitUntil(precacheAppShell());
 });
 
 self.addEventListener("activate", (event) => {
