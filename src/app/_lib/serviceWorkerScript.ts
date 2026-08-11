@@ -287,7 +287,10 @@ async function cacheFirst(request, cacheKey) {
     return cached;
   }
   const response = await self.fetch(request);
-  if (response.ok) {
+  // Next の欠落 chunk に対してホスティング層が 200 HTML fallback を返すことがある。
+  // それを cache-first へ保存すると、次の正常応答を取りに行けず同 URL が恒久的に壊れる。
+  // install 時と同じ拡張子 + MIME 検証を runtime 経路にも適用する。
+  if (isSuccessfulBuildAsset(response, cacheKey)) {
     await putRuntimeCache(cacheKey, response.clone()).catch(() => {});
   }
   return response;
