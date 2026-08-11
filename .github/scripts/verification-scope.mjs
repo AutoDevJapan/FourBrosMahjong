@@ -47,6 +47,8 @@ export const DOCUMENTATION_EXCEPTIONS = [
   "docs/四兄弟麻雀ルール.md",
   // src/test/playwright-projects.test.ts が playwright install 手順を検証する。
   "README.md",
+  // src/test/release-guard.test.ts が current package version の release section を検証する。
+  "CHANGELOG.md",
 ];
 
 /**
