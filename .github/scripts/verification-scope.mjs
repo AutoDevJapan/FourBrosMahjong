@@ -219,8 +219,9 @@ export function changedPaths(baseSha, headSha) {
  * 3. **この job 自身の check run** が PR head SHA で `success` になっている。
  *    「required だったか」ではなく「実際に緑だったか」を見るため、required checks の
  *    設定変更から独立している。
- * 4. push 前の宛先ブランチ (`before`) が **PR head の祖先**である。陳腐化した (`strict` を
- *    外して古いまま入れた) PR ならここで落ちる。
+ * 4. 通常PRでは push 前の宛先 tip が PR head の祖先である。環境昇格では merge commit の親が
+ *    **push 前の宛先 tip, PR head** の順で完全一致する。main→dev / dev→stg は環境固有の過去の
+ *    merge commit により履歴が分岐するため、親の一致で分岐を許しつつ任意commitの混入を防ぐ。
  * 5. 着地したツリーが **PR head のツリーと完全一致**する。3 で緑を確認した中身が
  *    そのまま入ったことを、内容そのもので照合する。
  *
@@ -273,6 +274,15 @@ export async function resolvePostMergeEvidence({
       candidate?.merged_at &&
       candidate?.merge_commit_sha === sha &&
       candidate?.base?.ref === branch &&
+      // 環境昇格は経路を固定する。任意の feature PR が dev / stg の重い検証を
+      // PR側の成功だけで短絡することを許さない。
+      (branch === "main" ||
+        (branch === "dev" &&
+          candidate?.head?.ref === "main" &&
+          candidate?.head?.repo?.full_name === repo) ||
+        (branch === "stg" &&
+          candidate?.head?.ref === "dev" &&
+          candidate?.head?.repo?.full_name === repo)) &&
       isSha(candidate?.head?.sha),
   );
   // 直 push、未マージ、別ブランチ宛のいずれもここで落ちる。
@@ -335,12 +345,33 @@ export async function resolvePostMergeEvidence({
     return { skip: false, reason: "pull-head-fetch-failed" };
   }
 
-  try {
-    // `before` が PR head の祖先 = PR は push 直前の宛先ブランチを取り込み済み。
-    // 陳腐化した PR (strict を外して古いまま入れた) はここで落ちる。
-    git(["merge-base", "--is-ancestor", String(before), headSha]);
-  } catch {
-    return { skip: false, reason: "base-not-ancestor-of-pull-head" };
+  if (branch === "main") {
+    try {
+      git(["merge-base", "--is-ancestor", String(before), headSha]);
+    } catch {
+      return { skip: false, reason: "base-not-ancestor-of-pull-head" };
+    }
+  } else {
+    try {
+      const mergeLine = git([
+        "rev-list",
+        "--parents",
+        "-n",
+        "1",
+        String(sha),
+      ]).trim();
+      const [commit, ...parents] = mergeLine.split(/\s+/);
+      if (
+        commit !== sha ||
+        parents.length !== 2 ||
+        parents[0] !== String(before) ||
+        parents[1] !== headSha
+      ) {
+        return { skip: false, reason: "merge-parents-mismatch" };
+      }
+    } catch {
+      return { skip: false, reason: "merge-parents-unresolved" };
+    }
   }
 
   try {
