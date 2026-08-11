@@ -17,6 +17,7 @@ import {
   DOCUMENTATION_EXCEPTIONS,
   EVIDENCE_IO_TIMEOUT_MS,
   githubApi,
+  protectedPushBranch,
   resolvePostMergeEvidence,
   resolveScope,
   runGit,
@@ -421,7 +422,11 @@ describe("変更パスによる実行範囲の絞り込み (#491)", () => {
         checked += 1;
         expect(
           step.if ?? "",
-          `${jobName} / ${step.name}: 検証しない run では cache-hit のとき省略されるべき`,
+          `${jobName} / ${step.name}: setup しない run ではブラウザ導入も実行してはならない`,
+        ).toMatch(/^steps\.scope\.outputs\.setup == 'true' && \(/);
+        expect(
+          step.if ?? "",
+          `${jobName} / ${step.name}: 検証するかcache missの場合だけ導入すべき`,
         ).toMatch(
           /steps\.scope\.outputs\.verify == 'true' \|\| steps\.[\w-]+\.outputs\.cache-hit != 'true'/,
         );
@@ -912,12 +917,29 @@ describe("マージ後 push のスキップ前提を実行時に検証する (#4
   const HEAD = "c".repeat(40);
   const CHECK = "lint / typecheck / format / test / build";
 
+  it.each([
+    ["main", "refs/heads/main", "main"],
+    ["dev", "refs/heads/dev", "dev"],
+    ["stg", "refs/heads/stg", "stg"],
+  ])("%s への push は証拠検証の対象になる", (_name, ref, expected) => {
+    expect(protectedPushBranch("push", ref)).toBe(expected);
+  });
+
+  it.each([
+    ["PR", "pull_request", "refs/pull/1/merge"],
+    ["未知の branch", "push", "refs/heads/feature/test"],
+    ["tag", "push", "refs/tags/v1.0.0"],
+  ])("%s は証拠検証の対象外", (_name, event, ref) => {
+    expect(protectedPushBranch(event, ref)).toBeNull();
+  });
+
   /** すべての証拠が揃った状態。各テストはここから 1 つだけ壊す。 */
   function happyPath(
     overrides: {
       pulls?: unknown;
       checkRuns?: unknown;
       workflowRun?: unknown;
+      workflowRuns?: Record<string, unknown>;
       apiError?: string;
       gitFails?: string;
       trees?: Record<string, string>;
@@ -957,7 +979,8 @@ describe("マージ後 push のスキップ前提を実行時に検証する (#4
       }
       if (path.endsWith("/pulls")) return pulls;
       if (path.includes("/check-runs?")) return checkRuns;
-      if (path.endsWith("/actions/runs/123")) return workflowRun;
+      const runId = path.match(/\/actions\/runs\/(\d+)$/)?.[1];
+      if (runId) return overrides.workflowRuns?.[runId] ?? workflowRun;
       throw new Error(`unexpected path ${path}`);
     };
     const git = (args: string[]) => {
@@ -992,6 +1015,45 @@ describe("マージ後 push のスキップ前提を実行時に検証する (#4
 
   it("証拠がすべて揃えばスキップを許す", async () => {
     const result = await call();
+    expect(result).toEqual({
+      skip: true,
+      reason: "verified-by-merged-pull-request",
+    });
+  });
+
+  it("同名のpush checkが共存しても成功したPR checkを証拠にする", async () => {
+    const result = await call({
+      checkRuns: {
+        check_runs: [
+          {
+            name: CHECK,
+            conclusion: "success",
+            app: { slug: "github-actions" },
+            details_url: "https://github.com/o/r/actions/runs/123/job/1",
+          },
+          {
+            name: CHECK,
+            conclusion: "failure",
+            app: { slug: "github-actions" },
+            details_url: "https://github.com/o/r/actions/runs/456/job/2",
+          },
+        ],
+      },
+      workflowRuns: {
+        "123": {
+          event: "pull_request",
+          path: ".github/workflows/ci.yml",
+          head_sha: HEAD,
+          conclusion: "success",
+        },
+        "456": {
+          event: "push",
+          path: ".github/workflows/ci.yml",
+          head_sha: HEAD,
+          conclusion: "failure",
+        },
+      },
+    });
     expect(result).toEqual({
       skip: true,
       reason: "verified-by-merged-pull-request",
@@ -1162,25 +1224,23 @@ describe("マージ後 push のスキップ前提を実行時に検証する (#4
     },
   );
 
-  /**
-   * 同じ check 名の run が複数ある(再実行など)場合、1 つでも失敗していればスキップしない。
-   */
-  it("同名 check run が複数あり 1 つでも失敗ならスキップしない", async () => {
+  it("eligible なPR checkが失敗だけならスキップしない", async () => {
     const result = await call({
       checkRuns: {
         check_runs: [
           {
             name: CHECK,
-            conclusion: "success",
+            conclusion: "failure",
             app: { slug: "github-actions" },
             details_url: "https://github.com/o/r/actions/runs/123/job/1",
           },
-          {
-            name: CHECK,
-            conclusion: "failure",
-            app: { slug: "github-actions" },
-          },
         ],
+      },
+      workflowRun: {
+        event: "pull_request",
+        path: ".github/workflows/ci.yml",
+        head_sha: HEAD,
+        conclusion: "failure",
       },
     });
     expect(result.skip).toBe(false);
