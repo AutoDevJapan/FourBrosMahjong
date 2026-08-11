@@ -6,8 +6,8 @@
 #
 # 動作: `v*` タグの push を契機に GitHub Release を自動作成します。
 #   - 外部シークレット不要 (組み込みの GITHUB_TOKEN のみを使用)。
-#   - CHANGELOG.md から該当バージョンの節を抽出できればリリース本文に利用し、
-#     抽出できない場合は自動生成ノートにフォールバックします。
+#   - 公開前 guard が SemVer・package/CHANGELOG・main ancestry・trusted CI を照合し、
+#     どの証拠も確認できない場合は fail closed で停止します。
 #
 # リリース手順の詳細は CHANGELOG.md の「リリース運用方針」を参照してください。
 
@@ -25,17 +25,39 @@ concurrency:
   group: release-${{ github.ref }}
   cancel-in-progress: false
 
-# GITHUB_TOKEN に必要最小限の権限のみを付与 (Release/タグ作成に contents: write が必要)。
+# 既定は検証用の read のみ。公開 job だけが contents: write へ昇格する。
 permissions:
-  contents: write
+  contents: read
+  actions: read
 
 jobs:
-  release:
-    name: Create GitHub Release
+  validate:
+    name: Validate release evidence
     runs-on: ubuntu-latest
     # 異常時に既定の6時間まで runner を占有させない (#491)。
     # 実処理は checkout と Release 作成 API のみで通常 1 分未満。
     timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - name: Guard release evidence
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+          RELEASE_SHA: ${{ github.sha }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: node .github/scripts/release-guard.mjs
+
+  release:
+    name: Create GitHub Release
+    needs: validate
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    # Write authority exists only after the read-only validation job succeeds.
+    permissions:
+      contents: write
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -49,7 +71,7 @@ jobs:
           # CHANGELOG.md から `## [<version>]` の節だけを抽出する。
           if [ -f CHANGELOG.md ]; then
             awk -v ver="$version" '
-              $0 ~ "^## \\[" ver "\\]" { capture = 1; next }
+              index($0, "## [" ver "] - ") == 1 { capture = 1; next }
               capture && (/^## \[/ || /^\[.+\]:/) { exit }
               capture { print }
             ' CHANGELOG.md > "$notes_file"
@@ -65,8 +87,7 @@ jobs:
         uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228 # v3.0.2
         with:
           name: ${{ github.ref_name }}
-          # 抽出した CHANGELOG の節があればそれを本文に、なければ自動生成に任せる。
-          body_path: ${{ steps.changelog.outputs.has_notes == 'true' && steps.changelog.outputs.notes_path || '' }}
-          generate_release_notes: ${{ steps.changelog.outputs.has_notes != 'true' }}
+          # guard が対応する非空節を必須化しているため、自動生成へのfallbackはしない。
+          body_path: ${{ steps.changelog.outputs.notes_path }}
           # プレリリース識別子 (例: v1.0.0-rc.1) を含むタグは prerelease として扱う。
           prerelease: ${{ contains(github.ref_name, '-') }}
