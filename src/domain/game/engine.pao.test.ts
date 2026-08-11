@@ -239,6 +239,78 @@ describe("engine: パオ(責任払い)の結線(#284 / スペック3 3.3)", () =
     });
   });
 
+  it("未確定Q37: 異なる責任者の複数パオは後勝ちで上書きし、後の1人へダブル役満総額を寄せる(現行非規範挙動)", () => {
+    const state = createGame({ seed: 17 });
+    const hand = requireHand(state);
+    // 白・發を槓済み。南家(p1)の中で大三元パオ、続いて
+    // 西家(p2)の6sで4つ目の槓=四槓子パオが成立する盤面。
+    hand.melds.east = [kan("5z 5z 5z 5z"), kan("6z 6z 6z 6z")];
+    hand.melds.south = [];
+    hand.melds.west = [];
+    hand.hands.east = parseTiles("7z 7z 7z 6s 6s 6s 9p");
+    hand.hands.south = parseTiles(JUNK);
+    hand.hands.west = parseTiles(JUNK);
+    hand.pendingDiscard = { seat: "south", tile: parseTile("7z") };
+    hand.turn = "south";
+    hand.drawn = null;
+
+    const daisangen = declareKan({
+      ...state,
+      pending: reactPending({
+        tile: parseTile("7z"),
+        from: "south",
+        canKan: true,
+      }),
+    });
+    // 1つ目のパオは大三元を確定させた南家(p1)。
+    expect(daisangen.hand?.paoResponsible).toEqual({ east: "p1" });
+
+    const daisangenHand = requireHand(daisangen);
+    daisangenHand.pendingDiscard = { seat: "west", tile: parseTile("6s") };
+    daisangenHand.turn = "west";
+    daisangenHand.drawn = null;
+    const suukantsu = declareKan({
+      ...daisangen,
+      pending: reactPending({
+        tile: parseTile("6s"),
+        from: "west",
+        canKan: true,
+      }),
+    });
+    expect(suukantsu.phase).toBe("playing");
+    expect(suukantsu.hand?.melds.east).toHaveLength(4);
+    // 現行は「役満種類 → 責任者」を持たず「席 → 1人」だけのため、
+    // 後に四槓子を確定させたp2がp1を上書きする。これはQ37の裁定ではない。
+    expect(suukantsu.hand?.paoResponsible).toEqual({ east: "p2" });
+
+    const suukantsuHand = requireHand(suukantsu);
+    suukantsuHand.drawn = { tile: parseTile("9p"), source: "kanReplacement" };
+    suukantsuHand.turn = "east";
+    const after = declareTsumo({
+      ...suukantsu,
+      // 現行のダブル役満総額96,000を支払っても終局処理まで到達させる。
+      points: { ...suukantsu.points, p2: 120000 },
+      pending: discardPending({ canTsumo: true }),
+    });
+
+    expect(after.phase).toBe("roundEnd");
+    expect(after.lastRound?.winDetails?.yaku.map((y) => y.name)).toEqual(
+      expect.arrayContaining(["大三元", "四槓子"]),
+    );
+    // analysis.pao が複数要素でも settleWin は役ごとの責任者/額を渡せず、
+    // 最後に記録された1人(p2)へ親ダブル役満総額96,000を寄せる。
+    // Q37の回答後はこの非規範テストを裁定に合わせて置き換える。
+    expect(after.lastRound?.deltas).toEqual({
+      p0: 96000,
+      p1: 0,
+      p2: -96000,
+      p3: 0,
+    });
+    expect(after.lastRound?.winDetails?.payments).toEqual([
+      { name: "二郎", amount: 96000 },
+    ]);
+  });
+
   it("門前完成(暗槓のみ)はパオ無し: 責任者は記録されず通常のツモ配分になる", () => {
     const state = createGame({ seed: 14 });
     const hand = requireHand(state);

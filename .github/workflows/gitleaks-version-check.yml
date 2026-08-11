@@ -14,10 +14,9 @@ name: gitleaks-version-check
 #
 # 注意: GitHub は既定の GITHUB_TOKEN によって発生した push/PR 作成イベントでは
 # 他のワークフローの pull_request/push トリガーを自動発火しない(無限ループ防止の
-# 仕様)。そのため、gitleaks.yml は「PR を開いただけ」では自動実行されない。
-# これを補うため、ブランチを push した直後に `gh workflow run gitleaks.yml
-# --ref <branch>` で明示的に workflow_dispatch 起動する。この実行は同じコミット
-# SHA に紐づくため、作成された PR のチェック欄にも反映される。
+# 仕様)。そのため、「PR を開くだけ」では gitleaks と CI の required checks が作られない。
+# これを補うため、ブランチを push した直後に両 workflow を workflow_dispatch 起動する。
+# これらの実行は同じコミット SHA に紐づき、作成された PR のチェック欄にも反映される。
 # マージするかどうかは引き続き人間のレビューに委ねる。
 
 on:
@@ -89,7 +88,7 @@ jobs:
     runs-on: ubuntu-latest
     # 同上 (#491)。
     timeout-minutes: 10
-    # ブランチの push・PR 作成・gitleaks.yml の手動起動のために書き込み権限が必要。
+    # ブランチの push・PR 作成・gitleaks.yml と ci.yml の手動起動のために書き込み権限が必要。
     # このジョブ (バージョン差分が検出された場合のみ実行) に限定して付与する。
     permissions:
       contents: write
@@ -137,14 +136,15 @@ jobs:
           # ブランチが remote に残っているケースでも安全に上書きできるようにする。
           git push --force-with-lease origin "${{ steps.existing.outputs.branch }}"
 
-      - name: Trigger gitleaks check on the new branch
+      - name: Trigger required checks on the new branch
         if: steps.existing.outputs.skip == 'false'
         run: |
           set -euo pipefail
           # GITHUB_TOKEN による push は他ワークフローの pull_request/push トリガーを
-          # 自動発火しないため、gitleaks.yml をこのブランチに対して明示的に起動する。
+          # 自動発火しないため、required checksをこのブランチに対して明示的に起動する。
           # 実行結果は同じコミット SHA に紐づき、後続で作成する PR のチェック欄にも表示される。
           gh workflow run gitleaks.yml --ref "${{ steps.existing.outputs.branch }}"
+          gh workflow run ci.yml --ref "${{ steps.existing.outputs.branch }}"
 
       - name: Open PR
         if: steps.existing.outputs.skip == 'false'
@@ -160,10 +160,10 @@ jobs:
           ## 検証について
 
           既定の GITHUB_TOKEN による push/PR 作成は他ワークフローの自動トリガーを発火しないため、
-          このワークフローが明示的に \`gitleaks.yml\` をこのブランチに対して workflow_dispatch
-          起動しています。新バージョンのダウンロード・チェックサム検証・\`gitleaks detect\` の
-          実行結果は、この PR のチェック欄に反映されます。gitleaks チェックが green になっている
-          ことを確認してからマージしてください。
+          このワークフローが明示的に \`gitleaks.yml\` と \`ci.yml\` をこのブランチに対して
+          workflow_dispatch 起動しています。新バージョンのダウンロード・チェックサム検証・
+          \`gitleaks detect\` と全CIの実行結果は、この PR のチェック欄に反映されます。
+          required checks がすべて green になっていることを確認してからマージしてください。
 
           リリースノート: https://github.com/gitleaks/gitleaks/releases/tag/v${LATEST_VERSION}
           EOF
