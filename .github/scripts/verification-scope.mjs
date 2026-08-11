@@ -120,7 +120,7 @@ export function classifyChangedPaths(paths) {
  * @param {"ci" | "e2e"} input.job
  * @param {readonly string[] | null | undefined} input.paths
  * @param {boolean} input.postMergeDuplicate
- *   `main` へのマージ後 push か。`main` は branch protection が
+ *   永続ブランチへのマージ後 push か。対象ブランチは branch protection が
  *   `strict: true` (マージ前に最新であることを要求) / 直 push 禁止 / force push 禁止
  *   なので、着地するツリーは直前に PR の checks が緑にしたツリーと必ず一致する。
  *   したがって検証は重複であり、この run はキャッシュ投入だけを行う。
@@ -202,10 +202,10 @@ export function changedPaths(baseSha, headSha) {
  *
  * ## なぜ設定の記述を信じてはいけないか
  *
- * このスキップは「`main` に着地するツリーは直前に PR の checks が緑にしたツリーと一致する」
+ * このスキップは「永続ブランチに着地するツリーは直前に PR の checks が緑にしたツリーと一致する」
  * という前提に立つ。その前提は branch protection (`strict: true` / 直 push 禁止 /
  * force push 禁止) が支えているが、**設定は後から緩められる**。緩んだ瞬間、未検証の
- * コミットが `main` に入っても CI は緑のまま素通りする — 誰も気づけない失敗になる。
+ * コミットが永続ブランチに入っても CI は緑のまま素通りする — 誰も気づけない失敗になる。
  *
  * そこで branch protection の *設定* を読むのではなく、**検証済みであることの証拠**を直接見る。
  * 設定がどうであれ、証拠が揃っていれば安全であり、揃っていなければ危険だからである
@@ -219,7 +219,7 @@ export function changedPaths(baseSha, headSha) {
  * 3. **この job 自身の check run** が PR head SHA で `success` になっている。
  *    「required だったか」ではなく「実際に緑だったか」を見るため、required checks の
  *    設定変更から独立している。
- * 4. push 前の `main` (`before`) が **PR head の祖先**である。陳腐化した (`strict` を
+ * 4. push 前の宛先ブランチ (`before`) が **PR head の祖先**である。陳腐化した (`strict` を
  *    外して古いまま入れた) PR ならここで落ちる。
  * 5. 着地したツリーが **PR head のツリーと完全一致**する。3 で緑を確認した中身が
  *    そのまま入ったことを、内容そのもので照合する。
@@ -293,18 +293,14 @@ export async function resolvePostMergeEvidence({
     return { skip: false, reason: "check-runs-response-invalid" };
   const own = runs.filter((run) => run?.name === checkName);
   if (own.length === 0) return { skip: false, reason: "own-check-run-missing" };
-  if (
-    !own.every(
-      (run) =>
-        run?.conclusion === "success" && run?.app?.slug === TRUSTED_CHECK_APP,
-    )
-  )
-    return { skip: false, reason: "own-check-run-not-successful" };
-
   // 名前と app だけでは、同じ repository の別 workflow が作った check を区別できない。
   // details URL から Actions run を引き、その run がこの workflow の pull_request 実行で
-  // 同じ head SHA を検証したことまで確認する。
+  // 同じ head SHA を検証したことまで確認する。同じ SHA にはマージ後 push の同名 check も
+  // 共存しうるため、それは候補から除外し、eligible な PR run が 1 本以上成功していることを
+  // 証拠とする。
+  let successfulEligibleRun = false;
   for (const run of own) {
+    if (run?.app?.slug !== TRUSTED_CHECK_APP) continue;
     const match = String(run?.details_url ?? "").match(
       /\/actions\/runs\/(\d+)(?:\/job\/\d+)?(?:[/?#]|$)/,
     );
@@ -316,14 +312,20 @@ export async function resolvePostMergeEvidence({
     } catch {
       return { skip: false, reason: "check-runs-api-failed" };
     }
-    if (
+    const ineligible =
       workflowRun?.event !== "pull_request" ||
       workflowRun?.path !== TRUSTED_WORKFLOW_PATH ||
-      workflowRun?.head_sha !== headSha ||
-      workflowRun?.conclusion !== "success"
-    )
-      return { skip: false, reason: "own-check-run-not-successful" };
+      workflowRun?.head_sha !== headSha;
+    if (ineligible) continue;
+    if (
+      run?.conclusion === "success" &&
+      workflowRun?.conclusion === "success"
+    ) {
+      successfulEligibleRun = true;
+    }
   }
+  if (!successfulEligibleRun)
+    return { skip: false, reason: "own-check-run-not-successful" };
 
   // PR head の commit は merge 後も `refs/pull/N/head` で取得できる
   // (`refs/pull/N/merge` は merge 時に削除されるため使えない)。
@@ -334,7 +336,7 @@ export async function resolvePostMergeEvidence({
   }
 
   try {
-    // `before` が PR head の祖先 = PR は push 直前の main を取り込み済み。
+    // `before` が PR head の祖先 = PR は push 直前の宛先ブランチを取り込み済み。
     // 陳腐化した PR (strict を外して古いまま入れた) はここで落ちる。
     git(["merge-base", "--is-ancestor", String(before), headSha]);
   } catch {
@@ -384,23 +386,38 @@ export function runGit(
   });
 }
 
+/**
+ * CI の対象となる永続ブランチへの push ならブランチ名を返す。
+ * PR と未知のブランチは証拠検証の対象にしない。
+ *
+ * @param {string | undefined} eventName
+ * @param {string | undefined} ref
+ * @returns {"main" | "dev" | "stg" | null}
+ */
+export function protectedPushBranch(eventName, ref) {
+  if (eventName !== "push") return null;
+  const match = String(ref ?? "").match(/^refs\/heads\/(main|dev|stg)$/);
+  return /** @type {"main" | "dev" | "stg" | null} */ (match?.[1] ?? null);
+}
+
 /** GitHub Actions の `$GITHUB_OUTPUT` へ書き出す。 */
 async function main() {
   const job = process.env.SCOPE_JOB === "e2e" ? "e2e" : "ci";
-  const isMainPush =
-    process.env.SCOPE_EVENT_NAME === "push" &&
-    process.env.SCOPE_REF === "refs/heads/main";
+  const pushBranch = protectedPushBranch(
+    process.env.SCOPE_EVENT_NAME,
+    process.env.SCOPE_REF,
+  );
 
   // マージ後 push のスキップは「前提が成立している」と信じるのではなく、
   // その run の中で証拠を確認できたときにだけ許す (#496)。
-  let evidence = { skip: false, reason: "not-a-main-push" };
-  if (isMainPush) {
+  let evidence = { skip: false, reason: "not-a-protected-branch-push" };
+  if (pushBranch) {
     evidence = await resolvePostMergeEvidence({
       repo: String(process.env.GITHUB_REPOSITORY ?? ""),
       sha: process.env.SCOPE_HEAD_SHA,
       before: process.env.SCOPE_BASE_SHA,
       forced: process.env.SCOPE_FORCED === "true",
-      branch: "main",
+      branch: pushBranch,
       checkName: String(process.env.SCOPE_CHECK_NAME ?? ""),
       api: githubApi,
       git: runGit,
@@ -414,12 +431,12 @@ async function main() {
   const scope = resolveScope({
     job,
     paths,
-    postMergeDuplicate: isMainPush && evidence.skip,
+    postMergeDuplicate: Boolean(pushBranch) && evidence.skip,
   });
 
   const summary = [
     `job=${job}`,
-    `mainPush=${isMainPush}`,
+    `pushBranch=${pushBranch ?? "none"}`,
     `postMergeEvidence=${evidence.reason}`,
     paths
       ? `changedPaths=${paths.length}`
