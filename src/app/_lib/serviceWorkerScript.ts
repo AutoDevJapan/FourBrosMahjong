@@ -133,7 +133,13 @@ function isSuccessfulHtml(response) {
   );
 }
 
-function expectedBuildAssetTypes(pathname) {
+function expectedAssetTypes(pathname) {
+  if (pathname === "/manifest.webmanifest") {
+    return ["application/manifest+json", "application/json"];
+  }
+  if (pathname === "/icons/icon-192" || pathname === "/icons/icon-512") {
+    return ["image/png"];
+  }
   const extension = pathname.slice(pathname.lastIndexOf(".")).toLowerCase();
   return {
     ".js": ["application/javascript", "text/javascript"],
@@ -153,8 +159,8 @@ function expectedBuildAssetTypes(pathname) {
   }[extension] || [];
 }
 
-function isSuccessfulBuildAsset(response, assetUrl) {
-  const expected = expectedBuildAssetTypes(new URL(assetUrl).pathname);
+function isSuccessfulAssetResponse(response, assetUrl) {
+  const expected = expectedAssetTypes(new URL(assetUrl, self.location).pathname);
   return (
     response.status >= 200 &&
     response.status < 300 &&
@@ -165,9 +171,22 @@ function isSuccessfulBuildAsset(response, assetUrl) {
 async function precacheAppShell() {
   const cache = await self.caches.open(PRECACHE);
   try {
-    // 固定素材は Cache API の atomic な addAll に任せる。App shell は status と
-    // Content-Type を検証してから保存し、200 のログイン画面等を shell と誤認しない。
-    await cache.addAll(PRECACHE_ASSET_URLS);
+    // 固定素材も status と MIME を検証する。Vercel 等が欠落パスへ返す 200 HTML を
+    // 牌 SVG / icon / manifest として永続化したまま install を成功させない。
+    const staticAssets = await Promise.all(
+      PRECACHE_ASSET_URLS.map(async (asset) => {
+        const response = await self.fetch(asset);
+        if (!isSuccessfulAssetResponse(response, asset)) {
+          throw new TypeError(
+            "Invalid precached static asset response: " + asset,
+          );
+        }
+        return [asset, response];
+      }),
+    );
+    for (const [asset, response] of staticAssets) {
+      await cache.put(asset, response);
+    }
     const buildAssets = new Set();
     for (const route of CACHEABLE_ROUTE_PATHS) {
       const response = await self.fetch(route);
@@ -186,7 +205,7 @@ async function precacheAppShell() {
     // (HTML fallback等)も install 成功扱いにしない。
     for (const asset of buildAssets) {
       const response = await self.fetch(asset);
-      if (!isSuccessfulBuildAsset(response, asset)) {
+      if (!isSuccessfulAssetResponse(response, asset)) {
         throw new TypeError("Invalid precached build asset response: " + asset);
       }
       await cache.put(asset, response);
@@ -290,7 +309,7 @@ async function cacheFirst(request, cacheKey) {
   // Next の欠落 chunk に対してホスティング層が 200 HTML fallback を返すことがある。
   // それを cache-first へ保存すると、次の正常応答を取りに行けず同 URL が恒久的に壊れる。
   // install 時と同じ拡張子 + MIME 検証を runtime 経路にも適用する。
-  if (isSuccessfulBuildAsset(response, cacheKey)) {
+  if (isSuccessfulAssetResponse(response, cacheKey)) {
     await putRuntimeCache(cacheKey, response.clone()).catch(() => {});
   }
   return response;

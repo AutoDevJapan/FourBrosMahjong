@@ -32,6 +32,7 @@
 
 ### Fixed
 
+- Service Worker の install 時に、牌 SVG・PWA icon・manifest の HTTP 2xx だけでなく Content-Type も検証し、200 HTML fallback 等を必須オフライン素材として保存した不完全な worker の有効化を防止。
 - GitHub Release の公開前に、厳密な SemVer、package/CHANGELOG、`main` ancestry、tagged SHA の信頼済み CI 成功を fail-closed で照合する guard を追加。Production は従来どおり `main` マージ時の Vercel 自動デプロイを SSOT とし、tag ruleset はリポジトリ外の権限変更になるため別途合意事項として文書化 (#507)。
 - 対局者名の12文字上限を書記素クラスタ(grapheme cluster)単位へ統一し、絵文字・結合文字をUTF-16境界で分断せず設定・再読込・盤面表示できるよう修正 (#484)。修正前に保存された半端なサロゲート入りの名前は、対局ジャーナルの読み込み時に U+FFFD へ正規化して受け入れる(進行中の半荘を失わせない)。
 - 赤ドラ翻の判定を牌種(5筒・5索)込みへ修正。`createTile` を経由しない構造的入力が仕様外の `isRed` を持っても、得点(`countDoraHan`)と表示が同じ述語 `isRedDora` で一致するようにした。赤5判定の重複を検出する回帰スキャンの範囲も表示層まで拡張 (#485)。
