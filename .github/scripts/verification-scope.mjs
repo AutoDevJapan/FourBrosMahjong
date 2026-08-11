@@ -138,6 +138,13 @@ export function resolveScope({ job, paths, postMergeDuplicate }) {
 
 export const SCOPE_OUTPUT_KEYS = /** @type {const} */ (["setup", "verify"]);
 
+/** API / ref 取得が job 全体の timeout まで居座らないための上限。 */
+export const EVIDENCE_IO_TIMEOUT_MS = 15_000;
+
+/** 成功 check をこのワークフローの PR run に束縛する。 */
+const TRUSTED_CHECK_APP = "github-actions";
+const TRUSTED_WORKFLOW_PATH = ".github/workflows/ci.yml";
+
 /**
  * この PR / push が持ち込んだ変更ファイルを取得する。
  * 特定できなければ `null` を返し、呼び出し側でフェイルオープンさせる。
@@ -171,7 +178,13 @@ export function changedPaths(baseSha, headSha) {
     const output = execFileSync(
       "git",
       ["diff", "--name-only", "--no-renames", "-z", `${baseSha}...${headSha}`],
-      { encoding: "utf8", maxBuffer: 32 * 1024 * 1024 },
+      {
+        encoding: "utf8",
+        maxBuffer: 32 * 1024 * 1024,
+        // 失敗はフェイルオープンとして扱い理由を自前で出力するので、git の
+        // エラー出力をそのまま垂れ流さない (ログのノイズになるだけ)。
+        stdio: ["ignore", "pipe", "pipe"],
+      },
     );
     // `-z` で NUL 区切りにする。パスに改行や非 ASCII (本リポジトリは日本語ファイル名を含む)
     // があっても、git がクォート/エスケープした形に化けない。
@@ -182,21 +195,230 @@ export function changedPaths(baseSha, headSha) {
   }
 }
 
+/**
+ * マージ後 push のスキップを許してよいかを、**その run の中で実際に確かめる** (#496)。
+ *
+ * ## なぜ設定の記述を信じてはいけないか
+ *
+ * このスキップは「`main` に着地するツリーは直前に PR の checks が緑にしたツリーと一致する」
+ * という前提に立つ。その前提は branch protection (`strict: true` / 直 push 禁止 /
+ * force push 禁止) が支えているが、**設定は後から緩められる**。緩んだ瞬間、未検証の
+ * コミットが `main` に入っても CI は緑のまま素通りする — 誰も気づけない失敗になる。
+ *
+ * そこで branch protection の *設定* を読むのではなく、**検証済みであることの証拠**を直接見る。
+ * 設定がどうであれ、証拠が揃っていれば安全であり、揃っていなければ危険だからである
+ * (`administration:read` 権限も不要になる)。
+ *
+ * ## 確認する証拠
+ *
+ * 1. force push でない (`github.event.forced`)。履歴の書き換えは前提を丸ごと壊す。
+ * 2. この commit が **マージ済み PR の成果物**である (`merge_commit_sha` が一致)。
+ *    直 push なら該当 PR が無いのでここで落ちる。
+ * 3. **この job 自身の check run** が PR head SHA で `success` になっている。
+ *    「required だったか」ではなく「実際に緑だったか」を見るため、required checks の
+ *    設定変更から独立している。
+ * 4. push 前の `main` (`before`) が **PR head の祖先**である。陳腐化した (`strict` を
+ *    外して古いまま入れた) PR ならここで落ちる。
+ * 5. 着地したツリーが **PR head のツリーと完全一致**する。3 で緑を確認した中身が
+ *    そのまま入ったことを、内容そのもので照合する。
+ *
+ * ## フェイルセーフ
+ *
+ * どれか 1 つでも確認 **できなかった** 場合 (API 失敗・権限不足・ref 取得不可を含む) は
+ * スキップせず全ゲートを実行する。「確認できない」を「安全」と読み替えない。
+ *
+ * @param {object} input
+ * @param {string} input.repo `owner/name`
+ * @param {string | undefined} input.sha push で着地した commit
+ * @param {string | undefined} input.before push 前の branch 先端
+ * @param {boolean} input.forced force push か
+ * @param {string} input.branch push 先ブランチ名 (PR の base と突き合わせる)
+ * @param {string} input.checkName この job の check run 名
+ * @param {(path: string) => Promise<unknown>} input.api GitHub REST 呼び出し
+ * @param {(args: string[]) => string} input.git git 実行 (stdout を返す)
+ * @returns {Promise<{ skip: boolean, reason: string }>} `reason` は安定した ASCII 列挙
+ */
+export async function resolvePostMergeEvidence({
+  repo,
+  sha,
+  before,
+  forced,
+  branch,
+  checkName,
+  api,
+  git,
+}) {
+  const isSha = (/** @type {unknown} */ value) =>
+    typeof value === "string" && /^[0-9a-f]{40}$/.test(value);
+
+  if (forced) return { skip: false, reason: "forced-push" };
+  if (!isSha(sha)) return { skip: false, reason: "head-sha-unresolved" };
+  // 全 0 = ブランチ新規作成。比較対象が無く、着地内容を照合できない。
+  if (!isSha(before) || /^0{40}$/.test(String(before)))
+    return { skip: false, reason: "base-sha-unresolved" };
+
+  /** @type {any} */
+  let pulls;
+  try {
+    pulls = await api(`/repos/${repo}/commits/${sha}/pulls`);
+  } catch {
+    return { skip: false, reason: "pulls-api-failed" };
+  }
+  if (!Array.isArray(pulls))
+    return { skip: false, reason: "pulls-response-invalid" };
+  const pull = pulls.find(
+    (candidate) =>
+      candidate?.merged_at &&
+      candidate?.merge_commit_sha === sha &&
+      candidate?.base?.ref === branch &&
+      isSha(candidate?.head?.sha),
+  );
+  // 直 push、未マージ、別ブランチ宛のいずれもここで落ちる。
+  if (!pull) return { skip: false, reason: "no-merged-pull-request" };
+  const headSha = pull.head.sha;
+
+  /** @type {any} */
+  let checks;
+  try {
+    checks = await api(
+      `/repos/${repo}/commits/${headSha}/check-runs?per_page=100`,
+    );
+  } catch {
+    return { skip: false, reason: "check-runs-api-failed" };
+  }
+  const runs = checks?.check_runs;
+  if (!Array.isArray(runs))
+    return { skip: false, reason: "check-runs-response-invalid" };
+  const own = runs.filter((run) => run?.name === checkName);
+  if (own.length === 0) return { skip: false, reason: "own-check-run-missing" };
+  if (
+    !own.every(
+      (run) =>
+        run?.conclusion === "success" && run?.app?.slug === TRUSTED_CHECK_APP,
+    )
+  )
+    return { skip: false, reason: "own-check-run-not-successful" };
+
+  // 名前と app だけでは、同じ repository の別 workflow が作った check を区別できない。
+  // details URL から Actions run を引き、その run がこの workflow の pull_request 実行で
+  // 同じ head SHA を検証したことまで確認する。
+  for (const run of own) {
+    const match = String(run?.details_url ?? "").match(
+      /\/actions\/runs\/(\d+)(?:\/job\/\d+)?(?:[/?#]|$)/,
+    );
+    if (!match) return { skip: false, reason: "own-check-run-not-successful" };
+    /** @type {any} */
+    let workflowRun;
+    try {
+      workflowRun = await api(`/repos/${repo}/actions/runs/${match[1]}`);
+    } catch {
+      return { skip: false, reason: "check-runs-api-failed" };
+    }
+    if (
+      workflowRun?.event !== "pull_request" ||
+      workflowRun?.path !== TRUSTED_WORKFLOW_PATH ||
+      workflowRun?.head_sha !== headSha ||
+      workflowRun?.conclusion !== "success"
+    )
+      return { skip: false, reason: "own-check-run-not-successful" };
+  }
+
+  // PR head の commit は merge 後も `refs/pull/N/head` で取得できる
+  // (`refs/pull/N/merge` は merge 時に削除されるため使えない)。
+  try {
+    git(["fetch", "--quiet", "origin", `refs/pull/${pull.number}/head`]);
+  } catch {
+    return { skip: false, reason: "pull-head-fetch-failed" };
+  }
+
+  try {
+    // `before` が PR head の祖先 = PR は push 直前の main を取り込み済み。
+    // 陳腐化した PR (strict を外して古いまま入れた) はここで落ちる。
+    git(["merge-base", "--is-ancestor", String(before), headSha]);
+  } catch {
+    return { skip: false, reason: "base-not-ancestor-of-pull-head" };
+  }
+
+  try {
+    const landed = git(["rev-parse", `${sha}^{tree}`]).trim();
+    const verified = git(["rev-parse", `${headSha}^{tree}`]).trim();
+    if (!landed || landed !== verified)
+      return { skip: false, reason: "tree-mismatch" };
+  } catch {
+    return { skip: false, reason: "tree-resolution-failed" };
+  }
+
+  return { skip: true, reason: "verified-by-merged-pull-request" };
+}
+
+/** `resolvePostMergeEvidence` に渡す既定の GitHub REST 呼び出し。 */
+export async function githubApi(/** @type {string} */ path) {
+  const token = process.env.GITHUB_TOKEN;
+  if (!token) throw new Error("GITHUB_TOKEN is not available");
+  const base = process.env.GITHUB_API_URL || "https://api.github.com";
+  const response = await fetch(`${base}${path}`, {
+    signal: AbortSignal.timeout(EVIDENCE_IO_TIMEOUT_MS),
+    headers: {
+      accept: "application/vnd.github+json",
+      authorization: `Bearer ${token}`,
+      "x-github-api-version": "2022-11-28",
+    },
+  });
+  // 権限不足 (403) や存在しない (404) も「確認できなかった」として扱う。
+  if (!response.ok) throw new Error(`GitHub API ${path} -> ${response.status}`);
+  return response.json();
+}
+
+/** `resolvePostMergeEvidence` に渡す既定の git 実行。 */
+export function runGit(
+  /** @type {string[]} */ args,
+  /** @type {typeof execFileSync} */ exec = execFileSync,
+) {
+  return exec("git", args, {
+    encoding: "utf8",
+    maxBuffer: 32 * 1024 * 1024,
+    timeout: EVIDENCE_IO_TIMEOUT_MS,
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+}
+
 /** GitHub Actions の `$GITHUB_OUTPUT` へ書き出す。 */
-function main() {
+async function main() {
   const job = process.env.SCOPE_JOB === "e2e" ? "e2e" : "ci";
-  const postMergeDuplicate =
+  const isMainPush =
     process.env.SCOPE_EVENT_NAME === "push" &&
     process.env.SCOPE_REF === "refs/heads/main";
+
+  // マージ後 push のスキップは「前提が成立している」と信じるのではなく、
+  // その run の中で証拠を確認できたときにだけ許す (#496)。
+  let evidence = { skip: false, reason: "not-a-main-push" };
+  if (isMainPush) {
+    evidence = await resolvePostMergeEvidence({
+      repo: String(process.env.GITHUB_REPOSITORY ?? ""),
+      sha: process.env.SCOPE_HEAD_SHA,
+      before: process.env.SCOPE_BASE_SHA,
+      forced: process.env.SCOPE_FORCED === "true",
+      branch: "main",
+      checkName: String(process.env.SCOPE_CHECK_NAME ?? ""),
+      api: githubApi,
+      git: runGit,
+    });
+  }
+
   const paths = changedPaths(
     process.env.SCOPE_BASE_SHA,
     process.env.SCOPE_HEAD_SHA,
   );
-  const scope = resolveScope({ job, paths, postMergeDuplicate });
+  const scope = resolveScope({
+    job,
+    paths,
+    postMergeDuplicate: isMainPush && evidence.skip,
+  });
 
   const summary = [
     `job=${job}`,
-    `postMergeDuplicate=${postMergeDuplicate}`,
+    `mainPush=${isMainPush}`,
+    `postMergeEvidence=${evidence.reason}`,
     paths
       ? `changedPaths=${paths.length}`
       : "changedPaths=unresolved (fail-open)",
@@ -222,5 +444,10 @@ if (
   process.argv[1] &&
   import.meta.url === pathToFileURL(process.argv[1]).href
 ) {
-  main();
+  main().catch((error) => {
+    // 判定自体が落ちたら job を赤にする。「判定できなかったので全部やる」を
+    // 静かに握り潰すと、逆にスキップの誤りに気づけなくなる。
+    console.error(error);
+    process.exitCode = 1;
+  });
 }
