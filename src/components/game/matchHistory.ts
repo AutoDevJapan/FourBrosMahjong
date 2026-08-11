@@ -431,7 +431,17 @@ export type HistoryClearResult =
  */
 function clearAndVerify(storage: Storage): HistoryClearResult {
   if (!clearHistory(storage)) return "storage-failed";
-  return loadHistory(storage).length === 0 ? "cleared" : "storage-failed";
+  try {
+    // `loadHistory` は画面表示用に読み込み例外を空配列へ縮退する。その結果を
+    // 削除検証へ使うと、removeItem 後に権限が失われて getItem が SecurityError を
+    // 投げた場合も「空になった」と誤認してしまう。成功通知の根拠にする読み戻しは
+    // 生の保存値を確認し、読めないことを空であることと区別する。
+    return storage.getItem(MATCH_HISTORY_KEY) === null
+      ? "cleared"
+      : "storage-failed";
+  } catch {
+    return "storage-failed";
+  }
 }
 
 /**

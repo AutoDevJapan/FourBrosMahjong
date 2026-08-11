@@ -479,6 +479,29 @@ describe("match history persistence (#293)", () => {
       // 解除し損ねると、取得済みの lock へ無用な abort を投げるタイマーが残る。
       expect(vi.getTimerCount()).toBe(0);
     });
+
+    it("削除後の読み戻しが失敗した場合は成功を偽らない", async () => {
+      const storage = new (class extends MemoryStorage {
+        private removed = false;
+
+        override removeItem(key: string): void {
+          super.removeItem(key);
+          this.removed = true;
+        }
+
+        override getItem(key: string): string | null {
+          if (this.removed) {
+            throw new DOMException("Storage is disabled", "SecurityError");
+          }
+          return super.getItem(key);
+        }
+      })();
+      appendHistory(storage, entry(1));
+
+      expect(await clearHistoryAcrossTabs(storage, null)).toBe(
+        "storage-failed",
+      );
+    });
   });
 
   it("破損データは読み込み時に空扱いとし、次回のため削除する", () => {
