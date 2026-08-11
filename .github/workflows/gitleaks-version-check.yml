@@ -125,11 +125,13 @@ jobs:
 
       - name: Commit and push
         if: steps.existing.outputs.skip == 'false'
+        env:
+          BRANCH: ${{ steps.existing.outputs.branch }}
         run: |
           set -euo pipefail
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git checkout -b "${{ steps.existing.outputs.branch }}"
+          git checkout -b "$BRANCH"
           git add .github/workflows/gitleaks.yml
           git commit -m "chore: bump gitleaks CLI to v${LATEST_VERSION}"
           # force-with-lease: 前回の更新提案が未マージのままクローズされ、同名
@@ -137,25 +139,24 @@ jobs:
           # checkout はその remote branch を fetch しないため、引数なしの lease では
           # 期待 tip が無く既存 branch を更新できない。直前に観測した tip を明示し、
           # 観測後に別 actor が更新していれば push を拒否する。
-          branch="${{ steps.existing.outputs.branch }}"
-          remote_ref="refs/heads/${branch}"
-          expected_tip="$(git ls-remote --refs origin "${remote_ref}" | awk '{print $1}')"
-          git push \
-            --force-with-lease="${remote_ref}:${expected_tip}" \
-            origin "HEAD:${remote_ref}"
+          node .github/scripts/push-branch-with-lease.mjs "$BRANCH"
 
       - name: Trigger required checks on the new branch
         if: steps.existing.outputs.skip == 'false'
+        env:
+          BRANCH: ${{ steps.existing.outputs.branch }}
         run: |
           set -euo pipefail
           # GITHUB_TOKEN による push は他ワークフローの pull_request/push トリガーを
           # 自動発火しないため、required checksをこのブランチに対して明示的に起動する。
           # 実行結果は同じコミット SHA に紐づき、後続で作成する PR のチェック欄にも表示される。
-          gh workflow run gitleaks.yml --ref "${{ steps.existing.outputs.branch }}"
-          gh workflow run ci.yml --ref "${{ steps.existing.outputs.branch }}"
+          gh workflow run gitleaks.yml --ref "$BRANCH"
+          gh workflow run ci.yml --ref "$BRANCH"
 
       - name: Open PR
         if: steps.existing.outputs.skip == 'false'
+        env:
+          BRANCH: ${{ steps.existing.outputs.branch }}
         run: |
           set -euo pipefail
           cat > pr-body.md <<EOF
@@ -180,5 +181,5 @@ jobs:
             --title "chore: bump gitleaks CLI to v${LATEST_VERSION}" \
             --body-file pr-body.md \
             --base main \
-            --head "${{ steps.existing.outputs.branch }}" \
+            --head "$BRANCH" \
             --label ci

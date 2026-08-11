@@ -96,8 +96,8 @@ describe("GITHUB_TOKEN 生成PRのrequired checks", () => {
         .map((line) => line.trim())
         .filter((line) => line.startsWith("gh workflow run")) ?? [];
     expect(dispatchLines).toEqual([
-      'gh workflow run gitleaks.yml --ref "${{ steps.existing.outputs.branch }}"',
-      'gh workflow run ci.yml --ref "${{ steps.existing.outputs.branch }}"',
+      'gh workflow run gitleaks.yml --ref "$BRANCH"',
+      'gh workflow run ci.yml --ref "$BRANCH"',
     ]);
   });
 
@@ -107,17 +107,19 @@ describe("GITHUB_TOKEN 生成PRのrequired checks", () => {
     );
   });
 
-  it("残存する更新branchは観測したremote tipをleaseにして安全に再利用する", () => {
+  it("更新branchをshell本文へ直接展開せずenv経由で引用する", () => {
     const updater = readWorkflowFile("gitleaks-version-check.yml");
-    const push = updater.jobs?.["open-bump-pr"]?.steps?.find(
-      (step) => step.name === "Commit and push",
+    const branchSteps = updater.jobs?.["open-bump-pr"]?.steps?.filter((step) =>
+      step.run?.includes("$BRANCH"),
     );
-    expect(push?.run).toContain("git ls-remote --refs origin");
-    expect(push?.run).toContain(
-      '--force-with-lease="${remote_ref}:${expected_tip}"',
-    );
-    expect(push?.run).toContain('origin "HEAD:${remote_ref}"');
-    expect(push?.run).not.toMatch(/--force-with-lease\s+origin/);
+    expect(branchSteps).toHaveLength(3);
+    for (const step of branchSteps ?? []) {
+      expect(step.env?.BRANCH).toBe("${{ steps.existing.outputs.branch }}");
+      expect(step.run).not.toContain("${{ steps.existing.outputs.branch }}");
+    }
+    expect(
+      updater.jobs?.["open-bump-pr"]?.steps?.map((step) => step.run).join("\n"),
+    ).not.toContain("${{ steps.existing.outputs.branch }}");
   });
 });
 
