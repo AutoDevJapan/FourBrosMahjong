@@ -21,6 +21,8 @@ pnpm dev            # http://localhost:3000 で開発サーバ起動(Turbopack)
 ```
 
 Node.js のバージョンは [`.nvmrc`](./.nvmrc) に固定し、`package.json` の `engines` でも強制しています。
+依存インストール後に Node.js を切り替えた場合も、Vitest の各コマンドは開始前に
+`engines.node` を検査します。範囲外なら `nvm use` などで対応バージョンへ戻してください。
 
 ## コマンド一覧
 
