@@ -35,6 +35,7 @@ type Step = {
 };
 
 type Workflow = {
+  on?: Record<string, unknown>;
   concurrency?: { group?: string; "cancel-in-progress"?: unknown };
   permissions?: Record<string, string>;
   jobs?: Record<
@@ -76,6 +77,30 @@ function readWorkflow(): Workflow {
   );
   return parse(source) as Workflow;
 }
+
+describe("GITHUB_TOKEN 生成PRのrequired checks", () => {
+  it("version bump workflowはdispatch可能なgitleaksとCIを同じheadで起動する", () => {
+    expect(readWorkflowFile("ci.yml").on).toHaveProperty("workflow_dispatch");
+    expect(readWorkflowFile("gitleaks.yml").on).toHaveProperty(
+      "workflow_dispatch",
+    );
+
+    const updater = readWorkflowFile("gitleaks-version-check.yml");
+    const trigger = updater.jobs?.["open-bump-pr"]?.steps?.find((step) =>
+      step.run?.includes("gh workflow run"),
+    );
+    expect(trigger, "自動PRにrequired checksを作るstepが無い").toBeDefined();
+    expect(trigger?.run).toContain("gh workflow run gitleaks.yml");
+    expect(trigger?.run).toContain("gh workflow run ci.yml");
+    expect(trigger?.run).toContain("steps.existing.outputs.branch");
+  });
+
+  it("workflow_dispatchは同じrefのpush CIをキャンセルしない", () => {
+    expect(readWorkflowFile("ci.yml").concurrency?.group).toContain(
+      "github.event_name",
+    );
+  });
+});
 
 /**
  * キャッシュを**書き込む**ステップか(一体型 `actions/cache@` と `actions/cache/save@`)。
