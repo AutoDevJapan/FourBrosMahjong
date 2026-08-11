@@ -106,6 +106,19 @@ describe("GITHUB_TOKEN 生成PRのrequired checks", () => {
       "github.event_name",
     );
   });
+
+  it("残存する更新branchは観測したremote tipをleaseにして安全に再利用する", () => {
+    const updater = readWorkflowFile("gitleaks-version-check.yml");
+    const push = updater.jobs?.["open-bump-pr"]?.steps?.find(
+      (step) => step.name === "Commit and push",
+    );
+    expect(push?.run).toContain("git ls-remote --refs origin");
+    expect(push?.run).toContain(
+      '--force-with-lease="${remote_ref}:${expected_tip}"',
+    );
+    expect(push?.run).toContain('origin "HEAD:${remote_ref}"');
+    expect(push?.run).not.toMatch(/--force-with-lease\s+origin/);
+  });
 });
 
 /**

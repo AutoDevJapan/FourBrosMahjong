@@ -134,7 +134,15 @@ jobs:
           git commit -m "chore: bump gitleaks CLI to v${LATEST_VERSION}"
           # force-with-lease: 前回の更新提案が未マージのままクローズされ、同名
           # ブランチが remote に残っているケースでも安全に上書きできるようにする。
-          git push --force-with-lease origin "${{ steps.existing.outputs.branch }}"
+          # checkout はその remote branch を fetch しないため、引数なしの lease では
+          # 期待 tip が無く既存 branch を更新できない。直前に観測した tip を明示し、
+          # 観測後に別 actor が更新していれば push を拒否する。
+          branch="${{ steps.existing.outputs.branch }}"
+          remote_ref="refs/heads/${branch}"
+          expected_tip="$(git ls-remote --refs origin "${remote_ref}" | awk '{print $1}')"
+          git push \
+            --force-with-lease="${remote_ref}:${expected_tip}" \
+            origin "HEAD:${remote_ref}"
 
       - name: Trigger required checks on the new branch
         if: steps.existing.outputs.skip == 'false'
