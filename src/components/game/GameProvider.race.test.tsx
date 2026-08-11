@@ -30,6 +30,34 @@ function DoubleActionProbe() {
   );
 }
 
+function DuplicateTileDoubleActionProbe() {
+  const { controls, view } = useGame();
+  const self = view.slots.self;
+  if (self.kind !== "seated" || !self.player.hand) {
+    throw new Error("human hand is missing");
+  }
+  const tile = self.player.hand.find((candidate, index, hand) =>
+    hand.some(
+      (other, otherIndex) =>
+        otherIndex !== index &&
+        other.suit === candidate.suit &&
+        other.rank === candidate.rank,
+    ),
+  );
+  if (!tile) throw new Error("duplicate tile is missing for this seed");
+  return (
+    <button
+      type="button"
+      onClick={() => {
+        controls.discard(tile);
+        controls.discard(tile);
+      }}
+    >
+      重複牌を連続操作
+    </button>
+  );
+}
+
 describe("GameProvider concurrent controls (#230)", () => {
   beforeEach(() => {
     window.sessionStorage.clear();
@@ -58,5 +86,17 @@ describe("GameProvider concurrent controls (#230)", () => {
     // 再生不能な no-op を journal へ記録しない。
     expect(journal?.actions).toHaveLength(1);
     expect(liveView).toEqual(selectView(replayJournal(journal!)));
+  });
+
+  it("同種牌が次の手番にも残っていても画面更新前の連続操作を二巡目へ適用しない", () => {
+    render(
+      <GameProvider>
+        <DuplicateTileDoubleActionProbe />
+      </GameProvider>,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "重複牌を連続操作" }));
+
+    expect(loadJournal(window.sessionStorage)?.actions).toHaveLength(1);
   });
 });

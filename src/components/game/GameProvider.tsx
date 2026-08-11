@@ -20,6 +20,7 @@ import {
   createContext,
   useContext,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -260,7 +261,16 @@ export function GameProvider({ children, initialGame }: GameProviderProps) {
   // 次の遷移を計算する。engine は Wall/RNG を含め入力を可変更新するため、レンダー時点の
   // session をクロージャから再利用するとライブ状態だけが二重に進み、journal と分岐する。
   const sessionRef = useRef(session);
+  // 1回の描画で公開したUIから受け付ける遷移は1つだけにする。engine の1操作は
+  // AI進行を含めて次の自家入力まで同期的に進み得るため、同じDOMへのダブルクリック等を
+  // sessionRef上で直列化すると、画面更新を挟まず次の手番の操作まで成立してしまう。
+  // React commit後は新しい盤面が利用者へ公開済みなので、次の入力を受け付ける。
+  const transitionPendingRef = useRef(false);
   const { engine } = session;
+
+  useLayoutEffect(() => {
+    transitionPendingRef.current = false;
+  }, [engine]);
 
   // 終局済みジャーナルを復元したときの戦績追記(終局時の保存失敗の補完)は、
   // 描画フェーズではなくマウント後の効果で行う(#310)。追記に伴う
@@ -294,11 +304,13 @@ export function GameProvider({ children, initialGame }: GameProviderProps) {
   // ref は同一レンダー中の連続イベントにも即時反映され、engine と journal を同じ順序で進める。
   const controls = useMemo<GameControls>(() => {
     const commit = (action: GameAction) => {
+      if (transitionPendingRef.current) return;
       const { engine, journal } = sessionRef.current;
       const nextEngine = applyGameAction(engine, action);
       // engine が局面上不正な操作を同一 state の no-op として拒否した場合は、
       // 再生不能なイベントを journal に残さない。
       if (nextEngine === engine) return;
+      transitionPendingRef.current = true;
       // この操作で半荘が終局したら、確定結果を戦績へ追記する(issue #293)。
       const historySaveStatus =
         nextEngine.phase === "gameEnd"
