@@ -6,6 +6,7 @@ import {
   CI_PAGE_SIZE,
   hasTrustedCiRun,
   MAX_CI_PAGES,
+  releaseNotesFromChangelog,
   validateReleaseMetadata,
   verifyTagOnMain,
   versionFromTag,
@@ -24,7 +25,7 @@ const trustedRun = {
   event: "push",
   status: "completed",
   conclusion: "success",
-  path: ".github/workflows/ci.yml",
+  path: ".github/workflows/ci.yml@main",
 };
 
 describe("release metadata guard (#507)", () => {
@@ -84,6 +85,35 @@ describe("release metadata guard (#507)", () => {
       }),
     ).toThrow(/empty/);
   });
+
+  it("uses one parser for validation and the published release body", () => {
+    const input = metadata();
+    expect(
+      releaseNotesFromChangelog({
+        version: "1.2.3",
+        changelog: input.changelog,
+      }),
+    ).toBe("- Released.\n");
+    expect(() =>
+      validateReleaseMetadata({
+        ...input,
+        changelog:
+          "## [1.2.3] - 2026-08-11\n\n[1.2.3]: https://example.test/release\n",
+      }),
+    ).toThrow(/empty/);
+    expect(() =>
+      validateReleaseMetadata({
+        ...input,
+        changelog: "## [1.2.3] - 2026-02-30\n- impossible date\n",
+      }),
+    ).toThrow(/invalid date/);
+    expect(() =>
+      validateReleaseMetadata({
+        ...input,
+        changelog: `${input.changelog}\n## [1.2.3] - 2026-08-12\n- duplicate\n`,
+      }),
+    ).toThrow(/duplicate/);
+  });
 });
 
 describe("release ancestry guard (#507)", () => {
@@ -91,7 +121,15 @@ describe("release ancestry guard (#507)", () => {
     const git = vi.fn(() => "");
     verifyTagOnMain({ sha: SHA, git });
     expect(git.mock.calls).toEqual([
-      [["fetch", "--quiet", "--no-tags", "origin", "main"]],
+      [
+        [
+          "fetch",
+          "--quiet",
+          "--no-tags",
+          "origin",
+          "+refs/heads/main:refs/remotes/origin/main",
+        ],
+      ],
       [["merge-base", "--is-ancestor", SHA, "origin/main"]],
     ]);
   });
@@ -123,6 +161,7 @@ describe("trusted CI evidence guard (#507)", () => {
     const api = vi.fn(async () => ({
       workflow_runs: [
         { ...trustedRun, path: ".github/workflows/untrusted.yml" },
+        { ...trustedRun, path: ".github/workflows/ci.yml@feature" },
         {
           name: "lint / typecheck / format / test / build",
           conclusion: "success",
@@ -201,5 +240,10 @@ describe("release workflow contract (#507)", () => {
     );
     expect(publish.with.generate_release_notes).toBeUndefined();
     expect(publish.with.body_path).toContain("notes_path");
+    const extract = workflow.jobs.release.steps.find(
+      (step: { id?: string }) => step.id === "changelog",
+    );
+    expect(extract.run).toContain("release-guard.mjs --extract-notes");
+    expect(extract.run).not.toContain("awk");
   });
 });

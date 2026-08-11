@@ -21,6 +21,44 @@ export function versionFromTag(tag) {
 }
 
 /**
+ * Return the exact body published for a release. Validation and release.yml
+ * share this parser so a section cannot pass the guard but publish an empty or
+ * different body.
+ * @param {{version: string, changelog: string}} input
+ */
+export function releaseNotesFromChangelog({ version, changelog }) {
+  const escaped = version.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const heading = new RegExp(
+    `^## \\[${escaped}\\] - (\\d{4}-\\d{2}-\\d{2})\\s*$`,
+    "gm",
+  );
+  const matches = [...changelog.matchAll(heading)];
+  if (matches.length !== 1) {
+    throw new Error(
+      matches.length === 0
+        ? `CHANGELOG has no dated section for ${version}`
+        : `CHANGELOG has duplicate dated sections for ${version}`,
+    );
+  }
+  const match = matches[0];
+  const date = match[1];
+  const parsedDate = new Date(`${date}T00:00:00Z`);
+  if (
+    Number.isNaN(parsedDate.valueOf()) ||
+    parsedDate.toISOString().slice(0, 10) !== date
+  ) {
+    throw new Error(`CHANGELOG section for ${version} has an invalid date`);
+  }
+  const bodyStart = (match.index ?? 0) + match[0].length;
+  const remainder = changelog.slice(bodyStart);
+  const terminator = remainder.search(/^(?:## \[|\[.+\]:)/m);
+  const body = remainder.slice(0, terminator < 0 ? undefined : terminator);
+  if (!body.trim())
+    throw new Error(`CHANGELOG section for ${version} is empty`);
+  return body.trim() + "\n";
+}
+
+/**
  * Validate the repository-owned release metadata before consulting remote
  * evidence. A dated, non-empty CHANGELOG section is mandatory; falling back to
  * generated notes would otherwise hide a typo or an unfinished release.
@@ -40,23 +78,7 @@ export function validateReleaseMetadata({ tag, packageJson, changelog }) {
     );
   }
 
-  const escaped = version.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  const heading = new RegExp(
-    `^## \\[${escaped}\\] - \\d{4}-\\d{2}-\\d{2}\\s*$`,
-    "m",
-  );
-  const headingMatch = heading.exec(changelog);
-  if (!headingMatch) {
-    throw new Error(`CHANGELOG has no dated section for ${version}`);
-  }
-  const bodyStart = headingMatch.index + headingMatch[0].length;
-  const nextHeading = changelog.slice(bodyStart).search(/^## /m);
-  const body = changelog.slice(
-    bodyStart,
-    nextHeading < 0 ? undefined : bodyStart + nextHeading,
-  );
-  if (!body.trim())
-    throw new Error(`CHANGELOG section for ${version} is empty`);
+  releaseNotesFromChangelog({ version, changelog });
   return version;
 }
 
@@ -99,7 +121,12 @@ export async function hasTrustedCiRun({ repo, sha, api }) {
           run?.event === "push" &&
           run?.status === "completed" &&
           run?.conclusion === "success" &&
-          run?.path === ".github/workflows/ci.yml",
+          // REST appends the workflow ref (for example `ci.yml@main`).
+          // The endpoint is already workflow-specific; retain a shape check
+          // without rejecting GitHub's real response.
+          /^\.github\/workflows\/ci\.yml(?:@(?:refs\/heads\/)?main)?$/.test(
+            run?.path,
+          ),
       )
     ) {
       return true;
@@ -138,7 +165,13 @@ export function runGit(args) {
 /** @param {{sha: string, git: (args: string[]) => string}} input */
 export function verifyTagOnMain({ sha, git }) {
   if (!/^[0-9a-f]{40}$/.test(sha)) throw new Error("tag SHA is unresolved");
-  git(["fetch", "--quiet", "--no-tags", "origin", "main"]);
+  git([
+    "fetch",
+    "--quiet",
+    "--no-tags",
+    "origin",
+    "+refs/heads/main:refs/remotes/origin/main",
+  ]);
   git(["merge-base", "--is-ancestor", sha, "origin/main"]);
 }
 
@@ -166,8 +199,23 @@ if (
   process.argv[1] &&
   import.meta.url === pathToFileURL(process.argv[1]).href
 ) {
-  main().catch((error) => {
-    console.error(error);
-    process.exitCode = 1;
-  });
+  if (process.argv[2] === "--extract-notes") {
+    try {
+      const version = versionFromTag(`v${String(process.argv[3] ?? "")}`);
+      process.stdout.write(
+        releaseNotesFromChangelog({
+          version,
+          changelog: readFileSync("CHANGELOG.md", "utf8"),
+        }),
+      );
+    } catch (error) {
+      console.error(error);
+      process.exitCode = 1;
+    }
+  } else {
+    main().catch((error) => {
+      console.error(error);
+      process.exitCode = 1;
+    });
+  }
 }

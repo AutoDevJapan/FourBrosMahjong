@@ -35,7 +35,7 @@ jobs:
     name: Validate release evidence
     runs-on: ubuntu-latest
     # 異常時に既定の6時間まで runner を占有させない (#491)。
-    # 実処理は checkout と Release 作成 API のみで通常 1 分未満。
+    # 実処理は checkout・main fetch・Actions API 照合で通常 1 分未満。
     timeout-minutes: 10
     steps:
       - name: Checkout
@@ -68,20 +68,9 @@ jobs:
         run: |
           version="${GITHUB_REF_NAME#v}"
           notes_file="$(mktemp)"
-          # CHANGELOG.md から `## [<version>]` の節だけを抽出する。
-          if [ -f CHANGELOG.md ]; then
-            awk -v ver="$version" '
-              index($0, "## [" ver "] - ") == 1 { capture = 1; next }
-              capture && (/^## \[/ || /^\[.+\]:/) { exit }
-              capture { print }
-            ' CHANGELOG.md > "$notes_file"
-          fi
-          if [ -s "$notes_file" ]; then
-            echo "notes_path=$notes_file" >> "$GITHUB_OUTPUT"
-            echo "has_notes=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "has_notes=false" >> "$GITHUB_OUTPUT"
-          fi
+          # validate job と同じ parser で、検証した本文そのものを抽出する。
+          node .github/scripts/release-guard.mjs --extract-notes "$version" > "$notes_file"
+          echo "notes_path=$notes_file" >> "$GITHUB_OUTPUT"
 
       - name: Create Release
         uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228 # v3.0.2
