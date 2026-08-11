@@ -14,6 +14,8 @@ const VITEST_SCRIPTS = [
   "test:coverage",
 ] as const;
 
+const VITEST_CONFIG = resolve(process.cwd(), "vitest.config.ts");
+
 function packageJson(): {
   engines?: { node?: string };
   scripts?: Record<string, string>;
@@ -42,5 +44,13 @@ describe("Node.js version guard (#495)", () => {
         "node scripts/check-node-version.mjs",
       );
     }
+  });
+
+  it("guards direct Vitest invocations through the config", () => {
+    const config = readFileSync(VITEST_CONFIG, "utf8");
+    expect(config).toMatch(
+      /import \{ checkNodeVersion \} from ["']\.\/scripts\/check-node-version\.mjs["'];/,
+    );
+    expect(config).toMatch(/\ncheckNodeVersion\(\);/);
   });
 });

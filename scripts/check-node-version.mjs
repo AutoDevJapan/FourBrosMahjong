@@ -4,6 +4,7 @@ import semver from "semver";
 
 const packageJsonUrl = new URL("../package.json", import.meta.url);
 
+/** @returns {string} */
 export function requiredNodeRange() {
   const packageJson = JSON.parse(readFileSync(packageJsonUrl, "utf8"));
   const range = packageJson.engines?.node;
@@ -13,6 +14,11 @@ export function requiredNodeRange() {
   return range;
 }
 
+/**
+ * @param {string} version
+ * @param {string} [range]
+ * @returns {string | null}
+ */
 export function nodeVersionError(version, range = requiredNodeRange()) {
   if (semver.satisfies(version, range)) return null;
   return [
@@ -22,6 +28,7 @@ export function nodeVersionError(version, range = requiredNodeRange()) {
   ].join("\n");
 }
 
+/** @param {string} [version] */
 export function checkNodeVersion(version = process.versions.node) {
   const message = nodeVersionError(version);
   if (message !== null) throw new Error(message);
