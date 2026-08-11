@@ -16,6 +16,58 @@ test.describe("PWAオフライン動作(#292)", () => {
     "service worker は production ビルドのみ有効(E2E_PROD=1 で実行)",
   );
 
+  test("初回登録後に追加のオンライン再読込みなしで/gameをオフライン起動・hydrateできる(#506)", async ({
+    page,
+    context,
+  }) => {
+    // ロビーの初回表示は SW 非制御。このページで /game の chunk を
+    // runtime cache へ入れたことは無い状態で install 完了だけを待つ。
+    await page.goto("/");
+    await page.waitForFunction(
+      async () => (await navigator.serviceWorker?.ready) != null,
+    );
+    expect(
+      await page.evaluate(() => navigator.serviceWorker?.controller),
+    ).toBeNull();
+
+    // install cache 自体に build 固有依存が入ったことも確認する。
+    // hydrate 成功だけでは初回ロビー表示の HTTP cache に共通 chunk が
+    // 残った偽陽性を完全に排除できないため、Cache Storage を直接見る。
+    const precachedBuildAssets = await page.evaluate(async () => {
+      const cacheName = (await caches.keys()).find((key) =>
+        key.startsWith("fbm-precache-"),
+      );
+      if (!cacheName) return [];
+      return (await (await caches.open(cacheName)).keys()).map(
+        (request) => new URL(request.url).pathname,
+      );
+    });
+    expect(
+      precachedBuildAssets.some(
+        (path) => path.startsWith("/_next/static/") && path.endsWith(".js"),
+      ),
+    ).toBe(true);
+    expect(
+      precachedBuildAssets.some(
+        (path) => path.startsWith("/_next/static/") && path.endsWith(".css"),
+      ),
+    ).toBe(true);
+
+    // オンライン再読込みを挟まず初回ページを閉じ、機内モードで
+    // 新しいトップレベルページを開く。ナビゲーション HTML だけでなく
+    // build 固有 JS/CSS が install cache に無ければ hydration 待ちで失敗する。
+    await page.close();
+    await context.setOffline(true);
+    const offlinePage = await context.newPage();
+    await offlinePage.goto("/game");
+    await expect(offlinePage.locator("[data-phase]").first()).toHaveAttribute(
+      "data-phase",
+      "playing",
+    );
+    await expect(visibleHand(offlinePage).getByRole("option")).toHaveCount(14);
+    await context.setOffline(false);
+  });
+
   test("SW登録・プリキャッシュ後、オフラインで/gameを再読込しても対局を継続できる", async ({
     page,
     context,
@@ -35,7 +87,7 @@ test.describe("PWAオフライン動作(#292)", () => {
       () => navigator.serviceWorker?.controller != null,
     );
 
-    // プリキャッシュ(App シェル 5 ルート + アイコン + 牌素材)の完了を確認する。
+    // プリキャッシュ(App シェル 6 ルート + アイコン + 牌素材)の完了を確認する。
     const cacheKeys = await page.evaluate(() => caches.keys());
     expect(cacheKeys.some((key) => key.startsWith("fbm-precache-"))).toBe(true);
     const precached = await page.evaluate(async () => {

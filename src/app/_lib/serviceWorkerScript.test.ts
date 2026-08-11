@@ -216,6 +216,68 @@ describe("buildServiceWorkerScript", () => {
     expect(buildServiceWorkerScript("v1")).not.toContain("skipWaiting");
   });
 
+  it("初回install時にAppシェルHTMLが参照するbuild固有JS/CSS/fontをプリキャッシュする(#506)", async () => {
+    const sw = bootServiceWorker();
+    const fetchSpy = vi.fn(async (input: RequestInfo | URL) => {
+      const url = new URL(String(input));
+      if (PRECACHE_ROUTES.includes(url.pathname)) {
+        return htmlResponse(`
+          <link rel="stylesheet" href="/_next/static/css/app.abc.css">
+          <link rel="preload" href="/_next/static/media/game.def.woff2" as="font">
+          <script src="/_next/static/chunks/app.123.js"></script>
+          <script src="/_next/static/chunks/app.123.js#duplicate"></script>
+          <script src="https://cdn.example.net/_next/static/foreign.js"></script>
+          <script src="/api/not-a-build-asset"></script>
+        `);
+      }
+      return new Response(`asset:${url.pathname}`);
+    });
+    sw.setFetchImpl(fetchSpy as typeof fetch);
+
+    await sw.dispatchLifecycle("install");
+
+    const precache = sw.cacheStorage.caches.get("fbm-precache-v1");
+    for (const path of [
+      "/_next/static/css/app.abc.css",
+      "/_next/static/media/game.def.woff2",
+      "/_next/static/chunks/app.123.js",
+    ]) {
+      expect(precache?.store.has(`${ORIGIN}${path}`)).toBe(true);
+    }
+    expect(
+      precache?.store.has("https://cdn.example.net/_next/static/foreign.js"),
+    ).toBe(false);
+    expect(precache?.store.has(`${ORIGIN}/api/not-a-build-asset`)).toBe(false);
+    expect(
+      fetchSpy.mock.calls.filter(
+        ([input]) =>
+          new URL(String(input)).pathname === "/_next/static/chunks/app.123.js",
+      ),
+    ).toHaveLength(1);
+  });
+
+  it("必要build assetの取得失敗時はinstall自体を失敗させる(#506)", async () => {
+    const sw = bootServiceWorker();
+    sw.setFetchImpl(
+      vi.fn(async (input) => {
+        const url = new URL(String(input));
+        if (PRECACHE_ROUTES.includes(url.pathname)) {
+          return htmlResponse(
+            '<script src="/_next/static/chunks/missing.js"></script>',
+          );
+        }
+        if (url.pathname === "/_next/static/chunks/missing.js") {
+          return new Response("missing", { status: 404 });
+        }
+        return new Response("asset");
+      }),
+    );
+
+    await expect(sw.dispatchLifecycle("install")).rejects.toThrow(
+      "addAll failed",
+    );
+  });
+
   it("waiting中は旧chunk cacheを残し、activate後にだけ旧fbm-*を回収する(#349)", async () => {
     const sw = bootServiceWorker();
     const old = await sw.cacheStorage.open("fbm-precache-old");

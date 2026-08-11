@@ -14,6 +14,9 @@
  * - ナビゲーション(HTML): network-first。オンライン時は常に最新シェルを取得し、
  *   オフライン時のみキャッシュ(最後は `/` へフォールバック)で応答する。
  * - `/_next/static/`(コンテンツハッシュ付き)・牌 SVG・アイコン: cache-first(実質不変)。
+ *   install 時には各 App シェル HTML が直接参照する build 固有 JS/CSS/font も
+ *   抽出して保存する。初回登録ページは旧ページ保護のため SW 非制御なので、
+ *   runtime cache だけでは追加のオンライン再読込みなしのオフライン起動を保証できない。
  * - その他の同一オリジン GET(RSC/API/未知URL等): キャッシュせずブラウザへ委譲。
  *   未知URLへのナビゲーションだけは、オフライン時の `/` fallback のため仲介する。
  *
@@ -88,6 +91,56 @@ const NAVIGATION_FALLBACK_URL = "/";
 // cache.put + eviction を直列化する。同時 fetch が各々「上限未満」と判定してから
 // 書き込む競合を防ぎ、完了後の件数上限を常に維持する。
 let cacheWriteChain = Promise.resolve();
+
+/**
+ * App シェル HTML が直接参照する同一 origin の Next build asset を抽出する。
+ *
+ * ServiceWorkerGlobalScope に DOMParser は無いため、Next が生成する quoted
+ * src/href 属性だけを小さく読む。URL は URL API で正規化し、攻撃者が指定した
+ * external URL や通常 API を install が取得しないよう origin + pathname の両方を制限する。
+ */
+function buildAssetUrlsFromHtml(html, baseUrl) {
+  const assets = new Set();
+  const attribute = /\\b(?:src|href)\\s*=\\s*["']([^"']+)["']/gi;
+  for (const match of html.matchAll(attribute)) {
+    try {
+      const url = new URL(match[1], baseUrl);
+      if (
+        url.origin === self.location.origin &&
+        url.pathname.startsWith("/_next/static/")
+      ) {
+        url.hash = "";
+        assets.add(url.href);
+      }
+    } catch {
+      // 壊れた URL 属性はブラウザと同じく無視する。
+    }
+  }
+  return assets;
+}
+
+async function precacheAppShell() {
+  const cache = await self.caches.open(PRECACHE);
+  await cache.addAll(PRECACHE_URLS);
+
+  const buildAssets = new Set();
+  for (const route of CACHEABLE_ROUTE_PATHS) {
+    const response = await cache.match(route);
+    if (!response) {
+      throw new TypeError("Missing precached App shell: " + route);
+    }
+    const html = await response.clone().text();
+    const baseUrl = response.url || new URL(route, self.location).href;
+    for (const asset of buildAssetUrlsFromHtml(html, baseUrl)) {
+      buildAssets.add(asset);
+    }
+  }
+  // addAll を install promise の中で await し、必要 chunk が1つでも取れなければ
+  // SW を activate しない。HTML だけの不完全なオフラインシェルを公開しない。
+  if (buildAssets.size > 0) {
+    await cache.addAll([...buildAssets]);
+  }
+}
 
 /** コンテンツハッシュ付き・または実質不変の静的アセットか。 */
 function isImmutableAsset(pathname) {
@@ -184,9 +237,7 @@ async function cacheFirst(request, cacheKey) {
 }
 
 self.addEventListener("install", (event) => {
-  event.waitUntil(
-    self.caches.open(PRECACHE).then((cache) => cache.addAll(PRECACHE_URLS)),
-  );
+  event.waitUntil(precacheAppShell());
 });
 
 self.addEventListener("activate", (event) => {
