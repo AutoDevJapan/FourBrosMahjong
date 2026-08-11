@@ -98,8 +98,16 @@ describe("engine: カン→ガリ→再嶺上の役判定(#437 / Q36)", () => {
   it("Q36 の裁定まではカン起点として嶺上開花を付ける(現行挙動を固定)", () => {
     const { state, ankanTile, winningTile, seat } = setupKanKitaRinshan();
     const kitaBefore = state.hand?.kita[seat] ?? 0;
+    const wall = state.hand?.wall;
+    expect(wall).toBeDefined();
+    if (wall === undefined) return;
+
+    // 2回の嶺上補充(カン→北抜き)でライブ壁がちょうど0になる境界へ寄せる。
+    // これにより、供給元の追跡を失うと海底摸月が誤って付く局面を直接検証する。
+    while (wall.remainingLiveTiles > 2) wall.draw();
 
     const afterKan = declareAnkan(state, ankanTile);
+    expect(afterKan.hand?.wall.remainingLiveTiles).toBe(0);
     expect(afterKan.hand?.kita[seat]).toBe(kitaBefore + 1);
     expect(afterKan.hand?.drawn?.source).toBe("kanReplacement");
     expect(
