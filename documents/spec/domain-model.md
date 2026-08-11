@@ -113,9 +113,10 @@ classDiagram
 - 赤5は5筒・5索に限る。
   > この不変条件の**唯一の定義元**は `src/domain/tiles/tile.ts`(issue #375 / #379 / #485)。同ファイル内の内部式 `isRedFiveKind(suit, rank)` を、次の2つの公開関数が共有する。
   > - **生成**: `createTile(suit, rank)` — 牌種から `Tile` を組み立て `isRed` を確定させる。牌種から `Tile` を作る本番処理は UI 境界を含めてこのファクトリを経由し、`{ suit, rank, isRed: … }` を直に書かない。
-  > - **判定**: `isRedDora(tile)` — 既存の値が赤ドラかを判定する。`Tile` は実行時検証を持たない構造型で、`createTile` を経由しない値(復元データ・外部入力・表示用 `TileData`)は仕様外の `isRed` を持ち得るため、**牌種を確認せず `tile.isRed` を信じない**。得点(`domain/dora/han.ts` の赤ドラ翻)と表示(`components/common/` の色付き素材・赤枠・バッジ・`aria-label`)はこの述語を共有し、同じ入力に同じ答えを返す。
+  > - **判定**: `isRedDora(tile)` — 既存の値が赤ドラかを判定する。`Tile` は実行時検証を持たない構造型で、`createTile` を経由しない値(復元データ・外部入力・表示用 `TileData`)は仕様外の `isRed` を持ち得るため、**牌種を確認せず `tile.isRed` を信じない**。得点(`domain/dora/han.ts` の赤ドラ翻)・表示(`components/common/` の色付き素材・赤枠・バッジ・`aria-label`)・AI の打点温存(`domain/game/ai.ts` の `valueOf` / issue #490)はこの述語を共有し、同じ入力に同じ答えを返す。
   >
-  > `src/domain/tiles/tile-factory.regression.test.ts` がこれを機械的に検査する。`Tile` の組み立て(`isRed:` リテラル)は `src/domain/` を、赤5判定の再実装は `src/domain/` に加えて `src/components/` `src/app/` を走査する(表示層まで広げたのは、そこでの重複が issue #485 の原因だったため)。例外はテスト専用の独立オラクル `src/domain/hand/__oracle__/`(本番へ依存しないことが検証価値の源泉のため、意図的に重複させる)。
+  > `src/domain/tiles/tile-factory.regression.test.ts` が3本の検出器でこれを機械的に検査する。(1) `Tile` の組み立て(`isRed:` リテラル)は `src/domain/` を、(2) 赤5判定の再実装は `src/domain/` に加えて `src/components/` `src/app/` を走査する(表示層まで広げたのは、そこでの重複が issue #485 の原因だったため)。(3) **`.isRed` の直読み**は (2) と同じ走査ルートで検出し、フラグの値そのものを扱う正当な用途(同一性比較・識別キー・整列・投影・保存値の検証)だけを許可リスト `ALLOWED_RAW_IS_RED_READS` に**該当行の完全一致**で固定する(issue #490)。許可箇所が増えても、逆に許可リストから根拠が消えても落ちる。例外はテスト専用の独立オラクル `src/domain/hand/__oracle__/`(本番へ依存しないことが検証価値の源泉のため、意図的に重複させる)。
+  > いずれも字面の走査なので、別名束縛や `Object.entries` 経由の読み出しはすり抜ける(分割代入 `const { isRed } = tile` は `src/domain/` に限り (1) が拾う)。3本は**多層防御**であって、単体でも合計でも完全性を主張するものではない。
   > UI の操作入力は `suit` / `rank` を正として `createTile` で `isRed` を正規化する。一方、`sessionStorage` の復元ジャーナルは保存済み `isRed` が `createTile` の結果と一致する場合だけ受理する。矛盾した旧データを黙って修復・再生すると保存時と異なる操作になるため、破損データとして fail-closed で拒否し、新規対局へフォールバックする(issue #379)。
 - 常に着席3人(東/南/西)+抜け番1人の計4人。`benchWarmer` は席(`Seat`)を持たない。
 - 抜け番は**直前局の親**(親流れ時)。連荘中は席・抜け番・`roundNumber` を据え置く。
