@@ -64,11 +64,9 @@ jobs:
           fi
 
           latest_tag="$(gh api repos/gitleaks/gitleaks/releases/latest --jq .tag_name)"
-          latest_version="${latest_tag#v}"
-          if [ -z "$latest_version" ]; then
-            echo "::error::gitleaks の最新リリースを取得できませんでした" >&2
-            exit 1
-          fi
+          # upstream release metadata は信頼せず、output・branch・sed に渡す前に
+          # 安定版の厳密な vMAJOR.MINOR.PATCH へ制限する。
+          latest_version="$(node .github/scripts/gitleaks-version.mjs "$latest_tag")"
 
           echo "current_version=${current_version}" >> "$GITHUB_OUTPUT"
           echo "latest_version=${latest_version}" >> "$GITHUB_OUTPUT"
