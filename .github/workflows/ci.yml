@@ -14,9 +14,16 @@ concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
-# 最小権限の原則: このワークフローはチェックアウトして読むだけなので read-only で十分
+# 最小権限の原則。いずれも read のみ。
+# `pull-requests` / `checks` / `actions` は、マージ後 push のスキップ前提を実行時に検証するために要る
+# (マージ済み PR 由来か / 当 job の check と元の workflow run が緑だったか) (#496)。
+# branch protection API (`administration:read`) は**使わない** — 設定の記述ではなく
+# 検証済みであることの証拠そのものを見る設計のため、昇格した権限が不要になっている。
 permissions:
   contents: read
+  pull-requests: read
+  checks: read
+  actions: read
 
 # 実行範囲の判定方針 (#491)
 # Actions の課金は **job ごとに分単位へ切り上げ**られるため、判定用の軽量 job + 集約 gate job を
@@ -69,6 +76,13 @@ jobs:
           SCOPE_REF: ${{ github.ref }}
           SCOPE_BASE_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
           SCOPE_HEAD_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+          # マージ後 push のスキップ前提を実行時に検証するための入力 (#496)。
+          # `SCOPE_CHECK_NAME` は **この job 自身の name**。PR 側で「この job が緑だった」
+          # ことを確認するため、job の name を変えたらここも必ず追随させる
+          # (src/test/ci-workflow.test.ts が一致を固定する)。
+          SCOPE_FORCED: ${{ github.event.forced }}
+          SCOPE_CHECK_NAME: lint / typecheck / format / test / build
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: node .github/scripts/verification-scope.mjs
 
       - name: Setup pnpm
@@ -222,6 +236,13 @@ jobs:
           SCOPE_REF: ${{ github.ref }}
           SCOPE_BASE_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
           SCOPE_HEAD_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+          # マージ後 push のスキップ前提を実行時に検証するための入力 (#496)。
+          # `SCOPE_CHECK_NAME` は **この job 自身の name**。PR 側で「この job が緑だった」
+          # ことを確認するため、job の name を変えたらここも必ず追随させる
+          # (src/test/ci-workflow.test.ts が一致を固定する)。
+          SCOPE_FORCED: ${{ github.event.forced }}
+          SCOPE_CHECK_NAME: E2E (Playwright)
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: node .github/scripts/verification-scope.mjs
 
       - name: Setup pnpm
