@@ -138,13 +138,20 @@ test.describe("PWAオフライン動作(#292)", () => {
       () => navigator.serviceWorker?.controller != null,
     );
 
-    const rscContentType = await page.evaluate(async () => {
-      const response = await fetch("/game?_rsc=cache-integrity-repro", {
-        headers: { RSC: "1" },
-      });
-      return response.headers.get("content-type");
-    });
-    expect(rscContentType).toContain("text/x-component");
+    // Next の RSC query/header は内部プロトコルであり、手作りするとバージョン更新時に
+    // 正規化 redirect の対象になり得る。実際の <Link> 遷移が生成する RSC request で
+    // runtime cache を汚染しないことを確認する。
+    const rscResponsePromise = page.waitForResponse(
+      (response) =>
+        new URL(response.url()).pathname === "/" &&
+        response.url().includes("_rsc=") &&
+        response.headers()["content-type"]?.includes("text/x-component"),
+    );
+    await page.getByRole("link", { name: "ロビーへ戻る" }).click();
+    const rscResponse = await rscResponsePromise;
+    expect(rscResponse.ok()).toBe(true);
+    await page.getByRole("link", { name: /対局を開始/ }).click();
+    await expect(page.getByRole("heading", { name: "対局画面" })).toBeVisible();
 
     const cachedDocumentType = await page.evaluate(async () => {
       const keys = await caches.keys();
@@ -157,7 +164,7 @@ test.describe("PWAオフライン動作(#292)", () => {
 
     await context.setOffline(true);
     await page.reload();
-    await expect(page.getByRole("heading", { name: "対局" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "対局画面" })).toBeVisible();
     await context.setOffline(false);
   });
 });
