@@ -15,8 +15,11 @@ import {
   changedPaths,
   classifyPath,
   DOCUMENTATION_EXCEPTIONS,
+  EVIDENCE_IO_TIMEOUT_MS,
+  githubApi,
   resolvePostMergeEvidence,
   resolveScope,
+  runGit,
 } from "../../.github/scripts/verification-scope.mjs";
 import playwrightConfig from "../../playwright.config";
 
@@ -32,6 +35,7 @@ type Step = {
 
 type Workflow = {
   concurrency?: { group?: string; "cancel-in-progress"?: unknown };
+  permissions?: Record<string, string>;
   jobs?: Record<
     string,
     { name?: string; "timeout-minutes"?: unknown; steps?: Step[] }
@@ -913,6 +917,7 @@ describe("マージ後 push のスキップ前提を実行時に検証する (#4
     overrides: {
       pulls?: unknown;
       checkRuns?: unknown;
+      workflowRun?: unknown;
       apiError?: string;
       gitFails?: string;
       trees?: Record<string, string>;
@@ -929,9 +934,20 @@ describe("マージ後 push のスキップ前提を実行時に検証する (#4
     ];
     const checkRuns = overrides.checkRuns ?? {
       check_runs: [
-        { name: CHECK, conclusion: "success" },
+        {
+          name: CHECK,
+          conclusion: "success",
+          app: { slug: "github-actions" },
+          details_url: "https://github.com/owner/repo/actions/runs/123/job/456",
+        },
         { name: "gitleaks", conclusion: "success" },
       ],
+    };
+    const workflowRun = overrides.workflowRun ?? {
+      event: "pull_request",
+      path: ".github/workflows/ci.yml",
+      head_sha: HEAD,
+      conclusion: "success",
     };
     const trees = overrides.trees ?? { [SHA]: "tree1", [HEAD]: "tree1" };
 
@@ -940,7 +956,8 @@ describe("マージ後 push のスキップ前提を実行時に検証する (#4
         throw new Error("boom");
       }
       if (path.endsWith("/pulls")) return pulls;
-      if (path.endsWith("/check-runs")) return checkRuns;
+      if (path.includes("/check-runs?")) return checkRuns;
+      if (path.endsWith("/actions/runs/123")) return workflowRun;
       throw new Error(`unexpected path ${path}`);
     };
     const git = (args: string[]) => {
@@ -1063,6 +1080,12 @@ describe("マージ後 push のスキップ前提を実行時に検証する (#4
       "check-runs-api-failed",
     ],
     [
+      "workflow run API が timeout / 失敗",
+      { apiError: "/actions/runs" },
+      {},
+      "check-runs-api-failed",
+    ],
+    [
       "check-runs の形が不正",
       { checkRuns: {} },
       {},
@@ -1080,13 +1103,33 @@ describe("マージ後 push のスキップ前提を実行時に検証する (#4
     ],
     [
       "この job の check run が失敗している",
-      { checkRuns: { check_runs: [{ name: CHECK, conclusion: "failure" }] } },
+      {
+        checkRuns: {
+          check_runs: [
+            {
+              name: CHECK,
+              conclusion: "failure",
+              app: { slug: "github-actions" },
+            },
+          ],
+        },
+      },
       {},
       "own-check-run-not-successful",
     ],
     [
       "この job の check run が未完了",
-      { checkRuns: { check_runs: [{ name: CHECK, conclusion: null }] } },
+      {
+        checkRuns: {
+          check_runs: [
+            {
+              name: CHECK,
+              conclusion: null,
+              app: { slug: "github-actions" },
+            },
+          ],
+        },
+      },
       {},
       "own-check-run-not-successful",
     ],
@@ -1126,13 +1169,131 @@ describe("マージ後 push のスキップ前提を実行時に検証する (#4
     const result = await call({
       checkRuns: {
         check_runs: [
-          { name: CHECK, conclusion: "success" },
-          { name: CHECK, conclusion: "failure" },
+          {
+            name: CHECK,
+            conclusion: "success",
+            app: { slug: "github-actions" },
+            details_url: "https://github.com/o/r/actions/runs/123/job/1",
+          },
+          {
+            name: CHECK,
+            conclusion: "failure",
+            app: { slug: "github-actions" },
+          },
         ],
       },
     });
     expect(result.skip).toBe(false);
     expect(result.reason).toBe("own-check-run-not-successful");
+  });
+
+  it.each([
+    [
+      "別 App の同名 check",
+      {
+        checkRuns: {
+          check_runs: [
+            {
+              name: CHECK,
+              conclusion: "success",
+              app: { slug: "third-party" },
+              details_url: "https://github.com/o/r/actions/runs/123/job/1",
+            },
+          ],
+        },
+      },
+    ],
+    [
+      "別 workflow",
+      {
+        workflowRun: {
+          event: "pull_request",
+          path: ".github/workflows/other.yml",
+          head_sha: HEAD,
+          conclusion: "success",
+        },
+      },
+    ],
+    [
+      "push event",
+      {
+        workflowRun: {
+          event: "push",
+          path: ".github/workflows/ci.yml",
+          head_sha: HEAD,
+          conclusion: "success",
+        },
+      },
+    ],
+    [
+      "別 head",
+      {
+        workflowRun: {
+          event: "pull_request",
+          path: ".github/workflows/ci.yml",
+          head_sha: "d".repeat(40),
+          conclusion: "success",
+        },
+      },
+    ],
+  ])("%s の成功は当 job の証拠として扱わない", async (_label, overrides) => {
+    expect(await call(overrides)).toEqual({
+      skip: false,
+      reason: "own-check-run-not-successful",
+    });
+  });
+
+  it("check-runs を 100 件要求し pagination による見落としを防ぐ", async () => {
+    const paths: string[] = [];
+    const dependencies = happyPath();
+    await resolvePostMergeEvidence({
+      repo: REPO,
+      sha: SHA,
+      before: BEFORE,
+      forced: false,
+      branch: "main",
+      checkName: CHECK,
+      api: async (path) => {
+        paths.push(path);
+        return dependencies.api(path);
+      },
+      git: dependencies.git,
+    });
+    expect(paths).toContain(
+      `/repos/${REPO}/commits/${HEAD}/check-runs?per_page=100`,
+    );
+  });
+});
+
+describe("マージ後証拠の外部 I/O timeout (#496)", () => {
+  it("GitHub API fetch に短い AbortSignal timeout を渡す", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue({ ok: true, json: async () => [] });
+    const timeoutMock = vi.fn().mockReturnValue({ aborted: false });
+    vi.stubEnv("GITHUB_TOKEN", "test-token");
+    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal("AbortSignal", { timeout: timeoutMock });
+    try {
+      await githubApi("/test");
+      expect(timeoutMock).toHaveBeenCalledWith(EVIDENCE_IO_TIMEOUT_MS);
+      expect(fetchMock.mock.calls[0]?.[1]?.signal).toBe(
+        timeoutMock.mock.results[0]?.value,
+      );
+    } finally {
+      vi.unstubAllGlobals();
+      vi.unstubAllEnvs();
+    }
+  });
+
+  it("git/ref fetch に同じ bounded timeout を渡す", () => {
+    const exec = vi.fn().mockReturnValue("");
+    runGit(["fetch", "origin", "refs/pull/1/head"], exec);
+    expect(exec).toHaveBeenCalledWith(
+      "git",
+      ["fetch", "origin", "refs/pull/1/head"],
+      expect.objectContaining({ timeout: EVIDENCE_IO_TIMEOUT_MS }),
+    );
   });
 });
 
@@ -1143,6 +1304,15 @@ describe("マージ後 push のスキップ前提を実行時に検証する (#4
  * 静かに効果だけ失う変更なので設定側で固定する (#496)。
  */
 describe("ガードが参照する check 名が job 名と一致する (#496)", () => {
+  it("証拠 API は read-only の必要権限だけを持つ", () => {
+    expect(readWorkflowFile("ci.yml").permissions).toEqual({
+      contents: "read",
+      "pull-requests": "read",
+      checks: "read",
+      actions: "read",
+    });
+  });
+
   it("SCOPE_CHECK_NAME は job の name と完全一致する", () => {
     const workflow = readWorkflowFile("ci.yml");
     let checked = 0;
@@ -1283,8 +1453,24 @@ describe("マージ後ガードの git 操作が実物で動く (#496)", () => {
             head: { sha: repo.pullHead },
           },
         ];
-      if (path.endsWith("/check-runs"))
-        return { check_runs: [{ name: checkName, conclusion: "success" }] };
+      if (path.includes("/check-runs?"))
+        return {
+          check_runs: [
+            {
+              name: checkName,
+              conclusion: "success",
+              app: { slug: "github-actions" },
+              details_url: "https://github.com/o/r/actions/runs/123/job/456",
+            },
+          ],
+        };
+      if (path.endsWith("/actions/runs/123"))
+        return {
+          event: "pull_request",
+          path: ".github/workflows/ci.yml",
+          head_sha: repo.pullHead,
+          conclusion: "success",
+        };
       throw new Error(`unexpected ${path}`);
     };
   }

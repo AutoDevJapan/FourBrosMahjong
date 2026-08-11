@@ -138,6 +138,13 @@ export function resolveScope({ job, paths, postMergeDuplicate }) {
 
 export const SCOPE_OUTPUT_KEYS = /** @type {const} */ (["setup", "verify"]);
 
+/** API / ref 取得が job 全体の timeout まで居座らないための上限。 */
+export const EVIDENCE_IO_TIMEOUT_MS = 15_000;
+
+/** 成功 check をこのワークフローの PR run に束縛する。 */
+const TRUSTED_CHECK_APP = "github-actions";
+const TRUSTED_WORKFLOW_PATH = ".github/workflows/ci.yml";
+
 /**
  * この PR / push が持ち込んだ変更ファイルを取得する。
  * 特定できなければ `null` を返し、呼び出し側でフェイルオープンさせる。
@@ -273,7 +280,9 @@ export async function resolvePostMergeEvidence({
   /** @type {any} */
   let checks;
   try {
-    checks = await api(`/repos/${repo}/commits/${headSha}/check-runs`);
+    checks = await api(
+      `/repos/${repo}/commits/${headSha}/check-runs?per_page=100`,
+    );
   } catch {
     return { skip: false, reason: "check-runs-api-failed" };
   }
@@ -282,8 +291,37 @@ export async function resolvePostMergeEvidence({
     return { skip: false, reason: "check-runs-response-invalid" };
   const own = runs.filter((run) => run?.name === checkName);
   if (own.length === 0) return { skip: false, reason: "own-check-run-missing" };
-  if (!own.every((run) => run?.conclusion === "success"))
+  if (
+    !own.every(
+      (run) =>
+        run?.conclusion === "success" && run?.app?.slug === TRUSTED_CHECK_APP,
+    )
+  )
     return { skip: false, reason: "own-check-run-not-successful" };
+
+  // 名前と app だけでは、同じ repository の別 workflow が作った check を区別できない。
+  // details URL から Actions run を引き、その run がこの workflow の pull_request 実行で
+  // 同じ head SHA を検証したことまで確認する。
+  for (const run of own) {
+    const match = String(run?.details_url ?? "").match(
+      /\/actions\/runs\/(\d+)(?:\/job\/\d+)?(?:[/?#]|$)/,
+    );
+    if (!match) return { skip: false, reason: "own-check-run-not-successful" };
+    /** @type {any} */
+    let workflowRun;
+    try {
+      workflowRun = await api(`/repos/${repo}/actions/runs/${match[1]}`);
+    } catch {
+      return { skip: false, reason: "check-runs-api-failed" };
+    }
+    if (
+      workflowRun?.event !== "pull_request" ||
+      workflowRun?.path !== TRUSTED_WORKFLOW_PATH ||
+      workflowRun?.head_sha !== headSha ||
+      workflowRun?.conclusion !== "success"
+    )
+      return { skip: false, reason: "own-check-run-not-successful" };
+  }
 
   // PR head の commit は merge 後も `refs/pull/N/head` で取得できる
   // (`refs/pull/N/merge` は merge 時に削除されるため使えない)。
@@ -314,11 +352,12 @@ export async function resolvePostMergeEvidence({
 }
 
 /** `resolvePostMergeEvidence` に渡す既定の GitHub REST 呼び出し。 */
-async function githubApi(/** @type {string} */ path) {
+export async function githubApi(/** @type {string} */ path) {
   const token = process.env.GITHUB_TOKEN;
   if (!token) throw new Error("GITHUB_TOKEN is not available");
   const base = process.env.GITHUB_API_URL || "https://api.github.com";
   const response = await fetch(`${base}${path}`, {
+    signal: AbortSignal.timeout(EVIDENCE_IO_TIMEOUT_MS),
     headers: {
       accept: "application/vnd.github+json",
       authorization: `Bearer ${token}`,
@@ -331,10 +370,15 @@ async function githubApi(/** @type {string} */ path) {
 }
 
 /** `resolvePostMergeEvidence` に渡す既定の git 実行。 */
-function runGit(/** @type {string[]} */ args) {
-  return execFileSync("git", args, {
+export function runGit(
+  /** @type {string[]} */ args,
+  /** @type {typeof execFileSync} */ exec = execFileSync,
+) {
+  return exec("git", args, {
     encoding: "utf8",
     maxBuffer: 32 * 1024 * 1024,
+    timeout: EVIDENCE_IO_TIMEOUT_MS,
+    stdio: ["ignore", "pipe", "pipe"],
   });
 }
 

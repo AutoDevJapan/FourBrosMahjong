@@ -15,14 +15,15 @@ concurrency:
   cancel-in-progress: true
 
 # 最小権限の原則。いずれも read のみ。
-# `pull-requests` / `checks` は、マージ後 push のスキップ前提を実行時に検証するために要る
-# (この commit がマージ済み PR 由来か / その PR で当 job の check が緑だったか) (#496)。
+# `pull-requests` / `checks` / `actions` は、マージ後 push のスキップ前提を実行時に検証するために要る
+# (マージ済み PR 由来か / 当 job の check と元の workflow run が緑だったか) (#496)。
 # branch protection API (`administration:read`) は**使わない** — 設定の記述ではなく
 # 検証済みであることの証拠そのものを見る設計のため、昇格した権限が不要になっている。
 permissions:
   contents: read
   pull-requests: read
   checks: read
+  actions: read
 
 # 実行範囲の判定方針 (#491)
 # Actions の課金は **job ごとに分単位へ切り上げ**られるため、判定用の軽量 job + 集約 gate job を
