@@ -27,6 +27,7 @@
 
 ### Changed
 
+- `v*` Release tag 保護の担当ロール、ruleset 設定、正常/拒否検証、break-glass、tag を改変しない新 version rollback の runbook を追加。外部 ruleset と担当 Team は未決定・未適用であることも明記 (#508)。
 - `docs/デプロイ環境運用.md` をインフラ実態に合わせて更新。バックエンド(Railway)の位置づけとカスタムドメイン公開の節を追加し、`config.godd` / `AGENTS.md` のスタック定義と整合 (#69)。
 
 ### Fixed
