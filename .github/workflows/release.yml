@@ -18,6 +18,13 @@ on:
     tags:
       - "v*"
 
+# 同じタグへの再 push (タグ付け直し) で二重に Release を作らないよう、タグ単位で直列化する。
+# `cancel-in-progress` は **false**。Release 作成は途中で中断すると「タグはあるが Release が無い」
+# 中途半端な状態を残すため、CI と違って進行中の実行は必ず完走させる (#491)。
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
 # GITHUB_TOKEN に必要最小限の権限のみを付与 (Release/タグ作成に contents: write が必要)。
 permissions:
   contents: write
@@ -26,6 +33,9 @@ jobs:
   release:
     name: Create GitHub Release
     runs-on: ubuntu-latest
+    # 異常時に既定の6時間まで runner を占有させない (#491)。
+    # 実処理は checkout と Release 作成 API のみで通常 1 分未満。
+    timeout-minutes: 10
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

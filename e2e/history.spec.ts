@@ -131,10 +131,14 @@ test.describe("戦績のローカル保存・閲覧(#293)", () => {
 
     // 「起きないこと」の確認なので固定時間だけ待つ。lock 外で削除していた頃は
     // クリック直後(数ms)に消えるため、この待機で確実に赤くなる。
-    await viewer.waitForTimeout(500);
-    expect(
-      await viewer.evaluate((key) => localStorage.getItem(key), HISTORY_KEY),
-    ).not.toBeNull();
+    // クリックから解放までは上限時間(`HISTORY_LOCK_TIMEOUT_MS` = 3,000ms / #488)以内に
+    // 収める必要がある ─ 超えると解放を待たずに削除が失敗し、この後の「解放すると
+    // 実行される」検証が壊れる。待機を短くし、往復の多い evaluate は解放後へ回す。
+    await viewer.waitForTimeout(300);
+    // 待機中であることが利用者に伝わる(押しっぱなしの無反応画面にしない / #488)。
+    await expect(
+      viewer.getByRole("button", { name: "削除しています…" }),
+    ).toHaveAttribute("aria-disabled", "true");
     await expect(items).toHaveCount(1);
     await expect(
       viewer.getByText("保存された戦績はまだありません", { exact: false }),
@@ -156,6 +160,81 @@ test.describe("戦績のローカル保存・閲覧(#293)", () => {
     expect(
       await viewer.evaluate((key) => localStorage.getItem(key), HISTORY_KEY),
     ).toBeNull();
+    // 上限時間で打ち切られていた場合の失敗案内が出ていないこと(= 待って実行された)。
+    await expect(viewer.getByText(/削除できませんでした/)).toHaveCount(0);
+  });
+
+  test("別タブがlockを解放しなければ上限時間で削除失敗を案内する(#488)", async ({
+    context,
+  }) => {
+    // 実ブラウザの Web Locks を保持したまま解放しない = #482 の E2E から解放だけを
+    // 省いた状況。上限時間(3,000ms)が無かった頃は永久に待ち続けた。
+    const holder = await context.newPage();
+    await holder.goto("/");
+    await holder.evaluate(
+      (lock) =>
+        new Promise<void>((acquired) => {
+          navigator.locks.request(lock, () => {
+            acquired();
+            // 解放しない(このページが閉じられるまで保持し続ける)。
+            return new Promise<void>(() => {});
+          });
+        }),
+      HISTORY_LOCK,
+    );
+
+    const viewer = await context.newPage();
+    await viewer.addInitScript(
+      ({ key, value }) => localStorage.setItem(key, value),
+      { key: HISTORY_KEY, value: SAVED_HISTORY },
+    );
+    await viewer.goto("/history");
+    await viewer.getByRole("button", { name: "戦績をすべて削除" }).click();
+    await viewer.getByRole("button", { name: "削除する" }).click();
+
+    // 上限時間経過後、原因(他タブ)を案内して操作可能な状態へ戻る。
+    await expect(
+      viewer.getByRole("status").filter({ hasText: "他のタブが戦績を更新中" }),
+    ).toBeVisible({ timeout: 15_000 });
+    await expect(
+      viewer.getByRole("button", { name: "削除する" }),
+    ).toBeVisible();
+    // 排他できていないので履歴は残したまま(#482 の fail-closed)。
+    expect(
+      await viewer.evaluate((key) => localStorage.getItem(key), HISTORY_KEY),
+    ).not.toBeNull();
+  });
+
+  test("Web Locksが使えない環境でも保存済み戦績を削除できる(#489)", async ({
+    page,
+  }) => {
+    // 非セキュアコンテキスト(平文 http)では `navigator.locks` が存在しない。
+    // 同じオリジンでは追記も必ず失敗するため、削除だけ lock 無しで実行する(ADR-0004)。
+    await page.addInitScript(
+      ({ key, value }) => {
+        localStorage.setItem(key, value);
+        Reflect.deleteProperty(Navigator.prototype, "locks");
+        Object.defineProperty(navigator, "locks", {
+          configurable: true,
+          get: () => undefined,
+        });
+      },
+      { key: HISTORY_KEY, value: SAVED_HISTORY },
+    );
+    await page.goto("/history");
+    expect(await page.evaluate(() => navigator.locks)).toBeFalsy();
+
+    await page.getByRole("button", { name: "戦績をすべて削除" }).click();
+    await page.getByRole("button", { name: "削除する" }).click();
+
+    await expect(
+      page.getByText("保存された戦績はまだありません", { exact: false }),
+    ).toBeVisible();
+    expect(
+      await page.evaluate((key) => localStorage.getItem(key), HISTORY_KEY),
+    ).toBeNull();
+    // 「ブラウザの設定を確認してください」という誤案内(#489)を出さない。
+    await expect(page.getByText(/削除できませんでした/)).toHaveCount(0);
   });
 
   for (const failure of ["SecurityError", "QuotaExceededError"] as const) {

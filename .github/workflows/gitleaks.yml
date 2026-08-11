@@ -25,6 +25,8 @@ jobs:
   gitleaks:
     name: gitleaks
     runs-on: ubuntu-latest
+    # 異常時に既定の6時間まで runner を占有させない (#491)。実測は常に 10 秒前後。
+    timeout-minutes: 10
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

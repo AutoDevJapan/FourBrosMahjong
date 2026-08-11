@@ -127,6 +127,9 @@ describe("MatchHistoryList (#293)", () => {
       screen.getByText(/保存されているすべての戦績.*を削除します/),
     ).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "削除する" }));
+    // lock が空いていれば削除はミリ秒で終わる。進行中を即座に読み上げると
+    // `role="status"` が1フレームに2回更新される(スペック5 5.2.3 / #488)。
+    expect(screen.getByRole("status").textContent).toBe("");
 
     await waitFor(() =>
       expect(window.localStorage.getItem(MATCH_HISTORY_KEY)).toBeNull(),
@@ -188,8 +191,9 @@ describe("MatchHistoryList (#293)", () => {
     expect(
       screen.getByRole("list", { name: "保存された半荘結果" }),
     ).toBeInTheDocument();
+    // 原因はストレージ操作の失敗。接続方式(#489)ではなくストレージ設定を案内する。
     expect(
-      await screen.findByText(/この端末では戦績を削除できませんでした/),
+      await screen.findByText(/この端末のストレージを操作できず/),
     ).toBeInTheDocument();
     // 確認UIは畳まない。畳むと押したボタンが消え、フォーカスが body へ落ちる。
     expect(confirmButton).toBeInTheDocument();
@@ -197,10 +201,35 @@ describe("MatchHistoryList (#293)", () => {
     expect(document.body).not.toHaveFocus();
   });
 
-  it("Web Locksが使えない環境では削除成功と読み上げない(#482)", async () => {
+  it("Web Locksが無い環境(平文http)でも削除できる(#489 / ADR-0004)", async () => {
     appendHistory(window.localStorage, entry(1, 1_753_000_000_000));
-    // secure context 外など `navigator.locks` が無い環境。排他できないため削除しない。
+    // secure context 外では `navigator.locks` が存在しない。同じオリジンでは追記も
+    // 必ず失敗する = 書き戻す writer が居ないため、削除は lock 無しで実行する。
     Reflect.deleteProperty(navigator, "locks");
+
+    render(<MatchHistoryList />);
+    fireEvent.click(
+      await screen.findByRole("button", { name: "戦績をすべて削除" }),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "削除する" }));
+
+    expect(
+      await screen.findByText(/保存された戦績はまだありません/),
+    ).toBeInTheDocument();
+    expect(window.localStorage.getItem(MATCH_HISTORY_KEY)).toBeNull();
+    expect(
+      screen.getByText("保存されていた戦績をすべて削除しました。"),
+    ).toBeInTheDocument();
+    // 削除失敗の案内(#489 で誤案内だった文面を含む)は一切出さない。
+    expect(screen.queryByText(/削除できませんでした/)).toBeNull();
+  });
+
+  it("別タブがlockを保持している場合は原因を他タブとして案内する(#488/#489)", async () => {
+    appendHistory(window.localStorage, entry(1, 1_753_000_000_000));
+    // 上限時間まで待っても取得できなかった場合と同じ経路(request が中断で失敗する)。
+    stubWebLocks(() =>
+      Promise.reject(new DOMException("timed out", "TimeoutError")),
+    );
 
     render(<MatchHistoryList />);
     fireEvent.click(
@@ -212,9 +241,9 @@ describe("MatchHistoryList (#293)", () => {
     fireEvent.click(confirmButton);
 
     expect(
-      await screen.findByText(/この端末では戦績を削除できませんでした/),
+      await screen.findByText(/他のタブが戦績を更新中/),
     ).toBeInTheDocument();
-    // 保存も一覧もそのまま残る。「削除しました」と読み上げてはいけない。
+    // 排他できていないので保存も一覧もそのまま残る(#482 の fail-closed)。
     expect(window.localStorage.getItem(MATCH_HISTORY_KEY)).not.toBeNull();
     expect(
       screen.getByRole("list", { name: "保存された半荘結果" }),
@@ -224,6 +253,78 @@ describe("MatchHistoryList (#293)", () => {
     ).not.toBeInTheDocument();
     // 成功時と同じフォーカス契約 ─ 確認UIは畳まず、body へ落とさない。
     expect(confirmButton).toHaveFocus();
+  });
+
+  it("削除の待機中は進行中を伝え、連打しても要求を積み上げない(#488)", async () => {
+    appendHistory(window.localStorage, entry(1, 1_753_000_000_000));
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let requests = 0;
+    // 別タブが lock を保持していて、取得までに時間が掛かる状況。
+    stubWebLocks(async (_name, _options, callback) => {
+      requests++;
+      await held;
+      return callback();
+    });
+
+    render(<MatchHistoryList />);
+    fireEvent.click(
+      await screen.findByRole("button", { name: "戦績をすべて削除" }),
+    );
+    const confirmButton = screen.getByRole("button", { name: "削除する" });
+    // 実ブラウザではクリック時にボタンへフォーカスが載る(jsdom は載せない)。
+    confirmButton.focus();
+    fireEvent.click(confirmButton);
+
+    // 視覚(ラベル)は即座に、読み上げ(role="status")は待たされたときだけ伝える。
+    // 「まだ読み上げていない」判定は猶予(150ms)との実時間レースになるため、
+    // 非同期クエリを挟まずクリック直後に同期で確かめる。
+    expect(screen.getByRole("status").textContent).toBe("");
+    const busy = screen.getByRole("button", { name: "削除しています…" });
+    expect(
+      await screen.findByText("戦績を削除しています…"),
+    ).toBeInTheDocument();
+    // 操作不能は aria-disabled で表す。`disabled` にすると押した瞬間にフォーカスが
+    // body へ落ちるため(削除後の着地点まで文脈が途切れる)。
+    expect(busy).toHaveAttribute("aria-disabled", "true");
+    expect(busy).toHaveFocus();
+
+    fireEvent.click(busy);
+    fireEvent.click(busy);
+    expect(requests).toBe(1);
+
+    // 待機中のキャンセルも効かない ─ 確認UIを畳むとフォーカスの行き先が無くなる。
+    fireEvent.click(screen.getByRole("button", { name: "キャンセル" }));
+    expect(
+      screen.getByRole("button", { name: "削除しています…" }),
+    ).toBeInTheDocument();
+
+    release();
+    expect(
+      await screen.findByText(/保存された戦績はまだありません/),
+    ).toBeInTheDocument();
+    expect(document.body).not.toHaveFocus();
+  });
+
+  it("通知は読み上げ専用にせず、目でも読める形で表示する(#488)", async () => {
+    appendHistory(window.localStorage, entry(1, 1_753_000_000_000));
+    stubWebLocks(() =>
+      Promise.reject(new DOMException("timed out", "TimeoutError")),
+    );
+
+    render(<MatchHistoryList />);
+    // メッセージが無い間は読み上げ用に常設するだけ(視覚的には出さない)。
+    expect(await screen.findByRole("status")).toHaveClass("sr-only");
+
+    fireEvent.click(screen.getByRole("button", { name: "戦績をすべて削除" }));
+    fireEvent.click(screen.getByRole("button", { name: "削除する" }));
+
+    await screen.findByText(/他のタブが戦績を更新中/);
+    // 削除失敗は一覧の見た目を変えないため、sr-only のままだと晴眼の利用者へ
+    // まったく伝わらない。
+    expect(screen.getByRole("status")).not.toHaveClass("sr-only");
   });
 
   it("全件削除後はフォーカスを空状態へ移し、bodyへ落とさない", async () => {
@@ -247,7 +348,7 @@ describe("MatchHistoryList (#293)", () => {
     appendHistory(window.localStorage, entry(1, 1_753_000_000_000));
     // 削除の lock を解放した直後に別タブの終局保存が入り、一覧が再び描かれる状況。
     // 空状態が存在しないため、着地点が無いとフォーカスは <body> へ落ちる。
-    stubWebLocks(async (_name, callback) => {
+    stubWebLocks(async (_name, _options, callback) => {
       const result = await callback();
       appendHistory(window.localStorage, entry(2, 1_753_100_000_000, "二郎"));
       return result;
