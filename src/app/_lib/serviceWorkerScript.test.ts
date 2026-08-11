@@ -121,7 +121,7 @@ function bootServiceWorker({ version = "v1" } = {}) {
     const url = new URL(String(input), ORIGIN);
     return PRECACHE_ROUTES.includes(url.pathname)
       ? htmlResponse("ok")
-      : new Response("ok");
+      : staticAssetResponse(url.pathname);
   });
   const cacheStorage = new FakeCacheStorage(() => fetchImpl);
   const listeners = new Map<string, (event: unknown) => void>();
@@ -179,6 +179,16 @@ function buildAssetResponse(pathname: string, body = "asset"): Response {
     : pathname.endsWith(".woff2")
       ? "font/woff2"
       : "application/javascript";
+  return new Response(body, { headers: { "Content-Type": contentType } });
+}
+
+function staticAssetResponse(pathname: string, body = "asset"): Response {
+  const contentType =
+    pathname === "/manifest.webmanifest"
+      ? "application/manifest+json"
+      : pathname === "/icons/icon-192" || pathname === "/icons/icon-512"
+        ? "image/png"
+        : "image/svg+xml";
   return new Response(body, { headers: { "Content-Type": contentType } });
 }
 
@@ -244,6 +254,9 @@ describe("buildServiceWorkerScript", () => {
           <script src="/api/not-a-build-asset"></script>
         `);
       }
+      if (PRECACHE_ASSETS.includes(url.pathname)) {
+        return staticAssetResponse(url.pathname, `asset:${url.pathname}`);
+      }
       return buildAssetResponse(url.pathname, `asset:${url.pathname}`);
     });
     sw.setFetchImpl(fetchSpy as typeof fetch);
@@ -287,7 +300,7 @@ describe("buildServiceWorkerScript", () => {
             headers: { "Content-Type": "application/javascript" },
           });
         }
-        return new Response("asset");
+        return staticAssetResponse(url.pathname);
       }),
     );
 
@@ -310,7 +323,7 @@ describe("buildServiceWorkerScript", () => {
         }
         return PRECACHE_ROUTES.includes(url.pathname)
           ? htmlResponse("shell")
-          : new Response("asset");
+          : staticAssetResponse(url.pathname);
       }),
     );
 
@@ -333,12 +346,32 @@ describe("buildServiceWorkerScript", () => {
         if (url.pathname.endsWith("app.js")) {
           return htmlResponse("login fallback");
         }
-        return new Response("asset");
+        return staticAssetResponse(url.pathname);
       }),
     );
 
     await expect(sw.dispatchLifecycle("install")).rejects.toThrow(
       "Invalid precached build asset response",
+    );
+    expect(sw.cacheStorage.caches.has("fbm-precache-v1")).toBe(false);
+  });
+
+  it("固定素材が2xxでもMIME不一致ならinstallを失敗させ部分cacheを削除する", async () => {
+    const sw = bootServiceWorker();
+    sw.setFetchImpl(
+      vi.fn(async (input) => {
+        const url = new URL(String(input), ORIGIN);
+        if (url.pathname === "/tiles/Back.svg") {
+          return htmlResponse("hosting fallback");
+        }
+        return PRECACHE_ROUTES.includes(url.pathname)
+          ? htmlResponse("shell")
+          : staticAssetResponse(url.pathname);
+      }),
+    );
+
+    await expect(sw.dispatchLifecycle("install")).rejects.toThrow(
+      "Invalid precached static asset response: /tiles/Back.svg",
     );
     expect(sw.cacheStorage.caches.has("fbm-precache-v1")).toBe(false);
   });
@@ -465,7 +498,14 @@ describe("buildServiceWorkerScript", () => {
 
   it("既知routeのRSC取得後もcanonical HTML cacheを維持してoffline navigationへ返す(#355)", async () => {
     const sw = bootServiceWorker();
-    sw.setFetchImpl(vi.fn(async () => htmlResponse("precached-html")));
+    sw.setFetchImpl(
+      vi.fn(async (input) => {
+        const url = new URL(String(input), ORIGIN);
+        return PRECACHE_ROUTES.includes(url.pathname)
+          ? htmlResponse("precached-html")
+          : staticAssetResponse(url.pathname);
+      }),
+    );
     await sw.dispatchLifecycle("install");
 
     sw.setFetchImpl(vi.fn(async () => htmlResponse("fresh-html")));
@@ -510,7 +550,12 @@ describe("buildServiceWorkerScript", () => {
   it("オフラインのナビゲーションはプリキャッシュ済みHTMLで応答する(#292回帰防止)", async () => {
     const sw = bootServiceWorker();
     sw.setFetchImpl(
-      vi.fn(async (input) => htmlResponse(`precached:${String(input)}`)),
+      vi.fn(async (input) => {
+        const url = new URL(String(input), ORIGIN);
+        return PRECACHE_ROUTES.includes(url.pathname)
+          ? htmlResponse(`precached:${String(input)}`)
+          : staticAssetResponse(url.pathname);
+      }),
     );
     await sw.dispatchLifecycle("install");
     sw.setFetchImpl(OFFLINE);
@@ -526,7 +571,12 @@ describe("buildServiceWorkerScript", () => {
   it("オフラインで未キャッシュのパスへのナビゲーションは / へフォールバックする", async () => {
     const sw = bootServiceWorker();
     sw.setFetchImpl(
-      vi.fn(async (input) => htmlResponse(`precached:${String(input)}`)),
+      vi.fn(async (input) => {
+        const url = new URL(String(input), ORIGIN);
+        return PRECACHE_ROUTES.includes(url.pathname)
+          ? htmlResponse(`precached:${String(input)}`)
+          : staticAssetResponse(url.pathname);
+      }),
     );
     await sw.dispatchLifecycle("install");
     sw.setFetchImpl(OFFLINE);
