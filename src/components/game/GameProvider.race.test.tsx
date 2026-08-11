@@ -1,10 +1,12 @@
 // @vitest-environment jsdom
 
 import { fireEvent, render, screen } from "@testing-library/react";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import userEvent from "@testing-library/user-event";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { GameProvider, useGame } from "./GameProvider";
 import { loadJournal, replayJournal } from "./gamePersistence";
 import { selectView } from "./gameView";
+import Hand from "./Hand";
 import type { GameViewState } from "./types";
 
 function DoubleActionProbe() {
@@ -65,6 +67,7 @@ describe("GameProvider concurrent controls (#230)", () => {
   });
 
   afterEach(() => {
+    vi.restoreAllMocks();
     window.history.replaceState(null, "", "/");
   });
 
@@ -82,8 +85,7 @@ describe("GameProvider concurrent controls (#230)", () => {
       screen.getByTestId("live-view").textContent ?? "null",
     ) as GameViewState;
     expect(journal).not.toBeNull();
-    // 1回目の打牌後、同じ牌をもう一度指定する操作は engine が拒否するため
-    // 再生不能な no-op を journal へ記録しない。
+    // 1回目のaccepted transitionからcommitまで、Providerが追加操作を拒否する。
     expect(journal?.actions).toHaveLength(1);
     expect(liveView).toEqual(selectView(replayJournal(journal!)));
   });
@@ -97,6 +99,136 @@ describe("GameProvider concurrent controls (#230)", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "重複牌を連続操作" }));
 
+    expect(loadJournal(window.sessionStorage)?.actions).toHaveLength(1);
+  });
+
+  it("実Handへの別clickイベントから届くdouble clickでも次巡へ進めない", async () => {
+    const user = userEvent.setup();
+    function HandProbe() {
+      const { controls, view } = useGame();
+      const self = view.slots.self;
+      if (self.kind !== "seated" || !self.player.hand) return null;
+      return (
+        <Hand
+          tiles={self.player.hand}
+          onSelect={(_index, tile) => controls.discard(tile)}
+        />
+      );
+    }
+    render(
+      <GameProvider>
+        <HandProbe />
+      </GameProvider>,
+    );
+    const options = screen.getAllByRole("option");
+    const labels = options.map((option) => option.getAttribute("aria-label"));
+    const duplicateIndex = labels.findIndex(
+      (label, index) => labels.indexOf(label) !== index,
+    );
+    expect(duplicateIndex).toBeGreaterThanOrEqual(0);
+
+    await user.dblClick(options[duplicateIndex]);
+
+    expect(loadJournal(window.sessionStorage)?.actions).toHaveLength(1);
+  });
+
+  it("commit後は異なる正規操作を直ちに受け付ける", async () => {
+    const user = userEvent.setup();
+    function Probe() {
+      const { controls, pending, view } = useGame();
+      const self = view.slots.self;
+      if (self.kind !== "seated" || !self.player.hand?.[0]) return null;
+      return (
+        <button
+          type="button"
+          onClick={() => {
+            if (pending?.kind === "humanReact") controls.passRon();
+            else controls.discard(self.player.hand![0]);
+          }}
+        >
+          正規操作
+        </button>
+      );
+    }
+    render(
+      <GameProvider>
+        <Probe />
+      </GameProvider>,
+    );
+    await user.click(screen.getByRole("button", { name: "正規操作" }));
+    await user.click(screen.getByRole("button", { name: "正規操作" }));
+    expect(loadJournal(window.sessionStorage)?.actions).toHaveLength(2);
+  });
+
+  it("no-opはgateせず同じ描画中のvalid操作を受け付ける", () => {
+    function Probe() {
+      const { controls, view } = useGame();
+      const self = view.slots.self;
+      if (self.kind !== "seated" || !self.player.hand?.[0]) return null;
+      const tile = self.player.hand[0];
+      return (
+        <button
+          type="button"
+          onClick={() => {
+            controls.ron();
+            controls.discard(tile);
+          }}
+        >
+          no-op後
+        </button>
+      );
+    }
+    render(
+      <GameProvider>
+        <Probe />
+      </GameProvider>,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "no-op後" }));
+    expect(loadJournal(window.sessionStorage)?.actions).toHaveLength(1);
+  });
+
+  it("newGameの別click二重実行とaccepted action直後のstale newGameを共通gateで拒否する", async () => {
+    const user = userEvent.setup();
+    const random = vi.spyOn(globalThis.crypto, "getRandomValues");
+    function Probe() {
+      const { controls, view } = useGame();
+      const self = view.slots.self;
+      if (self.kind !== "seated" || !self.player.hand?.[0]) return null;
+      const tile = self.player.hand[0];
+      return (
+        <>
+          <button type="button" onClick={() => controls.newGame()}>
+            二重新規
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              controls.discard(tile);
+              controls.newGame();
+            }}
+          >
+            混在
+          </button>
+        </>
+      );
+    }
+    const first = render(
+      <GameProvider>
+        <Probe />
+      </GameProvider>,
+    );
+    await user.dblClick(screen.getByRole("button", { name: "二重新規" }));
+    expect(random).toHaveBeenCalledTimes(1);
+    first.unmount();
+    window.sessionStorage.clear();
+    random.mockClear();
+    render(
+      <GameProvider>
+        <Probe />
+      </GameProvider>,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "混在" }));
+    expect(random).not.toHaveBeenCalled();
     expect(loadJournal(window.sessionStorage)?.actions).toHaveLength(1);
   });
 });

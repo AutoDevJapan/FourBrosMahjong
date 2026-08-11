@@ -94,6 +94,21 @@ export interface GameContextValue {
 
 const GameContext = createContext<GameContextValue | null>(null);
 
+/** 同じ物理操作から届く連続clickを同一actionとして扱う上限。 */
+export const DUPLICATE_ACTION_WINDOW_MS = 500;
+
+function actionSignature(action: GameAction | { readonly type: "newGame" }) {
+  if (
+    action.type === "discard" ||
+    action.type === "riichi" ||
+    action.type === "ankan" ||
+    action.type === "kakan"
+  ) {
+    return `${action.type}:${action.tile.suit}:${action.tile.rank}`;
+  }
+  return action.type;
+}
+
 /**
  * 決定的再現用の乱数 seed を URL クエリ `?seed=<非負整数>` から読む(テスト専用フック)。
  *
@@ -263,9 +278,12 @@ export function GameProvider({ children, initialGame }: GameProviderProps) {
   const sessionRef = useRef(session);
   // 1回の描画で公開したUIから受け付ける遷移は1つだけにする。engine の1操作は
   // AI進行を含めて次の自家入力まで同期的に進み得るため、同じDOMへのダブルクリック等を
-  // sessionRef上で直列化すると、画面更新を挟まず次の手番の操作まで成立してしまう。
-  // React commit後は新しい盤面が利用者へ公開済みなので、次の入力を受け付ける。
+  // React commitまでは全操作を直列化する。commit後も同じ物理操作から届く
+  // 同一actionの連続clickだけは短時間拒否し、新しい盤面への異なる正規入力は即時許可する。
   const transitionPendingRef = useRef(false);
+  const lastAcceptedRef = useRef<{ signature: string; at: number } | null>(
+    null,
+  );
   const { engine } = session;
 
   useLayoutEffect(() => {
@@ -303,14 +321,32 @@ export function GameProvider({ children, initialGame }: GameProviderProps) {
   // 関数型 updater の中では実行しない。同期 ref 上で1度だけ遷移し、その確定値を state へ渡す。
   // ref は同一レンダー中の連続イベントにも即時反映され、engine と journal を同じ順序で進める。
   const controls = useMemo<GameControls>(() => {
+    const canAccept = (action: GameAction | { readonly type: "newGame" }) => {
+      if (transitionPendingRef.current) return false;
+      const signature = actionSignature(action);
+      const last = lastAcceptedRef.current;
+      return !(
+        last?.signature === signature &&
+        Date.now() - last.at < DUPLICATE_ACTION_WINDOW_MS
+      );
+    };
+    const markAccepted = (
+      action: GameAction | { readonly type: "newGame" },
+    ) => {
+      transitionPendingRef.current = true;
+      lastAcceptedRef.current = {
+        signature: actionSignature(action),
+        at: Date.now(),
+      };
+    };
     const commit = (action: GameAction) => {
-      if (transitionPendingRef.current) return;
+      if (!canAccept(action)) return;
       const { engine, journal } = sessionRef.current;
       const nextEngine = applyGameAction(engine, action);
       // engine が局面上不正な操作を同一 state の no-op として拒否した場合は、
       // 再生不能なイベントを journal に残さない。
       if (nextEngine === engine) return;
-      transitionPendingRef.current = true;
+      markAccepted(action);
       // この操作で半荘が終局したら、確定結果を戦績へ追記する(issue #293)。
       const historySaveStatus =
         nextEngine.phase === "gameEnd"
@@ -373,6 +409,8 @@ export function GameProvider({ children, initialGame }: GameProviderProps) {
       passRon: () => commit({ type: "passRon" }),
       nextRound: () => commit({ type: "nextRound" }),
       newGame: () => {
+        const action = { type: "newGame" } as const;
+        if (!canAccept(action)) return;
         const seed = freshSeed();
         const storage = sessionStorageOrNull();
         // 「もう一半荘」は新しい半荘の開始なので、設定で変更された名前をここで取り込む。
@@ -383,6 +421,7 @@ export function GameProvider({ children, initialGame }: GameProviderProps) {
           journal: nextJournal,
           historySaveStatus: "idle" as const,
         };
+        markAccepted(action);
         sessionRef.current = nextSession;
         if (storage !== null && nextJournal !== null)
           saveJournal(storage, nextJournal);
