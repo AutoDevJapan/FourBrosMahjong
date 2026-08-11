@@ -90,9 +90,15 @@ describe("GITHUB_TOKEN 生成PRのrequired checks", () => {
       step.run?.includes("gh workflow run"),
     );
     expect(trigger, "自動PRにrequired checksを作るstepが無い").toBeDefined();
-    expect(trigger?.run).toContain("gh workflow run gitleaks.yml");
-    expect(trigger?.run).toContain("gh workflow run ci.yml");
-    expect(trigger?.run).toContain("steps.existing.outputs.branch");
+    const dispatchLines =
+      trigger?.run
+        ?.split("\n")
+        .map((line) => line.trim())
+        .filter((line) => line.startsWith("gh workflow run")) ?? [];
+    expect(dispatchLines).toEqual([
+      'gh workflow run gitleaks.yml --ref "${{ steps.existing.outputs.branch }}"',
+      'gh workflow run ci.yml --ref "${{ steps.existing.outputs.branch }}"',
+    ]);
   });
 
   it("workflow_dispatchは同じrefのpush CIをキャンセルしない", () => {

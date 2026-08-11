@@ -88,7 +88,7 @@ jobs:
     runs-on: ubuntu-latest
     # 同上 (#491)。
     timeout-minutes: 10
-    # ブランチの push・PR 作成・gitleaks.yml の手動起動のために書き込み権限が必要。
+    # ブランチの push・PR 作成・gitleaks.yml と ci.yml の手動起動のために書き込み権限が必要。
     # このジョブ (バージョン差分が検出された場合のみ実行) に限定して付与する。
     permissions:
       contents: write
