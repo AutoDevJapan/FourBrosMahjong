@@ -65,6 +65,22 @@ test.describe("PWAオフライン動作(#292)", () => {
       "playing",
     );
     await expect(visibleHand(offlinePage).getByRole("option")).toHaveCount(14);
+
+    // SSR表示だけの偽陽性ではなく、hydrate済みのイベントハンドラと
+    // sessionStorageジャーナルがオフラインでも実際に進行することを固定する。
+    const playableTile = visibleHand(offlinePage)
+      .locator('[role="option"]:not([aria-disabled="true"])')
+      .first();
+    await playableTile.click();
+    await expect
+      .poll(() =>
+        offlinePage.evaluate(() => {
+          const raw = sessionStorage.getItem("four-bros-mahjong.game.v1");
+          return raw === null ? 0 : (JSON.parse(raw).actions?.length ?? 0);
+        }),
+      )
+      .toBeGreaterThan(0);
+    await expect(visibleHand(offlinePage).getByRole("option")).toHaveCount(14);
     await context.setOffline(false);
   });
 

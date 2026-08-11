@@ -74,7 +74,6 @@ export function resolveServiceWorkerVersion(
 
 /** 生成した SW スクリプト(JavaScript ソース文字列)を返す。 */
 export function buildServiceWorkerScript(version: string): string {
-  const precacheUrls = [...PRECACHE_ROUTES, ...PRECACHE_ASSETS];
   return `/* 四兄弟麻雀 service worker (generated: src/app/sw.js/route.ts, issue #292) */
 "use strict";
 
@@ -82,7 +81,7 @@ const VERSION = ${JSON.stringify(version)};
 const OWNED_CACHE_PREFIX = "fbm-";
 const PRECACHE = OWNED_CACHE_PREFIX + "precache-" + VERSION;
 const RUNTIME = OWNED_CACHE_PREFIX + "runtime-" + VERSION;
-const PRECACHE_URLS = ${JSON.stringify(precacheUrls)};
+const PRECACHE_ASSET_URLS = ${JSON.stringify(PRECACHE_ASSETS)};
 const CACHEABLE_ROUTE_PATHS = new Set(${JSON.stringify(PRECACHE_ROUTES)});
 const CACHEABLE_ASSET_PATHS = new Set(${JSON.stringify(PRECACHE_ASSETS)});
 const MAX_RUNTIME_ENTRIES = ${MAX_RUNTIME_ENTRIES};
@@ -119,26 +118,84 @@ function buildAssetUrlsFromHtml(html, baseUrl) {
   return assets;
 }
 
+function normalizedContentType(response) {
+  return (response.headers.get("Content-Type") || "")
+    .split(";", 1)[0]
+    .trim()
+    .toLowerCase();
+}
+
+function isSuccessfulHtml(response) {
+  return (
+    response.status >= 200 &&
+    response.status < 300 &&
+    normalizedContentType(response) === "text/html"
+  );
+}
+
+function expectedBuildAssetTypes(pathname) {
+  const extension = pathname.slice(pathname.lastIndexOf(".")).toLowerCase();
+  return {
+    ".js": ["application/javascript", "text/javascript"],
+    ".css": ["text/css"],
+    ".woff": ["font/woff", "application/font-woff"],
+    ".woff2": ["font/woff2"],
+    ".ttf": ["font/ttf", "application/x-font-ttf"],
+    ".otf": ["font/otf", "application/x-font-opentype"],
+    ".svg": ["image/svg+xml"],
+    ".png": ["image/png"],
+    ".jpg": ["image/jpeg"],
+    ".jpeg": ["image/jpeg"],
+    ".gif": ["image/gif"],
+    ".webp": ["image/webp"],
+    ".avif": ["image/avif"],
+    ".ico": ["image/x-icon", "image/vnd.microsoft.icon"],
+  }[extension] || [];
+}
+
+function isSuccessfulBuildAsset(response, assetUrl) {
+  const expected = expectedBuildAssetTypes(new URL(assetUrl).pathname);
+  return (
+    response.status >= 200 &&
+    response.status < 300 &&
+    expected.includes(normalizedContentType(response))
+  );
+}
+
 async function precacheAppShell() {
   const cache = await self.caches.open(PRECACHE);
-  await cache.addAll(PRECACHE_URLS);
+  try {
+    // 固定素材は Cache API の atomic な addAll に任せる。App shell は status と
+    // Content-Type を検証してから保存し、200 のログイン画面等を shell と誤認しない。
+    await cache.addAll(PRECACHE_ASSET_URLS);
+    const buildAssets = new Set();
+    for (const route of CACHEABLE_ROUTE_PATHS) {
+      const response = await self.fetch(route);
+      if (!isSuccessfulHtml(response)) {
+        throw new TypeError("Invalid precached App shell response: " + route);
+      }
+      await cache.put(route, response.clone());
+      const html = await response.text();
+      const baseUrl = response.url || new URL(route, self.location).href;
+      for (const asset of buildAssetUrlsFromHtml(html, baseUrl)) {
+        buildAssets.add(asset);
+      }
+    }
 
-  const buildAssets = new Set();
-  for (const route of CACHEABLE_ROUTE_PATHS) {
-    const response = await cache.match(route);
-    if (!response) {
-      throw new TypeError("Missing precached App shell: " + route);
+    // 応答を個別に検証してから保存する。拡張子と MIME が一致しない200応答
+    // (HTML fallback等)も install 成功扱いにしない。
+    for (const asset of buildAssets) {
+      const response = await self.fetch(asset);
+      if (!isSuccessfulBuildAsset(response, asset)) {
+        throw new TypeError("Invalid precached build asset response: " + asset);
+      }
+      await cache.put(asset, response);
     }
-    const html = await response.clone().text();
-    const baseUrl = response.url || new URL(route, self.location).href;
-    for (const asset of buildAssetUrlsFromHtml(html, baseUrl)) {
-      buildAssets.add(asset);
-    }
-  }
-  // addAll を install promise の中で await し、必要 chunk が1つでも取れなければ
-  // SW を activate しない。HTML だけの不完全なオフラインシェルを公開しない。
-  if (buildAssets.size > 0) {
-    await cache.addAll([...buildAssets]);
+  } catch (error) {
+    // install は再試行され得る。同versionの部分cacheを残すと後続監査や容量を汚すため、
+    // 失敗した世代を丸ごと回収してからrejectする。
+    await self.caches.delete(PRECACHE).catch(() => {});
+    throw error;
   }
 }
 
