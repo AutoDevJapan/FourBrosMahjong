@@ -573,18 +573,32 @@ describe("verification-scope の分類契約 (#491)", () => {
     ).toBe(false);
   });
 
-  it("マージ後 push は検証せずキャッシュ投入だけを行う", () => {
+  it("main のマージ後 push は検証せず共有キャッシュ投入だけを行う", () => {
     for (const job of ["ci", "e2e"] as const) {
       const scope = resolveScope({
         job,
         paths: ["src/domain/hand/yaku.ts"],
         postMergeDuplicate: true,
+        seedCaches: true,
       });
       expect(scope.verify, `${job}: 同一ツリーは PR 側で検証済み`).toBe(false);
       expect(
         scope.setup,
         `${job}: main が導入を止めると全 PR がキャッシュを復元できなくなる (#380)`,
       ).toBe(true);
+    }
+  });
+
+  it("dev / stg の検証済み昇格 push は保存不能なsetupを行わない", () => {
+    for (const job of ["ci", "e2e"] as const) {
+      expect(
+        resolveScope({
+          job,
+          paths: ["src/domain/hand/yaku.ts"],
+          postMergeDuplicate: true,
+          seedCaches: false,
+        }),
+      ).toEqual({ setup: false, verify: false });
     }
   });
 });
