@@ -96,8 +96,8 @@ describe("GITHUB_TOKEN 生成PRのrequired checks", () => {
         .map((line) => line.trim())
         .filter((line) => line.startsWith("gh workflow run")) ?? [];
     expect(dispatchLines).toEqual([
-      'gh workflow run gitleaks.yml --ref "${{ steps.existing.outputs.branch }}"',
-      'gh workflow run ci.yml --ref "${{ steps.existing.outputs.branch }}"',
+      'gh workflow run gitleaks.yml --ref "$BRANCH"',
+      'gh workflow run ci.yml --ref "$BRANCH"',
     ]);
   });
 
@@ -105,6 +105,21 @@ describe("GITHUB_TOKEN 生成PRのrequired checks", () => {
     expect(readWorkflowFile("ci.yml").concurrency?.group).toContain(
       "github.event_name",
     );
+  });
+
+  it("更新branchをshell本文へ直接展開せずenv経由で引用する", () => {
+    const updater = readWorkflowFile("gitleaks-version-check.yml");
+    const branchSteps = updater.jobs?.["open-bump-pr"]?.steps?.filter((step) =>
+      step.run?.includes("$BRANCH"),
+    );
+    expect(branchSteps).toHaveLength(3);
+    for (const step of branchSteps ?? []) {
+      expect(step.env?.BRANCH).toBe("${{ steps.existing.outputs.branch }}");
+      expect(step.run).not.toContain("${{ steps.existing.outputs.branch }}");
+    }
+    expect(
+      updater.jobs?.["open-bump-pr"]?.steps?.map((step) => step.run).join("\n"),
+    ).not.toContain("${{ steps.existing.outputs.branch }}");
   });
 });
 
