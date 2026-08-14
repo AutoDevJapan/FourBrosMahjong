@@ -27,6 +27,9 @@ checkNodeVersion();
  * ランタイム値を、ページ/コンポーネントを直接読み込むテストでも解決できるようにする。
  */
 const srcAlias = { "@": fileURLToPath(new URL("./src", import.meta.url)) };
+const jsdomEnvironmentOptions = {
+  jsdom: { url: "http://localhost:3000" },
+};
 
 export default defineConfig({
   resolve: { alias: srcAlias },
@@ -46,7 +49,9 @@ export default defineConfig({
         test: {
           name: "unit",
           environment: "node",
+          environmentOptions: jsdomEnvironmentOptions,
           globals: true,
+          setupFiles: ["./vitest.browser-storage.setup.ts"],
           include: ["src/**/*.{test,spec}.ts"],
           // 重い決定的テスト(例: cross-validation の 40k 手オラクル照合、
           // engine.melds-riichi の全公開アクション走破)は、全ファイル並列実行時の
@@ -65,8 +70,12 @@ export default defineConfig({
         test: {
           name: "component",
           environment: "jsdom",
+          environmentOptions: jsdomEnvironmentOptions,
           globals: true,
-          setupFiles: ["./vitest.setup.ts"],
+          setupFiles: [
+            "./vitest.setup.ts",
+            "./vitest.browser-storage.setup.ts",
+          ],
           include: ["src/**/*.{test,spec}.tsx"],
         },
       },
