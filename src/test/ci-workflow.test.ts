@@ -22,7 +22,6 @@ import {
   resolveChangedPaths,
   resolvePostMergeEvidence,
   resolveScope,
-  runGit,
 } from "../../.github/scripts/verification-scope.mjs";
 import playwrightConfig from "../../playwright.config";
 
@@ -1224,7 +1223,6 @@ describe("マージ後 push のスキップ前提を実行時に検証する (#4
       comparison?: unknown;
       apiError?: string;
       trees?: Record<string, string>;
-      parents?: Record<string, string[]>;
     } = {},
   ) {
     const pulls = overrides.pulls ?? [
@@ -1286,22 +1284,7 @@ describe("マージ後 push のスキップ前提を実行時に検証する (#4
       if (path.includes("/compare/")) return comparison;
       throw new Error(`unexpected path ${path}`);
     };
-    const git = (args: string[]) => {
-      if (args[0] === "rev-parse") {
-        const sha = args[1].replace("^{tree}", "");
-        const tree = trees[sha];
-        if (!tree) throw new Error("unknown rev");
-        return `${tree}\n`;
-      }
-      if (args[0] === "rev-list") {
-        const sha = args[4];
-        const parents = sha ? overrides.parents?.[sha] : undefined;
-        if (!sha || !parents) throw new Error("unknown commit parents");
-        return `${[sha, ...parents].join(" ")}\n`;
-      }
-      return "";
-    };
-    return { api, git };
+    return { api };
   }
 
   const call = (
@@ -1331,7 +1314,7 @@ describe("マージ後 push のスキップ前提を実行時に検証する (#4
     });
   });
 
-  it("PR #519型の履歴が分岐したmain→dev昇格を親とtreeの一致で許可する", async () => {
+  it("PR #519型の履歴が分岐したmain→dev昇格を祖先比較とtreeの一致で許可する", async () => {
     const merge = "545e1e05517bee2c526c07596b3fbe7b1b7be56f";
     const devBefore = "b9a05e53894113613342e9b0cfabe55b8c20df5b";
     const mainHead = "85efd840ef6c23183a80ad6dd20f6dfb38b09527";
@@ -1356,7 +1339,6 @@ describe("マージ後 push のスキップ前提を実行時に検証する (#4
           head_sha: mainHead,
           conclusion: "success",
         },
-        parents: { [merge]: [devBefore, mainHead] },
         trees: { [merge]: TREE, [mainHead]: TREE },
       },
       { sha: merge, before: devBefore, branch: "dev" },
@@ -1404,7 +1386,6 @@ describe("マージ後 push のスキップ前提を実行時に検証する (#4
             head: { ref: "dev", sha: HEAD, repo: { full_name: REPO } },
           },
         ],
-        parents: { [SHA]: [BEFORE, HEAD] },
       },
       { branch: "stg" },
     );
@@ -1414,7 +1395,7 @@ describe("マージ後 push のスキップ前提を実行時に検証する (#4
     });
   });
 
-  it("昇格mergeの親がpush前tipとsource headに一致しなければ拒否する", async () => {
+  it("昇格先tipが着地commitの祖先でなければ拒否する", async () => {
     const result = await call(
       {
         pulls: [
@@ -1426,13 +1407,57 @@ describe("マージ後 push のスキップ前提を実行時に検証する (#4
             head: { ref: "main", sha: HEAD, repo: { full_name: REPO } },
           },
         ],
-        parents: { [SHA]: ["d".repeat(40), HEAD] },
+        comparison: { status: "behind" },
       },
       { branch: "dev" },
     );
     expect(result).toEqual({
       skip: false,
-      reason: "merge-parents-mismatch",
+      reason: "base-not-ancestor-of-landed-commit",
+    });
+  });
+
+  it("一親のfast-forward/rebase昇格も祖先比較とtreeの一致で許可する", async () => {
+    const result = await call(
+      {
+        pulls: [
+          {
+            number: 522,
+            merged_at: "2026-08-14T16:30:35Z",
+            merge_commit_sha: SHA,
+            base: { ref: "dev" },
+            head: { ref: "main", sha: HEAD, repo: { full_name: REPO } },
+          },
+        ],
+        comparison: { status: "ahead" },
+      },
+      { branch: "dev" },
+    );
+    expect(result).toEqual({
+      skip: true,
+      reason: "verified-by-merged-pull-request",
+    });
+  });
+
+  it("昇格先の祖先比較APIが失敗したらスキップしない", async () => {
+    const result = await call(
+      {
+        apiError: "/compare/",
+        pulls: [
+          {
+            number: 523,
+            merged_at: "2026-08-14T16:30:35Z",
+            merge_commit_sha: SHA,
+            base: { ref: "dev" },
+            head: { ref: "main", sha: HEAD, repo: { full_name: REPO } },
+          },
+        ],
+      },
+      { branch: "dev" },
+    );
+    expect(result).toEqual({
+      skip: false,
+      reason: "landed-ancestor-api-failed",
     });
   });
 
@@ -1756,7 +1781,6 @@ describe("マージ後 push のスキップ前提を実行時に検証する (#4
         paths.push(path);
         return dependencies.api(path);
       },
-      git: dependencies.git,
     });
     expect(paths).toContain(`/repos/${REPO}/git/commits/${HEAD}`);
     expect(paths).toContain(`/repos/${REPO}/git/commits/${SHA}`);
@@ -1764,6 +1788,38 @@ describe("マージ後 push のスキップ前提を実行時に検証する (#4
       `/repos/${REPO}/commits/${HEAD}/check-runs?per_page=100`,
     );
     expect(paths).toContain(`/repos/${REPO}/compare/${BEFORE}...${HEAD}`);
+  });
+
+  it("昇格の祖先関係もCompare APIで確認し、ローカルgitのcommit形状に依存しない", async () => {
+    const paths: string[] = [];
+    const dependencies = happyPath({
+      pulls: [
+        {
+          number: 519,
+          merged_at: "2026-08-14T16:30:35Z",
+          merge_commit_sha: SHA,
+          base: { ref: "dev" },
+          head: { ref: "main", sha: HEAD, repo: { full_name: REPO } },
+        },
+      ],
+    });
+    const result = await resolvePostMergeEvidence({
+      repo: REPO,
+      sha: SHA,
+      before: BEFORE,
+      forced: false,
+      branch: "dev",
+      checkName: CHECK,
+      api: async (path) => {
+        paths.push(path);
+        return dependencies.api(path);
+      },
+    });
+    expect(result).toEqual({
+      skip: true,
+      reason: "verified-by-merged-pull-request",
+    });
+    expect(paths).toContain(`/repos/${REPO}/compare/${BEFORE}...${SHA}`);
   });
 
   it("着地 tree は commit API で検証し、ローカル git の tree 解決に依存しない", async () => {
@@ -1776,9 +1832,6 @@ describe("マージ後 push のスキップ前提を実行時に検証する (#4
       branch: "main",
       checkName: CHECK,
       api: dependencies.api,
-      git: () => {
-        throw new Error("local git tree is unavailable");
-      },
     });
     expect(result).toEqual({
       skip: true,
@@ -1806,16 +1859,6 @@ describe("マージ後証拠の外部 I/O timeout (#496)", () => {
       vi.unstubAllGlobals();
       vi.unstubAllEnvs();
     }
-  });
-
-  it("昇格 merge の親確認に使うローカル git 操作へ bounded timeout を渡す", () => {
-    const exec = vi.fn().mockReturnValue("");
-    runGit(["rev-list", "--parents", "-n", "1", "HEAD"], exec);
-    expect(exec).toHaveBeenCalledWith(
-      "git",
-      ["rev-list", "--parents", "-n", "1", "HEAD"],
-      expect.objectContaining({ timeout: EVIDENCE_IO_TIMEOUT_MS }),
-    );
   });
 });
 
@@ -1877,13 +1920,13 @@ describe("ガードが参照する check 名が job 名と一致する (#496)", 
 });
 
 /**
- * 上のテストは `git` を差し替えて分岐を網羅するが、**実際に発行する git コマンドと
- * API の組み合わせが意図どおり動くか**は検証していない。マージ後は PR head ref が
- * 消えることがあるため、ephemeral ref に依存せず landed / PR head の commit API の
+ * 上のテストは API を差し替えて分岐を網羅するが、**実際に発行する API の組み合わせが
+ * 意図どおり動くか**は検証していない。マージ後は PR head ref が消えることがあるため、
+ * ephemeral ref や checkout の commit 形状に依存せず、landed / PR head の commit API の
  * tree と compare API で証拠を確認する。本物のリポジトリで squash マージを再現して
  * 固定する (#496)。
  */
-describe("マージ後ガードの git 操作が実物で動く (#496)", () => {
+describe("マージ後ガードの API 操作が実物で動く (#496)", () => {
   type Repo = {
     dir: string;
     landed: string;
@@ -1955,14 +1998,6 @@ describe("マージ後ガードの git 操作が実物で動く (#496)", () => {
     };
   }
 
-  /** 本番コードが組み立てた引数をそのまま、対象リポジトリで実行する。 */
-  const gitIn = (dir: string) => (args: string[]) =>
-    execFileSync("git", args, {
-      cwd: dir,
-      encoding: "utf8",
-      stdio: ["ignore", "pipe", "pipe"],
-    });
-
   function apiFor(repo: Repo, checkName: string) {
     return async (path: string) => {
       if (path.endsWith("/pulls"))
@@ -2032,9 +2067,6 @@ describe("マージ後ガードの git 操作が実物で動く (#496)", () => {
         branch: "main",
         checkName: CHECK,
         api: apiFor(repo, CHECK),
-        git: () => {
-          throw new Error("local git tree is unavailable");
-        },
       });
       expect(result).toEqual({
         skip: true,
@@ -2058,7 +2090,6 @@ describe("マージ後ガードの git 操作が実物で動く (#496)", () => {
         branch: "main",
         checkName: CHECK,
         api: apiFor(repo, CHECK),
-        git: gitIn(repo.dir),
       });
       expect(result.skip, "未検証のツリーが検証されずに素通りする").toBe(false);
       expect(result.reason).toBe("base-not-ancestor-of-pull-head");

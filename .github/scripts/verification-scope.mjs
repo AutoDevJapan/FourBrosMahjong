@@ -343,9 +343,11 @@ export async function resolveChangedPaths({
  * 3. **この job 自身の check run** が PR head SHA で `success` になっている。
  *    「required だったか」ではなく「実際に緑だったか」を見るため、required checks の
  *    設定変更から独立している。
- * 4. 通常PRでは push 前の宛先 tip が PR head の祖先である。環境昇格では merge commit の親が
- *    **push 前の宛先 tip, PR head** の順で完全一致する。main→dev / dev→stg は環境固有の過去の
- *    merge commit により履歴が分岐するため、親の一致で分岐を許しつつ任意commitの混入を防ぐ。
+ * 4. 通常PRでは push 前の宛先 tip が PR head の祖先である。環境昇格では push 前の宛先 tip が
+ *    **着地した commit の祖先**である。main→dev / dev→stg は環境固有の過去の履歴により
+ *    分岐するため、merge commit の親配列を固定せず Compare API で fast-forward / rebase /
+ *    squash を含む前進を検証する。任意 commit の混入は、source branch、PR checks、tree 一致
+ *    の検証で防ぐ。
  * 5. 着地したツリーが **PR head のツリーと完全一致**する。3 で緑を確認した中身が
  *    そのまま入ったことを、内容そのもので照合する。
  *
@@ -362,7 +364,6 @@ export async function resolveChangedPaths({
  * @param {string} input.branch push 先ブランチ名 (PR の base と突き合わせる)
  * @param {string} input.checkName この job の check run 名
  * @param {(path: string) => Promise<unknown>} input.api GitHub REST 呼び出し
- * @param {(args: string[]) => string} input.git git 実行 (stdout を返す)
  * @returns {Promise<{ skip: boolean, reason: string }>} `reason` は安定した ASCII 列挙
  */
 export async function resolvePostMergeEvidence({
@@ -373,7 +374,6 @@ export async function resolvePostMergeEvidence({
   branch,
   checkName,
   api,
-  git,
 }) {
   const isSha = (/** @type {unknown} */ value) =>
     typeof value === "string" && /^[0-9a-f]{40}$/.test(value);
@@ -491,27 +491,6 @@ export async function resolvePostMergeEvidence({
     if (comparison?.status !== "ahead" && comparison?.status !== "identical") {
       return { skip: false, reason: "base-not-ancestor-of-pull-head" };
     }
-  } else {
-    try {
-      const mergeLine = git([
-        "rev-list",
-        "--parents",
-        "-n",
-        "1",
-        String(sha),
-      ]).trim();
-      const [commit, ...parents] = mergeLine.split(/\s+/);
-      if (
-        commit !== sha ||
-        parents.length !== 2 ||
-        parents[0] !== String(before) ||
-        parents[1] !== headSha
-      ) {
-        return { skip: false, reason: "merge-parents-mismatch" };
-      }
-    } catch {
-      return { skip: false, reason: "merge-parents-unresolved" };
-    }
   }
 
   // The checkout is not a stable source of merge metadata: a partial clone or
@@ -530,6 +509,22 @@ export async function resolvePostMergeEvidence({
     !/^[0-9a-f]{40}$/.test(String(landedCommit?.tree?.sha ?? ""))
   ) {
     return { skip: false, reason: "landed-commit-invalid" };
+  }
+
+  if (branch !== "main") {
+    /** @type {any} */
+    let comparison;
+    try {
+      comparison = await api(`/repos/${repo}/compare/${before}...${sha}`);
+    } catch {
+      return { skip: false, reason: "landed-ancestor-api-failed" };
+    }
+    // Promotion methods may produce a one-parent fast-forward/rebase commit or
+    // a two-parent merge commit. Only the ancestry relation matters here; the
+    // source branch, PR checks, and landed tree are verified independently.
+    if (comparison?.status !== "ahead" && comparison?.status !== "identical") {
+      return { skip: false, reason: "base-not-ancestor-of-landed-commit" };
+    }
   }
 
   const landed = String(landedCommit.tree.sha);
@@ -555,19 +550,6 @@ export async function githubApi(/** @type {string} */ path) {
   // 権限不足 (403) や存在しない (404) も「確認できなかった」として扱う。
   if (!response.ok) throw new Error(`GitHub API ${path} -> ${response.status}`);
   return response.json();
-}
-
-/** `resolvePostMergeEvidence` に渡す既定の git 実行。 */
-export function runGit(
-  /** @type {string[]} */ args,
-  /** @type {typeof execFileSync} */ exec = execFileSync,
-) {
-  return exec("git", args, {
-    encoding: "utf8",
-    maxBuffer: 32 * 1024 * 1024,
-    timeout: EVIDENCE_IO_TIMEOUT_MS,
-    stdio: ["ignore", "pipe", "pipe"],
-  });
 }
 
 /**
@@ -604,7 +586,6 @@ async function main() {
       branch: pushBranch,
       checkName: String(process.env.SCOPE_CHECK_NAME ?? ""),
       api: githubApi,
-      git: runGit,
     });
   }
 
