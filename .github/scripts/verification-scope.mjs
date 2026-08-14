@@ -343,18 +343,34 @@ export async function resolvePostMergeEvidence({
   if (!successfulEligibleRun)
     return { skip: false, reason: "own-check-run-not-successful" };
 
-  // PR head の commit は merge 後も `refs/pull/N/head` で取得できる
-  // (`refs/pull/N/merge` は merge 時に削除されるため使えない)。
+  // マージ後は PR の head branch / `refs/pull/N/head` が削除されることがある。
+  // ephemeral な ref に依存すると、並列 job の片方だけが証拠検証に失敗して
+  // 重い検証を重複実行するため、head commit は GitHub API の immutable SHA で読む。
+  /** @type {any} */
+  let headCommit;
   try {
-    git(["fetch", "--quiet", "origin", `refs/pull/${pull.number}/head`]);
+    headCommit = await api(`/repos/${repo}/git/commits/${headSha}`);
   } catch {
-    return { skip: false, reason: "pull-head-fetch-failed" };
+    return { skip: false, reason: "pull-head-commit-api-failed" };
+  }
+  if (
+    headCommit?.sha !== headSha ||
+    !/^[0-9a-f]{40}$/.test(String(headCommit?.tree?.sha ?? ""))
+  ) {
+    return { skip: false, reason: "pull-head-commit-invalid" };
   }
 
   if (branch === "main") {
+    /** @type {any} */
+    let comparison;
     try {
-      git(["merge-base", "--is-ancestor", String(before), headSha]);
+      comparison = await api(`/repos/${repo}/compare/${before}...${headSha}`);
     } catch {
+      return { skip: false, reason: "base-ancestor-api-failed" };
+    }
+    // `identical` is also an ancestor relationship; GitHub normally reports
+    // `ahead` for a PR head that contains the pre-merge base tip.
+    if (comparison?.status !== "ahead" && comparison?.status !== "identical") {
       return { skip: false, reason: "base-not-ancestor-of-pull-head" };
     }
   } else {
@@ -382,7 +398,7 @@ export async function resolvePostMergeEvidence({
 
   try {
     const landed = git(["rev-parse", `${sha}^{tree}`]).trim();
-    const verified = git(["rev-parse", `${headSha}^{tree}`]).trim();
+    const verified = String(headCommit.tree.sha);
     if (!landed || landed !== verified)
       return { skip: false, reason: "tree-mismatch" };
   } catch {
