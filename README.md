@@ -138,7 +138,7 @@ pnpm test:e2e:ui    # Playwright UI モード(対話的にテストを選択・�
 
 - `.github/workflows/ci.yml` の `E2E (Playwright)` ジョブが、PR および main への push 時にヘッドレスで `pnpm test:e2e` を実行します([#29](https://github.com/AutoDevJapan/FourBrosMahjong/issues/29) で組み込み済み)。
 - Service Worker はdev serverでは無効なため、通常E2Eでは `e2e/pwa-offline.spec.ts` の全件をskipします。CIは品質ジョブの既存production buildを再利用して `pnpm test:e2e:pwa:prebuilt` を実行し、初回登録の追加オンライン再読込みなしでのオフライン起動・実打によるhydrate確認・登録・プリキャッシュ・対局復元を別途検証します。`prebuilt` はCI内部用で、ローカルではbuild込みの `pnpm test:e2e:pwa` を使ってください。
-- CI ではブラウザバイナリ(`~/.cache/ms-playwright`)と pnpm store をキャッシュします。`playwright install --with-deps` はキャッシュの有無に関わらず毎回実行し、キャッシュヒット時はブラウザ本体の再ダウンロードのみスキップされます(OS 依存パッケージは毎回導入されます)。
+- CI の `ci` job では production E2E 用の Chromium と pnpm store をキャッシュします。通常の `E2E (Playwright)` job は Chromium/WebKit とOS依存を含むバージョン固定のPlaywrightイメージを使うため、毎回の `playwright install --with-deps` やE2E専用ブラウザcacheはありません。検証済みmain pushのE2Eは重複検証とsetupを省略し、共有cacheのseedは `ci` job だけが行います。
 - **キャッシュの保存は `main` への push 実行のみ**に限定しています([#380](https://github.com/AutoDevJapan/FourBrosMahjong/issues/380))。GitHub Actions のキャッシュ予算はリポジトリあたり 10GB・超過分は LRU で退避されるうえ、キャッシュは ref スコープなので、PR ref (`refs/pull/N/merge`) でも保存すると同一内容が ref の数だけ複製されて予算が数日で一巡し、「保存はするが復元前に消える」恒常ミス状態になります。既定ブランチのキャッシュは全ブランチ・全 PR から復元できるため、保存を `main` に限定してもヒット率は落ちません。PR / dev / stg の実行は `actions/cache/restore` による復元専用です。この不変条件は `src/test/ci-workflow.test.ts` が回帰テストとして固定しています。
 - `playwright.config.ts` は `retries: process.env.CI ? 2 : 0` としており、CI 環境(`CI=true`)でのみ失敗テストを自動リトライします。
 - E2E テストは lint/typecheck 等と比べて不安定化(flaky)しやすいため、現時点ではブランチ保護の必須ステータスチェックには含めていません(結果は PR 上で可視化されます。必要になれば別途判断して追加します)。
