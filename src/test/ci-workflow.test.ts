@@ -1102,6 +1102,7 @@ describe("マージ後 push のスキップ前提を実行時に検証する (#4
       workflowRun?: unknown;
       workflowRuns?: Record<string, unknown>;
       commit?: unknown;
+      landedCommit?: unknown;
       comparison?: unknown;
       apiError?: string;
       trees?: Record<string, string>;
@@ -1154,7 +1155,16 @@ describe("マージ後 push のスキップ前提を実行時に検証する (#4
       if (path.includes("/check-runs?")) return checkRuns;
       const runId = path.match(/\/actions\/runs\/(\d+)$/)?.[1];
       if (runId) return overrides.workflowRuns?.[runId] ?? workflowRun;
-      if (path.includes("/git/commits/")) return commit;
+      const commitSha = path.match(/\/git\/commits\/([^/]+)$/)?.[1];
+      if (commitSha) {
+        if (commitSha === defaultHead) return commit;
+        return (
+          overrides.landedCommit ?? {
+            sha: commitSha,
+            tree: { sha: trees[commitSha] ?? TREE },
+          }
+        );
+      }
       if (path.includes("/compare/")) return comparison;
       throw new Error(`unexpected path ${path}`);
     };
@@ -1495,6 +1505,18 @@ describe("マージ後 push のスキップ前提を実行時に検証する (#4
       "pull-head-commit-invalid",
     ],
     [
+      "着地 commit API が失敗",
+      { apiError: `/git/commits/${SHA}` },
+      {},
+      "landed-commit-api-failed",
+    ],
+    [
+      "着地 commit の形が不正",
+      { landedCommit: { sha: SHA } },
+      {},
+      "landed-commit-invalid",
+    ],
+    [
       "main ancestry compare API が失敗",
       { apiError: "/compare/" },
       {},
@@ -1619,10 +1641,31 @@ describe("マージ後 push のスキップ前提を実行時に検証する (#4
       git: dependencies.git,
     });
     expect(paths).toContain(`/repos/${REPO}/git/commits/${HEAD}`);
+    expect(paths).toContain(`/repos/${REPO}/git/commits/${SHA}`);
     expect(paths).toContain(
       `/repos/${REPO}/commits/${HEAD}/check-runs?per_page=100`,
     );
     expect(paths).toContain(`/repos/${REPO}/compare/${BEFORE}...${HEAD}`);
+  });
+
+  it("着地 tree は commit API で検証し、ローカル git の tree 解決に依存しない", async () => {
+    const dependencies = happyPath();
+    const result = await resolvePostMergeEvidence({
+      repo: REPO,
+      sha: SHA,
+      before: BEFORE,
+      forced: false,
+      branch: "main",
+      checkName: CHECK,
+      api: dependencies.api,
+      git: () => {
+        throw new Error("local git tree is unavailable");
+      },
+    });
+    expect(result).toEqual({
+      skip: true,
+      reason: "verified-by-merged-pull-request",
+    });
   });
 });
 
@@ -1647,12 +1690,12 @@ describe("マージ後証拠の外部 I/O timeout (#496)", () => {
     }
   });
 
-  it("ローカル git 操作に同じ bounded timeout を渡す", () => {
+  it("昇格 merge の親確認に使うローカル git 操作へ bounded timeout を渡す", () => {
     const exec = vi.fn().mockReturnValue("");
-    runGit(["rev-parse", "HEAD^{tree}"], exec);
+    runGit(["rev-list", "--parents", "-n", "1", "HEAD"], exec);
     expect(exec).toHaveBeenCalledWith(
       "git",
-      ["rev-parse", "HEAD^{tree}"],
+      ["rev-list", "--parents", "-n", "1", "HEAD"],
       expect.objectContaining({ timeout: EVIDENCE_IO_TIMEOUT_MS }),
     );
   });
@@ -1718,8 +1761,9 @@ describe("ガードが参照する check 名が job 名と一致する (#496)", 
 /**
  * 上のテストは `git` を差し替えて分岐を網羅するが、**実際に発行する git コマンドと
  * API の組み合わせが意図どおり動くか**は検証していない。マージ後は PR head ref が
- * 消えることがあるため、ephemeral ref に依存せず commit API の tree と compare API
- * で証拠を確認する。本物のリポジトリで squash マージを再現して固定する (#496)。
+ * 消えることがあるため、ephemeral ref に依存せず landed / PR head の commit API の
+ * tree と compare API で証拠を確認する。本物のリポジトリで squash マージを再現して
+ * 固定する (#496)。
  */
 describe("マージ後ガードの git 操作が実物で動く (#496)", () => {
   type Repo = {
@@ -1831,6 +1875,16 @@ describe("マージ後ガードの git 操作が実物で動く (#496)", () => {
           head_sha: repo.pullHead,
           conclusion: "success",
         };
+      if (path.endsWith(`/git/commits/${repo.landed}`))
+        return {
+          sha: repo.landed,
+          tree: {
+            sha: execFileSync("git", ["rev-parse", `${repo.landed}^{tree}`], {
+              cwd: repo.dir,
+              encoding: "utf8",
+            }).trim(),
+          },
+        };
       if (path.endsWith(`/git/commits/${repo.pullHead}`))
         return {
           sha: repo.pullHead,
@@ -1860,7 +1914,9 @@ describe("マージ後ガードの git 操作が実物で動く (#496)", () => {
         branch: "main",
         checkName: CHECK,
         api: apiFor(repo, CHECK),
-        git: gitIn(repo.dir),
+        git: () => {
+          throw new Error("local git tree is unavailable");
+        },
       });
       expect(result).toEqual({
         skip: true,

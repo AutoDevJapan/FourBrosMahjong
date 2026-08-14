@@ -396,14 +396,27 @@ export async function resolvePostMergeEvidence({
     }
   }
 
+  // The checkout is not a stable source of merge metadata: a partial clone or
+  // an unavailable object can make the same post-merge evidence resolve
+  // differently in parallel jobs. Read the landed commit and its tree through
+  // the immutable GitHub API, just like the PR head above.
+  /** @type {any} */
+  let landedCommit;
   try {
-    const landed = git(["rev-parse", `${sha}^{tree}`]).trim();
-    const verified = String(headCommit.tree.sha);
-    if (!landed || landed !== verified)
-      return { skip: false, reason: "tree-mismatch" };
+    landedCommit = await api(`/repos/${repo}/git/commits/${sha}`);
   } catch {
-    return { skip: false, reason: "tree-resolution-failed" };
+    return { skip: false, reason: "landed-commit-api-failed" };
   }
+  if (
+    landedCommit?.sha !== sha ||
+    !/^[0-9a-f]{40}$/.test(String(landedCommit?.tree?.sha ?? ""))
+  ) {
+    return { skip: false, reason: "landed-commit-invalid" };
+  }
+
+  const landed = String(landedCommit.tree.sha);
+  const verified = String(headCommit.tree.sha);
+  if (landed !== verified) return { skip: false, reason: "tree-mismatch" };
 
   return { skip: true, reason: "verified-by-merged-pull-request" };
 }
