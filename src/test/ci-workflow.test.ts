@@ -614,8 +614,10 @@ describe("変更パスによる実行範囲の絞り込み (#491)", () => {
   });
 
   /**
-   * `verify` が false でも `setup` は true になりうる (マージ後 push のキャッシュ投入)。
-   * 逆に `setup` が false なら依存が入っていないため `verify` も false でなければならない。
+   * `verify` が false でも `setup` は ci job だけ true になりうる
+   * (main のマージ後 push で共有キャッシュを投入するため)。
+   * E2E job は Playwright 固定イメージを使いキャッシュを書き込まないため、
+   * verify=false のとき setup も false でなければならない (#569)。
    */
   it("setup を伴わない verify は存在しない", () => {
     for (const job of ["ci", "e2e"] as const) {
@@ -642,6 +644,25 @@ describe("変更パスによる実行範囲の絞り込み (#491)", () => {
         }
       }
     }
+  });
+
+  it("main のマージ後でも E2E は不要な setup を行わない (#569)", () => {
+    expect(
+      resolveScope({
+        job: "ci",
+        paths: [".github/scripts/verification-scope.mjs"],
+        postMergeDuplicate: true,
+        seedCaches: true,
+      }),
+    ).toEqual({ setup: true, verify: false });
+    expect(
+      resolveScope({
+        job: "e2e",
+        paths: [".github/scripts/verification-scope.mjs"],
+        postMergeDuplicate: true,
+        seedCaches: true,
+      }),
+    ).toEqual({ setup: false, verify: false });
   });
 });
 
@@ -720,7 +741,7 @@ describe("verification-scope の分類契約 (#491)", () => {
     ).toBe(false);
   });
 
-  it("main のマージ後 push は検証せず共有キャッシュ投入だけを行う", () => {
+  it("main のマージ後 push は検証せず ci だけ共有キャッシュを投入する", () => {
     for (const job of ["ci", "e2e"] as const) {
       const scope = resolveScope({
         job,
@@ -731,8 +752,8 @@ describe("verification-scope の分類契約 (#491)", () => {
       expect(scope.verify, `${job}: 同一ツリーは PR 側で検証済み`).toBe(false);
       expect(
         scope.setup,
-        `${job}: main が導入を止めると全 PR がキャッシュを復元できなくなる (#380)`,
-      ).toBe(true);
+        `${job}: main の共有キャッシュ投入は ci job だけが行う (#380, #569)`,
+      ).toBe(job === "ci");
     }
   });
 
