@@ -50,6 +50,45 @@ type Workflow = {
 };
 
 const WORKFLOW_DIR = resolve(process.cwd(), ".github/workflows");
+const E2E_DIR = resolve(process.cwd(), "e2e");
+
+/**
+ * #554 の prebuilt production E2E は、配布物でしか見えない差分を優先して検証する。
+ * 既存のPWA/状態復元/モーダル回帰に加え、headers・metadata・axe契約を同じ build で走らせる。
+ */
+const PRODUCTION_E2E_SPECS = [
+  "e2e/pwa-offline.spec.ts",
+  "e2e/persistence.spec.ts",
+  "e2e/modal-focus.spec.ts",
+  "e2e/security-headers.spec.ts",
+  "e2e/metadata.spec.ts",
+  "e2e/a11y.spec.ts",
+] as const;
+
+/**
+ * production prebuilt の時間・環境依存を意図して含めない spec。
+ * これらは通常のdev E2Eで検証し、production側へ追加するときは上の契約を更新する。
+ */
+const PRODUCTION_E2E_EXCLUDED_SPECS = [
+  "e2e/game.spec.ts",
+  "e2e/history.spec.ts",
+  "e2e/home.spec.ts",
+  "e2e/non-text-contrast.spec.ts",
+  "e2e/player-names.spec.ts",
+] as const;
+
+function readPackageJson(): { scripts?: Record<string, string> } {
+  return JSON.parse(
+    readFileSync(resolve(process.cwd(), "package.json"), "utf8"),
+  ) as { scripts?: Record<string, string> };
+}
+
+function e2eSpecPaths(): string[] {
+  return readdirSync(E2E_DIR, { recursive: true, encoding: "utf8" })
+    .filter((entry) => entry.endsWith(".spec.ts"))
+    .map((entry) => `e2e/${entry.replaceAll("\\", "/")}`)
+    .sort();
+}
 
 function workflowFilenames(): string[] {
   // `.yaml` で追加されたワークフローが検査から丸ごと漏れないよう両方を見る。
@@ -268,6 +307,22 @@ describe("production E2E parity gate (#432)", () => {
       productionE2e,
       "prebuilt production成果物に対する主要E2Eがci jobに無い",
     ).toBeDefined();
+  });
+
+  it("prebuilt production E2Eの対象とdev専用除外を明示する(#554)", () => {
+    const command = readPackageJson().scripts?.["test:e2e:prod:prebuilt"];
+    expect(command, "production prebuilt E2E scriptが無い").toBeTypeOf(
+      "string",
+    );
+
+    const selected = command?.match(/e2e\/[\w./-]+\.spec\.ts/g) ?? [];
+    expect(selected).toEqual(PRODUCTION_E2E_SPECS);
+
+    const classified = [
+      ...PRODUCTION_E2E_SPECS,
+      ...PRODUCTION_E2E_EXCLUDED_SPECS,
+    ].sort();
+    expect(classified).toEqual(e2eSpecPaths());
   });
 });
 

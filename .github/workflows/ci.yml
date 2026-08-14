@@ -204,7 +204,7 @@ jobs:
           path: ~/.cache/ms-playwright
           key: playwright-browsers-${{ runner.os }}-chromium-${{ hashFiles('pnpm-lock.yaml') }}
 
-      - name: Production E2E (PWA / persistence / modal focus)
+      - name: Production E2E (PWA / persistence / modal focus / security / metadata / a11y)
         if: steps.scope.outputs.verify == 'true'
         env:
           E2E_PORT: "3101"
