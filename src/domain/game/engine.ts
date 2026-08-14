@@ -217,8 +217,12 @@ interface HandState {
    * 役満単位の精算コンポーネントへ渡す。
    */
   paoResponsible: Partial<Record<SeatKey, PaoResponsibility>>;
-  /** 直前の打牌(ロン/鳴き判定の対象)。解決後に null。 */
-  pendingDiscard: { seat: SeatKey; tile: Tile } | null;
+  /**
+   * 直前の打牌(ロン/鳴き判定の対象)。解決後に null。
+   * `haitei` は打牌時点のツモがライブ牌由来かで固定する。北抜き/嶺上の補充牌を
+   * 打ったとき、壁残数だけを後から見ると河底撈魚を誤付与するため(#396)。
+   */
+  pendingDiscard: { seat: SeatKey; tile: Tile; haitei: boolean } | null;
   /** 宣言牌の応答解決待ちのリーチ席。ロンされなければ供託を確定する。 */
   pendingRiichiSeat: SeatKey | null;
   /** 直前の打牌に対しロン/鳴きを見送った席(頭ハネ解決の再入で参照)。 */
@@ -1540,6 +1544,7 @@ function applyDiscard(
 ): EngineState {
   const hand = state.hand;
   if (hand === null) return state;
+  const drawSource = hand.drawn?.source;
   // 手牌(+ツモ)から捨て牌1枚を取り除く。
   const pool = [...hand.hands[seat], hand.drawn?.tile ?? null].filter(
     (t): t is Tile => t !== null,
@@ -1554,7 +1559,13 @@ function applyDiscard(
   hand.drawn = null;
   hand.ponnedKind = null; // 打牌で喰い替え禁止の窓(ポン直後の1打)を閉じる。
   hand.ippatsu[seat] = false; // 自分の打牌で一発の権利は消える。
-  hand.pendingDiscard = { seat, tile: discarded };
+  hand.pendingDiscard = {
+    seat,
+    tile: discarded,
+    // 河底撈魚は最後のライブ牌を引いた後の打牌だけ。北抜き/嶺上の補充牌は
+    // ライブ壁を尽くしていても河底にはならない。鳴き後の手出しも対象外。
+    haitei: drawSource === "live" && isHaitei(hand.wall.remainingLiveTiles),
+  };
   hand.passedRonSeats = [];
   return resolveDiscard(state);
 }
@@ -1605,8 +1616,10 @@ function commitPendingRiichi(
 function resolveDiscard(state: EngineState): EngineState {
   const hand = state.hand;
   if (hand === null || hand.pendingDiscard === null) return state;
-  const { seat: discarder, tile } = hand.pendingDiscard;
-  const haitei = isHaitei(hand.wall.remainingLiveTiles);
+  const { seat: discarder, tile, haitei } = hand.pendingDiscard;
+  // 鳴きの可否は「ライブ壁が尽きているか」で判定する。これは河底役の有無とは
+  // 独立しており、北抜き/嶺上牌の打牌でも残り0なら鳴きは許可しない(#396)。
+  const wallExhausted = isHaitei(hand.wall.remainingLiveTiles);
   const humanSeat = humanSeatOf(hand);
 
   // 1. ロン(頭ハネ順)。ロンは鳴きより優先。
@@ -1623,8 +1636,22 @@ function resolveDiscard(state: EngineState): EngineState {
           tile,
           from: discarder,
           canRon: true,
-          canPon: canHumanCall(hand, humanSeat, discarder, tile, haitei, 2),
-          canKan: canHumanCall(hand, humanSeat, discarder, tile, haitei, 3),
+          canPon: canHumanCall(
+            hand,
+            humanSeat,
+            discarder,
+            tile,
+            wallExhausted,
+            2,
+          ),
+          canKan: canHumanCall(
+            hand,
+            humanSeat,
+            discarder,
+            tile,
+            wallExhausted,
+            3,
+          ),
         },
       };
     }
@@ -1651,7 +1678,7 @@ function resolveDiscard(state: EngineState): EngineState {
       tile,
       need: 2,
       inRiichi: hand.riichi[candidate],
-      haitei,
+      haitei: wallExhausted,
       isDiscarder: false,
     });
     const canKan = canCallMeldOnDiscard({
@@ -1659,7 +1686,7 @@ function resolveDiscard(state: EngineState): EngineState {
       tile,
       need: 3,
       inRiichi: hand.riichi[candidate],
-      haitei,
+      haitei: wallExhausted,
       isDiscarder: false,
     });
     if (!canPon && !canKan) continue;
@@ -2754,9 +2781,10 @@ function declareRonImpl(state: EngineState): EngineState {
   const { tile, from, chankan } = state.pending;
   const seat = seatOfPlayer(state.hand.seating, HUMAN_ID);
   if (seat === null) return state;
-  // 槍槓は嶺上ツモ前の割り込みのため海底(河底)とは併存しない(#115)。
+  // 通常ロンは打牌時に固定した河底フラグを使う。槍槓は嶺上補充前の割り込みで、
+  // 河底とは併存しない(#115)。
   const haitei =
-    chankan === undefined && isHaitei(state.hand.wall.remainingLiveTiles);
+    chankan === undefined && state.hand.pendingDiscard?.haitei === true;
   const analysis = analyzeRon(state, seat, tile, haitei, chankan !== undefined);
   if (analysis === null) return state;
   // 暗槓への槍槓は国士無双のみ(Q17 フォローアップ・#126)。pending 構築時にも

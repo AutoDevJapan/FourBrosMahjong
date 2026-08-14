@@ -179,7 +179,7 @@ describe("engine: 四槓散了(#183)", () => {
     if (!hand) throw new Error("hand required");
     const tile = parseTile("6s");
     hand.hands.east = parseTiles("6s 6s 6s 1m 9m");
-    hand.pendingDiscard = { seat: "south", tile };
+    hand.pendingDiscard = { seat: "south", tile, haitei: false };
     hand.turn = "south";
     const armed = {
       ...state,

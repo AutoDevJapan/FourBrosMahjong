@@ -337,7 +337,7 @@ describe("engine: 通常打牌に対する頭ハネ(上家取り / spec 2.4・#3
     hand.hands.south = expectConcealed13(WAIT_3P_A);
     hand.hands.west = expectConcealed13(WAIT_3P_B);
     hand.discards.east = [ronTile]; // 打牌済みの河
-    hand.pendingDiscard = { seat: "east", tile: ronTile };
+    hand.pendingDiscard = { seat: "east", tile: ronTile, haitei: false };
     hand.passedRonSeats = [];
     hand.drawn = null;
     hand.turn = "east";
@@ -389,7 +389,7 @@ describe("engine: 通常打牌に対する頭ハネ(上家取り / spec 2.4・#3
     hand.hands.south = expectConcealed13("5z 5z 234m 678m 234s 66s");
     hand.hands.west = expectConcealed13(NO_WAIT_3P);
     hand.discards.east = [ponTile];
-    hand.pendingDiscard = { seat: "east", tile: ponTile };
+    hand.pendingDiscard = { seat: "east", tile: ponTile, haitei: false };
     hand.passedRonSeats = [];
     hand.drawn = null;
     hand.turn = "east";
