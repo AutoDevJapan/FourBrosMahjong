@@ -18,7 +18,7 @@
     "check": "biome check .",
     "check:node": "node scripts/check-node-version.mjs",
     "pretest": "node scripts/check-node-version.mjs",
-    "test": "vitest run",
+    "test": "vitest run --maxWorkers=1",
     "pretest:unit": "node scripts/check-node-version.mjs",
     "test:unit": "vitest run --project unit",
     "pretest:component": "node scripts/check-node-version.mjs",
