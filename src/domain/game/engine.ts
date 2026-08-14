@@ -146,8 +146,9 @@ function seatFlags(value = false): SeatFlags {
  * ツモ牌の供給元(#415)。
  *
  * - `"live"` … ライブ壁からの通常ツモ(`drawn` が無いときの既定値でもある)
- * - `"kanReplacement"` … カン(暗槓/加槓/大明槓)後の嶺上牌
- * - `"kitaReplacement"` … 北抜き(ガリ)後の嶺上牌
+ * - `"kanReplacement"` … カン(暗槓/加槓/大明槓)を起点とする一連の嶺上補充。
+ *   途中の北抜き(ガリ)で再補充してもこの値を維持する(嶺上開花の対象)
+ * - `"kitaReplacement"` … 通常ツモを起点とする北抜き(ガリ)後の嶺上牌
  */
 export type DrawSource = "live" | "kanReplacement" | "kitaReplacement";
 
@@ -183,8 +184,9 @@ interface HandState {
    * 現在の手番がツモった牌(打牌待ち)と供給元。未ツモは null。
    *
    * 役判定は2つの別条件をここから導く:
-   * - **嶺上開花**: `source === "kanReplacement"`。カン限定(spec 3.2「**槓の**
-   *   嶺上牌で和了」)なので、北抜きの嶺上牌には付かない。
+   * - **嶺上開花**: `source === "kanReplacement"`。カン起点の一連の補充は、途中で
+   *   北抜き→再嶺上になってもこの値を維持する(spec 3.0 / Q36)。通常ツモ起点の
+   *   北抜きは `"kitaReplacement"` なので付かない。
    * - **海底摸月の抑止**: `source !== "live"`。海底摸月は「ライブ壁の最後の1枚を
    *   ツモった」ことが条件で、嶺上牌のツモは**カン・北抜きのいずれも**対象外
    *   (`isHaiteiTsumo` の契約 / #396)。
@@ -775,8 +777,8 @@ function autoPullDealtNorths(hand: HandState): void {
  * カン後の嶺上補充(北抜きも自動処理)。`drawn` を更新する。
  *
  * 嶺上牌が北で続けて抜かれた場合も `"kanReplacement"` のままにする(カンを起点とした
- * 一連の補充なので嶺上開花の対象)。この解釈は #396 以前からの既存挙動で、spec 3.2 の
- * 「北抜きの嶺上牌では付かない」との境界は未確定(→ #437)。
+ * 一連の補充なので嶺上開花の対象 / Q36・#437)。`"kitaReplacement"` は通常ツモ起点の
+ * 北抜きにだけ使い、北抜きの直近性でカン起点の供給元を上書きしない。
  */
 function drawKanReplacement(hand: HandState, seat: SeatKey): void {
   let tile: Tile;
