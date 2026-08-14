@@ -1074,6 +1074,8 @@ describe("マージ後 push のスキップ前提を実行時に検証する (#4
   const SHA = "a".repeat(40);
   const BEFORE = "b".repeat(40);
   const HEAD = "c".repeat(40);
+  const TREE = "e".repeat(40);
+  const OTHER_TREE = "f".repeat(40);
   const CHECK = "lint / typecheck / format / test / build";
 
   it.each([
@@ -1099,8 +1101,9 @@ describe("マージ後 push のスキップ前提を実行時に検証する (#4
       checkRuns?: unknown;
       workflowRun?: unknown;
       workflowRuns?: Record<string, unknown>;
+      commit?: unknown;
+      comparison?: unknown;
       apiError?: string;
-      gitFails?: string;
       trees?: Record<string, string>;
       parents?: Record<string, string[]>;
     } = {},
@@ -1131,7 +1134,17 @@ describe("マージ後 push のスキップ前提を実行時に検証する (#4
       head_sha: HEAD,
       conclusion: "success",
     };
-    const trees = overrides.trees ?? { [SHA]: "tree1", [HEAD]: "tree1" };
+    const trees = overrides.trees ?? { [SHA]: TREE, [HEAD]: TREE };
+    const candidateHead = Array.isArray(pulls)
+      ? (pulls[0] as { head?: { sha?: unknown } })?.head?.sha
+      : undefined;
+    const defaultHead =
+      typeof candidateHead === "string" ? candidateHead : HEAD;
+    const commit = overrides.commit ?? {
+      sha: defaultHead,
+      tree: { sha: trees[defaultHead] ?? TREE },
+    };
+    const comparison = overrides.comparison ?? { status: "ahead" };
 
     const api = async (path: string) => {
       if (overrides.apiError && path.includes(overrides.apiError)) {
@@ -1141,13 +1154,11 @@ describe("マージ後 push のスキップ前提を実行時に検証する (#4
       if (path.includes("/check-runs?")) return checkRuns;
       const runId = path.match(/\/actions\/runs\/(\d+)$/)?.[1];
       if (runId) return overrides.workflowRuns?.[runId] ?? workflowRun;
+      if (path.includes("/git/commits/")) return commit;
+      if (path.includes("/compare/")) return comparison;
       throw new Error(`unexpected path ${path}`);
     };
     const git = (args: string[]) => {
-      const command = args.join(" ");
-      if (overrides.gitFails && command.includes(overrides.gitFails)) {
-        throw new Error("git failed");
-      }
       if (args[0] === "rev-parse") {
         const sha = args[1].replace("^{tree}", "");
         const tree = trees[sha];
@@ -1218,7 +1229,7 @@ describe("マージ後 push のスキップ前提を実行時に検証する (#4
           conclusion: "success",
         },
         parents: { [merge]: [devBefore, mainHead] },
-        trees: { [merge]: "promoted-tree", [mainHead]: "promoted-tree" },
+        trees: { [merge]: TREE, [mainHead]: TREE },
       },
       { sha: merge, before: devBefore, branch: "dev" },
     );
@@ -1472,20 +1483,32 @@ describe("マージ後 push のスキップ前提を実行時に検証する (#4
       "own-check-run-not-successful",
     ],
     [
-      "PR head の取得に失敗",
-      { gitFails: "fetch" },
+      "PR head commit API が失敗",
+      { apiError: "/git/commits/" },
       {},
-      "pull-head-fetch-failed",
+      "pull-head-commit-api-failed",
+    ],
+    [
+      "PR head commit の形が不正",
+      { commit: { sha: HEAD } },
+      {},
+      "pull-head-commit-invalid",
+    ],
+    [
+      "main ancestry compare API が失敗",
+      { apiError: "/compare/" },
+      {},
+      "base-ancestor-api-failed",
     ],
     [
       "陳腐化した PR (before が PR head の祖先でない)",
-      { gitFails: "merge-base" },
+      { comparison: { status: "behind" } },
       {},
       "base-not-ancestor-of-pull-head",
     ],
     [
       "着地したツリーが検証済みツリーと違う",
-      { trees: { [SHA]: "landed", [HEAD]: "verified" } },
+      { trees: { [SHA]: OTHER_TREE, [HEAD]: TREE } },
       {},
       "tree-mismatch",
     ],
@@ -1595,9 +1618,11 @@ describe("マージ後 push のスキップ前提を実行時に検証する (#4
       },
       git: dependencies.git,
     });
+    expect(paths).toContain(`/repos/${REPO}/git/commits/${HEAD}`);
     expect(paths).toContain(
       `/repos/${REPO}/commits/${HEAD}/check-runs?per_page=100`,
     );
+    expect(paths).toContain(`/repos/${REPO}/compare/${BEFORE}...${HEAD}`);
   });
 });
 
@@ -1622,12 +1647,12 @@ describe("マージ後証拠の外部 I/O timeout (#496)", () => {
     }
   });
 
-  it("git/ref fetch に同じ bounded timeout を渡す", () => {
+  it("ローカル git 操作に同じ bounded timeout を渡す", () => {
     const exec = vi.fn().mockReturnValue("");
-    runGit(["fetch", "origin", "refs/pull/1/head"], exec);
+    runGit(["rev-parse", "HEAD^{tree}"], exec);
     expect(exec).toHaveBeenCalledWith(
       "git",
-      ["fetch", "origin", "refs/pull/1/head"],
+      ["rev-parse", "HEAD^{tree}"],
       expect.objectContaining({ timeout: EVIDENCE_IO_TIMEOUT_MS }),
     );
   });
@@ -1691,10 +1716,10 @@ describe("ガードが参照する check 名が job 名と一致する (#496)", 
 });
 
 /**
- * 上のテストは `git` を差し替えて分岐を網羅するが、**実際に発行する git コマンドが
- * 意図どおり動くか**は検証していない。`refs/pull/N/merge` は merge 時に削除されるため
- * 使えず `refs/pull/N/head` を使う、といった前提は実物でしか確かめられない。
- * 本物のリポジトリで squash マージを再現して固定する (#496)。
+ * 上のテストは `git` を差し替えて分岐を網羅するが、**実際に発行する git コマンドと
+ * API の組み合わせが意図どおり動くか**は検証していない。マージ後は PR head ref が
+ * 消えることがあるため、ephemeral ref に依存せず commit API の tree と compare API
+ * で証拠を確認する。本物のリポジトリで squash マージを再現して固定する (#496)。
  */
 describe("マージ後ガードの git 操作が実物で動く (#496)", () => {
   type Repo = {
@@ -1702,6 +1727,7 @@ describe("マージ後ガードの git 操作が実物で動く (#496)", () => {
     landed: string;
     pullHead: string;
     before: string;
+    stale: boolean;
     cleanup: () => void;
   };
 
@@ -1742,9 +1768,6 @@ describe("マージ後ガードの git 操作が実物で動く (#496)", () => {
     run(work, "add", "-A");
     run(work, "commit", "--quiet", "-m", "feature");
     const pullHead = run(work, "rev-parse", "HEAD");
-    // GitHub が保持する PR head ref を再現する。
-    run(work, "push", "--quiet", "origin", `HEAD:refs/pull/492/head`);
-
     run(work, "checkout", "--quiet", "main");
     if (stale) {
       // main が独自に進む = PR は古い main のまま(strict を外した状況)。
@@ -1765,6 +1788,7 @@ describe("マージ後ガードの git 操作が実物で動く (#496)", () => {
       landed,
       pullHead,
       before,
+      stale,
       cleanup: () => rmSync(root, { recursive: true, force: true }),
     };
   }
@@ -1807,13 +1831,25 @@ describe("マージ後ガードの git 操作が実物で動く (#496)", () => {
           head_sha: repo.pullHead,
           conclusion: "success",
         };
+      if (path.endsWith(`/git/commits/${repo.pullHead}`))
+        return {
+          sha: repo.pullHead,
+          tree: {
+            sha: execFileSync("git", ["rev-parse", `${repo.pullHead}^{tree}`], {
+              cwd: repo.dir,
+              encoding: "utf8",
+            }).trim(),
+          },
+        };
+      if (path.includes(`/compare/${repo.before}...${repo.pullHead}`))
+        return { status: repo.stale ? "behind" : "ahead" };
       throw new Error(`unexpected ${path}`);
     };
   }
 
   const CHECK = "lint / typecheck / format / test / build";
 
-  it("最新の main を取り込んだ PR の squash マージはスキップを許す", async () => {
+  it("PR head ref が消えていても commit API の証拠で squash マージをスキップする", async () => {
     const repo = createMergedRepository(false);
     try {
       const result = await resolvePostMergeEvidence({
