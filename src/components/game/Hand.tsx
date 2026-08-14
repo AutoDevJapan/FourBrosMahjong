@@ -102,6 +102,7 @@ export default function Hand({
         case "Enter":
         case " ":
           event.preventDefault();
+          if (event.repeat) break;
           if (tileStates[index]?.disabled) {
             onBlockedSelect?.(
               tileStates[index].reason ?? "この牌は選べません。",
@@ -192,7 +193,10 @@ export default function Hand({
             aria-disabled={disabled || undefined}
             tabIndex={isActive ? 0 : -1}
             onKeyDown={(event) => handleKeyDown(event, index)}
-            onClick={() => {
+            onClick={(event) => {
+              // dblclickの2回目は1回目と同じ物理activation。React commit後の
+              // 新しいhandlerへ配送されても、次巡の操作として再利用しない。
+              if (event.detail > 1) return;
               if (disabled) {
                 setActiveIndex(index);
                 onBlockedSelect?.(state?.reason ?? "この牌は選べません。");

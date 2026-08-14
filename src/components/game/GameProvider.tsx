@@ -20,6 +20,7 @@ import {
   createContext,
   useContext,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -260,7 +261,16 @@ export function GameProvider({ children, initialGame }: GameProviderProps) {
   // 次の遷移を計算する。engine は Wall/RNG を含め入力を可変更新するため、レンダー時点の
   // session をクロージャから再利用するとライブ状態だけが二重に進み、journal と分岐する。
   const sessionRef = useRef(session);
+  // 1回の描画で公開したUIから受け付ける遷移は1つだけにする。engine の1操作は
+  // AI進行を含めて次の自家入力まで同期的に進み得るため、同じDOMへのダブルクリック等を
+  // React commitまで直列化する。
+  // accepted transition後は session identityが変わるため、旧renderのcontrolsも失効する。
+  const transitionPendingRef = useRef(false);
   const { engine } = session;
+
+  useLayoutEffect(() => {
+    transitionPendingRef.current = false;
+  }, [engine]);
 
   // 終局済みジャーナルを復元したときの戦績追記(終局時の保存失敗の補完)は、
   // 描画フェーズではなくマウント後の効果で行う(#310)。追記に伴う
@@ -293,12 +303,20 @@ export function GameProvider({ children, initialGame }: GameProviderProps) {
   // 関数型 updater の中では実行しない。同期 ref 上で1度だけ遷移し、その確定値を state へ渡す。
   // ref は同一レンダー中の連続イベントにも即時反映され、engine と journal を同じ順序で進める。
   const controls = useMemo<GameControls>(() => {
+    const renderSession = session;
+    const canAccept = () =>
+      !transitionPendingRef.current && sessionRef.current === renderSession;
+    const markAccepted = () => {
+      transitionPendingRef.current = true;
+    };
     const commit = (action: GameAction) => {
+      if (!canAccept()) return;
       const { engine, journal } = sessionRef.current;
       const nextEngine = applyGameAction(engine, action);
       // engine が局面上不正な操作を同一 state の no-op として拒否した場合は、
       // 再生不能なイベントを journal に残さない。
       if (nextEngine === engine) return;
+      markAccepted();
       // この操作で半荘が終局したら、確定結果を戦績へ追記する(issue #293)。
       const historySaveStatus =
         nextEngine.phase === "gameEnd"
@@ -361,6 +379,7 @@ export function GameProvider({ children, initialGame }: GameProviderProps) {
       passRon: () => commit({ type: "passRon" }),
       nextRound: () => commit({ type: "nextRound" }),
       newGame: () => {
+        if (!canAccept()) return;
         const seed = freshSeed();
         const storage = sessionStorageOrNull();
         // 「もう一半荘」は新しい半荘の開始なので、設定で変更された名前をここで取り込む。
@@ -371,13 +390,14 @@ export function GameProvider({ children, initialGame }: GameProviderProps) {
           journal: nextJournal,
           historySaveStatus: "idle" as const,
         };
+        markAccepted();
         sessionRef.current = nextSession;
         if (storage !== null && nextJournal !== null)
           saveJournal(storage, nextJournal);
         setSession(nextSession);
       },
     };
-  }, []);
+  }, [session]);
 
   const value = useMemo<GameContextValue>(
     () => ({
