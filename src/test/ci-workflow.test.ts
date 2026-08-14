@@ -13,11 +13,13 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { parse } from "yaml";
 import {
   changedPaths,
+  changedPathsFromApi,
   classifyPath,
   DOCUMENTATION_EXCEPTIONS,
   EVIDENCE_IO_TIMEOUT_MS,
   githubApi,
   protectedPushBranch,
+  resolveChangedPaths,
   resolvePostMergeEvidence,
   resolveScope,
   runGit,
@@ -1057,6 +1059,101 @@ describe("変更ファイルの取得範囲 (#491)", () => {
   it("存在しないリビジョンでも例外にせず null を返す", () => {
     // git が失敗しても判定 step 全体を落とさない (落ちると job が赤くなる)。
     expect(changedPaths("0".repeat(39) + "1", "1".repeat(40))).toBeNull();
+  });
+});
+
+describe("container の変更パス判定 API fallback (#567)", () => {
+  const REPO = "AutoDevJapan/FourBrosMahjong";
+  const BASE = "a".repeat(40);
+  const HEAD = "b".repeat(40);
+
+  it("local git が解決できないとき Compare API の一覧へ切り替える", async () => {
+    const api = vi.fn(async (path: string) => {
+      expect(path).toBe(
+        `/repos/${REPO}/compare/${BASE}...${HEAD}?per_page=100&page=1`,
+      );
+      return { files: [{ filename: "src/domain/game/engine.ts" }] };
+    });
+
+    await expect(
+      resolveChangedPaths({
+        repo: REPO,
+        baseSha: BASE,
+        headSha: HEAD,
+        local: () => null,
+        api,
+      }),
+    ).resolves.toEqual({
+      paths: ["src/domain/game/engine.ts"],
+      source: "github-api",
+    });
+  });
+
+  it("local git が解決できるとき API を余分に呼ばない", async () => {
+    const api = vi.fn();
+    await expect(
+      resolveChangedPaths({
+        repo: REPO,
+        baseSha: BASE,
+        headSha: HEAD,
+        local: () => ["docs/only.md"],
+        api,
+      }),
+    ).resolves.toEqual({ paths: ["docs/only.md"], source: "git" });
+    expect(api).not.toHaveBeenCalled();
+  });
+
+  it("rename は旧パスと新パスをどちらも分類対象にする", async () => {
+    await expect(
+      changedPathsFromApi({
+        repo: REPO,
+        baseSha: BASE,
+        headSha: HEAD,
+        api: async () => ({
+          files: [
+            {
+              filename: "docs/ships.md",
+              previous_filename: "src/ships.ts",
+              status: "renamed",
+            },
+          ],
+        }),
+      }),
+    ).resolves.toEqual(["docs/ships.md", "src/ships.ts"]);
+  });
+
+  it.each([
+    [
+      "API が失敗",
+      async () => {
+        throw new Error("network");
+      },
+    ],
+    ["レスポンスが不正", async () => ({ files: "not-an-array" })],
+    ["ファイル要素が不正", async () => ({ files: [{}] })],
+  ])("%s は unresolved のまま fail-open する", async (_label, api) => {
+    await expect(
+      changedPathsFromApi({
+        repo: REPO,
+        baseSha: BASE,
+        headSha: HEAD,
+        api,
+      }),
+    ).resolves.toBeNull();
+  });
+
+  it("Compare API の 300 件上限に達したら完全性を保証せず fail-open する", async () => {
+    const fullPage = Array.from({ length: 100 }, (_, index) => ({
+      filename: `src/generated-${index}.ts`,
+    }));
+    await expect(
+      changedPathsFromApi({
+        repo: REPO,
+        baseSha: BASE,
+        headSha: HEAD,
+        api: async () => ({ files: fullPage }),
+      }),
+    ).resolves.toBeNull();
   });
 });
 

@@ -149,6 +149,12 @@ export const SCOPE_OUTPUT_KEYS = /** @type {const} */ (["setup", "verify"]);
 /** API / ref 取得が job 全体の timeout まで居座らないための上限。 */
 export const EVIDENCE_IO_TIMEOUT_MS = 15_000;
 
+// GitHub Compare API は 1 ページ最大 100 件で、変更ファイルは最大 300 件まで返す。
+// 上限に達した場合は一覧の完全性を証明できないため、変更パス判定を null に戻して
+// 呼び出し側の fail-open (全検証) を選ぶ。
+const COMPARE_FILES_PAGE_SIZE = 100;
+const COMPARE_FILES_MAX_PAGES = 3;
+
 /** 成功 check をこのワークフローの PR run に束縛する。 */
 const TRUSTED_CHECK_APP = "github-actions";
 const TRUSTED_WORKFLOW_PATH = ".github/workflows/ci.yml";
@@ -176,12 +182,7 @@ const TRUSTED_WORKFLOW_PATH = ".github/workflows/ci.yml";
  */
 export function changedPaths(baseSha, headSha) {
   // 新規ブランチへの push では `github.event.before` が全 0 になり、比較対象が無い。
-  /** @param {string | undefined} sha */
-  const isUsable = (sha) =>
-    typeof sha === "string" &&
-    /^[0-9a-f]{40}$/.test(sha) &&
-    !/^0{40}$/.test(sha);
-  if (!isUsable(baseSha) || !isUsable(headSha)) return null;
+  if (!isUsableSha(baseSha) || !isUsableSha(headSha)) return null;
   try {
     const output = execFileSync(
       "git",
@@ -201,6 +202,120 @@ export function changedPaths(baseSha, headSha) {
   } catch {
     return null;
   }
+}
+
+/** @param {unknown} sha */
+function isUsableSha(sha) {
+  return (
+    typeof sha === "string" &&
+    /^[0-9a-f]{40}$/.test(sha) &&
+    !/^0{40}$/.test(sha)
+  );
+}
+
+/**
+ * local git diff の代替として GitHub Compare API から変更パスを取得する (#567)。
+ *
+ * Actions の E2E job は Playwright container 内で別の partial checkout を使うため、
+ * 同じ SHA の compare でも local git の object/ref 解決結果が job ごとに揺れることがある。
+ * API のファイル一覧を使うことで、checkout の状態に依存しない immutable SHA の判定にする。
+ * local `--no-renames` と同じ安全性を保つため、rename の旧パスも含める。
+ *
+ * @param {object} input
+ * @param {string} input.repo `owner/name`
+ * @param {string | undefined} input.baseSha
+ * @param {string | undefined} input.headSha
+ * @param {(path: string) => Promise<unknown>} input.api
+ * @returns {Promise<string[] | null>}
+ */
+export async function changedPathsFromApi({ repo, baseSha, headSha, api }) {
+  if (!isUsableSha(baseSha) || !isUsableSha(headSha)) return null;
+
+  /** @type {string[]} */
+  const paths = [];
+  const seen = new Set();
+  const append = (/** @type {unknown} */ value) => {
+    if (typeof value !== "string" || value.length === 0) return false;
+    if (!seen.has(value)) {
+      seen.add(value);
+      paths.push(value);
+    }
+    return true;
+  };
+
+  for (let page = 1; page <= COMPARE_FILES_MAX_PAGES; page += 1) {
+    /** @type {any} */
+    let comparison;
+    try {
+      comparison = await api(
+        `/repos/${repo}/compare/${baseSha}...${headSha}?per_page=${COMPARE_FILES_PAGE_SIZE}&page=${page}`,
+      );
+    } catch {
+      return null;
+    }
+
+    const files = comparison?.files;
+    if (!Array.isArray(files)) return null;
+    for (const file of files) {
+      if (!append(file?.filename)) return null;
+      // Compare API exposes the source path of a rename as previous_filename.
+      // Include it even when status is omitted so the safety property does not
+      // depend on an optional response field.
+      if (
+        file &&
+        Object.prototype.hasOwnProperty.call(file, "previous_filename") &&
+        !append(file.previous_filename)
+      ) {
+        return null;
+      }
+    }
+
+    if (files.length < COMPARE_FILES_PAGE_SIZE)
+      return paths.length > 0 ? paths : null;
+    // GitHub documents a 300-file cap for Compare API. A full third page means
+    // the complete list cannot be proven, so keep the fail-open behavior.
+    if (page === COMPARE_FILES_MAX_PAGES) return null;
+  }
+
+  return null;
+}
+
+/**
+ * local diff を優先し、container/partial clone で解決できないときだけ API に補完させる。
+ * API も解決できなければ `unresolved` のままにして全検証を実行する。
+ *
+ * @param {object} input
+ * @param {string} input.repo
+ * @param {string | undefined} input.baseSha
+ * @param {string | undefined} input.headSha
+ * @param {(path: string) => Promise<unknown>} input.api
+ * @param {(baseSha: string | undefined, headSha: string | undefined) => string[] | null} [input.local]
+ * @returns {Promise<{ paths: string[] | null, source: "git" | "github-api" | "unresolved" }>}
+ */
+export async function resolveChangedPaths({
+  repo,
+  baseSha,
+  headSha,
+  api,
+  local = changedPaths,
+}) {
+  let localPaths = null;
+  try {
+    localPaths = local(baseSha, headSha);
+  } catch {
+    // Treat injected or future local resolution failures the same as git's
+    // existing fail-open behavior.
+  }
+  if (localPaths) return { paths: localPaths, source: "git" };
+
+  const apiPaths = await changedPathsFromApi({
+    repo,
+    baseSha,
+    headSha,
+    api,
+  });
+  if (apiPaths) return { paths: apiPaths, source: "github-api" };
+  return { paths: null, source: "unresolved" };
 }
 
 /**
@@ -490,10 +605,13 @@ async function main() {
     });
   }
 
-  const paths = changedPaths(
-    process.env.SCOPE_BASE_SHA,
-    process.env.SCOPE_HEAD_SHA,
-  );
+  const changed = await resolveChangedPaths({
+    repo: String(process.env.GITHUB_REPOSITORY ?? ""),
+    baseSha: process.env.SCOPE_BASE_SHA,
+    headSha: process.env.SCOPE_HEAD_SHA,
+    api: githubApi,
+  });
+  const paths = changed.paths;
   const scope = resolveScope({
     job,
     paths,
@@ -507,6 +625,7 @@ async function main() {
     `job=${job}`,
     `pushBranch=${pushBranch ?? "none"}`,
     `postMergeEvidence=${evidence.reason}`,
+    `changedPathsSource=${changed.source}`,
     paths
       ? `changedPaths=${paths.length}`
       : "changedPaths=unresolved (fail-open)",
