@@ -101,7 +101,7 @@ function armHumanRon(
 ): EngineState {
   const hand = state.hand;
   if (hand === null) throw new Error("hand should exist");
-  hand.pendingDiscard = { seat: from, tile };
+  hand.pendingDiscard = { seat: from, tile, haitei: false };
   return {
     ...state,
     pending: {

@@ -95,7 +95,11 @@ function armedForThirdDragonPon(seed: number): EngineState {
   hand.hands.east = parseTiles("7z 7z 1m 1m 1m 9m");
   hand.hands.south = parseTiles(JUNK);
   hand.hands.west = parseTiles(JUNK);
-  hand.pendingDiscard = { seat: "south", tile: parseTile("7z") };
+  hand.pendingDiscard = {
+    seat: "south",
+    tile: parseTile("7z"),
+    haitei: false,
+  };
   hand.turn = "south";
   hand.drawn = null;
   return {
@@ -120,7 +124,11 @@ describe("engine: パオ(責任払い)の結線(#284 / スペック3 3.3)", () =
 
     // 西家(p2)の 9m 放銃でロン(親・役満 48,000)。
     const hand = requireHand(ponState);
-    hand.pendingDiscard = { seat: "west", tile: parseTile("9m") };
+    hand.pendingDiscard = {
+      seat: "west",
+      tile: parseTile("9m"),
+      haitei: false,
+    };
     hand.turn = "west";
     hand.drawn = null;
     const after = declareRon({
@@ -202,7 +210,11 @@ describe("engine: パオ(責任払い)の結線(#284 / スペック3 3.3)", () =
     hand.hands.east = parseTiles("6s 6s 6s 9p");
     hand.hands.south = parseTiles(JUNK);
     hand.hands.west = parseTiles(JUNK);
-    hand.pendingDiscard = { seat: "south", tile: parseTile("6s") };
+    hand.pendingDiscard = {
+      seat: "south",
+      tile: parseTile("6s"),
+      haitei: false,
+    };
     hand.turn = "south";
     hand.drawn = null;
     const armed = {
@@ -256,7 +268,11 @@ describe("engine: パオ(責任払い)の結線(#284 / スペック3 3.3)", () =
     hand.hands.east = parseTiles("7z 7z 7z 6s 6s 6s 9p");
     hand.hands.south = parseTiles(JUNK);
     hand.hands.west = parseTiles(JUNK);
-    hand.pendingDiscard = { seat: "south", tile: parseTile("7z") };
+    hand.pendingDiscard = {
+      seat: "south",
+      tile: parseTile("7z"),
+      haitei: false,
+    };
     hand.turn = "south";
     hand.drawn = null;
 
@@ -274,7 +290,11 @@ describe("engine: パオ(責任払い)の結線(#284 / スペック3 3.3)", () =
     });
 
     const daisangenHand = requireHand(daisangen);
-    daisangenHand.pendingDiscard = { seat: "west", tile: parseTile("6s") };
+    daisangenHand.pendingDiscard = {
+      seat: "west",
+      tile: parseTile("6s"),
+      haitei: false,
+    };
     daisangenHand.turn = "west";
     daisangenHand.drawn = null;
     const suukantsu = declareKan({
@@ -404,7 +424,11 @@ describe("engine: パオ(責任払い)の結線(#284 / スペック3 3.3)", () =
     hand.hands.east = parseTiles("6z 6z 7z 7z 1m 1m 1m 9m");
     hand.hands.south = parseTiles(JUNK);
     hand.hands.west = parseTiles(JUNK);
-    hand.pendingDiscard = { seat: "south", tile: parseTile("6z") };
+    hand.pendingDiscard = {
+      seat: "south",
+      tile: parseTile("6z"),
+      haitei: false,
+    };
     hand.turn = "south";
     hand.drawn = null;
 
@@ -421,7 +445,11 @@ describe("engine: パオ(責任払い)の結線(#284 / スペック3 3.3)", () =
 
     // 3種目(中)を西家(p2)が打牌 → この鳴きで大三元が確定しパオ発火。
     const secondHand = requireHand(second);
-    secondHand.pendingDiscard = { seat: "west", tile: parseTile("7z") };
+    secondHand.pendingDiscard = {
+      seat: "west",
+      tile: parseTile("7z"),
+      haitei: false,
+    };
     secondHand.turn = "west";
     secondHand.drawn = null;
     const third = declarePon({
