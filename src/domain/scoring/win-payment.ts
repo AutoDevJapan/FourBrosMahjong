@@ -110,6 +110,66 @@ function safeMultiply(left: number, right: number, name: string): number {
   return result;
 }
 
+/**
+ * 支払先をIDだけで扱うAPIの境界検証。内部のseat→player写像が壊れても、
+ * 同じ人への二重払い・和了者自身への支払い・未知IDのdelta生成を許さない。
+ */
+function assertWinParticipants(input: WinPaymentInput): void {
+  if (input.winType !== "ron" && input.winType !== "tsumo") {
+    throw new RangeError(`unsupported winType: ${String(input.winType)}`);
+  }
+  if (
+    input.winner === null ||
+    typeof input.winner !== "object" ||
+    typeof input.winner.id !== "string" ||
+    input.winner.id.length === 0 ||
+    typeof input.winner.isDealer !== "boolean"
+  ) {
+    throw new RangeError("winner must be a valid seated player.");
+  }
+  if (!Array.isArray(input.others) || input.others.length !== 2) {
+    throw new RangeError("others must contain exactly two opponents.");
+  }
+
+  const opponentIds = new Set<PlayerId>();
+  for (const [index, other] of input.others.entries()) {
+    if (
+      other === null ||
+      typeof other !== "object" ||
+      typeof other.id !== "string" ||
+      other.id.length === 0 ||
+      typeof other.isDealer !== "boolean"
+    ) {
+      throw new RangeError(`others[${index}] must be a valid seated player.`);
+    }
+    if (other.id === input.winner.id) {
+      throw new RangeError("winner cannot also be an opponent.");
+    }
+    if (opponentIds.has(other.id)) {
+      throw new RangeError(`duplicate opponent playerId: ${other.id}`);
+    }
+    opponentIds.add(other.id);
+  }
+
+  if (input.winType === "ron") {
+    if (
+      input.discarderId === undefined ||
+      !opponentIds.has(input.discarderId)
+    ) {
+      throw new RangeError("ron discarderId must identify an opponent.");
+    }
+  } else if (input.discarderId !== undefined) {
+    throw new RangeError("tsumo cannot have a discarderId.");
+  }
+
+  if (
+    input.paoResponsibleId !== undefined &&
+    !opponentIds.has(input.paoResponsibleId)
+  ) {
+    throw new RangeError("paoResponsibleId must identify an opponent.");
+  }
+}
+
 function assertSafeScore(score: ScoreResult): void {
   for (const [name, value] of [
     ["score.basePoints", score.basePoints],
@@ -224,9 +284,10 @@ function resolveYakumanComponents(
 /**
  * 和了の持ち点移動を解決する。
  *
- * @throws RangeError ロンで `discarderId` 未指定、本場/供託が不正なとき。
+ * @throws RangeError 参加者・支払者のID、ロンの `discarderId`、本場/供託が不正なとき。
  */
 export function resolveWinPayment(input: WinPaymentInput): WinPaymentResult {
+  assertWinParticipants(input);
   const honba = input.honba ?? 0;
   const riichiSticks = input.riichiSticks ?? 0;
   assertNonNegativeSafeInteger(honba, "honba");

@@ -64,6 +64,59 @@ describe("resolveWinPayment — ロン", () => {
   });
 });
 
+describe("resolveWinPayment — 参加者境界", () => {
+  it.each([
+    ["opponentが1人", [D]],
+    ["同じopponentが重複", [D, D]],
+    ["winnerがopponentに混入", [C1, C2]],
+  ])("%s は精算前に拒否する", (_label, others) => {
+    expect(() =>
+      resolveWinPayment({
+        winner: C1,
+        winType: "tsumo",
+        score: mangan,
+        others,
+      }),
+    ).toThrow(RangeError);
+  });
+
+  it("ロンの未知の放銃者IDをdeltaへ出力しない", () => {
+    expect(() =>
+      resolveWinPayment({
+        winner: C1,
+        winType: "ron",
+        score: mangan,
+        discarderId: "missing-player",
+        others: [D, C2],
+      }),
+    ).toThrow(RangeError);
+  });
+
+  it("ツモに放銃者IDを指定できない", () => {
+    expect(() =>
+      resolveWinPayment({
+        winner: C1,
+        winType: "tsumo",
+        score: mangan,
+        discarderId: "dealer",
+        others: [D, C2],
+      }),
+    ).toThrow(RangeError);
+  });
+
+  it("未知のパオ責任者IDをdeltaへ出力しない", () => {
+    expect(() =>
+      resolveWinPayment({
+        winner: C1,
+        winType: "tsumo",
+        score: mangan,
+        paoResponsibleId: "missing-player",
+        others: [D, C2],
+      }),
+    ).toThrow(RangeError);
+  });
+});
+
 describe("resolveWinPayment — ツモ(サンマ北家折半)", () => {
   it("子ツモ満貫: 親5000/子3000、総和ゼロ", () => {
     const { deltas } = resolveWinPayment({
