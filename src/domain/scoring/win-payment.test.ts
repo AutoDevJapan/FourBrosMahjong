@@ -220,22 +220,55 @@ describe("resolveWinPayment — 本場・供託", () => {
 });
 
 describe("resolveWinPayment — パオ(責任払い)", () => {
-  describe("複合役満の現行集約挙動(Q37 / #525 未確定)", () => {
-    /**
-     * `resolveWinPayment` は役満の内訳を受け取らず、責任者も1人しか
-     * 表現できない。したがってパオ対象外を含み得るダブル役満でも、
-     * `paoResponsibleId` が渡ると総額全体へ責任払いを適用する。
-     * これは Q37 の裁定ではなく、裁定までの意図せざる変更を検出するための
-     * 現行挙動の可視化である。
-     */
-    it("ロンはダブル役満総額を1人の責任者と放銃者で折半する", () => {
+  describe("役満単位の責任分配 (#525)", () => {
+    it("ロン: 異なる責任者のパオ役満を各単位で分け、責任者=放銃者は全額負担する", () => {
       const { deltas } = resolveWinPayment({
         winner: C1,
         winType: "ron",
         score: doubleYakuman,
         discarderId: "child2",
         others: [D, C2],
-        paoResponsibleId: "dealer",
+        yakumanComponents: [
+          { multiplier: 1, paoResponsibleId: "dealer" },
+          { multiplier: 1, paoResponsibleId: "child2" },
+        ],
+      });
+      // 1つ目: dealer 16,000 / discarder 16,000、2つ目: discarder 32,000。
+      expect(deltas.child1).toBe(64000);
+      expect(deltas.dealer).toBe(-16000);
+      expect(deltas.child2).toBe(-48000);
+      expectZeroSum(deltas);
+    });
+
+    it("ロン: パオ対象役満だけを折半し、非対象役満は放銃者が全額負担する", () => {
+      const { deltas } = resolveWinPayment({
+        winner: C1,
+        winType: "ron",
+        score: doubleYakuman,
+        discarderId: "child2",
+        others: [D, C2],
+        yakumanComponents: [
+          { multiplier: 1, paoResponsibleId: "dealer" },
+          { multiplier: 1 },
+        ],
+      });
+      // パオ分: dealer 16,000 / discarder 16,000、非パオ分: discarder 32,000。
+      expect(deltas.child1).toBe(64000);
+      expect(deltas.dealer).toBe(-16000);
+      expect(deltas.child2).toBe(-48000);
+      expectZeroSum(deltas);
+    });
+
+    it("ツモ: 異なる責任者がそれぞれのパオ役満単位を全額負担する", () => {
+      const { deltas } = resolveWinPayment({
+        winner: C1,
+        winType: "tsumo",
+        score: doubleYakuman,
+        others: [D, C2],
+        yakumanComponents: [
+          { multiplier: 1, paoResponsibleId: "dealer" },
+          { multiplier: 1, paoResponsibleId: "child2" },
+        ],
       });
       expect(deltas.child1).toBe(64000);
       expect(deltas.dealer).toBe(-32000);
@@ -243,18 +276,38 @@ describe("resolveWinPayment — パオ(責任払い)", () => {
       expectZeroSum(deltas);
     });
 
-    it("ツモはダブル役満総額を1人の責任者へ寄せる", () => {
+    it("ツモ: 非パオ役満は通常配分し、複合時の本場は各支払者が100×本場を負担する", () => {
+      const honba = 2;
       const { deltas } = resolveWinPayment({
         winner: C1,
         winType: "tsumo",
         score: doubleYakuman,
         others: [D, C2],
-        paoResponsibleId: "dealer",
+        honba,
+        yakumanComponents: [
+          { multiplier: 1, paoResponsibleId: "dealer" },
+          { multiplier: 1 },
+        ],
       });
-      expect(deltas.child1).toBe(64000);
-      expect(deltas.dealer).toBe(-64000);
-      expect(deltas.child2).toBe(0);
+      // パオ分: dealer 32,000。非パオ分: dealer 20,000 / child2 12,000。
+      // 複合時の本場: dealer/child2 各200。
+      expect(deltas.child1).toBe(64000 + 400);
+      expect(deltas.dealer).toBe(-(32000 + 20000 + 200));
+      expect(deltas.child2).toBe(-(12000 + 200));
       expectZeroSum(deltas);
+    });
+
+    it("役満コンポーネントのない通常スコアには適用できない", () => {
+      expect(() =>
+        resolveWinPayment({
+          winner: C1,
+          winType: "ron",
+          score: mangan,
+          discarderId: "child2",
+          others: [D, C2],
+          yakumanComponents: [{ multiplier: 1 }],
+        }),
+      ).toThrow(RangeError);
     });
   });
 

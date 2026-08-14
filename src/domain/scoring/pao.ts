@@ -13,16 +13,17 @@
  * - **門前(暗刻・暗槓)・自摸・加槓のみで完成した役満にはパオが付かない**(責任者なし)。
  *
  * 本モジュールは**鳴き(副露)が成立した瞬間**に評価する純判定
- * {@link isPaoTriggeringCall} を提供する。鳴きそのものの受理(ポン/大明槓)は #97 の
- * 責務であり、#97 が本判定で真を得たとき、その打牌者を責任者として記録し、和了精算
- * (engine `settleWin` → {@link "./win-payment".resolveWinPayment} の `paoResponsibleId`)
- * へ渡す。点棒移動そのもの(ロン折半・ツモ全額・本場)は `win-payment.ts` が確定済み。
+ * {@link paoYakuForCall} と、後方互換の真偽判定 {@link isPaoTriggeringCall} を提供する。
+ * 鳴きそのものの受理(ポン/大明槓)は #97 の責務であり、#97 が本判定で得た
+ * **役満種類ごと**に、その打牌者を責任者として記録し、和了精算へ渡す。
+ * 点棒移動そのもの(ロン折半・ツモ全額・本場)は `win-payment.ts` が担当する。
  *
  * 純関数・決定的・React/DOM 非依存。
  */
 
 import type { Meld } from "../hand/meld";
 import { isDragon, isWind } from "../hand/tile-identity";
+import type { PaoYaku } from "../hand/yaku";
 import type { Tile } from "../tiles/tile";
 
 /** 三元牌の種類数(白・發・中)= 大三元の完成条件。 */
@@ -71,40 +72,46 @@ export interface PaoCallContext {
 }
 
 /**
- * この鳴きがパオ役満(大三元・大四喜・四槓子)を**確定**させ、パオ責任を発生
- * させるかを判定する(スペック3 3.3 / issue #99)。
+ * この鳴きで確定したパオ役満(大三元・大四喜・四槓子)の種類を返す
+ * (スペック3 3.3 / issue #99)。空配列ならパオ責任は発生しない。
  *
- * 真のとき、`newMeld` を鳴かせた打牌者がパオ責任者となる。呼び出し側(#97 の
- * 鳴き実装)がその打牌者IDを記録し、和了時に `resolveWinPayment` の
- * `paoResponsibleId` へ渡す。
+ * 1件以上返るとき、`newMeld` を鳴かせた打牌者が返された各役満のパオ責任者となる。
+ * 呼び出し側(#97 の鳴き実装)が役満種類との組でその打牌者IDを記録し、和了時に
+ * `resolveWinPayment` の役満単位コンポーネントへ渡す。
  *
  * 相手の打牌を鳴いた副露(ポン・大明槓)のみが対象で、暗槓・加槓・自摸完成
  * (`fromOpponentDiscard === false`)はパオを発生させない。
  */
-export function isPaoTriggeringCall(ctx: PaoCallContext): boolean {
-  if (!ctx.fromOpponentDiscard) return false;
+export function paoYakuForCall(ctx: PaoCallContext): readonly PaoYaku[] {
+  if (!ctx.fromOpponentDiscard) return [];
 
   const { existingMelds, newMeld } = ctx;
   const newTile = meldTile(newMeld);
-  if (newTile === undefined) return false;
+  if (newTile === undefined) return [];
+  const triggered: PaoYaku[] = [];
 
   // 大三元: この鳴きで三元牌が3種すべて揃う(=直前は2種確定)。
   if (isDragon(newTile)) {
     const kinds = honorKinds(existingMelds, newTile.rank, isDragon);
-    if (kinds.size === DRAGON_KINDS) return true;
+    if (kinds.size === DRAGON_KINDS) triggered.push("daisangen");
   }
 
   // 大四喜: この鳴きで風牌が4種すべて揃う(=直前は3種確定)。
   if (isWind(newTile)) {
     const kinds = honorKinds(existingMelds, newTile.rank, isWind);
-    if (kinds.size === WIND_KINDS) return true;
+    if (kinds.size === WIND_KINDS) triggered.push("daisuushii");
   }
 
   // 四槓子: 既に3つの槓が確定 + 4つ目の大明槓をこの鳴きで成立。
   if (newMeld.type === "kan") {
     const existingKans = existingMelds.filter((m) => m.type === "kan").length;
-    if (existingKans === 3) return true;
+    if (existingKans === 3) triggered.push("suukantsu");
   }
 
-  return false;
+  return triggered;
+}
+
+/** この鳴きでパオ対象役満が1つ以上確定したか。 */
+export function isPaoTriggeringCall(ctx: PaoCallContext): boolean {
+  return paoYakuForCall(ctx).length > 0;
 }

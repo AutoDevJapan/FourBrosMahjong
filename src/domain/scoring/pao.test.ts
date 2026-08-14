@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { Meld } from "../hand/meld";
 import { HONOR, type Tile } from "../tiles/tile";
-import { isPaoTriggeringCall } from "./pao";
+import { isPaoTriggeringCall, paoYakuForCall } from "./pao";
 
 /** テスト用の牌生成(赤5は本判定に無関係なので常に false)。 */
 function tile(suit: Tile["suit"], rank: number): Tile {
@@ -45,6 +45,22 @@ function suitPon(suit: Tile["suit"], rank: number): Meld {
 }
 
 describe("isPaoTriggeringCall: パオ責任者判定(スペック3 3.3 / #99)", () => {
+  it("1回の鳴きで確定した役満種類を返す", () => {
+    expect(
+      paoYakuForCall({
+        existingMelds: [
+          honorPon(HONOR.WHITE),
+          honorPon(HONOR.GREEN),
+          suitKan("pin", 1),
+          suitKan("sou", 2),
+          suitKan("man", 9),
+        ],
+        newMeld: honorDaiminkan(HONOR.RED),
+        fromOpponentDiscard: true,
+      }),
+    ).toEqual(["daisangen", "suukantsu"]);
+  });
+
   describe("大三元", () => {
     it("三元牌2種が副露済み + 3種目をポン → パオ確定", () => {
       const ctx = {
