@@ -40,7 +40,12 @@ type Workflow = {
   permissions?: Record<string, string>;
   jobs?: Record<
     string,
-    { name?: string; "timeout-minutes"?: unknown; steps?: Step[] }
+    {
+      name?: string;
+      "timeout-minutes"?: unknown;
+      container?: { image?: string; options?: string };
+      steps?: Step[];
+    }
   >;
 };
 
@@ -266,15 +271,44 @@ describe("production E2E parity gate (#432)", () => {
   });
 });
 
+describe("Playwright E2E provisioned environment (#557)", () => {
+  it("uses a pinned Playwright image with Chromium and WebKit already provisioned", () => {
+    const job = readWorkflow().jobs?.e2e;
+    const image = job?.container?.image ?? "";
+    const steps = job?.steps ?? [];
+
+    expect(image).toBe(
+      "mcr.microsoft.com/playwright:v1.62.1-noble@sha256:c091b21d9fae78c76e85cd4356431e9b018402f172a214fc7d7a5e9a7e29d8ac",
+    );
+    expect(job?.container?.options).toContain("--ipc=host");
+    expect(job?.container?.options).toContain("--init");
+    expect(steps.some((step) => step.run?.includes("playwright install"))).toBe(
+      false,
+    );
+    expect(
+      steps.some((step) => step.with?.path === PLAYWRIGHT_CACHE_PATH),
+    ).toBe(false);
+
+    const provisionCheck = steps.find(
+      (step) => step.name === "Verify Playwright browsers are provisioned",
+    );
+    expect(provisionCheck?.if).toBe("steps.scope.outputs.verify == 'true'");
+    expect(provisionCheck?.run).toContain(
+      "/ms-playwright/chromium-*/chrome-linux64/chrome",
+    );
+    expect(provisionCheck?.run).toContain("/ms-playwright/webkit-*/pw_run.sh");
+  });
+});
+
 /**
- * 複数 job が同じ `~/.cache/ms-playwright` を異なるブラウザ集合で使うため、キャッシュキーが
- * ブラウザ集合を含まないと、先に保存した job の内容(例: chromium のみ)がキーを占有し、
- * webkit を要求する job は exact hit で保存もスキップされたまま毎回再ダウンロードになる。
+ * ローカルのproduction E2E jobは `~/.cache/ms-playwright` を使う。E2E jobは
+ * #557 の公式Playwright imageにブラウザを固定しているため、ここでは残るキャッシュが
+ * 要求するブラウザ集合と衝突しないことを確認する。
  */
 describe("Playwright browser cache keys", () => {
   it("インストールするブラウザ集合をキーに含め、job 間で衝突しない", () => {
     const caches = playwrightBrowserCaches(readWorkflow());
-    expect(caches.length).toBeGreaterThanOrEqual(2);
+    expect(caches.length).toBeGreaterThanOrEqual(1);
 
     for (const { job, key, install, browsers } of caches) {
       expect(
@@ -466,9 +500,8 @@ describe("変更パスによる実行範囲の絞り込み (#491)", () => {
   );
 
   /**
-   * ブラウザの導入は「検証する」か「キャッシュがまだ無い」ときだけ必要。
-   * マージ後 push でキャッシュが既にヒットしている場合、入れても使わず保存もしないため
-   * 丸ごと無駄になる (#491)。実測で 31〜99 秒を占める最大の無駄。
+   * ホストrunner上で残るブラウザ導入は「検証する」か「キャッシュがまだ無い」ときだけ必要。
+   * E2E jobのChromium/WebKit導入は #557 の公式Playwright imageへ移し、apt経路を持たない。
    */
   it("ブラウザの導入はキャッシュミス時のみ実行される", () => {
     const workflow = readWorkflowFile("ci.yml");
@@ -489,7 +522,7 @@ describe("変更パスによる実行範囲の絞り込み (#491)", () => {
         );
       }
     }
-    expect(checked, "playwright install を 1 つも検出できなかった").toBe(2);
+    expect(checked, "playwright install を 1 つも検出できなかった").toBe(1);
   });
 
   /**
