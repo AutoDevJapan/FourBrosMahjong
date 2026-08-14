@@ -23,7 +23,7 @@ export interface SeatedPlayerRef {
 }
 
 /** 役満1単位の責任払い情報。`multiplier` は役満倍数(通常は1)。 */
-export interface YakumanPaymentComponent {
+interface YakumanPaymentComponent {
   readonly multiplier: number;
   /** この役満単位のパオ責任者。未指定なら通常の支払い。 */
   readonly paoResponsibleId?: PlayerId;
