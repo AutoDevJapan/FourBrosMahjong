@@ -22,6 +22,13 @@ export interface SeatedPlayerRef {
   readonly isDealer: boolean;
 }
 
+/** 役満1単位の責任払い情報。`multiplier` は役満倍数(通常は1)。 */
+interface YakumanPaymentComponent {
+  readonly multiplier: number;
+  /** この役満単位のパオ責任者。未指定なら通常の支払い。 */
+  readonly paoResponsibleId?: PlayerId;
+}
+
 /** 本場1つあたりの加点(標準)。 */
 const HONBA_UNIT_TSUMO = 100;
 const HONBA_UNIT_RON = 300;
@@ -38,17 +45,26 @@ export interface WinPaymentInput {
   /** 和了者以外の在席プレイヤー(サンマでは2人)。 */
   readonly others: readonly SeatedPlayerRef[];
   /**
-   * パオ責任者ID(役満のパオ成立時のみ)。指定時は責任払い:
+   * パオ責任者ID(役満のパオ成立時のみ)。指定時は従来の集約型責任払い:
    * ツモは責任者が全額、ロンは放銃者と責任者で折半。
    *
-   * 役満単位の内訳は受け取らないため、指定時は `score` 総額全体に
-   * 責任払いを適用する。複数パオ・非パオ役満との複合は Q37 / #525
-   * 未確定であり、この API 制約を裁定とはみなさない。
+   * 役満単位の内訳を渡す新規呼び出しでは {@link yakumanComponents} を使う。
+   * このフィールドは既存呼び出しとの互換性のため残し、指定時は `score` 総額全体に
+   * 責任払いを適用する。
    *
    * 本関数は役満か否かを検査しない。折半規則は任意の `score.ronTotal` に対して
    * 定義され、端数は 100 点単位へ切り上げて責任者が負担する(スペック3 3.1)。
    */
   readonly paoResponsibleId?: PlayerId;
+  /**
+   * 構成役満を役満単位へ分解した責任払い情報。各要素の合計 `multiplier` は
+   * `score.basePoints / 8,000` と一致しなければならない。パオ対象単位だけに
+   * `paoResponsibleId` を指定し、非対象単位は省略する。
+   *
+   * `paoResponsibleId` とは併用しない。複合役満では、パオ対象単位を責任者ごとに
+   * ロン折半/ツモ全額、非対象単位を通常支払いとして処理する。
+   */
+  readonly yakumanComponents?: readonly YakumanPaymentComponent[];
   /** 本場数(0 以上の整数)。既定 0。 */
   readonly honba?: number;
   /** 場の供託リーチ棒の本数(和了者が回収)。既定 0。 */
@@ -96,6 +112,7 @@ function safeMultiply(left: number, right: number, name: string): number {
 
 function assertSafeScore(score: ScoreResult): void {
   for (const [name, value] of [
+    ["score.basePoints", score.basePoints],
     ["score.ronTotal", score.ronTotal],
     ["score.tsumo.fromDealer", score.tsumo.fromDealer],
     ["score.tsumo.fromNonDealer", score.tsumo.fromNonDealer],
@@ -103,6 +120,105 @@ function assertSafeScore(score: ScoreResult): void {
   ] as const) {
     assertNonNegativeSafeInteger(value, name);
   }
+}
+
+interface ResolvedYakumanPaymentComponent {
+  readonly multiplier: number;
+  readonly paoResponsibleId?: PlayerId;
+  readonly ronTotal: number;
+  readonly tsumo: ScoreResult["tsumo"];
+}
+
+/**
+ * 複合役満の内訳を検証し、ScoreResult の各支払額へ比例展開する。
+ * 構成役満の点数は役満倍数に対して線形なので、各値は整数のまま分解できる。
+ */
+function resolveYakumanComponents(
+  input: WinPaymentInput,
+): readonly ResolvedYakumanPaymentComponent[] | null {
+  const components = input.yakumanComponents;
+  if (components === undefined) return null;
+  if (input.paoResponsibleId !== undefined) {
+    throw new RangeError(
+      "paoResponsibleId and yakumanComponents cannot be used together.",
+    );
+  }
+  if (!input.score.isTrueYakuman || components.length === 0) {
+    throw new RangeError(
+      "yakumanComponents require a non-empty true-yakuman score.",
+    );
+  }
+
+  const totalMultiplier = input.score.basePoints / 8000;
+  if (!Number.isSafeInteger(totalMultiplier) || totalMultiplier < 1) {
+    throw new RangeError(
+      "true-yakuman score.basePoints must be a positive multiple of 8000.",
+    );
+  }
+
+  const knownPayers = new Set(input.others.map((player) => player.id));
+  let componentMultiplier = 0;
+  const resolved = components.map((component, index) => {
+    if (
+      !Number.isSafeInteger(component.multiplier) ||
+      component.multiplier < 1
+    ) {
+      throw new RangeError(
+        `yakumanComponents[${index}].multiplier must be a positive safe integer.`,
+      );
+    }
+    if (
+      component.paoResponsibleId !== undefined &&
+      (component.paoResponsibleId === input.winner.id ||
+        !knownPayers.has(component.paoResponsibleId))
+    ) {
+      throw new RangeError(
+        `yakumanComponents[${index}].paoResponsibleId must identify an opponent.`,
+      );
+    }
+    componentMultiplier = safeAdd(
+      componentMultiplier,
+      component.multiplier,
+      "yakuman component multiplier",
+    );
+
+    const scale = (value: number, name: string): number => {
+      if (value % totalMultiplier !== 0) {
+        throw new RangeError(
+          `${name} cannot be split into ${totalMultiplier} yakuman units.`,
+        );
+      }
+      return safeMultiply(
+        value / totalMultiplier,
+        component.multiplier,
+        `${name} component`,
+      );
+    };
+
+    return {
+      multiplier: component.multiplier,
+      paoResponsibleId: component.paoResponsibleId,
+      ronTotal: scale(input.score.ronTotal, "score.ronTotal"),
+      tsumo: {
+        fromDealer: scale(
+          input.score.tsumo.fromDealer,
+          "score.tsumo.fromDealer",
+        ),
+        fromNonDealer: scale(
+          input.score.tsumo.fromNonDealer,
+          "score.tsumo.fromNonDealer",
+        ),
+        total: scale(input.score.tsumo.total, "score.tsumo.total"),
+      },
+    };
+  });
+
+  if (componentMultiplier !== totalMultiplier) {
+    throw new RangeError(
+      `yakumanComponents must total ${totalMultiplier} yakuman units, received ${componentMultiplier}.`,
+    );
+  }
+  return resolved;
 }
 
 /**
@@ -116,6 +232,7 @@ export function resolveWinPayment(input: WinPaymentInput): WinPaymentResult {
   assertNonNegativeSafeInteger(honba, "honba");
   assertNonNegativeSafeInteger(riichiSticks, "riichiSticks");
   assertSafeScore(input.score);
+  const yakumanComponents = resolveYakumanComponents(input);
 
   const deltas: Record<PlayerId, number> = { [input.winner.id]: 0 };
   for (const o of input.others) deltas[o.id] = 0;
@@ -130,15 +247,99 @@ export function resolveWinPayment(input: WinPaymentInput): WinPaymentResult {
   };
 
   if (input.winType === "ron") {
-    resolveRon(input, honba, pay);
+    if (yakumanComponents === null) {
+      resolveRon(input, honba, pay);
+    } else {
+      resolveYakumanRon(input, honba, pay, yakumanComponents);
+    }
   } else {
-    resolveTsumo(input, honba, pay);
+    if (yakumanComponents === null) {
+      resolveTsumo(input, honba, pay);
+    } else {
+      resolveYakumanTsumo(input, honba, pay, yakumanComponents);
+    }
   }
 
   return {
     deltas,
     stickPayout: safeMultiply(riichiSticks, RIICHI_STICK_POINTS, "stickPayout"),
   };
+}
+
+function resolveYakumanRon(
+  input: WinPaymentInput,
+  honba: number,
+  pay: (id: PlayerId, amount: number) => void,
+  components: readonly ResolvedYakumanPaymentComponent[],
+): void {
+  const discarderId = input.discarderId;
+  if (discarderId === undefined) {
+    throw new RangeError("ron win requires discarderId.");
+  }
+
+  for (const component of components) {
+    if (component.paoResponsibleId === undefined) {
+      pay(discarderId, component.ronTotal);
+      continue;
+    }
+    if (component.paoResponsibleId === discarderId) {
+      pay(discarderId, component.ronTotal);
+      continue;
+    }
+    const paoShare = ceil100(component.ronTotal / 2);
+    pay(component.paoResponsibleId, paoShare);
+    pay(discarderId, component.ronTotal - paoShare);
+  }
+
+  // 本場は役満の構成単位とは独立し、ロンでは常に放銃者が一括負担する。
+  const honbaBonus = safeMultiply(HONBA_UNIT_RON, honba, "honba bonus");
+  if (honbaBonus > 0) pay(discarderId, honbaBonus);
+}
+
+function resolveYakumanTsumo(
+  input: WinPaymentInput,
+  honba: number,
+  pay: (id: PlayerId, amount: number) => void,
+  components: readonly ResolvedYakumanPaymentComponent[],
+): void {
+  for (const component of components) {
+    if (component.paoResponsibleId !== undefined) {
+      pay(component.paoResponsibleId, component.tsumo.total);
+      continue;
+    }
+    for (const other of input.others) {
+      const base = other.isDealer
+        ? component.tsumo.fromDealer
+        : component.tsumo.fromNonDealer;
+      pay(other.id, base);
+    }
+  }
+
+  const honbaEach = safeMultiply(HONBA_UNIT_TSUMO, honba, "honba payment");
+  if (honbaEach === 0) return;
+
+  const paoResponsibleIds = [
+    ...new Set(
+      components
+        .map((component) => component.paoResponsibleId)
+        .filter((id): id is PlayerId => id !== undefined),
+    ),
+  ];
+  // 既存の単独パオ・ツモの簡略(責任者が300×本場を一括負担)を維持する。
+  // 複数責任者/非パオ役満との複合では、1人を恣意的に選ばず通常ツモ本場に戻す。
+  const solePaoResponsibleId = paoResponsibleIds[0];
+  if (
+    components.every((component) => component.paoResponsibleId !== undefined) &&
+    solePaoResponsibleId !== undefined &&
+    paoResponsibleIds.length === 1
+  ) {
+    pay(
+      solePaoResponsibleId,
+      safeMultiply(HONBA_UNIT_RON, honba, "pao tsumo honba"),
+    );
+    return;
+  }
+  for (const other of input.others) pay(other.id, honbaEach);
 }
 
 function resolveRon(

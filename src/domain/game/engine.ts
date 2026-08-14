@@ -35,9 +35,9 @@
  *   (`canAnkanAfterRiichi` が判定)。加槓に対する槍槓横取りは Q17 / #115 の範囲。
  * - 北抜き(ガリ)は**自動**で処理する(手動選択は未対応)。
  * - パオ(責任払い)は**鳴きで確定した大三元/大四喜/四槓子**に対応(#99)。ポン/大明槓で
- *   パオ役満が確定した瞬間に責任者(打牌者)を記録し、和了時 `resolveWinPayment` で責任払い
- *   (ロン折半・ツモ全額・本場)を行う(判定は `scoring/pao.ts`)。役満祝儀は別枠で、支払者は
- *   **抜け番を含む和了者以外の3兄弟**とする(Q14 確定・ユーザー承認 2026-07-17 / #129)。
+ *   パオ役満が確定した瞬間に役満種類ごとの責任者(打牌者)を記録し、和了時
+ *   `resolveWinPayment` へ役満単位で渡す(ロン折半・ツモ全額・本場 / #525)。役満祝儀は
+ *   別枠で、支払者は**抜け番を含む和了者以外の3兄弟**とする(Q14 確定・#129)。
  * - `SAFETY_ROUND_CAP` で局数に上限を設け、南4連荘の理論的無限ループを防ぐ(通常は発火しない)。
  *
  * 決定性: `createGame({ seed })` で `createSeededRng` を用いるため、同じ seed + 同じ操作列から
@@ -65,6 +65,7 @@ import { isConcealedHand, type Meld } from "@/domain/hand/meld";
 import { isTenpai, waitingTiles } from "@/domain/hand/tenpai";
 import { sameKind, tileKey } from "@/domain/hand/tile-identity";
 import { analyzeWin, type WinAnalysis } from "@/domain/hand/win";
+import type { PaoYaku } from "@/domain/hand/yaku";
 import { createSeededRng, type Rng } from "@/domain/random/rng";
 import {
   advanceRound,
@@ -76,7 +77,7 @@ import {
   seatingOf,
 } from "@/domain/round/round";
 import type { PlayerRing, Seating } from "@/domain/round/seat";
-import { isPaoTriggeringCall } from "@/domain/scoring/pao";
+import { paoYakuForCall } from "@/domain/scoring/pao";
 import { computeScore, handValueFromHan } from "@/domain/scoring/points";
 import {
   RETURN_POINTS,
@@ -133,6 +134,9 @@ interface EnginePlayer {
 
 /** 席ごとの真偽フラグ。 */
 type SeatFlags = Record<SeatKey, boolean>;
+
+/** 和了席ごとのパオ対象役満 → その役を確定させた責任者。 */
+type PaoResponsibility = Partial<Record<PaoYaku, PlayerId>>;
 
 function seatFlags(value = false): SeatFlags {
   return { east: value, south: value, west: value };
@@ -205,13 +209,12 @@ interface HandState {
   /** この局で鳴き(ポン/カン)が発生したか(ダブルリーチ判定用)。 */
   callsMade: boolean;
   /**
-   * パオ責任者(スペック3 3.3 / #99)。パオ役満(大三元/大四喜/四槓子)を
-   * **鳴き(ポン/大明槓)で確定させた席 → その確定牌を打った責任者ID**。
-   * その席が和了したとき `settleWin` が責任払いへ渡す。
-   * 複数のパオ役満と役ごとの責任者は表現できず、後の確定で上書きされる。
-   * この未確定境界は Q37 / #525。裁定前に状態形式を拡張しない。
+   * パオ責任者(スペック3 3.3 / #99 / #525)。パオ役満を
+   * **鳴き(ポン/大明槓)で確定させた席 → 役満種類 → その確定牌を打った責任者ID**
+   * を保持する。複数のパオ役満が異なる打牌者で確定しても上書きせず、和了時に
+   * 役満単位の精算コンポーネントへ渡す。
    */
-  paoResponsible: Partial<Record<SeatKey, PlayerId>>;
+  paoResponsible: Partial<Record<SeatKey, PaoResponsibility>>;
   /** 直前の打牌(ロン/鳴き判定の対象)。解決後に null。 */
   pendingDiscard: { seat: SeatKey; tile: Tile } | null;
   /** 宣言牌の応答解決待ちのリーチ席。ロンされなければ供託を確定する。 */
@@ -1859,18 +1862,26 @@ function settleWin(state: EngineState, win: WinInput): EngineState {
       ? seatOccupant(hand.seating, win.discarderSeat)
       : undefined;
 
-  // パオ(責任払い): 和了手にパオ役満が含まれ、その席がパオ確定牌を鳴いていれば
-  // 記録済みの責任者へ寄せる(スペック3 3.3 / #99)。門前完成はパオなし。
-  const paoResponsibleId =
-    analysis.pao.length > 0 ? hand.paoResponsible[winnerSeat] : undefined;
-
   const payment = resolveWinPayment({
     winner: { id: winnerId, isDealer: isDealerWin },
     winType,
     score,
     discarderId,
     others,
-    paoResponsibleId,
+    // true役満を役満役ごとに分解する。パオ対象役満だけ責任者を付け、
+    // 非対象役満は undefined のまま通常配分にする(#525)。
+    yakumanComponents:
+      analysis.yakuman > 0
+        ? analysis.yaku
+            .filter(({ yakuman }) => yakuman > 0)
+            .map(({ id, yakuman }) => ({
+              multiplier: yakuman,
+              paoResponsibleId:
+                hand.paoResponsible[winnerSeat]?.[
+                  id as keyof PaoResponsibility
+                ],
+            }))
+        : undefined,
     honba: state.round.honba,
     riichiSticks: state.riichiSticks,
   });
@@ -2468,7 +2479,8 @@ function declareRiichiImpl(state: EngineState, tile: Tile): EngineState {
 
 /**
  * 相手の打牌を鳴いた副露(ポン/大明槓)がパオ役満(大三元/大四喜/四槓子)を
- * 確定させたら、責任者(= その確定牌を打った者)を記録する(スペック3 3.3 / #99)。
+ * 確定させたら、責任者(= その確定牌を打った者)を**役満種類ごと**に記録する
+ * (スペック3 3.3 / #99 / #525)。
  * `existingMelds` は **この鳴きを加える前**の副露列。
  */
 function recordPaoResponsible(
@@ -2478,10 +2490,18 @@ function recordPaoResponsible(
   existingMelds: readonly Meld[],
   newMeld: Meld,
 ): void {
-  if (
-    isPaoTriggeringCall({ existingMelds, newMeld, fromOpponentDiscard: true })
-  ) {
-    hand.paoResponsible[seat] = seatOccupant(hand.seating, discarder);
+  const triggered = paoYakuForCall({
+    existingMelds,
+    newMeld,
+    fromOpponentDiscard: true,
+  });
+  if (triggered.length > 0) {
+    const responsibility = hand.paoResponsible[seat] ?? {};
+    const responsibleId = seatOccupant(hand.seating, discarder);
+    for (const paoYaku of triggered) {
+      responsibility[paoYaku] = responsibleId;
+    }
+    hand.paoResponsible[seat] = responsibility;
   }
 }
 
