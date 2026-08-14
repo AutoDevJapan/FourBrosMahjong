@@ -45,10 +45,38 @@ jobs:
         run: |
           set -euo pipefail
           archive="gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
+          checksum_file="gitleaks_${GITLEAKS_VERSION}_checksums.txt"
           base_url="https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}"
-          curl -sSLO "${base_url}/${archive}"
-          curl -sSLO "${base_url}/gitleaks_${GITLEAKS_VERSION}_checksums.txt"
-          sha256sum --ignore-missing -c "gitleaks_${GITLEAKS_VERSION}_checksums.txt"
+          curl --fail --location --silent --show-error --output "${archive}" "${base_url}/${archive}"
+          curl --fail --location --silent --show-error --output "${checksum_file}" "${base_url}/${checksum_file}"
+
+          # Do not let a checksum manifest silently omit the archive we are about to
+          # install. A missing-file-tolerant checksum check would return success in
+          # that case and leave the downloaded executable unverified.
+          expected_hash="$(
+            awk -v archive="${archive}" '
+              {
+                name = $2
+                sub(/^\*/, "", name)
+                sub(/\r$/, "", name)
+                if (name == archive) {
+                  print $1
+                  matches++
+                }
+              }
+              END {
+                if (matches != 1) exit 1
+              }
+            ' "${checksum_file}"
+          )" || {
+            echo "checksum manifest must contain exactly one entry for ${archive}" >&2
+            exit 1
+          }
+          if [[ ! "${expected_hash}" =~ ^[[:xdigit:]]{64}$ ]]; then
+            echo "checksum manifest contains an invalid SHA-256 for ${archive}" >&2
+            exit 1
+          fi
+          printf '%s  %s\n' "${expected_hash}" "${archive}" | sha256sum --check --strict -
           tar -xzf "${archive}" gitleaks
           sudo install -m 0755 gitleaks /usr/local/bin/gitleaks
           gitleaks version
