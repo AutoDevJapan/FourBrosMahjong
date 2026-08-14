@@ -109,6 +109,14 @@ describe("Vitest がテスト0件収集を成功として通さない (#381)", (
     }
   });
 
+  it("統合testはproject間のCPU競合を避けるworker上限を持つ", () => {
+    const command = packageScripts().test;
+    expect(
+      command,
+      "test: unit/componentのmulti-project実行は既定並列だと重いテストを競合でtimeoutさせるため、統合runはworkerを1に固定する",
+    ).toContain("--maxWorkers=1");
+  });
+
   it("package.json の --project 名が vitest.config.ts のプロジェクト名と一致する", () => {
     const scripts = packageScripts();
     const defined = projects().map((project) => project.test?.name);

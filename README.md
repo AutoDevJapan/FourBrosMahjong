@@ -73,7 +73,7 @@ Vitest は**ファイル拡張子でテスト環境を分割**する 2 プロジ
 | `*.{test,spec}.ts` | `node` | 純粋なゲーム/ルール/ロジック(DOM 不要) | `unit` |
 | `*.{test,spec}.tsx` | `jsdom` | React コンポーネント(DOM が必要) | `component` |
 
-`pnpm test` で両プロジェクトを一括実行し、`pnpm test:unit` / `pnpm test:component` で片方だけを実行できます。個別ファイルで方針を上書きしたい場合は先頭に `// @vitest-environment jsdom`(または `node`)のドックブロックを付けます。
+`pnpm test` で両プロジェクトを一括実行します。unit/componentの重いテストが同時にCPUを奪い合わないよう、統合runはworker 1個に固定しています。片方だけを高速に確認する場合は `pnpm test:unit` / `pnpm test:component` を使えます。個別ファイルで方針を上書きしたい場合は先頭に `// @vitest-environment jsdom`(または `node`)のドックブロックを付けます。
 
 ### 構成要素
 
