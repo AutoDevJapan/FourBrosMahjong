@@ -6,7 +6,7 @@ import type {
   RoundSummary,
 } from "@/domain/game/engine";
 
-export interface OnlinePlayerSnapshot {
+interface OnlinePlayerSnapshot {
   readonly id: PlayerId;
   readonly name: string;
   readonly connected: boolean;

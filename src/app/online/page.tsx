@@ -19,12 +19,12 @@ export const metadata: Metadata = {
 export default function OnlinePage() {
   return (
     <div className="mx-auto flex min-h-screen w-full max-w-5xl flex-col gap-6 p-4 sm:p-6">
-      <header className="flex items-center justify-between gap-4">
-        <Link href="/" className="text-sm text-foreground/70 hover:underline">
-          ロビーへ戻る
-        </Link>
-      </header>
-      <main>
+      <main className="flex flex-col gap-6">
+        <header className="flex items-center justify-between gap-4">
+          <Link href="/" className="text-sm text-foreground/70 hover:underline">
+            ロビーへ戻る
+          </Link>
+        </header>
         <OnlineLobby />
       </main>
     </div>

@@ -8,6 +8,7 @@ import {
 import type { GameAction } from "@/components/game/gamePersistence";
 import type { TileData } from "@/components/game/types";
 import type { PlayerId } from "@/domain/game/engine";
+import { isRedDora } from "@/domain/tiles/tile";
 import type { OnlineSnapshot } from "./types";
 
 interface OnlineGameProviderProps {
@@ -18,10 +19,7 @@ interface OnlineGameProviderProps {
 }
 
 function wireTile(tile: TileData) {
-  const isRed =
-    tile.isRed ??
-    (tile.rank === 5 && (tile.suit === "pin" || tile.suit === "sou"));
-  return { suit: tile.suit, rank: tile.rank, isRed };
+  return { suit: tile.suit, rank: tile.rank, isRed: isRedDora(tile) };
 }
 
 export function onlineSocketUrl(): string {

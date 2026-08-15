@@ -22,7 +22,7 @@ const MAX_ROOMS = 1_000;
 
 const PLAYER_IDS: readonly PlayerId[] = ["p0", "p1", "p2", "p3"];
 
-export interface RoomPlayerSnapshot {
+interface RoomPlayerSnapshot {
   readonly id: PlayerId;
   readonly name: string;
   readonly connected: boolean;
@@ -127,7 +127,7 @@ function playerNameChanged(
   };
 }
 
-export function isValidTile(value: unknown): value is {
+function isValidTile(value: unknown): value is {
   readonly suit: "man" | "pin" | "sou" | "honor";
   readonly rank: number;
   readonly isRed: boolean;
@@ -140,11 +140,7 @@ export function isValidTile(value: unknown): value is {
   const suit = tile.suit as string;
   const rank = tile.rank;
   if (!Number.isInteger(rank)) return false;
-  if (
-    (suit === "honor" && (rank as number) < 1) ||
-    (suit !== "honor" && (rank as number) < 1)
-  )
-    return false;
+  if ((rank as number) < 1) return false;
   if (suit === "honor" && (rank as number) > 7) return false;
   if (suit !== "honor" && (rank as number) > 9) return false;
   if (suit === "man" && ![1, 9].includes(rank as number)) return false;

@@ -2,7 +2,7 @@
 
 粗品 Official Channel「ギャンブル四兄弟」の麻雀企画をベースにした、関西式三人打ち(サンマ)麻雀のデジタル実装プロジェクトです。オールレッド5・北抜きドラ「ガリ」・サイコロ連動のドラ枚数・4人による着席ローテーション・「ソシー」精算など、番組独自のルールを再現します。
 
-> **プロジェクトの現状**: 開発中です。牌・山・配牌・ドラ・和了判定・局進行・点数精算を担うドメイン層と、ロビー(`/`)・ルール(`/rules`)・設定(`/settings`)・対局(`/game`)・結果(`/game/result`)・戦績(`/history`)の各画面を実装しています。対局画面は実対局エンジンで動作し、同一タブ内では操作履歴を `sessionStorage` に保存してリロード後に復元します。Service Worker によるオフライン対応(PWA)も組み込み済みです。Vitest でドメイン/コンポーネントを、Playwright で実際の対局操作や半荘終了までの導線を検証しています。バックエンドや複数端末間の状態同期は未実装です。
+> **プロジェクトの現状**: 開発中です。牌・山・配牌・ドラ・和了判定・局進行・点数精算を担うドメイン層と、ロビー(`/`)・オンラインロビー(`/online`)・ルール(`/rules`)・設定(`/settings`)・対局(`/game`)・結果(`/game/result`)・戦績(`/history`)の各画面を実装しています。対局画面は実対局エンジンで動作し、同一タブ内では操作履歴を `sessionStorage` に保存してリロード後に復元します。Service Worker によるオフライン対応(PWA)も組み込み済みです。オンラインロビーでは匿名のルームコードで複数端末を接続し、Railway の WebSocket サーバーが対局状態を権威的に同期します(空席は AI)。Vitest でドメイン/コンポーネントを、Playwright で実際の対局操作や半荘終了までの導線を検証しています。オンラインルームは現状インメモリのため、Railway の再起動時に破棄されます。
 
 ## 技術スタック
 
@@ -55,9 +55,10 @@ pnpm docs           # TypeDoc → docs/api(gitignore対象)
 ## ディレクトリ構成
 
 ```
-src/app/          Next.js App Router の各画面(`/`・`/rules`・`/settings`・`/game`・`/game/result`・`/history`)と PWA 資産(`sw.js`・`manifest.ts`)
+src/app/          Next.js App Router の各画面(`/`・`/online`・`/rules`・`/settings`・`/game`・`/game/result`・`/history`)と PWA 資産(`sw.js`・`manifest.ts`)
 src/components/   対局盤面・結果・共通 UI コンポーネント
 src/domain/       牌・山・和了判定・対局進行・点数精算などのゲームロジック
+server/           Railway で動かす WebSocket ルームサーバー(`/healthz`・`/ws`)
 e2e/              Playwright E2E テスト
 docs/             ゲームルール・ドキュメントの入口(人間向け)
 documents/spec/   実装スペック(SpecDD SSOT) — GoDD の docs_dir
@@ -166,4 +167,15 @@ pnpm test:e2e:ui    # Playwright UI モード(対話的にテストを選択・�
 ## 開発時の注意
 
 - 詳細な開発ガイドライン(ツール構成・コーディング規約など)は [`CLAUDE.md`](./CLAUDE.md) を参照してください。
-- フロントエンドは Vercel の Git Integration と連携済みで、PR Preview と `dev` / `stg` / `main`(`prd`)の昇格フローを運用しています。環境ごとの状態・URL・手順は [`docs/デプロイ環境運用.md`](./docs/デプロイ環境運用.md) を参照してください。バックエンドは未実装のため、Railway リソースはまだ作成していません。
+- フロントエンドは Vercel の Git Integration と連携済みで、PR Preview と `dev` / `stg` / `main`(`prd`)の昇格フローを運用しています。環境ごとの状態・URL・手順は [`docs/デプロイ環境運用.md`](./docs/デプロイ環境運用.md) を参照してください。オンライン対戦バックエンドは Railway の `server/index.ts` で動かし、Vercel の `NEXT_PUBLIC_ONLINE_WS_URL` から `/ws` に接続します。
+
+### オンライン対戦の設定
+
+ローカルでは、Next.js と Railway サーバーを別々に起動します。
+
+```bash
+pnpm server:dev       # ws://localhost:8080/ws
+pnpm dev              # http://localhost:3000
+```
+
+Vercel では `NEXT_PUBLIC_ONLINE_WS_URL` に Railway の公開 URL(`https://...` または `wss://...`)を設定します。WebSocket の Origin 制限を有効にする場合は、Railway の `ALLOWED_ORIGINS` に Vercel の本番URLをカンマ区切りで指定してください。ルームは匿名トークンで再接続できますが、認証・永続化・観戦・途中参加者の座席予約はまだ対象外です。

@@ -5,6 +5,7 @@ import GamePage from "@/app/game/page";
 import ResultPage from "@/app/game/result/page";
 import HistoryPage from "@/app/history/page";
 import NotFound from "@/app/not-found";
+import OnlinePage from "@/app/online/page";
 import HomePage from "@/app/page";
 import RulesPage from "@/app/rules/page";
 import SettingsPage from "@/app/settings/page";
@@ -92,6 +93,7 @@ const ROUTE_ELEMENTS: Readonly<Record<string, () => ReactElement>> = {
   "/rules": () => <RulesPage />,
   "/settings": () => <SettingsPage />,
   "/history": () => <HistoryPage />,
+  "/online": () => <OnlinePage />,
   "/game": () => (
     <GameProvider initialGame={createGame({ seed: 0 })}>
       <GamePage />

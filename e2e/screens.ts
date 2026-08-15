@@ -69,6 +69,14 @@ export const SCREENS: readonly NonTextContrastScreen[] = [
     nonTextContrastMinMeasured: 4,
   },
   {
+    path: "/online",
+    name: "オンライン対戦",
+    heading: "オンライン対戦",
+    clientReady: (page) =>
+      page.getByRole("button", { name: "新しいルームを作る" }),
+    nonTextContrastMinMeasured: 3,
+  },
+  {
     path: "/rules",
     name: "ルール説明",
     heading: "ルール説明",
