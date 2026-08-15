@@ -69,7 +69,14 @@ export function residualSticksNote(
   return `残存供託${award.sticks}本（${award.points.toLocaleString("ja-JP")}点）は${award.recipientName}が取得。`;
 }
 
-export default function GameBoard() {
+export interface GameBoardProps {
+  /** 結果ボタンの遷移先。オンライン対局は同じルームへ戻るため上書きする。 */
+  readonly resultHref?: string;
+}
+
+export default function GameBoard({
+  resultHref = "/game/result",
+}: GameBoardProps) {
   const { view, phase, pending, roundSummary, controls } = useGame();
   const { slots, tableInfo, dora } = view;
   const router = useRouter();
@@ -247,7 +254,7 @@ export default function GameBoard() {
           key: "result",
           label: "結果を見る",
           icon: "▶",
-          onClick: () => router.push("/game/result"),
+          onClick: () => router.push(resultHref),
           primary: true,
         },
         {
@@ -346,7 +353,7 @@ export default function GameBoard() {
       return items;
     }
     return [];
-  }, [phase, pending, controls, router, riichiArmed]);
+  }, [phase, pending, controls, router, resultHref, riichiArmed]);
 
   const hint = useMemo(() => {
     if (phase === "roundEnd") return roundSummary?.label ?? "";
