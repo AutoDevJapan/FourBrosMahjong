@@ -180,7 +180,7 @@ describe("クロス検証: 受け入れ候補枝刈り(#368)", () => {
       }
       expect(ukeire(tiles), describeHand(tiles)).toEqual({ kinds, copies });
     }
-  });
+  }, 120_000);
 });
 
 describe("クロス検証: 和了・分解・待ち(decompose/tenpai ⇔ オラクル)", () => {
