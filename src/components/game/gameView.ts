@@ -76,7 +76,11 @@ function nameOf(engine: EngineState, id: PlayerId): string {
 }
 
 /** 1プレイヤー分のスロット内容(着席 or 抜け番)を作る。 */
-function buildSlotContent(engine: EngineState, id: PlayerId): SlotContent {
+function buildSlotContent(
+  engine: EngineState,
+  id: PlayerId,
+  selfId: PlayerId,
+): SlotContent {
   const hand = engine.hand;
   const seating: Seating<PlayerId> = hand
     ? hand.seating
@@ -101,7 +105,7 @@ function buildSlotContent(engine: EngineState, id: PlayerId): SlotContent {
     return { kind: "bench", player: bench };
   }
 
-  const isSelf = id === HUMAN_ID;
+  const isSelf = id === selfId;
   const isTurn = engine.phase === "playing" && hand?.turn === seat;
   const melds = hand
     ? hand.melds[seat].map((m) => ({
@@ -170,12 +174,15 @@ function buildResult(engine: EngineState): GameResultView | null {
 }
 
 /** エンジン状態を対局画面のビューモデルへ写像する。 */
-export function selectView(engine: EngineState): GameViewState {
-  const humanIndex = engine.order.indexOf(HUMAN_ID);
+export function selectView(
+  engine: EngineState,
+  selfId: PlayerId = HUMAN_ID,
+): GameViewState {
+  const humanIndex = engine.order.indexOf(selfId);
   const slots = {} as Record<SeatPosition, SlotContent>;
   engine.order.forEach((id, ringIndex) => {
     const offset = (ringIndex - humanIndex + 4) % 4;
-    slots[OFFSET_TO_SLOT[offset]] = buildSlotContent(engine, id);
+    slots[OFFSET_TO_SLOT[offset]] = buildSlotContent(engine, id, selfId);
   });
 
   const tableInfo: TableInfoData = {

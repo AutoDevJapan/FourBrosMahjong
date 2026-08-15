@@ -52,7 +52,7 @@ export default defineConfig({
           environmentOptions: jsdomEnvironmentOptions,
           globals: true,
           setupFiles: ["./vitest.browser-storage.setup.ts"],
-          include: ["src/**/*.{test,spec}.ts"],
+          include: ["src/**/*.{test,spec}.ts", "server/**/*.{test,spec}.ts"],
           // 3 worktree のローカルゲートを同時に走らせても、重い決定的テストが
           // worker のCPU競合で飢餓状態にならないよう、unit は直列実行する。
           fileParallelism: false,

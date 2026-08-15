@@ -31,6 +31,12 @@ const menuItems: MenuItem[] = [
     ready: true,
   },
   {
+    title: "オンライン対戦",
+    description: "ルームコードを共有して別端末の友人と対局する",
+    href: "/online",
+    ready: true,
+  },
+  {
     title: "ルールを見る",
     description: "オール赤5・ガリ・サイコロ連動ドラなど独自ルールの説明",
     href: "/rules",
