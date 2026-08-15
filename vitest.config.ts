@@ -53,6 +53,10 @@ export default defineConfig({
           globals: true,
           setupFiles: ["./vitest.browser-storage.setup.ts"],
           include: ["src/**/*.{test,spec}.ts"],
+          // 3 worktree のローカルゲートを同時に走らせても、重い決定的テストが
+          // worker のCPU競合で飢餓状態にならないよう、unit は直列実行する。
+          fileParallelism: false,
+          maxWorkers: 1,
           // 重い決定的テスト(例: cross-validation の 40k 手オラクル照合、
           // engine.melds-riichi の全公開アクション走破)は、全ファイル並列実行時の
           // CPU 競合で Vitest 既定の 5,000ms を超えることがある(issue #262)。
@@ -77,6 +81,9 @@ export default defineConfig({
             "./vitest.browser-storage.setup.ts",
           ],
           include: ["src/**/*.{test,spec}.tsx"],
+          // jsdom の起動コストが大きいUIテストをworktree間で安定して走らせる。
+          fileParallelism: false,
+          maxWorkers: 1,
         },
       },
     ],
