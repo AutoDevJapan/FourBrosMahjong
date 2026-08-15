@@ -191,11 +191,14 @@ export default function MatchHistoryList() {
           ? "storage-failed"
           : await clearHistoryAcrossTabs(storage);
       if (result === "cleared") {
+        // 購読通知は同期的に再描画を起こし得るため、通知より先に着地点を予約する。
+        // 先に通知すると、その再描画で effect が走った時点ではフラグがまだ falseで、
+        // 高負荷時にフォーカス移動を取りこぼして body へ落ちる(#482 / スペック5 5.2.2)。
+        pendingFocusRef.current = true;
         // 永続化と購読者への通知は分離されているため、削除後に明示的に知らせる(#302)。
         notifyHistoryChanged();
         // 「削除する」ボタンごと一覧セクションが消えるので、着地点へフォーカスを移す。
         setConfirmingClear(false);
-        pendingFocusRef.current = true;
         setStatusMessage("保存されていた戦績をすべて削除しました。");
         return;
       }
