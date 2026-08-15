@@ -150,16 +150,25 @@ export default function MatchHistoryList() {
 
   useEffect(() => {
     if (!pendingFocusRef.current) return;
-    pendingFocusRef.current = false;
     // 着地点は空状態が第一候補。削除完了までに別タブの終局保存が届くと一覧が再び描かれ、
     // 空状態が存在しないため、そのときは「戦績をすべて削除」ボタンへ連鎖する。
     // 到達可否は DOM 接続では判定できない(#377)ので、実際に activeElement が移ったかで
     // 実測してから次の候補へ進む(スペック5 5.2.2 / `Modal` と同じ規約)。
+    // 外部ストア通知と確認UIのstate更新が別コミットになることがあるため、候補がまだ
+    // 描画されていない中間renderではフラグを消費しない。先に消費すると、次のrenderで
+    // 空状態が現れてもフォーカスを取りこぼし、bodyへ落ちる(#482)。
+    let hasCandidate = false;
     for (const candidate of [emptyStateRef.current, clearButtonRef.current]) {
       if (candidate === null) continue;
+      hasCandidate = true;
       candidate.focus();
-      if (candidate.ownerDocument.activeElement === candidate) return;
+      if (candidate.ownerDocument.activeElement === candidate) {
+        pendingFocusRef.current = false;
+        return;
+      }
     }
+    if (!hasCandidate) return;
+    pendingFocusRef.current = false;
     // 削除成功時は必ず確認UIを畳むため、通常はどちらかへ到達する。到達できないのは
     // 着地点が隠されている等の契約違反であり、黙って <body> へ落とさず知らせる。
     if (process.env.NODE_ENV !== "production") {
