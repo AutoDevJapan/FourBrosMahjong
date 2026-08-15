@@ -250,6 +250,8 @@ describe("ai: 受け入れ(ukeire)", () => {
   // 参照は同モジュールの `shanten` なので独立オラクル照合ではなく自己整合の検証であり、
   // 独立オラクルとの照合は `hand/cross-validation.test.ts` が門前手で担当する。
   // ここでは独立オラクルが `meldCount` を受け取れない副露手を受け持つ。
+  // 3 worktree のローカルゲートを同時実行するとCPU競合で30秒を超えることがある。
+  // 反復網羅性は維持し、単独実行時のハング検出も残すため対象テストだけ延長する。
   it("副露数1〜4でも全27牌種走査と一致し、特殊形候補を混入しない(#368)", () => {
     const rng = makeRng(0x3680_0002);
     for (let meldCount = 1; meldCount <= MAX_MELD_COUNT; meldCount += 1) {
@@ -276,7 +278,7 @@ describe("ai: 受け入れ(ukeire)", () => {
         });
       }
     }
-  });
+  }, 120_000);
 });
 
 describe("ai: 打牌選択(chooseDiscard)", () => {
