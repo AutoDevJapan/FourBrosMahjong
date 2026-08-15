@@ -14,6 +14,7 @@ import {
   declareTsumo,
   discard,
   type EngineState,
+  type PlayerId,
   type PlayerNames,
   passRon,
   proceedToNextRound,
@@ -189,28 +190,29 @@ export function parseJournal(raw: string): GameJournal | null {
 export function applyGameAction(
   state: EngineState,
   action: GameAction,
+  playerId?: PlayerId,
 ): EngineState {
   switch (action.type) {
     case "discard":
-      return discard(state, action.tile);
+      return discard(state, action.tile, playerId);
     case "tsumogiri":
-      return tsumogiri(state);
+      return tsumogiri(state, playerId);
     case "riichi":
-      return declareRiichi(state, action.tile);
+      return declareRiichi(state, action.tile, playerId);
     case "tsumo":
-      return declareTsumo(state);
+      return declareTsumo(state, playerId);
     case "ron":
-      return declareRon(state);
+      return declareRon(state, playerId);
     case "pon":
-      return declarePon(state);
+      return declarePon(state, playerId);
     case "kan":
-      return declareKan(state);
+      return declareKan(state, playerId);
     case "ankan":
-      return declareAnkan(state, action.tile);
+      return declareAnkan(state, action.tile, playerId);
     case "kakan":
-      return declareKakan(state, action.tile);
+      return declareKakan(state, action.tile, playerId);
     case "passRon":
-      return passRon(state);
+      return passRon(state, playerId);
     case "nextRound":
       return proceedToNextRound(state);
   }
