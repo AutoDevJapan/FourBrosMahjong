@@ -2,6 +2,10 @@ import { createServer, type IncomingMessage } from "node:http";
 import type { Socket } from "node:net";
 import { WebSocket, WebSocketServer } from "ws";
 import {
+  type ConnectionState,
+  hasOpenPeer as hasOpenPeerConnection,
+} from "./connectionState";
+import {
   normalizePlayerName,
   normalizeRoomCode,
   parseGameAction,
@@ -58,6 +62,22 @@ function broadcast(room: RoomSession["room"]): void {
   for (const client of clients) {
     if (client.room === room && client.player) sendSnapshot(client);
   }
+}
+
+function connectionState(client: Client): ConnectionState {
+  return {
+    key: client,
+    room: client.room,
+    playerId: client.player?.id ?? null,
+    readyState: client.socket.readyState,
+  };
+}
+
+function hasOpenPeer(client: Client): boolean {
+  return hasOpenPeerConnection(
+    connectionState(client),
+    [...clients].map(connectionState),
+  );
 }
 
 function attach(client: Client, session: RoomSession): void {
@@ -215,7 +235,9 @@ function onConnection(socket: WebSocket): void {
   });
   socket.on("close", () => {
     clients.delete(client);
-    if (client.room && client.player) {
+    // 再接続時は旧ソケットのcloseが新ソケットの接続状態を上書きし得る。
+    // 同じ席に生きたソケットが残っている間は、切断扱いにしない。
+    if (client.room && client.player && !hasOpenPeer(client)) {
       manager.disconnect(client.room, client.player);
       broadcast(client.room);
     }
