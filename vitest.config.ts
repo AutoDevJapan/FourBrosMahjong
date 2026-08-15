@@ -84,6 +84,9 @@ export default defineConfig({
           // jsdom の起動コストが大きいUIテストをworktree間で安定して走らせる。
           fileParallelism: false,
           maxWorkers: 1,
+          // componentテストはprocess.chdir()に依存せず、forkの起動を繰り返すと
+          // 3 worktree負荷下で最後のjsdom workerが60秒待ちになるためthreadsを再利用する。
+          pool: "threads",
         },
       },
     ],
