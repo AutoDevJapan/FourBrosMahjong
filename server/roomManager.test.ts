@@ -51,10 +51,21 @@ describe("online room manager", () => {
   });
 
   it("validates action tiles before the engine sees them", () => {
+    for (const rank of [1, 2, 3, 4, 5, 6, 7, 8, 9]) {
+      expect(
+        parseGameAction({
+          type: "discard",
+          tile: { suit: "man", rank, isRed: false },
+        }),
+      ).toEqual({
+        type: "discard",
+        tile: { suit: "man", rank, isRed: false },
+      });
+    }
     expect(
       parseGameAction({
         type: "discard",
-        tile: { suit: "man", rank: 2, isRed: false },
+        tile: { suit: "man", rank: 10, isRed: false },
       }),
     ).toBeNull();
     expect(

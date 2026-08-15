@@ -143,7 +143,6 @@ function isValidTile(value: unknown): value is {
   if ((rank as number) < 1) return false;
   if (suit === "honor" && (rank as number) > 7) return false;
   if (suit !== "honor" && (rank as number) > 9) return false;
-  if (suit === "man" && ![1, 9].includes(rank as number)) return false;
   return (
     typeof tile.isRed === "boolean" &&
     (!tile.isRed || (suit !== "honor" && rank === 5))
