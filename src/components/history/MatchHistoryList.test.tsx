@@ -137,9 +137,11 @@ describe("MatchHistoryList (#293)", () => {
     expect(
       await screen.findByText(/保存された戦績はまだありません/),
     ).toBeInTheDocument();
-    expect(
-      screen.getByText("保存されていた戦績をすべて削除しました。"),
-    ).toBeInTheDocument();
+    await waitFor(() =>
+      expect(
+        screen.getByText("保存されていた戦績をすべて削除しました。"),
+      ).toBeInTheDocument(),
+    );
   });
 
   it("破損データは空状態で描画し、次回以降のために削除する(#302)", async () => {
