@@ -256,8 +256,9 @@ describe("engine 不変条件: Σ持ち点 + 場の供託 = 140,000(#430)", () =
   };
   const ends: { policy: Policy; seed: number; end: EngineState }[] = [];
 
-  // 既定の hookTimeout(10s)では CI の並列実行下で不安定になり得るため明示的に伸ばす
-  // (`vitest.config.ts` の unit プロジェクトが testTimeout を伸ばしているのと同じ理由 / #262)。
+  // CI/ローカルのフルsuiteでは他のunit workerとのCPU競合で60秒を超え得るため、
+  // 検査範囲を削らずに明示的なhook上限を設ける(`vitest.config.ts`のunitプロジェクトが
+  // testTimeoutを伸ばしているのと同じ理由 / #262)。
   //
   // 走査中に保存則が破れると**この hook が投げる**。その場合 vitest は本 describe の
   // 各 it を「skipped」と数える(緑ではなく `Failed Suites 1` + 終了コード 1)ので
@@ -269,7 +270,7 @@ describe("engine 不変条件: Σ持ち点 + 場の供託 = 140,000(#430)", () =
         ends.push({ policy, seed, end: playChecked(seed, policy, totals) });
       }
     }
-  }, 60_000);
+  }, 120_000);
 
   it("終局時には供託が場に残らない(各遷移の保存則は beforeAll の走査で検査)", () => {
     expect(ends).toHaveLength(POLICIES.length * SEEDS.length);
