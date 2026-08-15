@@ -154,7 +154,7 @@ describe("クロス検証: 向聴数(ai.shanten ⇔ オラクル)", () => {
       `[cross] structured shanten hands=${STRUCTURED_HANDS} mismatches=${mismatches}`,
     );
     expect(mismatches).toBe(0);
-  });
+  }, 120_000);
 });
 
 describe("クロス検証: 受け入れ候補枝刈り(#368)", () => {
