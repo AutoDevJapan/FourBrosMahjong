@@ -28,7 +28,7 @@ const VITEST_SCRIPTS = [
 ] as const;
 
 type ProjectConfig = {
-  test?: { name?: string; include?: string[] };
+  test?: { name?: string; include?: string[]; pool?: string };
 };
 
 function packageScripts(): Record<string, string> {
@@ -115,6 +115,14 @@ describe("Vitest がテスト0件収集を成功として通さない (#381)", (
       command,
       "test: unit/componentのmulti-project実行は既定並列だと重いテストを競合でtimeoutさせるため、統合runはworkerを1に固定する",
     ).toContain("--maxWorkers=1");
+
+    const component = projects().find(
+      (project) => project.test?.name === "component",
+    );
+    expect(
+      component?.test?.pool,
+      "component: 3 worktree負荷下のfork起動timeoutを避けるためthreads poolを固定する",
+    ).toBe("threads");
   });
 
   it("package.json の --project 名が vitest.config.ts のプロジェクト名と一致する", () => {
