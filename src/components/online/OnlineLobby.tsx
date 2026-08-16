@@ -899,9 +899,9 @@ export default function OnlineLobby() {
                 )
               }
               onKeyDown={(event) => {
-                if (event.key !== "Enter" || event.nativeEvent.isComposing)
-                  return;
+                if (event.key !== "Enter") return;
                 event.preventDefault();
+                if (event.nativeEvent.isComposing) return;
                 createRoom();
               }}
               placeholder="例: たろう"
@@ -945,9 +945,9 @@ export default function OnlineLobby() {
                     setRoomCode(event.target.value.toUpperCase().slice(0, 6))
                   }
                   onKeyDown={(event) => {
-                    if (event.key !== "Enter" || event.nativeEvent.isComposing)
-                      return;
+                    if (event.key !== "Enter") return;
                     event.preventDefault();
+                    if (event.nativeEvent.isComposing) return;
                     joinRoom();
                   }}
                   maxLength={6}
