@@ -35,7 +35,7 @@ describe("OnlineLobby の参加条件", () => {
     );
   });
 
-  it("表示名と6文字のルームコードで参加ボタンが有効になる", async () => {
+  it("空・短い・不正文字・有効なルームコードを順に検証する", async () => {
     const user = userEvent.setup();
     render(<OnlineLobby />);
 
@@ -46,42 +46,53 @@ describe("OnlineLobby の参加条件", () => {
     });
     const joinButton = screen.getByRole("button", { name: "参加する" });
 
+    expect(roomCodeInput).toHaveAccessibleDescription(
+      /参加には6文字のルームコードが必要です。ルームコードを入力してください。/,
+    );
+    expect(roomCodeInput).toHaveAttribute("aria-invalid", "true");
+    expect(joinButton).toBeDisabled();
+
     await user.type(nameInput, "たろう");
     expect(createButton).toBeEnabled();
-    expect(joinButton).toBeDisabled();
 
     await user.type(roomCodeInput, "ABC23");
     expect(joinButton).toBeDisabled();
+    expect(roomCodeInput).toHaveAttribute("aria-invalid", "true");
     expect(roomCodeInput).toHaveAccessibleDescription(
       /ルームコードは6文字必要です。あと1文字入力してください。/,
     );
 
-    await user.type(roomCodeInput, "4");
+    await user.clear(roomCodeInput);
+    await user.type(roomCodeInput, "ABC!");
+    expect(joinButton).toBeDisabled();
+    expect(roomCodeInput).toHaveAttribute("aria-invalid", "true");
+    expect(roomCodeInput).toHaveAccessibleDescription(
+      /英大文字と2〜9の数字を使った6文字で入力してください。.*あと2文字入力してください。/,
+    );
+    expect(joinButton).toHaveAccessibleDescription(
+      /英大文字と2〜9の数字を使った6文字で入力してください。.*あと2文字入力してください。/,
+    );
+    expect(screen.getByRole("status")).toHaveTextContent(
+      /英大文字と2〜9の数字を使った6文字で入力してください。.*あと2文字入力してください。/,
+    );
+
+    await user.clear(roomCodeInput);
+    await user.type(roomCodeInput, "ABC!@#");
+    expect(joinButton).toBeDisabled();
+    expect(roomCodeInput).toHaveAttribute("aria-invalid", "true");
+    expect(roomCodeInput).toHaveAccessibleDescription(
+      /英大文字と2〜9の数字を使った6文字で入力してください。/,
+    );
+
+    await user.clear(roomCodeInput);
+    await user.type(roomCodeInput, "ABC234");
+    expect(roomCodeInput).toHaveAttribute("aria-invalid", "false");
+    expect(roomCodeInput).toHaveAccessibleDescription(
+      /ルームコードは6文字入力されています。/,
+    );
     expect(joinButton).toBeEnabled();
     expect(joinButton).toHaveAccessibleDescription(
       /参加条件を満たしています。参加できます。/,
-    );
-  });
-
-  it("6文字でもサーバー形式に合わないコードの理由を入力欄付近に示す", async () => {
-    const user = userEvent.setup();
-    render(<OnlineLobby />);
-
-    const nameInput = screen.getByRole("textbox", { name: "表示名" });
-    const roomCodeInput = screen.getByRole("textbox", { name: "ルームコード" });
-
-    await user.type(nameInput, "たろう");
-    await user.type(roomCodeInput, "ABC!@#");
-
-    const joinButton = screen.getByRole("button", { name: "参加する" });
-
-    expect(roomCodeInput).toHaveAttribute("aria-invalid", "true");
-    expect(joinButton).toBeDisabled();
-    expect(roomCodeInput).toHaveAccessibleDescription(
-      /ルームコードは英大文字と2〜9の数字を使った6文字で入力してください。/,
-    );
-    expect(joinButton).toHaveAccessibleDescription(
-      /ルームコードは英大文字と2〜9の数字を使った6文字で入力してください。/,
     );
   });
 });

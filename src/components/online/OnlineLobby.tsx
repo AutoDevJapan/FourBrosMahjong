@@ -12,6 +12,9 @@ import type {
 const ONLINE_SESSION_KEY = "four-bros-mahjong.online.session.v1";
 const ROOM_CODE_LENGTH = 6;
 const ROOM_CODE_PATTERN = /^[A-Z2-9]{6}$/;
+const ROOM_CODE_CHARACTER_PATTERN = /^[A-Z2-9]*$/;
+const ROOM_CODE_FORMAT_MESSAGE =
+  "ルームコードは英大文字と2〜9の数字を使った6文字で入力してください。";
 const NAME_INPUT_ID = "online-lobby-name";
 const ROOM_CODE_INPUT_ID = "online-lobby-room-code";
 const NAME_REQUIREMENT_ID = "online-lobby-name-requirement";
@@ -78,11 +81,20 @@ function roomCodeRequirementMessage(roomCode: string): string {
   if (normalized.length === 0) {
     return "参加には6文字のルームコードが必要です。ルームコードを入力してください。";
   }
-  if (normalized.length < ROOM_CODE_LENGTH) {
-    return `ルームコードは6文字必要です。あと${ROOM_CODE_LENGTH - normalized.length}文字入力してください。`;
+  const lengthMessage =
+    normalized.length < ROOM_CODE_LENGTH
+      ? `ルームコードは6文字必要です。あと${ROOM_CODE_LENGTH - normalized.length}文字入力してください。`
+      : normalized.length > ROOM_CODE_LENGTH
+        ? "ルームコードは6文字以内で入力してください。"
+        : "";
+  if (!ROOM_CODE_CHARACTER_PATTERN.test(normalized)) {
+    return lengthMessage
+      ? `${ROOM_CODE_FORMAT_MESSAGE} ${lengthMessage}`
+      : ROOM_CODE_FORMAT_MESSAGE;
   }
+  if (lengthMessage) return lengthMessage;
   if (!ROOM_CODE_PATTERN.test(normalized)) {
-    return "ルームコードは英大文字と2〜9の数字を使った6文字で入力してください。";
+    return ROOM_CODE_FORMAT_MESSAGE;
   }
   return "ルームコードは6文字入力されています。";
 }
