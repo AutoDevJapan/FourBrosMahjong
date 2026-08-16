@@ -96,6 +96,7 @@ test.describe("オンラインロビーの接続失敗復帰", () => {
   test("接続失敗時に再試行でき、入力を保持したまま成功状態へ遷移する", async ({
     page,
   }) => {
+    await page.setViewportSize({ width: 320, height: 800 });
     await page.goto("/online");
     await installWebSocketStub(page);
 
@@ -133,6 +134,16 @@ test.describe("オンラインロビーの接続失敗復帰", () => {
     await expect(
       page.locator('[data-connection-status="reconnecting"]'),
     ).toBeVisible();
+    await expect(
+      page.locator('[data-connection-status="reconnecting"]'),
+    ).toBeFocused();
+    expect(
+      await page.evaluate(
+        () =>
+          document.documentElement.scrollWidth -
+          document.documentElement.clientWidth,
+      ),
+    ).toBeLessThanOrEqual(1);
 
     const request = await page.evaluate(() => {
       const socket = (window as unknown as OnlineTestWindow)
@@ -162,5 +173,8 @@ test.describe("オンラインロビーの接続失敗復帰", () => {
     await expect(
       page.getByText("オンラインサーバーに接続しました。"),
     ).toBeVisible();
+    await expect(
+      page.locator('[data-connection-status="connected"]'),
+    ).toBeFocused();
   });
 });

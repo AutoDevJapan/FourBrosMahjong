@@ -146,6 +146,9 @@ describe("OnlineLobby connection recovery", () => {
     expect(
       document.querySelector('[data-connection-status="reconnecting"]'),
     ).not.toBeNull();
+    expect(
+      document.querySelector('[data-connection-status="reconnecting"]'),
+    ).toHaveFocus();
     expect(sockets).toHaveLength(2);
 
     act(() => sockets[1]?.open());
@@ -171,6 +174,49 @@ describe("OnlineLobby connection recovery", () => {
     expect(
       screen.getByText("オンラインサーバーに接続しました。"),
     ).toBeInTheDocument();
+    expect(
+      document.querySelector('[data-connection-status="connected"]'),
+    ).toHaveFocus();
     expect(screen.getByTestId("game-board")).toBeInTheDocument();
+  });
+
+  it("clears saved credentials before starting a new room request", async () => {
+    window.sessionStorage.setItem(
+      "four-bros-mahjong.online.session.v1",
+      JSON.stringify({ code: "OLD234", token: "o".repeat(24) }),
+    );
+    const user = userEvent.setup();
+    render(<OnlineLobby />);
+
+    await waitFor(() => expect(sockets).toHaveLength(1));
+    act(() => {
+      sockets[0]?.open();
+      sockets[0]?.message({
+        type: "error",
+        message: "再接続情報が無効です。",
+      });
+    });
+    await waitFor(() => {
+      expect(
+        document.querySelector('[data-connection-status="failed"]'),
+      ).not.toBeNull();
+    });
+
+    await user.type(screen.getByLabelText("表示名"), "たろう");
+    await user.click(
+      screen.getByRole("button", { name: "新しいルームを作る" }),
+    );
+    expect(sockets).toHaveLength(2);
+
+    act(() => sockets[1]?.fail());
+    await waitFor(() => {
+      expect(
+        document.querySelector('[data-connection-status="failed"]'),
+      ).not.toBeNull();
+    });
+    expect(sockets).toHaveLength(2);
+    expect(
+      window.sessionStorage.getItem("four-bros-mahjong.online.session.v1"),
+    ).toBeNull();
   });
 });

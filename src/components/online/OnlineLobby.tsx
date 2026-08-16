@@ -1,6 +1,12 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type RefObject,
+} from "react";
 import GameBoard from "@/components/game/GameBoard";
 import OnlineGameProvider, { onlineSocketUrl } from "./OnlineGameProvider";
 import type {
@@ -85,21 +91,27 @@ interface ConnectionFeedbackProps {
   readonly status: ConnectionStatus;
   readonly error: string;
   readonly canRetry: boolean;
-  readonly onRetry: () => void;
+  readonly feedbackRef: RefObject<HTMLDivElement | null>;
+  readonly onRetry: (restoreFocus: boolean) => void;
 }
 
 function ConnectionFeedback({
   status,
   error,
   canRetry,
+  feedbackRef,
   onRetry,
 }: ConnectionFeedbackProps) {
+  const retryButtonRef = useRef<HTMLButtonElement>(null);
+
   return (
     <div
       aria-atomic="true"
       aria-live="polite"
       className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-foreground/20 px-3 py-2 text-sm"
       data-connection-status={status}
+      ref={feedbackRef}
+      tabIndex={-1}
     >
       <div className="min-w-0">
         <p>{connectionStatusMessage(status)}</p>
@@ -116,8 +128,11 @@ function ConnectionFeedback({
         <button
           type="button"
           disabled={!canRetry}
-          onClick={onRetry}
-          className="shrink-0 rounded-lg border border-control-border px-3 py-2 font-medium hover:bg-foreground/5 disabled:cursor-not-allowed disabled:opacity-40"
+          onClick={() =>
+            onRetry(document.activeElement === retryButtonRef.current)
+          }
+          ref={retryButtonRef}
+          className="min-h-11 shrink-0 rounded-lg border border-control-border px-3 py-2 font-medium whitespace-nowrap hover:bg-foreground/5 disabled:cursor-not-allowed disabled:opacity-40"
         >
           再試行
         </button>
@@ -141,12 +156,21 @@ export default function OnlineLobby() {
   const reconnectAttemptRef = useRef(0);
   const reconnectTimerRef = useRef<number | null>(null);
   const manualCloseRef = useRef(false);
-  const restoredRef = useRef(false);
   const [activeRequest, setActiveRequest] = useState<JoinRequest | null>(null);
   const pendingSessionSocketRef = useRef<WebSocket | null>(null);
+  const feedbackRef = useRef<HTMLDivElement>(null);
+  const focusAfterRetryRef = useRef(false);
   const connectRef = useRef<
     (request: JoinRequest, reconnecting?: boolean) => void
   >(() => undefined);
+
+  useEffect(() => {
+    if (!focusAfterRetryRef.current) return;
+    feedbackRef.current?.focus({ preventScroll: true });
+    if (status === "connected" || status === "failed") {
+      focusAfterRetryRef.current = false;
+    }
+  }, [snapshot, status]);
 
   const clearReconnectTimer = useCallback(() => {
     if (reconnectTimerRef.current !== null) {
@@ -324,11 +348,10 @@ export default function OnlineLobby() {
   }, [connect]);
 
   useEffect(() => {
-    if (restoredRef.current) return;
-    restoredRef.current = true;
     const timer = window.setTimeout(() => {
       const stored = readCredentials();
-      if (!stored) return;
+      if (!stored || socketRef.current || credentialsRef.current) return;
+      manualCloseRef.current = false;
       credentialsRef.current = stored;
       setActiveRequest({ type: "resume", ...stored });
       setCredentials(stored);
@@ -353,13 +376,20 @@ export default function OnlineLobby() {
   const start = (request: JoinRequest) => {
     manualCloseRef.current = false;
     reconnectAttemptRef.current = 0;
+    focusAfterRetryRef.current = false;
+    if (request.type !== "resume") {
+      credentialsRef.current = null;
+      setCredentials(null);
+      saveCredentials(null);
+    }
     setActiveRequest(request);
     connect(request);
   };
 
-  const retry = () => {
+  const retry = (restoreFocus = false) => {
     manualCloseRef.current = false;
     reconnectAttemptRef.current = 0;
+    focusAfterRetryRef.current = restoreFocus;
     const current = credentialsRef.current;
     const request = current
       ? ({ type: "resume", ...current } satisfies JoinRequest)
@@ -371,6 +401,7 @@ export default function OnlineLobby() {
   const leave = () => {
     manualCloseRef.current = true;
     clearReconnectTimer();
+    focusAfterRetryRef.current = false;
     credentialsRef.current = null;
     setActiveRequest(null);
     pendingSessionSocketRef.current = null;
@@ -470,6 +501,7 @@ export default function OnlineLobby() {
             status={status}
             error={error}
             canRetry={canRetry}
+            feedbackRef={feedbackRef}
             onRetry={retry}
           />
           <GameBoard resultHref="/online" />
@@ -546,6 +578,7 @@ export default function OnlineLobby() {
         status={status}
         error={error}
         canRetry={canRetry}
+        feedbackRef={feedbackRef}
         onRetry={retry}
       />
       {credentials && !snapshot ? (
