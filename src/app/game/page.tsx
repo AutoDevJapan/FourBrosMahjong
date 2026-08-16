@@ -36,7 +36,7 @@ export default function GamePage() {
           <h1 className="text-xl font-bold sm:text-2xl">対局画面</h1>
           <Link
             href="/"
-            className="rounded-full border border-control-border px-3 py-1.5 text-sm hover:bg-foreground/5"
+            className="inline-flex min-h-11 items-center rounded-full border border-control-border px-3 py-1.5 text-sm hover:bg-foreground/5"
           >
             ロビーへ戻る
           </Link>

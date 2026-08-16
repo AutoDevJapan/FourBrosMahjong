@@ -57,7 +57,7 @@ export default function ActionPanel({ actions, hint }: ActionPanelProps) {
                   event.preventDefault();
                 }
               }}
-              className={`inline-flex items-center gap-1.5 rounded-lg border px-4 py-2 text-sm font-medium transition-colors motion-reduce:transition-none disabled:cursor-not-allowed disabled:opacity-40 ${
+              className={`inline-flex min-h-11 items-center gap-1.5 rounded-lg border px-4 py-2 text-sm font-medium transition-colors motion-reduce:transition-none disabled:cursor-not-allowed disabled:opacity-40 ${
                 primary
                   ? "border-turn-highlight bg-turn-highlight/10 text-turn-highlight-strong hover:bg-turn-highlight/20"
                   : "border-control-border hover:bg-foreground/5"
