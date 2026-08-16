@@ -117,7 +117,7 @@ export default function RoomShareControls({
       </p>
       <button
         type="button"
-        className="mt-1 font-mono text-2xl font-bold tracking-[0.25em]"
+        className="mt-1 inline-flex min-h-11 items-center font-mono text-2xl font-bold tracking-[0.25em]"
         onClick={() => void copyRoomCode()}
         title="クリックしてコピー"
         aria-label={`ルームコード ${code} をコピー`}

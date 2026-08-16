@@ -543,7 +543,7 @@ export default function OnlineLobby() {
               </span>
               <button
                 type="button"
-                className="rounded-lg border border-control-border px-3 py-2 text-sm hover:bg-foreground/5"
+                className="inline-flex min-h-11 items-center rounded-lg border border-control-border px-3 py-2 text-sm hover:bg-foreground/5"
                 onClick={leave}
               >
                 退出
@@ -619,7 +619,7 @@ export default function OnlineLobby() {
           required
           aria-invalid={name.trim().length === 0}
           aria-describedby={NAME_REQUIREMENT_ID}
-          className="rounded-lg border border-control-border bg-transparent px-3 py-2 font-normal"
+          className="min-h-11 rounded-lg border border-control-border bg-transparent px-3 py-2 font-normal"
         />
         <span
           id={NAME_REQUIREMENT_ID}
@@ -636,7 +636,7 @@ export default function OnlineLobby() {
           disabled={!canSubmit}
           aria-describedby={NAME_REQUIREMENT_ID}
           onClick={() => start({ type: "create", name: name.trim() })}
-          className="rounded-lg bg-foreground px-4 py-3 font-medium text-background disabled:cursor-not-allowed disabled:opacity-40"
+          className="min-h-11 rounded-lg bg-foreground px-4 py-3 font-medium text-background disabled:cursor-not-allowed disabled:opacity-40"
         >
           新しいルームを作る
         </button>
@@ -660,7 +660,7 @@ export default function OnlineLobby() {
                 !ROOM_CODE_PATTERN.test(normalizedRoomCode)
               }
               aria-describedby={ROOM_CODE_REQUIREMENT_ID}
-              className="rounded-lg border border-control-border bg-transparent px-3 py-2 font-mono font-normal tracking-widest"
+              className="min-h-11 rounded-lg border border-control-border bg-transparent px-3 py-2 font-mono font-normal tracking-widest"
             />
             <span
               id={ROOM_CODE_REQUIREMENT_ID}
@@ -677,7 +677,7 @@ export default function OnlineLobby() {
             onClick={() =>
               start({ type: "join", code: roomCode.trim(), name: name.trim() })
             }
-            className="rounded-lg border border-control-border px-4 py-2.5 font-medium disabled:cursor-not-allowed disabled:opacity-40"
+            className="min-h-11 rounded-lg border border-control-border px-4 py-2.5 font-medium disabled:cursor-not-allowed disabled:opacity-40"
           >
             参加する
           </button>
@@ -703,7 +703,7 @@ export default function OnlineLobby() {
       {credentials && !snapshot ? (
         <button
           type="button"
-          className="text-left text-sm underline"
+          className="inline-flex min-h-11 items-center text-left text-sm underline"
           onClick={leave}
         >
           保存済みのルーム接続を解除
