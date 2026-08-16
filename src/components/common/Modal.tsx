@@ -254,6 +254,7 @@ export default function Modal({
         <div
           className="min-h-0 flex-1 overflow-auto overscroll-contain"
           data-modal-scroll-area
+          tabIndex={0}
         >
           {children}
         </div>

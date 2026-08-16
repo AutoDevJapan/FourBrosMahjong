@@ -662,11 +662,12 @@ test.describe("対局画面(/game)", () => {
     await expect(dialog.getByRole("option")).toHaveCount(0);
     await expect(modalHand.getByRole("listitem")).toHaveCount(14);
 
-    // フォーカストラップ内で唯一の操作対象は閉じるボタン。Tab/Shift+Tabともそこに留まる。
+    // フォーカストラップ内の操作対象は閉じるボタンと本文スクロール領域。
+    const scrollArea = dialog.locator("[data-modal-scroll-area]");
     await page.keyboard.press("Tab");
     await expect(dialog.getByRole("button", { name: "閉じる" })).toBeFocused();
     await page.keyboard.press("Tab");
-    await expect(dialog.getByRole("button", { name: "閉じる" })).toBeFocused();
+    await expect(scrollArea).toBeFocused();
     await page.keyboard.press("Shift+Tab");
     await expect(dialog.getByRole("button", { name: "閉じる" })).toBeFocused();
 

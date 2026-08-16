@@ -47,6 +47,7 @@ describe("Modal (spec 5.2.2 dialog / focus trap / Escape)", () => {
       "overflow-auto",
       "overscroll-contain",
     );
+    expect(scrollArea).toHaveAttribute("tabindex", "0");
     expect(scrollArea?.querySelector("h2")).toBeNull();
     expect(scrollArea?.querySelector('button[aria-label="閉じる"]')).toBeNull();
     expect(dialog.querySelector("h2")).toHaveTextContent("全体盤面");
