@@ -10,6 +10,13 @@ import type {
 } from "./types";
 
 const ONLINE_SESSION_KEY = "four-bros-mahjong.online.session.v1";
+const ROOM_CODE_LENGTH = 6;
+const ROOM_CODE_PATTERN = /^[A-Z2-9]{6}$/;
+const NAME_INPUT_ID = "online-lobby-name";
+const ROOM_CODE_INPUT_ID = "online-lobby-room-code";
+const NAME_REQUIREMENT_ID = "online-lobby-name-requirement";
+const ROOM_CODE_REQUIREMENT_ID = "online-lobby-room-code-requirement";
+const JOIN_REQUIREMENT_ID = "online-lobby-join-requirement";
 
 type ConnectionStatus = "idle" | "connecting" | "connected" | "reconnecting";
 type JoinRequest =
@@ -58,6 +65,52 @@ function messageOf(value: unknown): OnlineServerMessage | null {
   return typeof message.type === "string"
     ? (message as OnlineServerMessage)
     : null;
+}
+
+function nameRequirementMessage(name: string): string {
+  return name.trim().length > 0
+    ? "表示名は入力されています(12文字以内)。"
+    : "参加には表示名が必要です。表示名を入力してください(12文字以内)。";
+}
+
+function roomCodeRequirementMessage(roomCode: string): string {
+  const normalized = roomCode.trim();
+  if (normalized.length === 0) {
+    return "参加には6文字のルームコードが必要です。ルームコードを入力してください。";
+  }
+  if (normalized.length < ROOM_CODE_LENGTH) {
+    return `ルームコードは6文字必要です。あと${ROOM_CODE_LENGTH - normalized.length}文字入力してください。`;
+  }
+  if (!ROOM_CODE_PATTERN.test(normalized)) {
+    return "ルームコードは英大文字と2〜9の数字を使った6文字で入力してください。";
+  }
+  return "ルームコードは6文字入力されています。";
+}
+
+function joinRequirementMessage(
+  name: string,
+  roomCode: string,
+  status: ConnectionStatus,
+): string {
+  const requirements: string[] = [];
+  if (name.trim().length === 0) {
+    requirements.push("表示名を入力してください。");
+  }
+
+  const normalizedRoomCode = roomCode.trim();
+  if (normalizedRoomCode.length < ROOM_CODE_LENGTH) {
+    requirements.push(roomCodeRequirementMessage(roomCode));
+  } else if (!ROOM_CODE_PATTERN.test(normalizedRoomCode)) {
+    requirements.push(roomCodeRequirementMessage(roomCode));
+  }
+
+  if (status === "connecting" || status === "reconnecting") {
+    requirements.push("オンラインサーバーへ接続しています…");
+  }
+
+  return requirements.length > 0
+    ? requirements.join(" ")
+    : "参加条件を満たしています。参加できます。";
 }
 
 export default function OnlineLobby() {
@@ -308,6 +361,12 @@ export default function OnlineLobby() {
     name.trim().length > 0 &&
     status !== "connecting" &&
     status !== "reconnecting";
+  const normalizedRoomCode = roomCode.trim();
+  const joinDisabled =
+    !canSubmit || !ROOM_CODE_PATTERN.test(normalizedRoomCode);
+  const nameRequirement = nameRequirementMessage(name);
+  const roomCodeRequirement = roomCodeRequirementMessage(roomCode);
+  const joinRequirement = joinRequirementMessage(name, roomCode, status);
   return (
     <section className="mx-auto flex w-full max-w-md flex-col gap-6 rounded-xl border border-control-border p-6">
       <header>
@@ -318,32 +377,50 @@ export default function OnlineLobby() {
         <p className="mt-2 text-sm/6 text-foreground/70">
           ルームコードを共有して、同じ半荘を別端末からプレイできます。空席はAIが担当します。
         </p>
+        <p className="mt-2 text-sm/6 text-foreground/70">
+          参加するには表示名と6文字のルームコードが必要です。
+        </p>
       </header>
 
-      <label className="flex flex-col gap-2 text-sm font-medium">
-        表示名
+      <div className="flex flex-col gap-2 text-sm font-medium">
+        <label htmlFor={NAME_INPUT_ID}>表示名</label>
         <input
+          id={NAME_INPUT_ID}
+          type="text"
           value={name}
           onChange={(event) => setName(event.target.value.slice(0, 12))}
           maxLength={12}
           placeholder="例: たろう"
+          required
+          aria-invalid={name.trim().length === 0}
+          aria-describedby={NAME_REQUIREMENT_ID}
           className="rounded-lg border border-control-border bg-transparent px-3 py-2 font-normal"
         />
-      </label>
+        <span
+          id={NAME_REQUIREMENT_ID}
+          aria-live="polite"
+          className="text-xs/5 font-normal text-foreground/70"
+        >
+          {nameRequirement}
+        </span>
+      </div>
 
       <div className="flex flex-col gap-3">
         <button
           type="button"
           disabled={!canSubmit}
+          aria-describedby={NAME_REQUIREMENT_ID}
           onClick={() => start({ type: "create", name: name.trim() })}
           className="rounded-lg bg-foreground px-4 py-3 font-medium text-background disabled:cursor-not-allowed disabled:opacity-40"
         >
           新しいルームを作る
         </button>
         <div className="flex items-end gap-2">
-          <label className="flex min-w-0 flex-1 flex-col gap-2 text-sm font-medium">
-            ルームコード
+          <div className="flex min-w-0 flex-1 flex-col gap-2 text-sm font-medium">
+            <label htmlFor={ROOM_CODE_INPUT_ID}>ルームコード</label>
             <input
+              id={ROOM_CODE_INPUT_ID}
+              type="text"
               value={roomCode}
               onChange={(event) =>
                 setRoomCode(event.target.value.toUpperCase().slice(0, 6))
@@ -352,12 +429,26 @@ export default function OnlineLobby() {
               inputMode="text"
               autoCapitalize="characters"
               placeholder="ABC234"
+              required
+              aria-invalid={
+                normalizedRoomCode.length !== ROOM_CODE_LENGTH ||
+                !ROOM_CODE_PATTERN.test(normalizedRoomCode)
+              }
+              aria-describedby={ROOM_CODE_REQUIREMENT_ID}
               className="rounded-lg border border-control-border bg-transparent px-3 py-2 font-mono font-normal tracking-widest"
             />
-          </label>
+            <span
+              id={ROOM_CODE_REQUIREMENT_ID}
+              aria-live="polite"
+              className="text-xs/5 font-normal text-foreground/70"
+            >
+              {roomCodeRequirement}
+            </span>
+          </div>
           <button
             type="button"
-            disabled={!canSubmit || roomCode.trim().length !== 6}
+            disabled={joinDisabled}
+            aria-describedby={`${NAME_REQUIREMENT_ID} ${ROOM_CODE_REQUIREMENT_ID} ${JOIN_REQUIREMENT_ID}`}
             onClick={() =>
               start({ type: "join", code: roomCode.trim(), name: name.trim() })
             }
@@ -367,6 +458,15 @@ export default function OnlineLobby() {
           </button>
         </div>
       </div>
+
+      <p
+        id={JOIN_REQUIREMENT_ID}
+        role="status"
+        aria-atomic="true"
+        className="text-sm/6 text-foreground/70"
+      >
+        {joinRequirement}
+      </p>
 
       <p className="text-xs/5 text-foreground/60">
         {status === "connecting" || status === "reconnecting"
