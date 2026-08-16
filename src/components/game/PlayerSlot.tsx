@@ -7,7 +7,7 @@
  */
 
 import BenchArea from "./BenchArea";
-import type { HandTileState } from "./Hand";
+import type { HandProps, HandTileState } from "./Hand";
 import PlayerArea from "./PlayerArea";
 import type { SeatPosition, SlotContent, TileData } from "./types";
 
@@ -21,6 +21,8 @@ export interface PlayerSlotProps {
   onSelectTile?: (index: number, tile: TileData) => void;
   /** タッチ端末では牌の選択と打牌確定を分離する。 */
   confirmTouchSelection?: boolean;
+  /** タッチ選択の確定対象。 */
+  confirmTouchSelectionMode?: HandProps["confirmTouchSelectionMode"];
   /** 全体盤面モーダル等で、自家手牌を閲覧専用にする。 */
   handReadOnly?: boolean;
   handTileStates?: readonly HandTileState[];
@@ -33,6 +35,7 @@ export default function PlayerSlot({
   compact = false,
   onSelectTile,
   confirmTouchSelection = false,
+  confirmTouchSelectionMode = "discard",
   handReadOnly = false,
   handTileStates,
   onBlockedTile,
@@ -48,6 +51,9 @@ export default function PlayerSlot({
       onSelectTile={position === "self" ? onSelectTile : undefined}
       confirmTouchSelection={
         position === "self" ? confirmTouchSelection : undefined
+      }
+      confirmTouchSelectionMode={
+        position === "self" ? confirmTouchSelectionMode : undefined
       }
       handReadOnly={position === "self" ? handReadOnly : undefined}
       handTileStates={position === "self" ? handTileStates : undefined}

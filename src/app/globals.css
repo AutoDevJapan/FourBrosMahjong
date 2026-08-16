@@ -275,7 +275,7 @@ body {
  * 44px 以上を確保して隣接牌との誤タップを減らす。空いた幅は牌の周囲に残すため、
  * 牌面そのものの判読性と既存のキーボード/マウス配置を変えない。
  */
-@media (pointer: coarse) {
+@media (pointer: coarse), (any-pointer: coarse) {
   .hand-touch-option {
     display: inline-flex;
     min-width: 2.75rem;

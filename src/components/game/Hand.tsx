@@ -22,6 +22,8 @@ export interface HandProps {
   onSelect?: (index: number, tile: TileData) => void;
   /** タッチ操作では1回目を選択状態に留め、確定ボタンを要求する。 */
   confirmTouchSelection?: boolean;
+  /** タッチ選択の確定対象。リーチ宣言中は通常の打牌と文言を分ける。 */
+  confirmTouchSelectionMode?: "discard" | "riichi";
   /** アクセシブルな一覧名。 */
   label?: string;
   tileStates?: readonly HandTileState[];
@@ -40,6 +42,7 @@ export default function Hand({
   readOnly = false,
   onSelect,
   confirmTouchSelection = false,
+  confirmTouchSelectionMode = "discard",
   label = "自家の手牌",
   tileStates = [],
   onBlockedSelect,
@@ -51,6 +54,8 @@ export default function Hand({
   );
   const [previousTiles, setPreviousTiles] = useState(tiles);
   const optionRefs = useRef<(HTMLLIElement | null)[]>([]);
+  const confirmButtonRef = useRef<HTMLButtonElement | null>(null);
+  const restoreFocusIndexRef = useRef<number | null>(null);
   const handHadFocus = useRef(false);
   const pointerTypeRef = useRef<"touch" | "other" | null>(null);
   const touchSelectionStatusId = useId();
@@ -92,6 +97,41 @@ export default function Hand({
     if (!handHadFocus.current || tiles.length === 0) return;
     optionRefs.current[Math.min(activeIndex, tiles.length - 1)]?.focus();
   }, [tiles, activeIndex]);
+
+  // タッチ選択で確認UIが追加された直後は、確認ボタンへフォーカスを移す。
+  // `preventScroll` でフォーカス移動による予期せぬジャンプを抑えたあと、ボタン自身を
+  // viewport中央へ安全にスクロールする。これにより 320/360px の狭幅でも確定操作が
+  // 画面外に残らず、document.activeElement が body に落ちない(#607)。
+  useLayoutEffect(() => {
+    if (!confirmTouchSelection || touchSelectionIndex === null) return;
+    const button = confirmButtonRef.current;
+    if (!button) return;
+    button.focus({ preventScroll: true });
+    button.scrollIntoView?.({
+      block: "center",
+      inline: "nearest",
+      behavior: "auto",
+    });
+  }, [confirmTouchSelection, touchSelectionIndex]);
+
+  // 確定成功時はゲーム側の更新へフォーカスを委ねる。解除操作でのみ復帰先を予約し、
+  // 選択牌が再描画されたあとにその牌へ戻す(#607)。
+  useLayoutEffect(() => {
+    if (touchSelectionIndex !== null) return;
+    const index = restoreFocusIndexRef.current;
+    if (index === null) return;
+    restoreFocusIndexRef.current = null;
+    const option = optionRefs.current[index];
+    if (option?.getAttribute("aria-disabled") !== "true") option?.focus();
+  }, [touchSelectionIndex]);
+
+  const handleCancelTouchSelection = useCallback(() => {
+    if (touchSelectionIndex === null) return;
+    restoreFocusIndexRef.current = touchSelectionIndex;
+    setActiveIndex(touchSelectionIndex);
+    setTouchSelectionIndex(null);
+    setSelectedIndex(null);
+  }, [touchSelectionIndex]);
 
   const focusIndex = useCallback((index: number) => {
     setActiveIndex(index);
@@ -197,6 +237,9 @@ export default function Hand({
     }
     commitSelection(touchSelectionIndex, pendingTouchTile);
   };
+
+  const touchSelectionAction =
+    confirmTouchSelectionMode === "riichi" ? "リーチ宣言" : "打牌";
 
   const listbox = (
     <ul
@@ -325,22 +368,21 @@ export default function Hand({
           className="text-xs text-foreground/75"
         >
           {tileLabel(pendingTouchTile)}
-          を選択中です。打牌するには確定してください。
+          を選択中です。{touchSelectionAction}
+          を確定するにはボタンを押してください。
         </p>
         <div className="mt-2 flex flex-wrap gap-2">
           <button
+            ref={confirmButtonRef}
             type="button"
             onClick={handleConfirmTouchSelection}
             className="min-h-11 rounded-lg bg-turn-highlight px-3 py-2 text-sm font-semibold text-background hover:opacity-90"
           >
-            {tileLabel(pendingTouchTile)}で打牌を確定
+            {tileLabel(pendingTouchTile)}で{touchSelectionAction}を確定
           </button>
           <button
             type="button"
-            onClick={() => {
-              setTouchSelectionIndex(null);
-              setSelectedIndex(null);
-            }}
+            onClick={handleCancelTouchSelection}
             className="min-h-11 rounded-lg border border-control-border px-3 py-2 text-sm font-medium hover:bg-foreground/5"
           >
             選択を解除

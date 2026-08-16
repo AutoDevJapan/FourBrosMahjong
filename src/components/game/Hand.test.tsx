@@ -69,15 +69,18 @@ describe("Hand (roving tabindex listbox, spec 5.2.2)", () => {
     expect(onSelect).not.toHaveBeenCalled();
     expect(first()).toHaveAttribute("aria-selected", "true");
     expect(screen.getByRole("status")).toHaveTextContent(
-      "一萬を選択中です。打牌するには確定してください。",
+      "一萬を選択中です。打牌を確定するにはボタンを押してください。",
     );
-    expect(
-      screen.getByRole("button", { name: "一萬で打牌を確定" }),
-    ).toBeInTheDocument();
+    const confirm = screen.getByRole("button", {
+      name: "一萬で打牌を確定",
+    });
+    expect(confirm).toBeInTheDocument();
+    expect(confirm).toHaveFocus();
 
     await user.click(screen.getByRole("button", { name: "選択を解除" }));
     expect(onSelect).not.toHaveBeenCalled();
     expect(first()).toHaveAttribute("aria-selected", "false");
+    expect(first()).toHaveFocus();
     expect(
       screen.queryByRole("button", { name: "一萬で打牌を確定" }),
     ).not.toBeInTheDocument();
@@ -87,6 +90,30 @@ describe("Hand (roving tabindex listbox, spec 5.2.2)", () => {
     fireEvent.click(first());
     await user.click(screen.getByRole("button", { name: "一萬で打牌を確定" }));
     expect(onSelect).toHaveBeenCalledWith(0, tiles[0]);
+  });
+
+  it("リーチ宣言中のタッチ確認は打牌と混同しない文言を表示する", async () => {
+    const user = userEvent.setup();
+    render(
+      <Hand
+        tiles={tiles}
+        confirmTouchSelection
+        confirmTouchSelectionMode="riichi"
+      />,
+    );
+    const first = screen.getAllByRole("option")[0];
+
+    fireEvent.touchStart(first);
+    fireEvent.touchEnd(first);
+    fireEvent.click(first);
+
+    expect(screen.getByRole("status")).toHaveTextContent(
+      "一萬を選択中です。リーチ宣言を確定するにはボタンを押してください。",
+    );
+    expect(
+      screen.getByRole("button", { name: "一萬でリーチ宣言を確定" }),
+    ).toHaveFocus();
+    await user.click(screen.getByRole("button", { name: "選択を解除" }));
   });
 
   it("タッチ確定モードでもキーボードEnterは従来どおり即時に打牌する", async () => {

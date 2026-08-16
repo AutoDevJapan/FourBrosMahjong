@@ -677,6 +677,72 @@ test.describe("対局画面(/game)", () => {
     await expect(openButton).toBeFocused();
   });
 
+  test("マウス操作では牌のクリックだけで即時に打牌する(#607)", async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 1280, height: 900 });
+    await page.goto("/game?seed=0");
+    await expect(page.locator('[data-pending="humanDiscard"]')).toHaveCount(1);
+
+    const hand = visibleHand(page);
+    const firstTile = hand.getByRole("option").first();
+    const box = await firstTile.boundingBox();
+    expect(box).not.toBeNull();
+    const self = page
+      .getByRole("region", { name: /^あなた/ })
+      .filter({ visible: true })
+      .first();
+    const discards = self
+      .getByRole("list", { name: "捨て牌" })
+      .getByRole("listitem");
+    const initialDiscards = await discards.count();
+
+    await page.mouse.click(
+      (box?.x ?? 0) + (box?.width ?? 0) / 2,
+      (box?.y ?? 0) + (box?.height ?? 0) / 2,
+    );
+
+    await expect
+      .poll(async () => discards.count(), { timeout: 5_000 })
+      .toBeGreaterThan(initialDiscards);
+    await expect(
+      page.getByRole("button", { name: /で打牌を確定$/ }).filter({
+        visible: true,
+      }),
+    ).toHaveCount(0);
+  });
+
+  test("キーボード操作では牌のEnterだけで即時に打牌する(#607)", async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 1280, height: 900 });
+    await page.goto("/game?seed=0");
+    await expect(page.locator('[data-pending="humanDiscard"]')).toHaveCount(1);
+
+    const hand = visibleHand(page);
+    const firstTile = hand.getByRole("option").first();
+    const self = page
+      .getByRole("region", { name: /^あなた/ })
+      .filter({ visible: true })
+      .first();
+    const discards = self
+      .getByRole("list", { name: "捨て牌" })
+      .getByRole("listitem");
+    const initialDiscards = await discards.count();
+
+    await firstTile.focus();
+    await page.keyboard.press("Enter");
+
+    await expect
+      .poll(async () => discards.count(), { timeout: 5_000 })
+      .toBeGreaterThan(initialDiscards);
+    await expect(
+      page.getByRole("button", { name: /で打牌を確定$/ }).filter({
+        visible: true,
+      }),
+    ).toHaveCount(0);
+  });
+
   test.describe("狭幅タッチの手牌確定(#607)", () => {
     test.use({
       viewport: { width: 320, height: 800 },
@@ -738,6 +804,30 @@ test.describe("対局画面(/game)", () => {
           .getByRole("button", { name: /で打牌を確定$/ })
           .filter({ visible: true })
           .first();
+        await expect(confirm).toBeVisible();
+        await expect(confirm).toBeFocused();
+        const confirmInViewport = await confirm.evaluate((element) => {
+          const rect = element.getBoundingClientRect();
+          return rect.top >= 0 && rect.bottom <= window.innerHeight;
+        });
+        expect(confirmInViewport).toBe(true);
+
+        await page.getByRole("button", { name: "選択を解除" }).click();
+        await expect(firstTile).toBeFocused();
+        await expect(
+          page.getByRole("button", { name: /で打牌を確定$/ }).filter({
+            visible: true,
+          }),
+        ).toHaveCount(0);
+
+        await firstTile.scrollIntoViewIfNeeded();
+        const retryBox = await firstTile.boundingBox();
+        expect(retryBox).not.toBeNull();
+        await page.touchscreen.tap(
+          (retryBox?.x ?? 0) + Math.max(8, (retryBox?.width ?? 0) - 8),
+          (retryBox?.y ?? 0) + Math.min(8, (retryBox?.height ?? 0) / 2),
+        );
+        await expect(confirm).toBeFocused();
         await expect(confirm).toBeVisible();
         await confirm.click();
 
