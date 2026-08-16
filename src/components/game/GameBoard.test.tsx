@@ -18,7 +18,11 @@ import type { Tile } from "@/domain/tiles/tile";
 import { bannerLandmarks, describeElement } from "@/test/bannerLandmarks";
 import { tileLabel } from "../common/tileLabel";
 import { walkToGameEnd } from "./finishedGameFixture";
-import GameBoard, { pulledKitaCount, residualSticksNote } from "./GameBoard";
+import GameBoard, {
+  type GameBoardProps,
+  pulledKitaCount,
+  residualSticksNote,
+} from "./GameBoard";
 import { GameProvider } from "./GameProvider";
 import { type GameAction, replayJournal } from "./gamePersistence";
 
@@ -62,10 +66,14 @@ function gameBeforeEnd(seed = 2024): {
  * 実対局エンジン(seed 固定 = 決定的)で盤面を描画する。
  * 起家=自家 p0 が 東1 の親のため、開始直後は自家の打牌待ち。
  */
-function renderBoard(seed = 1, options?: Parameters<typeof render>[1]) {
+function renderBoard(
+  seed = 1,
+  options?: Parameters<typeof render>[1],
+  boardProps: GameBoardProps = {},
+) {
   return render(
     <GameProvider initialGame={createGame({ seed })}>
-      <GameBoard />
+      <GameBoard {...boardProps} />
     </GameProvider>,
     options,
   );
@@ -123,6 +131,46 @@ describe("GameBoard (spec 6.6 client island / engine-driven)", () => {
     expect(
       screen.getAllByRole("button", { name: "ツモ" }).length,
     ).toBeGreaterThan(0);
+  });
+
+  it("オンライン接続待ちでは手牌とサーバー操作を無効化し、接続後に戻す", () => {
+    const { rerender } = renderBoard(1, undefined, {
+      interactionDisabled: true,
+    });
+
+    expect(
+      screen.queryByRole("listbox", { name: "自家の手牌" }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.getAllByRole("list", { name: "自家の手牌" }).length,
+    ).toBeGreaterThan(0);
+    expect(
+      screen.getAllByText(
+        "オンラインサーバーとの接続を待っています。再接続後に操作を再開できます。",
+      ).length,
+    ).toBeGreaterThan(0);
+
+    for (const panel of screen.getAllByRole("group", {
+      name: "操作パネル",
+    })) {
+      for (const button of within(panel).getAllByRole("button")) {
+        expect(button).toBeDisabled();
+      }
+    }
+
+    rerender(
+      <GameProvider initialGame={createGame({ seed: 1 })}>
+        <GameBoard interactionDisabled={false} />
+      </GameProvider>,
+    );
+    expect(
+      screen.getAllByRole("listbox", { name: "自家の手牌" }).length,
+    ).toBeGreaterThan(0);
+    expect(
+      screen.queryByText(
+        "オンラインサーバーとの接続を待っています。再接続後に操作を再開できます。",
+      ),
+    ).not.toBeInTheDocument();
   });
 
   it("決定的な公開状態から全プレイヤーの抜き北を表示し、自家の連続北抜きを通知する", () => {

@@ -52,6 +52,7 @@ export default function Hand({
   const [touchSelectionIndex, setTouchSelectionIndex] = useState<number | null>(
     null,
   );
+  const [previousReadOnly, setPreviousReadOnly] = useState(readOnly);
   const [previousTiles, setPreviousTiles] = useState(tiles);
   const optionRefs = useRef<(HTMLLIElement | null)[]>([]);
   const confirmButtonRef = useRef<HTMLButtonElement | null>(null);
@@ -88,6 +89,17 @@ export default function Hand({
       tileStates[touchSelectionIndex]?.disabled === true);
   if (touchSelectionInvalid) {
     setTouchSelectionIndex(null);
+  }
+
+  // 接続断で閲覧専用へ切り替わる際、再接続後に古い選択を表示・確定しない。
+  // props の変化から同期的に導ける state は、Hand の既存の手牌更新・index 補正と同じ
+  // 条件付き render-state 調整で破棄する(外部副作用ではないため effect は使わない)。
+  if (previousReadOnly !== readOnly) {
+    setPreviousReadOnly(readOnly);
+    if (readOnly) {
+      if (selectedIndex !== null) setSelectedIndex(null);
+      if (touchSelectionIndex !== null) setTouchSelectionIndex(null);
+    }
   }
 
   useLayoutEffect(() => {
