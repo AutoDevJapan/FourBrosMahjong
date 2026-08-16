@@ -69,4 +69,25 @@ describe("OnlineGameProvider", () => {
       action: { type: "discard" },
     });
   });
+
+  it("does not send a stale action while the socket is unavailable", async () => {
+    const onSendError = vi.fn();
+    const socket = { readyState: 0, send: vi.fn() } as unknown as WebSocket;
+    render(
+      <OnlineGameProvider
+        socket={socket}
+        snapshot={snapshotFixture()}
+        onSendError={onSendError}
+      >
+        <ActionProbe />
+      </OnlineGameProvider>,
+    );
+
+    await userEvent.click(screen.getByRole("button", { name: "打牌" }));
+
+    expect(socket.send).not.toHaveBeenCalled();
+    expect(onSendError).toHaveBeenCalledWith(
+      "オンラインサーバーとの接続が切れています。再接続を待っています。",
+    );
+  });
 });

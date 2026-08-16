@@ -276,6 +276,25 @@ describe("Hand (roving tabindex listbox, spec 5.2.2)", () => {
     expect(screen.getAllByRole("option")[1]).not.toHaveClass("-translate-y-1");
   });
 
+  it("接続待ちで閲覧専用へ切り替わった選択状態を再接続後へ持ち越さない", async () => {
+    const user = userEvent.setup();
+    const { rerender } = render(<Hand tiles={tiles} />);
+
+    await user.click(screen.getAllByRole("option")[0]);
+    expect(screen.getAllByRole("option")[0]).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
+
+    rerender(<Hand tiles={tiles} readOnly />);
+    rerender(<Hand tiles={tiles} />);
+
+    expect(screen.getAllByRole("option")[0]).toHaveAttribute(
+      "aria-selected",
+      "false",
+    );
+  });
+
   it("閲覧専用では静的listとして表示し、選択・フォーカス操作を公開しない", () => {
     render(<Hand tiles={tiles} readOnly />);
 

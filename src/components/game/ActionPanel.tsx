@@ -19,6 +19,8 @@ export interface ActionItem {
   readonly onClick: () => void;
   /** 選択不能(局面上まだ確定できない)。 */
   readonly disabled?: boolean;
+  /** 接続待ちでも実行できるローカル操作(例: 結果画面への遷移)。 */
+  readonly requiresConnection?: boolean;
   /** 強調(主要操作)。 */
   readonly primary?: boolean;
 }
@@ -28,9 +30,15 @@ export interface ActionPanelProps {
   readonly actions: readonly ActionItem[];
   /** 補助テキスト(例: 「牌を選んで打牌してください」)。 */
   readonly hint?: string;
+  /** 接続待ちなど、局面上は選べても一時的に送信できない状態。 */
+  readonly disabled?: boolean;
 }
 
-export default function ActionPanel({ actions, hint }: ActionPanelProps) {
+export default function ActionPanel({
+  actions,
+  hint,
+  disabled = false,
+}: ActionPanelProps) {
   return (
     <div
       role="group"
@@ -40,37 +48,47 @@ export default function ActionPanel({ actions, hint }: ActionPanelProps) {
       {hint ? <p className="text-xs text-foreground/70">{hint}</p> : null}
       {actions.length > 0 ? (
         <div className="flex flex-wrap items-center justify-center gap-2">
-          {actions.map(({ key, label, icon, onClick, disabled, primary }) => (
-            <button
-              key={key}
-              type="button"
-              disabled={disabled}
-              onClick={(event) => {
-                if (event.detail > 1) return;
-                onClick();
-              }}
-              onKeyDown={(event) => {
-                if (
-                  event.repeat &&
-                  (event.key === "Enter" || event.key === " ")
-                ) {
-                  event.preventDefault();
-                }
-              }}
-              className={`inline-flex min-h-11 items-center gap-1.5 rounded-lg border px-4 py-2 text-sm font-medium transition-colors motion-reduce:transition-none disabled:cursor-not-allowed disabled:opacity-40 ${
-                primary
-                  ? "border-turn-highlight bg-turn-highlight/10 text-turn-highlight-strong hover:bg-turn-highlight/20"
-                  : "border-control-border hover:bg-foreground/5"
-              }`}
-            >
-              {icon ? (
-                <span aria-hidden="true" className="text-base">
-                  {icon}
-                </span>
-              ) : null}
-              {label}
-            </button>
-          ))}
+          {actions.map(
+            ({
+              key,
+              label,
+              icon,
+              onClick,
+              disabled: actionDisabled,
+              requiresConnection = true,
+              primary,
+            }) => (
+              <button
+                key={key}
+                type="button"
+                disabled={actionDisabled || (disabled && requiresConnection)}
+                onClick={(event) => {
+                  if (event.detail > 1) return;
+                  onClick();
+                }}
+                onKeyDown={(event) => {
+                  if (
+                    event.repeat &&
+                    (event.key === "Enter" || event.key === " ")
+                  ) {
+                    event.preventDefault();
+                  }
+                }}
+                className={`inline-flex min-h-11 items-center gap-1.5 rounded-lg border px-4 py-2 text-sm font-medium transition-colors motion-reduce:transition-none disabled:cursor-not-allowed disabled:opacity-40 ${
+                  primary
+                    ? "border-turn-highlight bg-turn-highlight/10 text-turn-highlight-strong hover:bg-turn-highlight/20"
+                    : "border-control-border hover:bg-foreground/5"
+                }`}
+              >
+                {icon ? (
+                  <span aria-hidden="true" className="text-base">
+                    {icon}
+                  </span>
+                ) : null}
+                {label}
+              </button>
+            ),
+          )}
         </div>
       ) : null}
     </div>

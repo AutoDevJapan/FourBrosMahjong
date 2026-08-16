@@ -73,10 +73,13 @@ export function residualSticksNote(
 export interface GameBoardProps {
   /** 結果ボタンの遷移先。オンライン対局は同じルームへ戻るため上書きする。 */
   readonly resultHref?: string;
+  /** オンライン再接続中など、サーバー操作を一時的に停止する。 */
+  readonly interactionDisabled?: boolean;
 }
 
 export default function GameBoard({
   resultHref = "/game/result",
+  interactionDisabled = false,
 }: GameBoardProps) {
   const { view, phase, pending, roundSummary, controls } = useGame();
   const { slots, tableInfo, dora } = view;
@@ -191,7 +194,8 @@ export default function GameBoard({
   // 打牌フェーズ(humanDiscard)でのみ自家手牌を対話可能にする。局終了(roundEnd/gameEnd)や
   // 他家打牌への応答待ち(humanReact)では閲覧専用の静的 list として描画し、牌ごとの
   // 「禁止」バッジ・理由文を付けない(#257 / スペック5 5.2.3 の読み上げ渋滞回避)。
-  const handInteractive = pending?.kind === "humanDiscard";
+  const handInteractive =
+    !interactionDisabled && pending?.kind === "humanDiscard";
 
   const handTileStates = useMemo<readonly HandTileState[]>(() => {
     const self = slots.self;
@@ -257,6 +261,7 @@ export default function GameBoard({
           label: "結果を見る",
           icon: "▶",
           onClick: () => router.push(resultHref),
+          requiresConnection: false,
           primary: true,
         },
         {
@@ -358,6 +363,9 @@ export default function GameBoard({
   }, [phase, pending, controls, router, resultHref, riichiArmed]);
 
   const hint = useMemo(() => {
+    if (interactionDisabled) {
+      return "オンラインサーバーとの接続を待っています。再接続後に操作を再開できます。";
+    }
     if (phase === "roundEnd") return roundSummary?.label ?? "";
     if (phase === "gameEnd") {
       // 最終局の決着ラベル(流局サマリ含む)も併記する。和了決着の詳細は WinDetails が描く
@@ -390,7 +398,7 @@ export default function GameBoard({
       return "牌を選んで打牌してください(北抜きは自動)。";
     }
     return "";
-  }, [phase, pending, roundSummary, riichiArmed]);
+  }, [interactionDisabled, phase, pending, roundSummary, riichiArmed]);
 
   const announcement = useMemo(() => {
     if (tileFeedback.message) return tileFeedback.message;
@@ -484,12 +492,25 @@ export default function GameBoard({
             {(phase === "roundEnd" || phase === "gameEnd") && roundSummary ? (
               <WinDetails summary={roundSummary} />
             ) : null}
-            <ActionPanel actions={actions} hint={hint} />
+            <ActionPanel
+              actions={actions}
+              hint={hint}
+              disabled={interactionDisabled}
+            />
           </div>
         ) : null}
       </div>
     ),
-    [renderSlot, tableInfo, dora, actions, hint, phase, roundSummary],
+    [
+      renderSlot,
+      tableInfo,
+      dora,
+      actions,
+      hint,
+      interactionDisabled,
+      phase,
+      roundSummary,
+    ],
   );
 
   if (!mounted) {
@@ -575,7 +596,11 @@ export default function GameBoard({
           {(phase === "roundEnd" || phase === "gameEnd") && roundSummary ? (
             <WinDetails summary={roundSummary} />
           ) : null}
-          <ActionPanel actions={actions} hint={hint} />
+          <ActionPanel
+            actions={actions}
+            hint={hint}
+            disabled={interactionDisabled}
+          />
         </div>
       </div>
 

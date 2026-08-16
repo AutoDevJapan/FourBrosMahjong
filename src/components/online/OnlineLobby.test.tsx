@@ -14,7 +14,14 @@ import OnlineLobby from "./OnlineLobby";
 import type { OnlineServerMessage, OnlineSnapshot } from "./types";
 
 vi.mock("@/components/game/GameBoard", () => ({
-  default: () => <div data-testid="game-board">対局盤</div>,
+  default: ({ interactionDisabled }: { interactionDisabled?: boolean }) => (
+    <div
+      data-testid="game-board"
+      data-interaction-disabled={String(interactionDisabled)}
+    >
+      対局盤
+    </div>
+  ),
 }));
 
 type TestListener = (event: Event) => void;
@@ -364,7 +371,10 @@ describe("OnlineLobby connection recovery", () => {
         snapshot: snapshotFixture(),
       });
     });
-    expect(screen.getByTestId("game-board")).toBeInTheDocument();
+    expect(screen.getByTestId("game-board")).toHaveAttribute(
+      "data-interaction-disabled",
+      "false",
+    );
 
     act(() => {
       sockets[0]?.message({
@@ -389,6 +399,10 @@ describe("OnlineLobby connection recovery", () => {
     expect(
       document.querySelector('[data-connection-status="reconnecting"]'),
     ).not.toBeNull();
+    expect(screen.getByTestId("game-board")).toHaveAttribute(
+      "data-interaction-disabled",
+      "true",
+    );
 
     act(() => vi.advanceTimersByTime(3_999));
     expect(sockets).toHaveLength(1);
@@ -491,7 +505,10 @@ describe("OnlineLobby connection recovery", () => {
     expect(
       document.querySelector('[data-connection-status="connected"]'),
     ).toHaveFocus();
-    expect(screen.getByTestId("game-board")).toBeInTheDocument();
+    expect(screen.getByTestId("game-board")).toHaveAttribute(
+      "data-interaction-disabled",
+      "false",
+    );
   });
 
   it("clears saved credentials before starting a new room request", async () => {

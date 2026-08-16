@@ -739,7 +739,10 @@ export default function OnlineLobby() {
             feedbackRef={feedbackRef}
             onRetry={retry}
           />
-          <GameBoard resultHref="/online" />
+          <GameBoard
+            resultHref="/online"
+            interactionDisabled={status !== "connected"}
+          />
         </section>
       </OnlineGameProvider>
     );
