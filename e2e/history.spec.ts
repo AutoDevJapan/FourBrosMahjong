@@ -386,6 +386,17 @@ test.describe("戦績のローカル保存・閲覧(#293)", () => {
       page.getByText("保存された戦績はまだありません", { exact: false }),
     ).toBeVisible();
 
+    // 空状態からローカル対局へキーボードでも到達できる(#611)。
+    const startGameLink = page.getByRole("link", { name: "対局を開始" });
+    await expect(startGameLink).toHaveAttribute("href", "/game");
+    await startGameLink.focus();
+    await expect(startGameLink).toBeFocused();
+    await startGameLink.press("Enter");
+    await expect(page).toHaveURL(/\/game$/);
+    await expect(
+      page.getByRole("heading", { level: 1, name: "対局画面" }),
+    ).toBeVisible();
+
     await page.goto("/settings");
     await page.getByRole("link", { name: /戦績を見る/ }).click();
     await expect(page).toHaveURL(/\/history$/);
