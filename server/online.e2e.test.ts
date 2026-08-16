@@ -9,6 +9,7 @@ import type {
   OnlineSnapshot,
 } from "../src/components/online/types";
 import { ABUSE_LIMITS } from "./abuseControl";
+import { ONLINE_HANDSHAKE_TIMEOUT_MS } from "./handshake";
 
 /**
  * server配下の test/spec ファイルは既存の Vitest unit project が収集する。
@@ -891,6 +892,37 @@ describe("online abuse boundary and four-client regression (#651)", () => {
           ok: false,
           code: "connection_limit",
           retryAfterMs: ABUSE_LIMITS.connectionRetryAfterMs,
+        });
+      } finally {
+        await closeTestClients(clients);
+        if (server !== undefined) await stopLocalOnlineServer(server);
+      }
+    },
+    TEST_TIMEOUT_MS,
+  );
+
+  it(
+    "handshake未完了の接続を解放し、後続ユーザーの接続枠を回復する",
+    async () => {
+      let server: LocalOnlineServer | undefined;
+      const clients: OnlineTestClient[] = [];
+      try {
+        server = await startLocalOnlineServer();
+        const idle = new OnlineTestClient(server.url, TEST_ORIGIN);
+        clients.push(idle);
+        await idle.open();
+
+        const close = await idle.waitForClose(
+          ONLINE_HANDSHAKE_TIMEOUT_MS + 5_000,
+        );
+        expect(close.code).not.toBe(1000);
+
+        const recovered = new OnlineTestClient(server.url, TEST_ORIGIN);
+        clients.push(recovered);
+        await recovered.open();
+        recovered.send({ type: "create", name: "タイムアウト後ホスト" });
+        await expect(recovered.waitForSession()).resolves.toMatchObject({
+          type: "session",
         });
       } finally {
         await closeTestClients(clients);
