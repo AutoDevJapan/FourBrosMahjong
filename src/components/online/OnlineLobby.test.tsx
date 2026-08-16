@@ -1,5 +1,6 @@
 import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { StrictMode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { selectView } from "@/components/game/gameView";
 import { createGame } from "@/domain/game/engine";
@@ -98,6 +99,78 @@ function snapshotFixture(): OnlineSnapshot {
   };
 }
 
+beforeEach(() => {
+  vi.stubEnv("NEXT_PUBLIC_ONLINE_WS_URL", "ws://localhost:8080/ws");
+  vi.stubGlobal("WebSocket", TestWebSocket);
+  window.sessionStorage.clear();
+  window.history.replaceState({}, "", "/online");
+  sockets.length = 0;
+});
+
+afterEach(() => {
+  window.history.replaceState({}, "", "/online");
+  window.sessionStorage.clear();
+  sockets.length = 0;
+  vi.unstubAllGlobals();
+  vi.unstubAllEnvs();
+  vi.restoreAllMocks();
+});
+
+describe("OnlineLobby (#605)", () => {
+  it("prefills a valid room code from a shared URL", async () => {
+    window.history.replaceState({}, "", "/online?room=abc234");
+
+    render(
+      <StrictMode>
+        <OnlineLobby />
+      </StrictMode>,
+    );
+
+    await waitFor(() =>
+      expect(screen.getByLabelText("ルームコード")).toHaveValue("ABC234"),
+    );
+    expect(screen.getByRole("button", { name: "参加する" })).toBeDisabled();
+  });
+
+  it("ignores an invalid room code in a shared URL", async () => {
+    window.history.replaceState({}, "", "/online?room=ABC123");
+
+    render(
+      <StrictMode>
+        <OnlineLobby />
+      </StrictMode>,
+    );
+
+    await waitFor(() =>
+      expect(screen.getByLabelText("ルームコード")).toHaveValue(""),
+    );
+  });
+
+  it("keeps reconnecting a restored session under StrictMode", async () => {
+    window.sessionStorage.setItem(
+      "four-bros-mahjong.online.session.v1",
+      JSON.stringify({ code: "ABC234", token: "t".repeat(16) }),
+    );
+
+    render(
+      <StrictMode>
+        <OnlineLobby />
+      </StrictMode>,
+    );
+
+    await waitFor(() => expect(sockets).toHaveLength(1));
+    act(() => sockets[0]?.open());
+    expect(JSON.parse(sockets[0]?.sent[0] ?? "{}")).toEqual({
+      type: "resume",
+      code: "ABC234",
+      token: "t".repeat(16),
+    });
+
+    act(() => sockets[0]?.close());
+    await waitFor(() => expect(sockets).toHaveLength(2), { timeout: 1_500 });
+  });
+});
+
 describe("OnlineLobby の参加条件", () => {
   it("初期状態でも入力条件とdisabled理由をアクセシブルに説明する", () => {
     render(<OnlineLobby />);
@@ -193,18 +266,6 @@ describe("OnlineLobby の参加条件", () => {
 });
 
 describe("OnlineLobby connection recovery", () => {
-  beforeEach(() => {
-    vi.stubEnv("NEXT_PUBLIC_ONLINE_WS_URL", "ws://localhost:8080/ws");
-    vi.stubGlobal("WebSocket", TestWebSocket);
-    window.sessionStorage.clear();
-    sockets.length = 0;
-  });
-
-  afterEach(() => {
-    vi.unstubAllGlobals();
-    vi.unstubAllEnvs();
-  });
-
   it("shows a retry action after a failed connection and keeps the form values", async () => {
     const user = userEvent.setup();
     render(<OnlineLobby />);

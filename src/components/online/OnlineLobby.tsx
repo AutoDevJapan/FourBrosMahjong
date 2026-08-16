@@ -9,6 +9,8 @@ import {
 } from "react";
 import GameBoard from "@/components/game/GameBoard";
 import OnlineGameProvider, { onlineSocketUrl } from "./OnlineGameProvider";
+import RoomShareControls from "./RoomShareControls";
+import { readSharedRoomCode, roomShareUrl } from "./roomSharing";
 import type {
   OnlineConnectionStatus,
   OnlineCredentials,
@@ -221,6 +223,8 @@ export default function OnlineLobby() {
   const reconnectAttemptRef = useRef(0);
   const reconnectTimerRef = useRef<number | null>(null);
   const manualCloseRef = useRef(false);
+  const restoreTimerRef = useRef<number | null>(null);
+  const restoreCanceledRef = useRef(false);
   const [activeRequest, setActiveRequest] = useState<JoinRequest | null>(null);
   const pendingSessionSocketRef = useRef<WebSocket | null>(null);
   const feedbackRef = useRef<HTMLDivElement>(null);
@@ -413,9 +417,18 @@ export default function OnlineLobby() {
   }, [connect]);
 
   useEffect(() => {
+    restoreCanceledRef.current = false;
     const timer = window.setTimeout(() => {
+      restoreTimerRef.current = null;
+      if (restoreCanceledRef.current) return;
       const stored = readCredentials();
-      if (!stored || socketRef.current || credentialsRef.current) return;
+      if (!stored) {
+        const sharedCode = readSharedRoomCode();
+        if (sharedCode) setRoomCode(sharedCode);
+        return;
+      }
+      // StrictModeの初回effect cleanupで立つフラグを、実際の自動復元では解除する。
+      if (socketRef.current || credentialsRef.current) return;
       manualCloseRef.current = false;
       credentialsRef.current = stored;
       setActiveRequest({ type: "resume", ...stored });
@@ -423,7 +436,11 @@ export default function OnlineLobby() {
       setRoomCode(stored.code);
       connect({ type: "resume", ...stored }, true);
     }, 0);
-    return () => window.clearTimeout(timer);
+    restoreTimerRef.current = timer;
+    return () => {
+      if (restoreTimerRef.current === timer) restoreTimerRef.current = null;
+      window.clearTimeout(timer);
+    };
   }, [connect]);
 
   useEffect(
@@ -439,6 +456,11 @@ export default function OnlineLobby() {
   );
 
   const start = (request: JoinRequest) => {
+    restoreCanceledRef.current = true;
+    if (restoreTimerRef.current !== null) {
+      window.clearTimeout(restoreTimerRef.current);
+      restoreTimerRef.current = null;
+    }
     manualCloseRef.current = false;
     reconnectAttemptRef.current = 0;
     focusAfterRetryRef.current = false;
@@ -464,6 +486,11 @@ export default function OnlineLobby() {
   };
 
   const leave = () => {
+    restoreCanceledRef.current = true;
+    if (restoreTimerRef.current !== null) {
+      window.clearTimeout(restoreTimerRef.current);
+      restoreTimerRef.current = null;
+    }
     manualCloseRef.current = true;
     clearReconnectTimer();
     focusAfterRetryRef.current = false;
@@ -479,18 +506,6 @@ export default function OnlineLobby() {
     setSnapshot(null);
     setStatus("idle");
     setError("");
-  };
-
-  const copyRoomCode = async () => {
-    if (!snapshot) return;
-    try {
-      await navigator.clipboard.writeText(snapshot.code);
-      setError("ルームコードをコピーしました。");
-    } catch {
-      setError(
-        "コピーできませんでした。ルームコードを手動で共有してください。",
-      );
-    }
   };
 
   const onSendError = useCallback((message: string) => setError(message), []);
@@ -509,24 +524,16 @@ export default function OnlineLobby() {
       >
         <section className="flex flex-col gap-4" aria-label="オンライン対局">
           <header className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-control-border p-4">
-            <div>
-              <p className="text-xs tracking-widest text-foreground/60 uppercase">
-                ルームコード
-              </p>
-              <button
-                type="button"
-                className="mt-1 font-mono text-2xl font-bold tracking-[0.25em]"
-                onClick={copyRoomCode}
-                title="クリックしてコピー"
-              >
-                {snapshot.code}
-              </button>
-              <p className="mt-1 text-xs text-foreground/60">
-                {status === "reconnecting"
+            <RoomShareControls
+              key={snapshot.code}
+              code={snapshot.code}
+              shareUrl={roomShareUrl(snapshot.code)}
+              statusMessage={
+                status === "reconnecting"
                   ? "再接続中…"
-                  : "コードを共有して同じ卓に参加"}
-              </p>
-            </div>
+                  : "コードを共有して同じ卓に参加"
+              }
+            />
             <div className="flex items-center gap-2">
               <span className="text-sm text-foreground/70">
                 {
