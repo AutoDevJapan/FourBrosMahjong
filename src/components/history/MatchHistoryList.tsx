@@ -248,7 +248,7 @@ export default function MatchHistoryList() {
           </p>
           <Link
             href="/game"
-            className="inline-flex rounded-full bg-foreground px-4 py-2 text-sm font-medium text-background hover:opacity-90"
+            className="inline-flex min-h-11 items-center rounded-full bg-foreground px-4 py-2 text-sm font-medium text-background hover:opacity-90"
           >
             対局を開始
           </Link>

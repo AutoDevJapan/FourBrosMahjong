@@ -376,9 +376,8 @@ test.describe("戦績のローカル保存・閲覧(#293)", () => {
     ).toBeNull();
   });
 
-  test("ロビー・設定から戦績ページへ到達でき、未保存時は空状態を表示する", async ({
-    page,
-  }) => {
+  test("空状態から対局を開始できる(#611)", async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
     await page.goto("/");
     await page.getByRole("link", { name: /戦績/ }).click();
     await expect(page).toHaveURL(/\/history$/);
@@ -389,6 +388,11 @@ test.describe("戦績のローカル保存・閲覧(#293)", () => {
     // 空状態からローカル対局へキーボードでも到達できる(#611)。
     const startGameLink = page.getByRole("link", { name: "対局を開始" });
     await expect(startGameLink).toHaveAttribute("href", "/game");
+    await expect(startGameLink).toBeVisible();
+    const startGameHeight = await startGameLink.evaluate(
+      (element) => element.getBoundingClientRect().height,
+    );
+    expect(startGameHeight).toBeGreaterThanOrEqual(44);
     await startGameLink.focus();
     await expect(startGameLink).toBeFocused();
     await startGameLink.press("Enter");
