@@ -77,6 +77,8 @@ export default function OnlineLobby() {
   const reconnectAttemptRef = useRef(0);
   const reconnectTimerRef = useRef<number | null>(null);
   const manualCloseRef = useRef(false);
+  const restoreTimerRef = useRef<number | null>(null);
+  const restoreCanceledRef = useRef(false);
   const connectRef = useRef<(request: JoinRequest) => void>(() => undefined);
 
   const clearReconnectTimer = useCallback(() => {
@@ -169,19 +171,28 @@ export default function OnlineLobby() {
   }, [connect]);
 
   useEffect(() => {
+    restoreCanceledRef.current = false;
     const timer = window.setTimeout(() => {
+      restoreTimerRef.current = null;
+      if (restoreCanceledRef.current) return;
       const stored = readCredentials();
       if (!stored) {
         const sharedCode = readSharedRoomCode();
         if (sharedCode) setRoomCode(sharedCode);
         return;
       }
+      // StrictModeの初回effect cleanupで立つフラグを、実際の自動復元では解除する。
+      manualCloseRef.current = false;
       credentialsRef.current = stored;
       setCredentials(stored);
       setRoomCode(stored.code);
       connect({ type: "resume", ...stored });
     }, 0);
-    return () => window.clearTimeout(timer);
+    restoreTimerRef.current = timer;
+    return () => {
+      if (restoreTimerRef.current === timer) restoreTimerRef.current = null;
+      window.clearTimeout(timer);
+    };
   }, [connect]);
 
   useEffect(
@@ -194,12 +205,22 @@ export default function OnlineLobby() {
   );
 
   const start = (request: JoinRequest) => {
+    restoreCanceledRef.current = true;
+    if (restoreTimerRef.current !== null) {
+      window.clearTimeout(restoreTimerRef.current);
+      restoreTimerRef.current = null;
+    }
     manualCloseRef.current = false;
     reconnectAttemptRef.current = 0;
     connect(request);
   };
 
   const leave = () => {
+    restoreCanceledRef.current = true;
+    if (restoreTimerRef.current !== null) {
+      window.clearTimeout(restoreTimerRef.current);
+      restoreTimerRef.current = null;
+    }
     manualCloseRef.current = true;
     clearReconnectTimer();
     credentialsRef.current = null;
