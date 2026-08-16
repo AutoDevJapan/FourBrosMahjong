@@ -9,6 +9,7 @@ import type { GameAction } from "@/components/game/gamePersistence";
 import type { TileData } from "@/components/game/types";
 import type { PlayerId } from "@/domain/game/engine";
 import { isRedDora } from "@/domain/tiles/tile";
+import { normalizeOnlineWebSocketUrl } from "@/lib/onlineWebSocket";
 import type { OnlineSnapshot } from "./types";
 
 interface OnlineGameProviderProps {
@@ -23,27 +24,12 @@ function wireTile(tile: TileData) {
 }
 
 export function onlineSocketUrl(): string {
-  const configured = process.env.NEXT_PUBLIC_ONLINE_WS_URL?.trim();
-  if (configured) {
-    if (configured.startsWith("http://")) {
-      const rest = configured.slice("http://".length).replace(/\/$/, "");
-      return `ws://${rest}${rest.endsWith("/ws") ? "" : "/ws"}`;
-    }
-    if (configured.startsWith("https://")) {
-      const rest = configured.slice("https://".length).replace(/\/$/, "");
-      return `wss://${rest}${rest.endsWith("/ws") ? "" : "/ws"}`;
-    }
-    return configured.endsWith("/ws")
-      ? configured
-      : `${configured.replace(/\/$/, "")}/ws`;
-  }
-  if (
-    typeof window !== "undefined" &&
-    window.location.hostname === "localhost"
-  ) {
-    return "ws://localhost:8080/ws";
-  }
-  return "";
+  return (
+    normalizeOnlineWebSocketUrl(
+      process.env.NEXT_PUBLIC_ONLINE_WS_URL,
+      process.env.NODE_ENV !== "production",
+    ) ?? ""
+  );
 }
 
 export default function OnlineGameProvider({

@@ -1,5 +1,7 @@
 /** Browser security policy shared by the request proxy and its regression tests. */
 
+import { normalizeOnlineWebSocketUrl } from "../../lib/onlineWebSocket";
+
 export const STATIC_SECURITY_HEADERS = {
   "X-Content-Type-Options": "nosniff",
   "Referrer-Policy": "strict-origin-when-cross-origin",
@@ -36,36 +38,8 @@ export function onlineWebSocketConnectSource(
   configuredUrl: string | undefined,
   development: boolean,
 ): string | null {
-  const value =
-    configuredUrl?.trim() || (development ? "ws://localhost:8080/ws" : "");
-  if (!value) return null;
-
-  let parsed: URL;
-  try {
-    parsed = new URL(value);
-  } catch {
-    return null;
-  }
-
-  if (parsed.username || parsed.password) return null;
-
-  const protocol =
-    parsed.protocol === "http:"
-      ? "ws:"
-      : parsed.protocol === "https:"
-        ? "wss:"
-        : parsed.protocol === "ws:" || parsed.protocol === "wss:"
-          ? parsed.protocol
-          : null;
-  if (!protocol) return null;
-  // Production Vercel pages are HTTPS; do not turn a misconfigured insecure
-  // endpoint into an allowed mixed-content WebSocket destination.
-  if (!development && protocol === "ws:") return null;
-
-  // CSP only needs the endpoint origin. The configured path is intentionally
-  // omitted so both `/ws` and an explicitly configured reverse-proxy path work
-  // without widening the allowed scheme or host.
-  return `${protocol}//${parsed.host}`;
+  const normalizedUrl = normalizeOnlineWebSocketUrl(configuredUrl, development);
+  return normalizedUrl ? new URL(normalizedUrl).origin : null;
 }
 
 export function contentSecurityPolicy(

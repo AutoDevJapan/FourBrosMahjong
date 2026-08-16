@@ -20,7 +20,12 @@ describe("contentSecurityPolicy", () => {
     expect(policy).not.toContain("'unsafe-eval'");
     expect(policy).not.toContain("script-src 'unsafe-inline'");
     expect(policy).toContain("frame-ancestors 'none'");
-    expect(policy).toContain(
+    expect(
+      policy
+        .split(";")
+        .map((directive) => directive.trim())
+        .find((directive) => directive.startsWith("connect-src ")),
+    ).toBe(
       "connect-src 'self' wss://four-bros-mahjong-online-production.up.railway.app",
     );
     // /sw.js の取得経路を CSP 上で明示する(issue #292)。
@@ -30,25 +35,34 @@ describe("contentSecurityPolicy", () => {
   });
 
   it("接続先が未設定または不正なら外部のconnect-srcを追加しない", () => {
-    expect(contentSecurityPolicy("test-nonce", false, undefined)).toContain(
-      "connect-src 'self'",
-    );
     expect(
-      contentSecurityPolicy("test-nonce", false, "javascript:alert(1)"),
-    ).toContain("connect-src 'self'");
+      contentSecurityPolicy("test-nonce", false, undefined)
+        .split(";")
+        .map((directive) => directive.trim())
+        .find((directive) => directive.startsWith("connect-src ")),
+    ).toBe("connect-src 'self'");
+    expect(
+      contentSecurityPolicy("test-nonce", false, "javascript:alert(1)")
+        .split(";")
+        .map((directive) => directive.trim())
+        .find((directive) => directive.startsWith("connect-src ")),
+    ).toBe("connect-src 'self'");
     expect(
       contentSecurityPolicy(
         "test-nonce",
         false,
         "https://user:pass@example.com/ws",
-      ),
-    ).toContain("connect-src 'self'");
+      )
+        .split(";")
+        .map((directive) => directive.trim())
+        .find((directive) => directive.startsWith("connect-src ")),
+    ).toBe("connect-src 'self'");
   });
 
   it("本番と開発の接続先をWebSocket originへ正規化する", () => {
     expect(
       onlineWebSocketConnectSource(
-        "https://four-bros-mahjong-online-production.up.railway.app/ws",
+        "HTTPS://FOUR-BROS-MAHJONG-ONLINE-PRODUCTION.UP.RAILWAY.APP/ws?token=demo",
         false,
       ),
     ).toBe("wss://four-bros-mahjong-online-production.up.railway.app");

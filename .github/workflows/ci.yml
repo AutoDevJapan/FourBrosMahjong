@@ -172,6 +172,8 @@ jobs:
           # 実配布buildでは未設定のE2E専用フラグ。production成果物でも決定的seedを使い、
           # dev/prodの主要導線を同じ局面で比較する(#432)。
           NEXT_PUBLIC_E2E_SEED_ENABLED: "1"
+          # Production E2Eで本番想定のconnect-src許可を独立検証するための公開設定。
+          NEXT_PUBLIC_ONLINE_WS_URL: "https://four-bros-mahjong-online-production.up.railway.app/ws"
         run: pnpm build
 
       # Service Worker は production build でのみ登録されるため、通常の dev E2E job では
@@ -208,6 +210,7 @@ jobs:
         if: steps.scope.outputs.verify == 'true'
         env:
           E2E_PORT: "3101"
+          NEXT_PUBLIC_ONLINE_WS_URL: "https://four-bros-mahjong-online-production.up.railway.app/ws"
         run: pnpm test:e2e:prod:prebuilt
 
   e2e:
