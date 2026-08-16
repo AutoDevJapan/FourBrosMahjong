@@ -84,7 +84,12 @@ export interface ClientAbuseState {
 }
 
 interface SourceAbuseState {
-  activeConnections: number;
+  /**
+   * Upgrade-admission reservations held by the limiter. Established sockets
+   * are counted by the server's client set, so this is intentionally not an
+   * authoritative active-connection count.
+   */
+  pendingUpgradeReservations: number;
   readonly connectionAttempts: SlidingWindow;
   readonly roomAttempts: {
     readonly create: SlidingWindow;
@@ -97,7 +102,7 @@ interface SourceAbuseState {
 
 function sourceStateFor(): SourceAbuseState {
   return {
-    activeConnections: 0,
+    pendingUpgradeReservations: 0,
     connectionAttempts: new SlidingWindow(
       ABUSE_LIMITS.connectionAttempts.limit,
       ABUSE_LIMITS.connectionAttempts.windowMs,
@@ -165,7 +170,7 @@ export class OnlineAbuseControls {
     }
     if (
       activeSourceConnections >= ABUSE_LIMITS.maxConnectionsPerSource ||
-      state.activeConnections >= ABUSE_LIMITS.maxConnectionsPerSource
+      state.pendingUpgradeReservations >= ABUSE_LIMITS.maxConnectionsPerSource
     ) {
       return {
         code: "connection_limit",
@@ -177,14 +182,17 @@ export class OnlineAbuseControls {
     if (retryAfterMs !== null) {
       return rateRejection("connection", retryAfterMs);
     }
-    state.activeConnections += 1;
+    state.pendingUpgradeReservations += 1;
     return null;
   }
 
   releaseConnection(source: string): void {
     const state = this.sources.get(source);
     if (state === undefined) return;
-    state.activeConnections = Math.max(0, state.activeConnections - 1);
+    state.pendingUpgradeReservations = Math.max(
+      0,
+      state.pendingUpgradeReservations - 1,
+    );
   }
 
   createClientState(): ClientAbuseState {
@@ -250,7 +258,7 @@ export class OnlineAbuseControls {
     const now = this.clock();
     for (const [source, state] of this.sources) {
       if (
-        state.activeConnections === 0 &&
+        state.pendingUpgradeReservations === 0 &&
         state.connectionAttempts.isIdle(now) &&
         state.roomAttempts.create.isIdle(now) &&
         state.roomAttempts.join.isIdle(now) &&

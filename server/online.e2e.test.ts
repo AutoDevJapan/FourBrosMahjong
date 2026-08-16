@@ -1,8 +1,10 @@
 import { type ChildProcess, spawn } from "node:child_process";
+import { request as httpRequest, type IncomingHttpHeaders } from "node:http";
 import { createServer } from "node:net";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { WebSocket } from "ws";
 import type {
+  OnlineRateLimitScope,
   OnlineServerMessage,
   OnlineSnapshot,
 } from "../src/components/online/types";
@@ -19,10 +21,17 @@ const SERVER_START_TIMEOUT_MS = 10_000;
 const SERVER_STOP_TIMEOUT_MS = 2_000;
 
 type ProtocolMessage = OnlineServerMessage;
+type RateLimitedScope = Exclude<OnlineRateLimitScope, "connection">;
 
 interface LocalOnlineServer {
   readonly child: ChildProcess;
   readonly url: string;
+}
+
+interface UpgradeResponse {
+  readonly statusCode: number | undefined;
+  readonly headers: IncomingHttpHeaders;
+  readonly body: string;
 }
 
 function childExited(child: ChildProcess): boolean {
@@ -139,10 +148,67 @@ async function stopLocalOnlineServer(server: LocalOnlineServer): Promise<void> {
   await terminateChild(server.child);
 }
 
+/** Send a real HTTP upgrade request so rejected handshakes expose status/headers. */
+async function requestUpgrade(
+  url: string,
+  origin: string,
+): Promise<UpgradeResponse> {
+  const target = new URL(`${url}/ws`);
+  return new Promise<UpgradeResponse>((resolve, reject) => {
+    let settled = false;
+    const request = httpRequest({
+      hostname: target.hostname,
+      port: target.port,
+      path: `${target.pathname}${target.search}`,
+      headers: {
+        Connection: "Upgrade",
+        Upgrade: "websocket",
+        Origin: origin,
+        "Sec-WebSocket-Key": Buffer.from("four-bros-mahjon").toString("base64"),
+        "Sec-WebSocket-Version": "13",
+      },
+    });
+    const fail = (error: Error) => {
+      if (settled) return;
+      settled = true;
+      reject(error);
+    };
+    request.once("response", (response) => {
+      const chunks: Buffer[] = [];
+      response.on("data", (chunk: Buffer | string) => {
+        chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+      });
+      response.once("end", () => {
+        if (settled) return;
+        settled = true;
+        resolve({
+          statusCode: response.statusCode,
+          headers: response.headers,
+          body: Buffer.concat(chunks).toString("utf8"),
+        });
+      });
+    });
+    request.once("upgrade", (_response, socket) => {
+      socket.destroy();
+      fail(new Error("upgrade request was unexpectedly accepted"));
+    });
+    request.once("error", fail);
+    request.end();
+  });
+}
+
 type MessagePredicate = (message: ProtocolMessage) => boolean;
 
 class OnlineTestClient {
   private readonly socket: WebSocket;
+  private readonly closePromise: Promise<{
+    readonly code: number;
+    readonly reason: string;
+  }>;
+  private resolveClose!: (details: {
+    readonly code: number;
+    readonly reason: string;
+  }) => void;
   private readonly queue: ProtocolMessage[] = [];
   private readonly waiters: Array<{
     readonly predicate: MessagePredicate;
@@ -155,6 +221,9 @@ class OnlineTestClient {
     readonly url: string,
     origin?: string,
   ) {
+    this.closePromise = new Promise((resolve) => {
+      this.resolveClose = resolve;
+    });
     this.socket =
       origin === undefined
         ? new WebSocket(`${url}/ws`)
@@ -178,7 +247,8 @@ class OnlineTestClient {
           : new Error("オンラインWebSocketでエラーが発生しました。"),
       );
     });
-    this.socket.on("close", () => {
+    this.socket.on("close", (code, reason) => {
+      this.resolveClose({ code, reason: reason.toString() });
       this.rejectAll(
         new Error("オンラインWebSocketが予期せず切断されました。"),
       );
@@ -248,6 +318,33 @@ class OnlineTestClient {
       (message): message is Extract<ProtocolMessage, { type: "error" }> =>
         message.type === "error",
     );
+  }
+
+  async waitForRateLimit(
+    scope: RateLimitedScope,
+  ): Promise<Extract<ProtocolMessage, { type: "error" }>> {
+    return this.waitFor(
+      (message): message is Extract<ProtocolMessage, { type: "error" }> =>
+        message.type === "error" &&
+        message.code === "rate_limited" &&
+        message.scope === scope,
+    );
+  }
+
+  async waitForClose(
+    timeoutMs = TEST_TIMEOUT_MS,
+  ): Promise<{ readonly code: number; readonly reason: string }> {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const timeout = new Promise<never>((_, reject) => {
+      timer = setTimeout(() => {
+        reject(new Error("オンラインWebSocketのcloseを受信できませんでした。"));
+      }, timeoutMs);
+    });
+    try {
+      return await Promise.race([this.closePromise, timeout]);
+    } finally {
+      if (timer !== undefined) clearTimeout(timer);
+    }
   }
 
   async waitForSnapshot(
@@ -596,6 +693,213 @@ describe("online multiplayer local E2E (#629)", () => {
       });
       expect(error.retryAfterMs).toBeGreaterThan(0);
       await client.close();
+    },
+    TEST_TIMEOUT_MS,
+  );
+});
+
+async function closeTestClients(
+  clients: readonly OnlineTestClient[],
+): Promise<void> {
+  await Promise.allSettled(clients.map((client) => client.close()));
+}
+
+async function expectRateLimited(
+  client: OnlineTestClient,
+  scope: RateLimitedScope,
+): Promise<void> {
+  const error = await client.waitForRateLimit(scope);
+  expect(error).toMatchObject({
+    type: "error",
+    code: "rate_limited",
+    scope,
+  });
+  expect(error.retryAfterMs ?? 0).toBeGreaterThan(0);
+  const close = await client.waitForClose();
+  expect(close).toEqual({ code: 1013, reason: "rate limited" });
+}
+
+describe("online abuse boundary and four-client regression (#651)", () => {
+  it(
+    "実WebSocket upgrade拒否でHTTP status・Retry-After・JSON詳細を返す",
+    async () => {
+      let server: LocalOnlineServer | undefined;
+      const clients: OnlineTestClient[] = [];
+      try {
+        server = await startLocalOnlineServer();
+        for (
+          let index = 0;
+          index < ABUSE_LIMITS.maxConnectionsPerSource;
+          index += 1
+        ) {
+          clients.push(new OnlineTestClient(server.url, TEST_ORIGIN));
+        }
+        await Promise.all(clients.map((client) => client.open()));
+
+        const response = await requestUpgrade(server.url, TEST_ORIGIN);
+        expect(response.statusCode).toBe(503);
+        expect(response.headers["retry-after"]).toBe(
+          String(Math.ceil(ABUSE_LIMITS.connectionRetryAfterMs / 1_000)),
+        );
+        expect(JSON.parse(response.body)).toMatchObject({
+          ok: false,
+          code: "connection_limit",
+          retryAfterMs: ABUSE_LIMITS.connectionRetryAfterMs,
+        });
+      } finally {
+        await closeTestClients(clients);
+        if (server !== undefined) await stopLocalOnlineServer(server);
+      }
+    },
+    TEST_TIMEOUT_MS,
+  );
+
+  it(
+    "create・join・resume・actionの制限を実通信で検証し、1013 close詳細を保持する",
+    async () => {
+      let server: LocalOnlineServer | undefined;
+      const clients: OnlineTestClient[] = [];
+      try {
+        server = await startLocalOnlineServer();
+
+        const createClient = new OnlineTestClient(server.url, TEST_ORIGIN);
+        clients.push(createClient);
+        await createClient.open();
+        for (
+          let index = 0;
+          index <= ABUSE_LIMITS.roomAttempts.create.limit;
+          index += 1
+        ) {
+          createClient.send({ type: "create", name: "作成制限検証" });
+        }
+        await expectRateLimited(createClient, "create");
+
+        const joinClient = new OnlineTestClient(server.url, TEST_ORIGIN);
+        clients.push(joinClient);
+        await joinClient.open();
+        for (
+          let index = 0;
+          index <= ABUSE_LIMITS.roomAttempts.join.limit;
+          index += 1
+        ) {
+          joinClient.send({
+            type: "join",
+            code: "ZZZZZZ",
+            name: "参加制限検証",
+          });
+        }
+        await expectRateLimited(joinClient, "join");
+
+        const resumeClient = new OnlineTestClient(server.url, TEST_ORIGIN);
+        clients.push(resumeClient);
+        await resumeClient.open();
+        for (
+          let index = 0;
+          index <= ABUSE_LIMITS.roomAttempts.resume.limit;
+          index += 1
+        ) {
+          resumeClient.send({
+            type: "resume",
+            code: "ZZZZZZ",
+            token: "invalid-token",
+          });
+        }
+        await expectRateLimited(resumeClient, "resume");
+
+        const actionClient = new OnlineTestClient(server.url, TEST_ORIGIN);
+        clients.push(actionClient);
+        await actionClient.open();
+        for (let index = 0; index <= ABUSE_LIMITS.actions.limit; index += 1) {
+          actionClient.send({ type: "newGame" });
+        }
+        await expectRateLimited(actionClient, "action");
+      } finally {
+        await closeTestClients(clients);
+        if (server !== undefined) await stopLocalOnlineServer(server);
+      }
+    },
+    TEST_TIMEOUT_MS,
+  );
+
+  it(
+    "4クライアントで作成・3人参加・同期操作を実通信で完走する",
+    async () => {
+      let server: LocalOnlineServer | undefined;
+      const clients: OnlineTestClient[] = [];
+      try {
+        server = await startLocalOnlineServer();
+        const host = new OnlineTestClient(server.url, TEST_ORIGIN);
+        const guests = [
+          new OnlineTestClient(server.url, TEST_ORIGIN),
+          new OnlineTestClient(server.url, TEST_ORIGIN),
+          new OnlineTestClient(server.url, TEST_ORIGIN),
+        ];
+        clients.push(host, ...guests);
+        await Promise.all(clients.map((client) => client.open()));
+
+        host.send({ type: "create", name: "4人ホスト" });
+        const hostSession = await host.waitForSession();
+        const code = hostSession.snapshot.code;
+        await Promise.all(
+          guests.map(async (guest, index) => {
+            guest.send({
+              type: "join",
+              code: code.toLowerCase(),
+              name: `4人ゲスト${index + 1}`,
+            });
+            await guest.waitForSession();
+          }),
+        );
+
+        const connectedSnapshots = await Promise.all(
+          clients.map((client) =>
+            client.waitForSnapshot(
+              (snapshot) =>
+                snapshot.version === 0 &&
+                snapshot.players.length === 4 &&
+                snapshot.players.every((player) => player.connected),
+            ),
+          ),
+        );
+        expect(
+          connectedSnapshots[0]?.players.map((player) => player.id),
+        ).toEqual(["p0", "p1", "p2", "p3"]);
+        expect(connectedSnapshots.map((snapshot) => snapshot.version)).toEqual([
+          0, 0, 0, 0,
+        ]);
+
+        const actorIndex = connectedSnapshots.findIndex(
+          (snapshot) => snapshot.pending?.playerId === snapshot.you,
+        );
+        if (actorIndex < 0) {
+          throw new Error("4クライアントのいずれにも操作担当がいません。");
+        }
+        const actorSnapshot = connectedSnapshots[actorIndex];
+        clients[actorIndex]?.send({
+          type: "action",
+          version: actorSnapshot.version,
+          action: actionFor(actorSnapshot),
+        });
+
+        const nextSnapshots = await Promise.all(
+          clients.map((client) =>
+            client.waitForSnapshot((snapshot) => snapshot.version === 1),
+          ),
+        );
+        expect(nextSnapshots.map((snapshot) => snapshot.version)).toEqual([
+          1, 1, 1, 1,
+        ]);
+        for (const snapshot of nextSnapshots) {
+          expect(snapshot.players).toHaveLength(4);
+          expect(snapshot.players.every((player) => player.connected)).toBe(
+            true,
+          );
+          expect(snapshot.currentTurn).toBe(nextSnapshots[0]?.currentTurn);
+        }
+      } finally {
+        await closeTestClients(clients);
+        if (server !== undefined) await stopLocalOnlineServer(server);
+      }
     },
     TEST_TIMEOUT_MS,
   );
