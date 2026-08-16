@@ -241,17 +241,71 @@ export default function MatchHistoryList() {
           ref={emptyStateRef}
           // 削除直後にフォーカスを受け取るため、プログラム的にのみフォーカス可能にする。
           tabIndex={-1}
-          className="flex flex-col items-start gap-4 rounded-lg border border-foreground/15 p-6"
+          className="flex flex-col gap-4 rounded-lg border border-foreground/15 p-6"
         >
           <p className="text-sm text-foreground/70">
             保存された戦績はまだありません。半荘終了時にこの端末のストレージが利用できる場合、最終順位とソシー内訳が自動で記録されます。記録されない場合は、ブラウザのストレージ設定や空き容量を確認してください。
           </p>
-          <Link
-            href="/game"
-            className="inline-flex min-h-11 items-center rounded-full bg-foreground px-4 py-2 text-sm font-medium text-background hover:opacity-90"
+          <div
+            role="group"
+            aria-labelledby="history-empty-actions-heading"
+            className="flex min-w-0 flex-col gap-3"
           >
-            対局を開始
-          </Link>
+            <h2
+              id="history-empty-actions-heading"
+              className="text-sm font-semibold"
+            >
+              次の対局を選ぶ
+            </h2>
+            <div className="grid min-w-0 gap-3 sm:grid-cols-2">
+              <section
+                aria-labelledby="history-local-game-heading"
+                className="flex min-w-0 flex-col items-start gap-3 rounded-lg border border-control-border p-4"
+              >
+                <div>
+                  <h3 id="history-local-game-heading" className="font-medium">
+                    ローカル対局
+                  </h3>
+                  <p
+                    id="history-local-game-description"
+                    className="mt-1 text-sm/5 text-foreground/70"
+                  >
+                    すぐに開始できます。
+                  </p>
+                </div>
+                <Link
+                  href="/game"
+                  aria-describedby="history-local-game-description"
+                  className="inline-flex min-h-11 items-center rounded-full bg-foreground px-4 py-2 text-sm font-medium text-background hover:opacity-90"
+                >
+                  対局を開始
+                </Link>
+              </section>
+              <section
+                aria-labelledby="history-online-game-heading"
+                className="flex min-w-0 flex-col items-start gap-3 rounded-lg border border-control-border p-4"
+              >
+                <div>
+                  <h3 id="history-online-game-heading" className="font-medium">
+                    オンライン対戦
+                  </h3>
+                  <p
+                    id="history-online-game-description"
+                    className="mt-1 text-sm/5 text-foreground/70"
+                  >
+                    表示名と6文字のルームコードが必要です。
+                  </p>
+                </div>
+                <Link
+                  href="/online"
+                  aria-describedby="history-online-game-description"
+                  className="inline-flex min-h-11 items-center rounded-full border border-control-border px-4 py-2 text-sm font-medium hover:bg-foreground/5"
+                >
+                  オンライン対戦へ
+                </Link>
+              </section>
+            </div>
+          </div>
         </div>
       ) : (
         <>

@@ -376,36 +376,72 @@ test.describe("戦績のローカル保存・閲覧(#293)", () => {
     ).toBeNull();
   });
 
-  test("空状態から対局を開始できる(#611)", async ({ page }) => {
-    await page.setViewportSize({ width: 390, height: 844 });
-    await page.goto("/");
-    await page.getByRole("link", { name: /戦績/ }).click();
-    await expect(page).toHaveURL(/\/history$/);
-    await expect(
-      page.getByText("保存された戦績はまだありません", { exact: false }),
-    ).toBeVisible();
+  test("空状態からローカル/オンラインを選べ、狭幅でも折り返す(#611, #618)", async ({
+    page,
+  }) => {
+    for (const width of [320, 360]) {
+      await page.setViewportSize({ width, height: 844 });
+      await page.goto("/history");
+      await expect(page).toHaveURL(/\/history$/);
+      await expect(
+        page.getByText("保存された戦績はまだありません", { exact: false }),
+      ).toBeVisible();
 
-    // 空状態からローカル対局へキーボードでも到達できる(#611)。
-    const startGameLink = page.getByRole("link", { name: "対局を開始" });
-    await expect(startGameLink).toHaveAttribute("href", "/game");
-    await expect(startGameLink).toBeVisible();
-    const startGameHeight = await startGameLink.evaluate(
-      (element) => element.getBoundingClientRect().height,
-    );
-    expect(startGameHeight).toBeGreaterThanOrEqual(44);
-    await startGameLink.focus();
-    await expect(startGameLink).toBeFocused();
-    await startGameLink.press("Enter");
-    await expect(page).toHaveURL(/\/game$/);
-    await expect(
-      page.getByRole("heading", { level: 1, name: "対局画面" }),
-    ).toBeVisible();
+      // 320/360pxでもページ全体が横スクロールせず、2つの選択肢が表示される。
+      await expect
+        .poll(() =>
+          page.evaluate(
+            () => document.documentElement.scrollWidth <= window.innerWidth,
+          ),
+        )
+        .toBe(true);
+      await expect(
+        page.getByRole("heading", { name: "ローカル対局" }),
+      ).toBeVisible();
+      await expect(
+        page.getByRole("heading", { name: "オンライン対戦" }),
+      ).toBeVisible();
 
-    await page.goto("/settings");
-    await page.getByRole("link", { name: /戦績を見る/ }).click();
-    await expect(page).toHaveURL(/\/history$/);
-    await expect(
-      page.getByRole("heading", { level: 1, name: "戦績" }),
-    ).toBeVisible();
+      const startGameLink = page.getByRole("link", { name: "対局を開始" });
+      await expect(startGameLink).toHaveAttribute("href", "/game");
+      await expect(startGameLink).toHaveAccessibleDescription(
+        "すぐに開始できます。",
+      );
+      await expect(
+        await startGameLink.evaluate(
+          (element) => element.getBoundingClientRect().height,
+        ),
+      ).toBeGreaterThanOrEqual(44);
+
+      const onlineLink = page.getByRole("link", { name: "オンライン対戦へ" });
+      await expect(onlineLink).toHaveAttribute("href", "/online");
+      await expect(onlineLink).toHaveAccessibleDescription(
+        "表示名と6文字のルームコードが必要です。",
+      );
+      await expect(
+        await onlineLink.evaluate(
+          (element) => element.getBoundingClientRect().height,
+        ),
+      ).toBeGreaterThanOrEqual(44);
+
+      // 既存のローカルCTAはキーボードでそのまま開始できる(#611)。
+      await startGameLink.focus();
+      await expect(startGameLink).toBeFocused();
+      await startGameLink.press("Enter");
+      await expect(page).toHaveURL(/\/game$/);
+      await expect(
+        page.getByRole("heading", { level: 1, name: "対局画面" }),
+      ).toBeVisible();
+
+      // オンラインCTAもキーボードで到達でき、接続処理はオンライン画面側へ委ねる(#618)。
+      await page.goto("/history");
+      await onlineLink.focus();
+      await expect(onlineLink).toBeFocused();
+      await onlineLink.press("Enter");
+      await expect(page).toHaveURL(/\/online$/);
+      await expect(
+        page.getByRole("heading", { level: 1, name: "オンライン対戦" }),
+      ).toBeVisible();
+    }
   });
 });
