@@ -844,7 +844,10 @@ export default function OnlineLobby() {
   const submitLobby = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     const submitter = (event.nativeEvent as SubmitEvent).submitter;
-    const intent = submitter?.getAttribute("data-intent");
+    const activeElement = event.currentTarget.ownerDocument.activeElement;
+    const intent =
+      submitter?.getAttribute("data-intent") ??
+      (activeElement?.id === ROOM_CODE_INPUT_ID ? "join" : "create");
     if (intent === "join") {
       joinRoom();
       return;
@@ -901,8 +904,12 @@ export default function OnlineLobby() {
               }
               onKeyDown={(event) => {
                 if (event.key !== "Enter") return;
+                if (
+                  event.nativeEvent.isComposing ||
+                  event.nativeEvent.keyCode === 229
+                )
+                  return;
                 event.preventDefault();
-                if (event.nativeEvent.isComposing) return;
                 createRoom();
               }}
               placeholder="例: たろう"
@@ -947,8 +954,12 @@ export default function OnlineLobby() {
                   }
                   onKeyDown={(event) => {
                     if (event.key !== "Enter") return;
+                    if (
+                      event.nativeEvent.isComposing ||
+                      event.nativeEvent.keyCode === 229
+                    )
+                      return;
                     event.preventDefault();
-                    if (event.nativeEvent.isComposing) return;
                     joinRoom();
                   }}
                   maxLength={6}

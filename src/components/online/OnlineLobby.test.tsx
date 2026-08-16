@@ -264,14 +264,40 @@ describe("OnlineLobby のキーボード送信", () => {
     });
   });
 
-  it("IME変換中のEnterでは送信しない", () => {
+  it("submitterなしでルームコードにフォーカスしてsubmitすると参加する", () => {
+    render(<OnlineLobby />);
+
+    fireEvent.change(screen.getByLabelText("表示名"), {
+      target: { value: "たろう" },
+    });
+    const roomCodeInput = screen.getByLabelText("ルームコード");
+    fireEvent.change(roomCodeInput, { target: { value: "ABC234" } });
+    roomCodeInput.focus();
+    fireEvent.submit(
+      screen.getByRole("form", { name: "オンラインルーム接続" }),
+    );
+
+    expect(sockets).toHaveLength(1);
+    act(() => sockets[0]?.open());
+    expect(JSON.parse(sockets[0]?.sent[0] ?? "{}")).toEqual({
+      type: "join",
+      code: "ABC234",
+      name: "たろう",
+    });
+  });
+
+  it("IME変換中のEnterでは候補確定を妨げず送信しない", () => {
+    const preventDefault = vi.spyOn(Event.prototype, "preventDefault");
     render(<OnlineLobby />);
 
     const nameInput = screen.getByLabelText("表示名");
     fireEvent.change(nameInput, { target: { value: "たろう" } });
     fireEvent.keyDown(nameInput, { key: "Enter", isComposing: true });
+    const roomCodeInput = screen.getByLabelText("ルームコード");
+    fireEvent.keyDown(roomCodeInput, { key: "Enter", keyCode: 229 });
 
     expect(sockets).toHaveLength(0);
+    expect(preventDefault).not.toHaveBeenCalled();
   });
 });
 
