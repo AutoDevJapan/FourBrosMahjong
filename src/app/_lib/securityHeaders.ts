@@ -32,7 +32,55 @@ export const SVG_CONTENT_SECURITY_POLICY = [
  * inline JavaScript. `strict-dynamic` lets those trusted runtime scripts load
  * the hashed application chunks they reference.
  */
-export function contentSecurityPolicy(nonce: string, development: boolean) {
+export function onlineWebSocketConnectSource(
+  configuredUrl: string | undefined,
+  development: boolean,
+): string | null {
+  const value =
+    configuredUrl?.trim() || (development ? "ws://localhost:8080/ws" : "");
+  if (!value) return null;
+
+  let parsed: URL;
+  try {
+    parsed = new URL(value);
+  } catch {
+    return null;
+  }
+
+  if (parsed.username || parsed.password) return null;
+
+  const protocol =
+    parsed.protocol === "http:"
+      ? "ws:"
+      : parsed.protocol === "https:"
+        ? "wss:"
+        : parsed.protocol === "ws:" || parsed.protocol === "wss:"
+          ? parsed.protocol
+          : null;
+  if (!protocol) return null;
+  // Production Vercel pages are HTTPS; do not turn a misconfigured insecure
+  // endpoint into an allowed mixed-content WebSocket destination.
+  if (!development && protocol === "ws:") return null;
+
+  // CSP only needs the endpoint origin. The configured path is intentionally
+  // omitted so both `/ws` and an explicitly configured reverse-proxy path work
+  // without widening the allowed scheme or host.
+  return `${protocol}//${parsed.host}`;
+}
+
+export function contentSecurityPolicy(
+  nonce: string,
+  development: boolean,
+  onlineWebSocketUrl = process.env.NEXT_PUBLIC_ONLINE_WS_URL,
+) {
+  const onlineWebSocketSource = onlineWebSocketConnectSource(
+    onlineWebSocketUrl,
+    development,
+  );
+  const connectSources = [
+    "'self'",
+    ...(onlineWebSocketSource ? [onlineWebSocketSource] : []),
+  ];
   const directives = [
     "default-src 'self'",
     `script-src 'self' 'nonce-${nonce}' 'strict-dynamic'${development ? " 'unsafe-eval'" : ""}`,
@@ -41,7 +89,7 @@ export function contentSecurityPolicy(nonce: string, development: boolean) {
     "style-src 'self' 'unsafe-inline'",
     "img-src 'self' data: blob:",
     "font-src 'self' data:",
-    "connect-src 'self'",
+    `connect-src ${connectSources.join(" ")}`,
     "manifest-src 'self'",
     // service worker(/sw.js)の取得を明示的に許可する。worker-src を省くと
     // child-src → default-src へフォールバックし、ブラウザによって挙動が変わる

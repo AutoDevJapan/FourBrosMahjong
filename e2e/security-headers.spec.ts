@@ -1,4 +1,5 @@
 import { expect, test } from "@playwright/test";
+import { onlineWebSocketConnectSource } from "../src/app/_lib/securityHeaders";
 
 const HTML_ROUTES = [
   "/",
@@ -7,6 +8,7 @@ const HTML_ROUTES = [
   "/rules",
   "/settings",
   "/history",
+  "/online",
 ];
 
 test.describe("browser security headers", () => {
@@ -32,6 +34,23 @@ test.describe("browser security headers", () => {
       expect(headers["x-frame-options"]).toBe("DENY");
     });
   }
+
+  test("設定済みのオンラインWebSocket originだけをconnect-srcに許可する", async ({
+    request,
+  }) => {
+    const response = await request.get("/online");
+    const csp = response.headers()["content-security-policy"];
+    const source = onlineWebSocketConnectSource(
+      process.env.NEXT_PUBLIC_ONLINE_WS_URL,
+      false,
+    );
+
+    expect(response.ok()).toBe(true);
+    expect(csp).toContain(
+      source ? `connect-src 'self' ${source}` : "connect-src 'self'",
+    );
+    expect(csp).not.toContain("connect-src *");
+  });
 
   for (const route of ["/icon.svg", "/tiles/Pin1.svg"]) {
     test(`${route} はcache可能なSVG専用ポリシーを返す`, async ({ request }) => {
