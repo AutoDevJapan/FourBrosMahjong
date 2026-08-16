@@ -309,6 +309,12 @@ export class RoomManager {
         error: "新しい半荘を始められるのはホストだけです。",
         room,
       };
+    if (room.state.phase !== "gameEnd")
+      return {
+        ok: false,
+        error: "新しい半荘を始められるのは対局終了後です。",
+        room,
+      };
     room.state = createGame({
       seed: randomSeed(),
       names: namesOf(room),
