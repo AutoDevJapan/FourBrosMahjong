@@ -75,6 +75,7 @@ const PRODUCTION_E2E_EXCLUDED_SPECS = [
   "e2e/history.spec.ts",
   "e2e/home.spec.ts",
   "e2e/non-text-contrast.spec.ts",
+  "e2e/online-room-sharing.spec.ts",
   "e2e/player-names.spec.ts",
 ] as const;
 
