@@ -65,7 +65,7 @@ afterEach(() => {
 });
 
 describe("MatchHistoryList (#293)", () => {
-  it("保存が無ければ空状態の説明と対局開始CTAを表示する", async () => {
+  it("保存が無ければローカル/オンラインのCTAと違いを表示する", async () => {
     render(<MatchHistoryList />);
 
     expect(
@@ -73,10 +73,21 @@ describe("MatchHistoryList (#293)", () => {
     ).toBeInTheDocument();
     const startGameLink = screen.getByRole("link", { name: "対局を開始" });
     expect(startGameLink).toHaveAttribute("href", "/game");
+    expect(startGameLink).toHaveAccessibleDescription(
+      "ローカル対局をすぐに開始できます。",
+    );
 
-    // CTA自体もキーボードで到達できる。
+    const onlineLink = screen.getByRole("link", { name: "オンライン対戦へ" });
+    expect(onlineLink).toHaveAttribute("href", "/online");
+    expect(onlineLink).toHaveAccessibleDescription(
+      "表示名が必要です。参加する場合は6文字のルームコードも必要です。",
+    );
+
+    // CTA自体もキーボードで到達でき、既存のローカル導線の名前を維持する。
     startGameLink.focus();
     expect(startGameLink).toHaveFocus();
+    onlineLink.focus();
+    expect(onlineLink).toHaveFocus();
   });
 
   it("保存済み戦績を新しい順に一覧し、展開で内訳を閲覧できる", async () => {
@@ -99,6 +110,9 @@ describe("MatchHistoryList (#293)", () => {
     expect(items[1]).toHaveTextContent("1位 三郎");
     expect(
       screen.queryByRole("link", { name: "対局を開始" }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("link", { name: "オンライン対戦へ" }),
     ).not.toBeInTheDocument();
 
     // 展開すると結果画面と同じ最終順位・ソシー内訳を閲覧できる。
