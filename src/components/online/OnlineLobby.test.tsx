@@ -114,6 +114,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  vi.useRealTimers();
   window.history.replaceState({}, "", "/online");
   window.sessionStorage.clear();
   sockets.length = 0;
@@ -308,6 +309,122 @@ describe("OnlineLobby の参加条件", () => {
 });
 
 describe("OnlineLobby connection recovery", () => {
+  it("preserves handshake rate-limit details and blocks retry during cooldown", () => {
+    vi.useFakeTimers();
+    render(<OnlineLobby />);
+
+    fireEvent.change(screen.getByLabelText("表示名"), {
+      target: { value: "たろう" },
+    });
+    fireEvent.change(screen.getByLabelText("ルームコード"), {
+      target: { value: "ABC234" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "参加する" }));
+
+    act(() => {
+      sockets[0]?.open();
+      sockets[0]?.message({
+        type: "error",
+        message: "参加の試行回数が上限に達しました。",
+        code: "rate_limited",
+        scope: "join",
+        retryAfterMs: 5_000,
+      });
+    });
+
+    expect(
+      screen.getByText("参加の試行回数が上限に達しました。"),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText("再試行まで約5秒お待ちください。"),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "再試行" })).toBeDisabled();
+
+    act(() => vi.advanceTimersByTime(4_999));
+    expect(screen.getByRole("button", { name: "再試行" })).toBeDisabled();
+
+    act(() => vi.advanceTimersByTime(1));
+    expect(screen.getByRole("button", { name: "再試行" })).toBeEnabled();
+  });
+
+  it("keeps the server rate-limit message after an established socket closes", () => {
+    vi.useFakeTimers();
+    render(<OnlineLobby />);
+
+    fireEvent.change(screen.getByLabelText("表示名"), {
+      target: { value: "たろう" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "新しいルームを作る" }));
+
+    act(() => {
+      sockets[0]?.open();
+      sockets[0]?.message({
+        type: "session",
+        token: "t".repeat(24),
+        snapshot: snapshotFixture(),
+      });
+    });
+    expect(screen.getByTestId("game-board")).toBeInTheDocument();
+
+    act(() => {
+      sockets[0]?.message({
+        type: "error",
+        message: "対局操作が多すぎます。",
+        code: "rate_limited",
+        scope: "action",
+        retryAfterMs: 4_000,
+      });
+      sockets[0]?.close();
+    });
+
+    expect(screen.getByText("対局操作が多すぎます。")).toBeInTheDocument();
+    expect(
+      screen.queryByText(
+        "オンラインサーバーとの接続が切れました。再接続しています。",
+      ),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.getByText("再試行まで約4秒お待ちください。"),
+    ).toBeInTheDocument();
+    expect(
+      document.querySelector('[data-connection-status="reconnecting"]'),
+    ).not.toBeNull();
+
+    act(() => vi.advanceTimersByTime(3_999));
+    expect(sockets).toHaveLength(1);
+    act(() => vi.advanceTimersByTime(1));
+    expect(sockets).toHaveLength(2);
+  });
+
+  it("bounds an oversized retryAfterMs value", () => {
+    vi.useFakeTimers();
+    render(<OnlineLobby />);
+
+    fireEvent.change(screen.getByLabelText("表示名"), {
+      target: { value: "たろう" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "新しいルームを作る" }));
+
+    act(() => {
+      sockets[0]?.open();
+      sockets[0]?.message({
+        type: "error",
+        message: "ルーム作成の試行回数が上限に達しました。",
+        code: "rate_limited",
+        scope: "create",
+        retryAfterMs: Number.MAX_VALUE,
+      });
+    });
+
+    expect(
+      screen.getByText("再試行まで約600秒お待ちください。"),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "再試行" })).toBeDisabled();
+
+    act(() => vi.advanceTimersByTime(10 * 60 * 1000));
+    expect(screen.getByRole("button", { name: "再試行" })).toBeEnabled();
+  });
+
   it("shows a retry action after a failed connection and keeps the form values", async () => {
     const user = userEvent.setup();
     render(<OnlineLobby />);

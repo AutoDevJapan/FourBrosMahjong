@@ -43,6 +43,13 @@ export type OnlineRateLimitScope =
   | "action"
   | "message";
 
+export interface OnlineServerError {
+  readonly type: "error";
+  readonly message: string;
+  readonly code?: OnlineErrorCode;
+  readonly scope?: OnlineRateLimitScope;
+  readonly retryAfterMs?: number;
+}
 export type OnlineConnectionStatus =
   | "idle"
   | "connecting"
@@ -57,11 +64,5 @@ export type OnlineServerMessage =
       readonly snapshot: OnlineSnapshot;
     }
   | { readonly type: "snapshot"; readonly snapshot: OnlineSnapshot }
-  | {
-      readonly type: "error";
-      readonly message: string;
-      readonly code?: OnlineErrorCode;
-      readonly scope?: OnlineRateLimitScope;
-      readonly retryAfterMs?: number;
-    }
+  | OnlineServerError
   | { readonly type: "pong" };
