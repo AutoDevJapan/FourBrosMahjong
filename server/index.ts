@@ -14,6 +14,7 @@ import {
 import {
   type ConnectionState,
   hasOpenPeer as hasOpenPeerConnection,
+  registerReplacementBeforeClose,
 } from "./connectionState";
 import {
   normalizePlayerName,
@@ -152,18 +153,22 @@ function hasOpenPeer(client: Client): boolean {
 }
 
 function attach(client: Client, session: RoomSession): void {
-  for (const other of clients) {
-    if (
-      other !== client &&
-      other.room === session.room &&
-      other.player?.id === session.player.id
-    ) {
-      other.socket.close(4001, "reconnected");
-    }
-  }
-  client.room = session.room;
-  client.player = session.player;
-  manager.touch(session.room, session.player);
+  registerReplacementBeforeClose(
+    client,
+    session,
+    () => manager.touch(session.room, session.player),
+    () => {
+      for (const other of clients) {
+        if (
+          other !== client &&
+          other.room === session.room &&
+          other.player?.id === session.player.id
+        ) {
+          other.socket.close(4001, "reconnected");
+        }
+      }
+    },
+  );
   send(client, {
     type: "session",
     token: session.player.token,

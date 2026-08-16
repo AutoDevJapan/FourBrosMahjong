@@ -712,6 +712,95 @@ describe("online multiplayer local E2E (#629)", () => {
   );
 });
 
+describe("online reconnect replacement race (#658)", () => {
+  let server: LocalOnlineServer | undefined;
+  const clients: OnlineTestClient[] = [];
+
+  beforeAll(async () => {
+    server = await startLocalOnlineServer();
+  }, SERVER_START_TIMEOUT_MS + 5_000);
+
+  afterAll(async () => {
+    await closeTestClients(clients);
+    if (server !== undefined) await stopLocalOnlineServer(server);
+  });
+
+  it(
+    "keeps a resumed seat connected when it replaces an open socket",
+    async () => {
+      if (server === undefined)
+        throw new Error("オンラインサーバーが起動していません。");
+
+      const host = new OnlineTestClient(server.url, TEST_ORIGIN);
+      const guest = new OnlineTestClient(server.url, TEST_ORIGIN);
+      const resumedGuest = new OnlineTestClient(server.url, TEST_ORIGIN);
+      clients.push(host, guest, resumedGuest);
+      await Promise.all([host.open(), guest.open(), resumedGuest.open()]);
+
+      host.send({ type: "create", name: "ホスト" });
+      const hostSession = await host.waitForSession();
+      const code = hostSession.snapshot.code;
+
+      guest.send({ type: "join", code, name: "ゲスト" });
+      const guestSession = await guest.waitForSession();
+      const hostJoinedSnapshot = await host.waitForSnapshot(
+        (snapshot) =>
+          snapshot.version === 0 &&
+          snapshot.players.length === 2 &&
+          playerConnected(snapshot, "p1"),
+      );
+
+      resumedGuest.send({
+        type: "resume",
+        code,
+        token: guestSession.token,
+      });
+      const resumedSession = await resumedGuest.waitForSession();
+      expect(resumedSession.snapshot.you).toBe("p1");
+      expect(resumedSession.snapshot.version).toBe(hostJoinedSnapshot.version);
+      await Promise.all([
+        host.waitForSnapshot(
+          (snapshot) =>
+            snapshot.version === hostJoinedSnapshot.version &&
+            playerConnected(snapshot, "p1"),
+        ),
+        resumedGuest.waitForSnapshot(
+          (snapshot) => snapshot.version === hostJoinedSnapshot.version,
+        ),
+      ]);
+
+      await expect(guest.waitForClose()).resolves.toEqual({
+        code: 4001,
+        reason: "reconnected",
+      });
+
+      // Force a fresh server snapshot after the old close handler has run.
+      // A stale version is rejected without changing the game state, while
+      // sendError still returns the authoritative connection state.
+      host.send({
+        type: "action",
+        version: hostJoinedSnapshot.version + 1,
+        action: { type: "tsumogiri" },
+      });
+      await expect(host.waitForError()).resolves.toMatchObject({
+        type: "error",
+        message: "対局状態が更新されています。最新状態を受信しました。",
+      });
+      await expect(
+        host.waitForSnapshot(
+          (snapshot) =>
+            snapshot.version === hostJoinedSnapshot.version &&
+            playerConnected(snapshot, "p1"),
+        ),
+      ).resolves.toMatchObject({
+        version: hostJoinedSnapshot.version,
+        phase: "playing",
+      });
+    },
+    TEST_TIMEOUT_MS,
+  );
+});
+
 async function closeTestClients(
   clients: readonly OnlineTestClient[],
 ): Promise<void> {
