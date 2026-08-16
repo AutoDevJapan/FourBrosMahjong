@@ -234,11 +234,11 @@ export default function Modal({
         onKeyDown={handleKeyDown}
         // ダイアログ内クリックはオーバーレイへ伝播させない(誤クローズ防止)。
         onClick={(event) => event.stopPropagation()}
-        // overscroll-contain: ダイアログ端まで到達した後の慣性/ラバーバンドを内側で止める
-        // (body のロックと二重の防波堤にし、pull-to-refresh 等の連鎖も抑える / #371)。
-        className="flex max-h-[90vh] w-full max-w-lg flex-col overflow-auto overscroll-contain rounded-xl border border-foreground/15 bg-background p-4 shadow-xl"
+        // ダイアログ自体は固定し、見出し・閉じる操作が本文スクロールで流れないようにする
+        // (#609)。本文だけを下のスクロール領域へ分けることで、狭幅でも操作を常に発見できる。
+        className="flex max-h-[90vh] w-full max-w-lg flex-col overflow-hidden rounded-xl border border-foreground/15 bg-background p-4 shadow-xl"
       >
-        <div className="mb-3 flex items-center justify-between gap-4">
+        <div className="mb-3 flex shrink-0 items-center justify-between gap-4">
           <h2 id={titleId} className="text-base font-bold">
             {title}
           </h2>
@@ -251,7 +251,12 @@ export default function Modal({
             <span aria-hidden="true">✕</span>
           </button>
         </div>
-        {children}
+        <div
+          className="min-h-0 flex-1 overflow-auto overscroll-contain"
+          data-modal-scroll-area
+        >
+          {children}
+        </div>
       </div>
     </div>,
     document.body,

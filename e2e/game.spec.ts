@@ -677,6 +677,69 @@ test.describe("対局画面(/game)", () => {
     await expect(openButton).toBeFocused();
   });
 
+  test("320/360px幅でも全体盤面の自家手牌までスクロールでき、操作を見失わない(#609)", async ({
+    page,
+  }) => {
+    for (const width of [320, 360] as const) {
+      await page.setViewportSize({ width, height: 800 });
+      await page.goto("/game?seed=0");
+
+      const openButton = page.getByRole("button", { name: "全体盤面" });
+      await expect(openButton).toBeVisible();
+      await openButton.click();
+
+      const dialog = page.getByRole("dialog", { name: "全体盤面" });
+      const scrollArea = dialog.locator("[data-modal-scroll-area]");
+      const modalHand = dialog.getByRole("list", { name: "自家の手牌" });
+      await expect(modalHand).toBeVisible();
+
+      const scrollMax = await scrollArea.evaluate(
+        (element) => element.scrollHeight - element.clientHeight,
+      );
+      expect(
+        scrollMax,
+        `${width}px幅の本文をスクロール可能にする`,
+      ).toBeGreaterThan(0);
+      await scrollArea.evaluate((element) => {
+        element.scrollTop = element.scrollHeight;
+      });
+      await expect
+        .poll(() => scrollArea.evaluate((element) => element.scrollTop))
+        .toBe(scrollMax);
+
+      const positions = await dialog.evaluate((element) => {
+        const area = element.querySelector("[data-modal-scroll-area]");
+        const hand = element.querySelector('[aria-label="自家の手牌"]');
+        const heading = element.querySelector("h2");
+        const close = element.querySelector('button[aria-label="閉じる"]');
+        if (!area || !hand || !heading || !close) {
+          throw new Error("モーダルの #609 検証対象が見つからない");
+        }
+        return {
+          area: area.getBoundingClientRect().toJSON(),
+          hand: hand.getBoundingClientRect().toJSON(),
+          heading: heading.getBoundingClientRect().toJSON(),
+          close: close.getBoundingClientRect().toJSON(),
+        };
+      });
+
+      expect(positions.hand.bottom).toBeLessThanOrEqual(
+        positions.area.bottom + 1,
+      );
+      expect(positions.heading.bottom).toBeLessThanOrEqual(positions.area.top);
+      expect(positions.close.bottom).toBeLessThanOrEqual(positions.area.top);
+      await expect(
+        dialog.getByRole("heading", { name: "全体盤面" }),
+      ).toBeVisible();
+      await expect(
+        dialog.getByRole("button", { name: "閉じる" }),
+      ).toBeVisible();
+
+      await page.keyboard.press("Escape");
+      await expect(dialog).toHaveCount(0);
+    }
+  });
+
   test("マウス操作では牌のクリックだけで即時に打牌する(#607)", async ({
     page,
   }) => {
@@ -1090,24 +1153,35 @@ test.describe("対局画面(/game)", () => {
     await settleScroll(page);
     expect(await page.evaluate(() => window.scrollY)).toBe(scrollWhileOpen);
 
-    // (2) ダイアログ内は末尾までスクロールできる。
+    // (2) 本文領域は末尾までスクロールできる。タイトル・閉じる操作は本文の外に固定される
+    // (#609)ため、本文のスクロール領域を対象にする。
+    const scrollArea = dialog.locator("[data-modal-scroll-area]");
+    await expect(scrollArea).toBeVisible();
+    await expect(
+      dialog.getByRole("heading", { name: "全体盤面" }),
+    ).toBeVisible();
+    await expect(dialog.getByRole("button", { name: "閉じる" })).toBeVisible();
     const box = await dialog.boundingBox();
     if (box === null) throw new Error("ダイアログの矩形が取得できない");
     await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
     await page.mouse.wheel(0, 2000);
-    const scrollMax = await dialog.evaluate(
+    const scrollMax = await scrollArea.evaluate(
       (el) => el.scrollHeight - el.clientHeight,
     );
     expect(scrollMax).toBeGreaterThan(0);
     await expect
-      .poll(() => dialog.evaluate((el) => el.scrollTop))
+      .poll(() => scrollArea.evaluate((el) => el.scrollTop))
       .toBe(scrollMax);
+    await expect(
+      dialog.getByRole("heading", { name: "全体盤面" }),
+    ).toBeVisible();
+    await expect(dialog.getByRole("button", { name: "閉じる" })).toBeVisible();
 
     // (3) 末尾に到達した状態でさらに送っても背面へ連鎖しない。
     await page.mouse.wheel(0, 500);
     await settleScroll(page);
     expect(await page.evaluate(() => window.scrollY)).toBe(scrollWhileOpen);
-    expect(await dialog.evaluate((el) => el.scrollTop)).toBe(scrollMax);
+    expect(await scrollArea.evaluate((el) => el.scrollTop)).toBe(scrollMax);
 
     // (4) 閉じると開く前の document スクロール位置へ戻り、トリガーへフォーカスが返る。
     await page.keyboard.press("Escape");
