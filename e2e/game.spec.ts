@@ -161,9 +161,19 @@ test.describe("対局画面(/game)", () => {
     await expect(dialog).toBeVisible();
     await expect(dialog).toContainText("ガリ（抜き北）");
     await expect(dialog).toContainText("スルー");
-    await expect(
-      dialog.getByRole("link", { name: "ルール説明を詳しく見る" }),
-    ).toHaveAttribute("href", "/rules");
+    const rulesLink = dialog.getByRole("link", {
+      name: "ルール説明を詳しく見る",
+    });
+    await expect(rulesLink).toHaveAttribute("href", "/rules");
+    const rulesLinkBox = await rulesLink.boundingBox();
+    expect(rulesLinkBox).not.toBeNull();
+    expect(rulesLinkBox?.width).toBeGreaterThanOrEqual(44);
+    expect(rulesLinkBox?.height).toBeGreaterThanOrEqual(44);
+    const closeButton = dialog.getByRole("button", { name: "閉じる" });
+    const closeButtonBox = await closeButton.boundingBox();
+    expect(closeButtonBox).not.toBeNull();
+    expect(closeButtonBox?.width).toBeGreaterThanOrEqual(44);
+    expect(closeButtonBox?.height).toBeGreaterThanOrEqual(44);
     await expect(
       page.evaluate(() => document.documentElement.scrollWidth <= innerWidth),
     ).toBeTruthy();

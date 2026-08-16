@@ -150,7 +150,7 @@ export default function GameGlossary() {
         aria-haspopup="dialog"
         aria-expanded={open}
         onClick={() => setOpen(true)}
-        className="inline-flex min-h-11 items-center gap-1.5 rounded-lg border border-control-border px-3 py-1.5 text-tile-face text-xs font-medium hover:bg-foreground/5"
+        className="inline-flex min-h-11 items-center gap-1.5 rounded-lg border border-tile-face px-3 py-1.5 text-tile-face text-xs font-medium hover:bg-foreground/5"
       >
         <span aria-hidden="true">?</span>
         対局中の用語を見る
@@ -184,16 +184,15 @@ export default function GameGlossary() {
               </section>
             ))}
 
-            <p className="border-t border-foreground/15 pt-3 text-xs/5 text-foreground/70">
-              詳しいルールや点数計算は、
+            <div className="border-t border-foreground/15 pt-3 text-xs/5 text-foreground/70">
+              <p>詳しいルールや点数計算は、</p>
               <Link
                 href="/rules"
-                className="font-medium underline underline-offset-4 hover:text-foreground focus-visible:rounded-sm"
+                className="mt-1 inline-flex min-h-11 items-center font-medium underline underline-offset-4 hover:text-foreground focus-visible:rounded-sm"
               >
                 ルール説明を詳しく見る
               </Link>
-              。
-            </p>
+            </div>
           </div>
         </Modal>
       ) : null}
