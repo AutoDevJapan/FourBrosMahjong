@@ -173,15 +173,18 @@ test.describe("狭幅の接続後オンライン操作と結果導線(#628)", ()
       await expectNoHorizontalOverflow(page);
       await expectAxeClean(page, "main");
 
-      // Web Share API を明示的に無効化し、共有失敗時の手動フォールバックも固定する。
+      // Web Share API が存在しても共有に失敗する分岐を固定し、手動フォールバックを確認する。
       await page.evaluate(() => {
         Object.defineProperty(navigator, "share", {
           configurable: true,
-          value: undefined,
+          value: () => Promise.reject(new Error("Share failed")),
         });
       });
       await onlineGame.getByRole("button", { name: "共有" }).click();
       await expect(page.getByText("手動で共有する場合")).toBeVisible();
+      await expect(page.getByRole("status")).toContainText(
+        "共有できませんでした",
+      );
       await expectTouchTarget(
         onlineGame.getByRole("textbox", { name: "共有URL" }),
         "共有URL",
