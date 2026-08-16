@@ -3,6 +3,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import GameBoard from "@/components/game/GameBoard";
 import OnlineGameProvider, { onlineSocketUrl } from "./OnlineGameProvider";
+import RoomShareControls from "./RoomShareControls";
+import { readSharedRoomCode, roomShareUrl } from "./roomSharing";
 import type {
   OnlineCredentials,
   OnlineServerMessage,
@@ -75,7 +77,6 @@ export default function OnlineLobby() {
   const reconnectAttemptRef = useRef(0);
   const reconnectTimerRef = useRef<number | null>(null);
   const manualCloseRef = useRef(false);
-  const restoredRef = useRef(false);
   const connectRef = useRef<(request: JoinRequest) => void>(() => undefined);
 
   const clearReconnectTimer = useCallback(() => {
@@ -168,11 +169,13 @@ export default function OnlineLobby() {
   }, [connect]);
 
   useEffect(() => {
-    if (restoredRef.current) return;
-    restoredRef.current = true;
     const timer = window.setTimeout(() => {
       const stored = readCredentials();
-      if (!stored) return;
+      if (!stored) {
+        const sharedCode = readSharedRoomCode();
+        if (sharedCode) setRoomCode(sharedCode);
+        return;
+      }
       credentialsRef.current = stored;
       setCredentials(stored);
       setRoomCode(stored.code);
@@ -210,18 +213,6 @@ export default function OnlineLobby() {
     setError("");
   };
 
-  const copyRoomCode = async () => {
-    if (!snapshot) return;
-    try {
-      await navigator.clipboard.writeText(snapshot.code);
-      setError("ルームコードをコピーしました。");
-    } catch {
-      setError(
-        "コピーできませんでした。ルームコードを手動で共有してください。",
-      );
-    }
-  };
-
   const onSendError = useCallback((message: string) => setError(message), []);
   const currentTurnName = snapshot?.currentTurn
     ? snapshot.players.find((player) => player.id === snapshot.currentTurn)
@@ -237,24 +228,16 @@ export default function OnlineLobby() {
       >
         <section className="flex flex-col gap-4" aria-label="オンライン対局">
           <header className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-control-border p-4">
-            <div>
-              <p className="text-xs tracking-widest text-foreground/60 uppercase">
-                ルームコード
-              </p>
-              <button
-                type="button"
-                className="mt-1 font-mono text-2xl font-bold tracking-[0.25em]"
-                onClick={copyRoomCode}
-                title="クリックしてコピー"
-              >
-                {snapshot.code}
-              </button>
-              <p className="mt-1 text-xs text-foreground/60">
-                {status === "reconnecting"
+            <RoomShareControls
+              key={snapshot.code}
+              code={snapshot.code}
+              shareUrl={roomShareUrl(snapshot.code)}
+              statusMessage={
+                status === "reconnecting"
                   ? "再接続中…"
-                  : "コードを共有して同じ卓に参加"}
-              </p>
-            </div>
+                  : "コードを共有して同じ卓に参加"
+              }
+            />
             <div className="flex items-center gap-2">
               <span className="text-sm text-foreground/70">
                 {
