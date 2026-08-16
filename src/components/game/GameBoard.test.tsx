@@ -186,6 +186,28 @@ describe("GameBoard (spec 6.6 client island / engine-driven)", () => {
     expect(screen.getAllByText(/局$/).length).toBeGreaterThan(0);
   });
 
+  it("狭幅表示は設定ではなく自動適用の状態説明として伝え、全体盤面をキーボードで開ける(#613)", async () => {
+    const user = userEvent.setup();
+    renderBoard();
+
+    const description = screen.getByTestId("narrow-board-description");
+    expect(description).not.toHaveAttribute("role");
+    expect(description).not.toHaveAttribute("aria-live");
+    expect(description).toHaveTextContent(
+      "狭い画面のため、自分の手牌を自動で優先表示しています。",
+    );
+    expect(description).not.toHaveAttribute("tabindex");
+    expect(
+      screen.queryByRole("button", { name: "自分手番フォーカス表示" }),
+    ).not.toBeInTheDocument();
+
+    const opener = screen.getByRole("button", { name: "全体盤面" });
+    expect(opener).toHaveAttribute("aria-describedby", description.id);
+    opener.focus();
+    await user.keyboard("{Enter}");
+    expect(screen.getByRole("dialog", { name: "全体盤面" })).toBeVisible();
+  });
+
   it("フォーカス表示の「全体盤面」で盤面モーダルを開閉できる(スペック5 5.3.2 段階② / 5.2.2)", async () => {
     const user = userEvent.setup();
     // `/game` と同じく `<main>` の内側へ置いて描く。`GameBoard` を裸で描くと、盤面ルート
