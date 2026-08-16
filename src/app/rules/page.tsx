@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { socialMetadata } from "@/app/_lib/metadata";
+import ScreenNavigation from "@/components/layout/ScreenNavigation";
 import {
   OKA,
   RETURN_POINTS,
@@ -212,6 +213,7 @@ export default function RulesPage() {
             <span aria-hidden>←</span> ロビーへ戻る
           </Link>
         </nav>
+        <ScreenNavigation currentPath="/rules" />
 
         <header className="flex flex-col gap-3">
           <h1 className="text-3xl font-bold sm:text-4xl">ルール説明</h1>

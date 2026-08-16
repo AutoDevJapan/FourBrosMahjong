@@ -96,7 +96,9 @@ describe("RulesPage (/rules)", () => {
 
   it("初期開閉状態を維持しつつ各summaryを提供する", () => {
     const { container } = render(<RulesPage />);
-    const sections = [...container.querySelectorAll("details")];
+    const sections = [
+      ...container.querySelectorAll<HTMLDetailsElement>("details[id^='rule-']"),
+    ];
 
     expect(sections.filter((section) => section.open)).toHaveLength(4);
     expect(sections.filter((section) => !section.open)).toHaveLength(2);

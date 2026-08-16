@@ -579,10 +579,14 @@ test.describe("キーボードのみ操作(a11y 補強)", () => {
   }) => {
     await page.goto("/settings");
 
-    // Tab で「ロビーへ戻る」→ radiogroup の順に到達できる(フォーカス到達・操作可能性)。
+    // Tab で「ロビーへ戻る」→共通ナビゲーション→radiogroup の順に到達できる。
     await page.keyboard.press("Tab");
     await expect(
       page.getByRole("link", { name: "ロビーへ戻る" }),
+    ).toBeFocused();
+    await page.keyboard.press("Tab");
+    await expect(
+      page.getByRole("navigation", { name: "画面メニュー" }).locator("summary"),
     ).toBeFocused();
     await page.keyboard.press("Tab");
     const systemRadio = page.getByRole("radio", { name: "システム設定に従う" });

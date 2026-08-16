@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { socialMetadata } from "@/app/_lib/metadata";
+import ScreenNavigation from "@/components/layout/ScreenNavigation";
 import OnlineLobby from "@/components/online/OnlineLobby";
 
 const description =
@@ -28,6 +29,7 @@ export default function OnlinePage() {
             ロビーへ戻る
           </Link>
         </header>
+        <ScreenNavigation currentPath="/online" />
         <OnlineLobby />
       </main>
     </div>

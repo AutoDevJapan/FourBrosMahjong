@@ -19,6 +19,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { socialMetadata } from "@/app/_lib/metadata";
+import ScreenNavigation from "@/components/layout/ScreenNavigation";
 import { ThemeToggle } from "@/components/layout/ThemeToggle";
 import { PlayerNamesForm } from "@/components/settings/PlayerNamesForm";
 
@@ -53,6 +54,8 @@ export default function SettingsPage() {
             表示モードと対局者の名前を変更できます。
           </p>
         </header>
+
+        <ScreenNavigation currentPath="/settings" />
 
         <section
           aria-labelledby="appearance-heading"
