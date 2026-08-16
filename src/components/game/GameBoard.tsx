@@ -75,11 +75,14 @@ export interface GameBoardProps {
   readonly resultHref?: string;
   /** オンライン再接続中など、サーバー操作を一時的に停止する。 */
   readonly interactionDisabled?: boolean;
+  /** 操作停止の理由。failed では自動再接続待ちではなく再試行を案内する。 */
+  readonly interactionDisabledReason?: "reconnecting" | "failed";
 }
 
 export default function GameBoard({
   resultHref = "/game/result",
   interactionDisabled = false,
+  interactionDisabledReason = "reconnecting",
 }: GameBoardProps) {
   const { view, phase, pending, roundSummary, controls } = useGame();
   const { slots, tableInfo, dora } = view;
@@ -364,6 +367,9 @@ export default function GameBoard({
 
   const hint = useMemo(() => {
     if (interactionDisabled) {
+      if (interactionDisabledReason === "failed") {
+        return "オンラインサーバーへの接続に失敗しました。再試行ボタンで接続を再開できます。";
+      }
       return "オンラインサーバーとの接続を待っています。再接続後に操作を再開できます。";
     }
     if (phase === "roundEnd") return roundSummary?.label ?? "";
@@ -398,7 +404,14 @@ export default function GameBoard({
       return "牌を選んで打牌してください(北抜きは自動)。";
     }
     return "";
-  }, [interactionDisabled, phase, pending, roundSummary, riichiArmed]);
+  }, [
+    interactionDisabled,
+    interactionDisabledReason,
+    phase,
+    pending,
+    roundSummary,
+    riichiArmed,
+  ]);
 
   const announcement = useMemo(() => {
     if (tileFeedback.message) return tileFeedback.message;

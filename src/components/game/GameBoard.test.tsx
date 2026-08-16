@@ -173,6 +173,24 @@ describe("GameBoard (spec 6.6 client island / engine-driven)", () => {
     ).not.toBeInTheDocument();
   });
 
+  it("自動再接続を終えた接続失敗では再試行導線を案内する", () => {
+    renderBoard(1, undefined, {
+      interactionDisabled: true,
+      interactionDisabledReason: "failed",
+    });
+
+    expect(
+      screen.getAllByText(
+        "オンラインサーバーへの接続に失敗しました。再試行ボタンで接続を再開できます。",
+      ).length,
+    ).toBeGreaterThan(0);
+    expect(
+      screen.queryByText(
+        "オンラインサーバーとの接続を待っています。再接続後に操作を再開できます。",
+      ),
+    ).not.toBeInTheDocument();
+  });
+
   it("決定的な公開状態から全プレイヤーの抜き北を表示し、自家の連続北抜きを通知する", () => {
     renderBoardWithKita();
 

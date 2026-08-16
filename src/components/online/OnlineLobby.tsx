@@ -742,6 +742,13 @@ export default function OnlineLobby() {
           <GameBoard
             resultHref="/online"
             interactionDisabled={status !== "connected"}
+            interactionDisabledReason={
+              status === "failed"
+                ? "failed"
+                : status === "connected"
+                  ? undefined
+                  : "reconnecting"
+            }
           />
         </section>
       </OnlineGameProvider>
