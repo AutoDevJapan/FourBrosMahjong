@@ -42,7 +42,7 @@ export type AbuseRejection =
     };
 
 /** A bounded sliding-window counter used by each abuse-control bucket. */
-export class SlidingWindow {
+class SlidingWindow {
   private readonly timestamps: number[] = [];
 
   constructor(
