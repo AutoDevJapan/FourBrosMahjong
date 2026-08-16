@@ -186,6 +186,39 @@ test.describe("対局画面(/game)", () => {
     ).toBeVisible();
   });
 
+  test("狭幅表示は自動適用の説明として伝わり、全体盤面をキーボードで開ける(#613)", async ({
+    page,
+  }) => {
+    for (const width of [320, 360]) {
+      await page.setViewportSize({ width, height: 800 });
+      await page.goto("/game?seed=0");
+
+      const description = page.getByTestId("narrow-board-description");
+      await expect(description).toBeVisible();
+      await expect(description).toHaveText(
+        "狭い画面のため、自分の手牌を自動で優先表示しています。",
+      );
+      await expect(
+        page.getByRole("button", { name: "自分手番フォーカス表示" }),
+      ).toHaveCount(0);
+
+      const opener = page.getByRole("button", { name: "全体盤面" });
+      expect(await opener.getAttribute("aria-describedby")).toBe(
+        await description.getAttribute("id"),
+      );
+      await opener.focus();
+      await page.keyboard.press("Enter");
+      await expect(
+        page.getByRole("dialog", { name: "全体盤面" }),
+      ).toBeVisible();
+      await page.keyboard.press("Escape");
+      await expect(opener).toBeFocused();
+      await expect(
+        page.evaluate(() => document.documentElement.scrollWidth <= innerWidth),
+      ).toBeTruthy();
+    }
+  });
+
   test("/game から「ロビーへ戻る」導線でロビーに戻れる(スペック6 6.3)", async ({
     page,
   }) => {
