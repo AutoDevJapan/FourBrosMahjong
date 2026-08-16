@@ -1,4 +1,9 @@
 import { expect, test } from "@playwright/test";
+import {
+  installWebSocketStub,
+  type OnlineTestWindow,
+  onlineSnapshotFixture,
+} from "./helpers/onlineTest";
 
 const navigationCases = [
   { source: "/rules", target: "設定", href: "/settings" },
@@ -86,5 +91,41 @@ test.describe("内部画面の共通ナビゲーション (#614)", () => {
     await expect(
       page.getByRole("link", { name: "ロビーへ戻る" }),
     ).toBeVisible();
+  });
+
+  test("接続後オンライン対局中も画面メニューを表示しない", async ({ page }) => {
+    await page.goto("/online");
+    await installWebSocketStub(page);
+    await page.getByLabel("表示名").fill("たろう");
+    await page.getByLabel("ルームコード").fill("ABC234");
+    await page.getByRole("button", { name: "参加する" }).click();
+    await expect(
+      page.locator('[data-connection-status="connecting"]'),
+    ).toBeVisible();
+
+    await page.evaluate(() => {
+      const socket = (window as unknown as OnlineTestWindow)
+        .__fourBrosOnlineSockets[0];
+      if (!socket) throw new Error("オンラインテスト用socketがありません");
+      socket.open();
+    });
+    await page.evaluate((snapshot) => {
+      const socket = (window as unknown as OnlineTestWindow)
+        .__fourBrosOnlineSockets[0];
+      if (!socket) throw new Error("オンラインテスト用socketがありません");
+      socket.message({
+        type: "session",
+        token: "t".repeat(24),
+        snapshot,
+      });
+    }, onlineSnapshotFixture());
+
+    await expect(
+      page.locator('[data-connection-status="connected"]'),
+    ).toBeVisible();
+    await expect(
+      page.getByRole("navigation", { name: "画面メニュー" }),
+    ).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "退出" })).toBeVisible();
   });
 });
