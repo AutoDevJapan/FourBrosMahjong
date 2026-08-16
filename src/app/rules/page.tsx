@@ -254,7 +254,7 @@ export default function RulesPage() {
           {ruleSections.map((section) => (
             <details
               id={section.id}
-              key={section.heading}
+              key={section.id}
               open={section.defaultOpen}
               className="scroll-mt-6 rounded-lg border border-control-border target:border-focus-ring target:ring-2 target:ring-focus-ring"
             >

@@ -14,16 +14,41 @@ test.describe("ルール説明の目次とアンカー(#612)", () => {
   test("狭幅でも目次から目的のセクションへ移動でき、現在位置を示す", async ({
     page,
   }) => {
-    await page.setViewportSize({ width: 390, height: 844 });
+    await page.setViewportSize({ width: 320, height: 844 });
     await page.goto("/rules");
 
     const toc = page.getByRole("navigation", { name: "ルールの目次" });
     await expect(toc).toBeVisible();
     await expect(toc.getByRole("link")).toHaveCount(RULE_SECTION_IDS.length);
+    for (const [index, link] of (await toc.getByRole("link").all()).entries()) {
+      const box = await link.boundingBox();
+      expect(
+        box,
+        `目次リンク(${index + 1})の寸法を取得できません`,
+      ).not.toBeNull();
+      expect(
+        box?.width,
+        `目次リンク(${index + 1})の幅が44px未満`,
+      ).toBeGreaterThanOrEqual(44);
+      expect(
+        box?.height,
+        `目次リンク(${index + 1})の高さが44px未満`,
+      ).toBeGreaterThanOrEqual(44);
+    }
+    expect(
+      await page.evaluate(
+        () =>
+          document.documentElement.scrollWidth <=
+          document.documentElement.clientWidth,
+      ),
+    ).toBe(true);
 
     const target = page.locator("#rule-progress");
     await expect(target).not.toHaveAttribute("open");
-    await toc.getByRole("link", { name: "3. 進行ルール" }).click();
+    const progressLink = toc.getByRole("link", { name: "3. 進行ルール" });
+    await progressLink.focus();
+    await expect(progressLink).toBeFocused();
+    await progressLink.press("Enter");
 
     await expect(page).toHaveURL(/\/rules#rule-progress$/);
     await expect(target).toBeInViewport();
@@ -54,5 +79,12 @@ test.describe("ルール説明の目次とアンカー(#612)", () => {
       await expect(link).toHaveAttribute("href", `#${RULE_SECTION_IDS[index]}`);
       await expect(page.locator(`#${RULE_SECTION_IDS[index]}`)).toHaveCount(1);
     }
+
+    // 目次を経由しない共有URLでも、同じ安定アンカーへ直接到達できる。
+    await page.goto("/rules#rule-progress");
+    const directTarget = page.locator("#rule-progress");
+    await expect(page).toHaveURL(/\/rules#rule-progress$/);
+    await expect(directTarget).toBeInViewport();
+    await expect(directTarget).not.toHaveAttribute("open");
   });
 });
