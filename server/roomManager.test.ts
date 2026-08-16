@@ -50,6 +50,23 @@ describe("online room manager", () => {
     expect(manager.resume(host.room.code, "not-a-token")).toBeNull();
   });
 
+  it("does not let the host reset an active room", () => {
+    const manager = new RoomManager();
+    const host = manager.create("ホスト");
+    const before = manager.snapshot(host.room, host.player);
+
+    const result = manager.newGame(host.room, host.player);
+
+    expect(result).toMatchObject({
+      ok: false,
+      error: "新しい半荘を始められるのは対局終了後です。",
+    });
+    const after = manager.snapshot(host.room, host.player);
+    expect(after.version).toBe(before.version);
+    expect(after.phase).toBe(before.phase);
+    expect(after.view).toEqual(before.view);
+  });
+
   it("validates action tiles before the engine sees them", () => {
     for (const rank of [1, 2, 3, 4, 5, 6, 7, 8, 9]) {
       expect(
