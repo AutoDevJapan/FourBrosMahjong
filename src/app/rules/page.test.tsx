@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import {
   OKA,
@@ -69,6 +69,41 @@ describe("RulesPage (/rules)", () => {
     // 各 details には開閉トリガ(summary)がある。
     for (const section of sections) {
       expect(section.querySelector("summary")).not.toBeNull();
+    }
+  });
+
+  it("目次から安定したセクションIDへ移動できる", () => {
+    render(<RulesPage />);
+
+    const toc = screen.getByRole("navigation", { name: "ルールの目次" });
+    const entries = [
+      ["rule-basic-format", "1. 基本形式"],
+      ["rule-tiles-and-dora", "2. 使用牌・ドラ牌"],
+      ["rule-progress", "3. 進行ルール"],
+      ["rule-scoring-and-dora", "4. 点数・ドラ(サイコロ連動)"],
+      ["rule-settlement-and-soshii", "5. 精算・祝儀(ソシー)"],
+      ["rule-special-elements", "6. 名物要素(ルール外)"],
+    ] as const;
+
+    expect(within(toc).getAllByRole("link")).toHaveLength(entries.length);
+    for (const [id, heading] of entries) {
+      const link = within(toc).getByRole("link", { name: heading });
+      expect(link).toHaveAttribute("href", `#${id}`);
+      expect(document.getElementById(id)).not.toBeNull();
+      expect(document.getElementById(id)).toHaveAttribute("id", id);
+    }
+  });
+
+  it("初期開閉状態を維持しつつ各summaryを提供する", () => {
+    const { container } = render(<RulesPage />);
+    const sections = [...container.querySelectorAll("details")];
+
+    expect(sections.filter((section) => section.open)).toHaveLength(4);
+    expect(sections.filter((section) => !section.open)).toHaveLength(2);
+    for (const section of sections) {
+      const summary = section.querySelector("summary");
+      expect(summary).not.toBeNull();
+      expect(summary).toHaveAttribute("id", `${section.id}-summary`);
     }
   });
 

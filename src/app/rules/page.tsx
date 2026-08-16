@@ -43,6 +43,8 @@ export const metadata: Metadata = {
 
 /** ルール要約の1セクション。`<details>` で折りたためる。 */
 type RuleSection = {
+  /** URLフラグメントに使う変更に強い安定ID。見出し文言から生成しない。 */
+  id: string;
   /** セクション見出し(`<summary>` に表示)。 */
   heading: string;
   /** 既定で開いた状態にするか(主要ルールは開き、補足は閉じる)。 */
@@ -57,6 +59,7 @@ type RuleSection = {
  */
 const ruleSections: RuleSection[] = [
   {
+    id: "rule-basic-format",
     heading: "1. 基本形式",
     defaultOpen: true,
     items: [
@@ -76,6 +79,7 @@ const ruleSections: RuleSection[] = [
     ],
   },
   {
+    id: "rule-tiles-and-dora",
     heading: "2. 使用牌・ドラ牌",
     defaultOpen: true,
     items: [
@@ -94,6 +98,7 @@ const ruleSections: RuleSection[] = [
     ],
   },
   {
+    id: "rule-progress",
     heading: "3. 進行ルール",
     defaultOpen: false,
     items: [
@@ -131,6 +136,7 @@ const ruleSections: RuleSection[] = [
     ],
   },
   {
+    id: "rule-scoring-and-dora",
     heading: "4. 点数・ドラ(サイコロ連動)",
     defaultOpen: true,
     items: [
@@ -149,6 +155,7 @@ const ruleSections: RuleSection[] = [
     ],
   },
   {
+    id: "rule-settlement-and-soshii",
     heading: "5. 精算・祝儀(ソシー)",
     defaultOpen: true,
     items: [
@@ -177,6 +184,7 @@ const ruleSections: RuleSection[] = [
     ],
   },
   {
+    id: "rule-special-elements",
     heading: "6. 名物要素(ルール外)",
     defaultOpen: false,
     items: [
@@ -221,14 +229,39 @@ export default function RulesPage() {
           </p>
         </header>
 
+        <nav
+          aria-labelledby="rules-toc-heading"
+          className="rounded-lg border border-control-border p-4"
+        >
+          <h2 id="rules-toc-heading" className="text-base font-semibold">
+            ルールの目次
+          </h2>
+          <ol className="mt-3 grid gap-2 sm:grid-cols-2">
+            {ruleSections.map((section) => (
+              <li key={section.id}>
+                <a
+                  href={`#${section.id}`}
+                  className="inline-flex min-h-11 w-full items-center rounded-md border border-control-border px-3 py-2 text-sm underline underline-offset-4 hover:bg-foreground/5 hover:text-foreground focus-visible:rounded-md"
+                >
+                  {section.heading}
+                </a>
+              </li>
+            ))}
+          </ol>
+        </nav>
+
         <div className="flex flex-col gap-3">
           {ruleSections.map((section) => (
             <details
-              key={section.heading}
+              id={section.id}
+              key={section.id}
               open={section.defaultOpen}
-              className="rounded-lg border border-control-border"
+              className="scroll-mt-6 rounded-lg border border-control-border target:border-focus-ring target:ring-2 target:ring-focus-ring"
             >
-              <summary className="cursor-pointer rounded-lg px-4 py-3 font-medium marker:text-foreground/60">
+              <summary
+                id={`${section.id}-summary`}
+                className="cursor-pointer rounded-lg px-4 py-3 font-medium marker:text-foreground/60"
+              >
                 {section.heading}
               </summary>
               <ul className="flex flex-col gap-2 px-4 pb-4 text-sm/6">
