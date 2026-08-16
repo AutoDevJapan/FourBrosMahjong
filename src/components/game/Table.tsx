@@ -5,19 +5,25 @@
  */
 
 import DoraIndicator from "./DoraIndicator";
+import GameGlossary from "./GameGlossary";
 import TableInfo from "./TableInfo";
 import type { DoraData, TableInfoData } from "./types";
 
 export interface TableProps {
   info: TableInfoData;
   dora: DoraData;
+  /** 閲覧専用の全体盤面モーダルでは、用語モーダルの入れ子を避ける。 */
+  showGlossary?: boolean;
 }
 
-export default function Table({ info, dora }: TableProps) {
+export default function Table({ info, dora, showGlossary = true }: TableProps) {
   return (
     <div className="flex flex-col items-center justify-center gap-3 rounded-xl bg-table-felt p-4 shadow-inner">
       <TableInfo info={info} />
-      <DoraIndicator dora={dora} />
+      <div className="flex flex-wrap items-center justify-center gap-2">
+        <DoraIndicator dora={dora} />
+        {showGlossary ? <GameGlossary /> : null}
+      </div>
     </div>
   );
 }

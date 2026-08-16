@@ -460,7 +460,7 @@ export default function GameBoard({
           {renderSlot("left", false)}
         </div>
         <div className="col-start-2 row-start-2">
-          <Table info={tableInfo} dora={dora} />
+          <Table info={tableInfo} dora={dora} showGlossary={withActions} />
         </div>
         <div className="col-start-3 row-start-2">
           {renderSlot("right", false)}
