@@ -12,7 +12,7 @@ import Link from "next/link";
 import { useRef, useState } from "react";
 import Modal from "../common/Modal";
 
-export interface GlossaryEntry {
+interface GlossaryEntry {
   readonly term: string;
   readonly description: string;
 }
