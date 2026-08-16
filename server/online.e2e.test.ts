@@ -6,6 +6,7 @@ import type {
   OnlineServerMessage,
   OnlineSnapshot,
 } from "../src/components/online/types";
+import { ABUSE_LIMITS } from "./abuseControl";
 
 /**
  * server配下の test/spec ファイルは既存の Vitest unit project が収集する。
@@ -570,6 +571,31 @@ describe("online multiplayer local E2E (#629)", () => {
         (candidate) => candidate.version === version,
       );
       expect(snapshot.version).toBe(version);
+    },
+    TEST_TIMEOUT_MS,
+  );
+
+  it(
+    "メッセージ過多を安定した再試行可能エラーで拒否し、接続を閉じる",
+    async () => {
+      if (server === undefined)
+        throw new Error("オンラインサーバーが起動していません。");
+
+      const client = new OnlineTestClient(server.url, TEST_ORIGIN);
+      clients.push(client);
+      await client.open();
+      for (let index = 0; index <= ABUSE_LIMITS.messages.limit; index += 1) {
+        client.send({ type: "ping" });
+      }
+
+      const error = await client.waitForError();
+      expect(error).toMatchObject({
+        type: "error",
+        code: "rate_limited",
+        scope: "message",
+      });
+      expect(error.retryAfterMs).toBeGreaterThan(0);
+      await client.close();
     },
     TEST_TIMEOUT_MS,
   );

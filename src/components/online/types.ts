@@ -30,6 +30,19 @@ export interface OnlineCredentials {
   readonly token: string;
 }
 
+export type OnlineErrorCode =
+  | "connection_limit"
+  | "message_too_large"
+  | "rate_limited";
+
+export type OnlineRateLimitScope =
+  | "connection"
+  | "create"
+  | "join"
+  | "resume"
+  | "action"
+  | "message";
+
 export type OnlineConnectionStatus =
   | "idle"
   | "connecting"
@@ -44,5 +57,11 @@ export type OnlineServerMessage =
       readonly snapshot: OnlineSnapshot;
     }
   | { readonly type: "snapshot"; readonly snapshot: OnlineSnapshot }
-  | { readonly type: "error"; readonly message: string }
+  | {
+      readonly type: "error";
+      readonly message: string;
+      readonly code?: OnlineErrorCode;
+      readonly scope?: OnlineRateLimitScope;
+      readonly retryAfterMs?: number;
+    }
   | { readonly type: "pong" };

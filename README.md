@@ -179,3 +179,5 @@ pnpm dev              # http://localhost:3000
 ```
 
 Vercel では `NEXT_PUBLIC_ONLINE_WS_URL` に Railway の公開 URL(`https://...` または `wss://...`)を設定します。WebSocket の Origin 制限を有効にする場合は、Railway の `ALLOWED_ORIGINS` に Vercel の本番URLをカンマ区切りで指定してください。ルームは匿名トークンで再接続できますが、認証・永続化・観戦・途中参加者の座席予約はまだ対象外です。
+
+WebSocket の接続数・接続元ごとの作成/参加/再接続試行・メッセージ/対局操作レートには、4人対局を妨げない固定上限を設けています。上限値と再試行エラーの契約は [`docs/デプロイ環境運用.md`](./docs/デプロイ環境運用.md#websocket-の-abuse-control-641) を参照してください。

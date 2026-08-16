@@ -1,6 +1,16 @@
 import { createServer, type IncomingMessage } from "node:http";
 import type { Socket } from "node:net";
 import { WebSocket, WebSocketServer } from "ws";
+import type {
+  OnlineErrorCode,
+  OnlineRateLimitScope,
+} from "../src/components/online/types";
+import {
+  type AbuseRejection,
+  type ClientAbuseState,
+  OnlineAbuseControls,
+  type RoomAttemptScope,
+} from "./abuseControl";
 import {
   type ConnectionState,
   hasOpenPeer as hasOpenPeerConnection,
@@ -16,15 +26,20 @@ import {
 
 const PORT = Number(process.env.PORT ?? 8080);
 const MAX_MESSAGE_BYTES = 32 * 1024;
+const RATE_LIMIT_CLOSE_CODE = 1013;
 
 interface Client {
   readonly socket: WebSocket;
+  readonly source: string;
+  readonly abuse: ClientAbuseState;
   room: RoomSession["room"] | null;
   player: RoomPlayer | null;
 }
 
 const manager = new RoomManager();
+const abuseControls = new OnlineAbuseControls();
 const clients = new Set<Client>();
+const pendingUpgrades = new Map<Socket, string>();
 
 function allowedOrigins(): readonly string[] {
   return (process.env.ALLOWED_ORIGINS ?? "")
@@ -45,9 +60,65 @@ function send(client: Client, value: unknown): void {
   client.socket.send(JSON.stringify(value));
 }
 
-function sendError(client: Client, message: string): void {
-  send(client, { type: "error", message });
-  if (client.room && client.player) sendSnapshot(client);
+type RateLimitedScope = Exclude<OnlineRateLimitScope, "connection">;
+
+function sendError(
+  client: Client,
+  message: string,
+  details: {
+    readonly code?: OnlineErrorCode;
+    readonly scope?: RateLimitedScope;
+    readonly retryAfterMs?: number;
+  } = {},
+  includeSnapshot = true,
+): void {
+  send(client, { type: "error", message, ...details });
+  if (includeSnapshot && client.room && client.player) sendSnapshot(client);
+}
+
+function rateLimitMessage(scope: RateLimitedScope): string {
+  switch (scope) {
+    case "create":
+      return "ルーム作成の試行回数が上限に達しました。しばらく待ってから再試行してください。";
+    case "join":
+      return "ルーム参加の試行回数が上限に達しました。しばらく待ってから再試行してください。";
+    case "resume":
+      return "再接続の試行回数が上限に達しました。しばらく待ってから再試行してください。";
+    case "action":
+      return "対局操作が多すぎます。しばらく待ってから再試行してください。";
+    case "message":
+      return "メッセージが多すぎます。しばらく待ってから再試行してください。";
+  }
+}
+
+function rejectRateLimited(client: Client, rejection: AbuseRejection): void {
+  if (rejection.code !== "rate_limited") return;
+  if (rejection.scope === "connection") return;
+  sendError(
+    client,
+    rateLimitMessage(rejection.scope),
+    {
+      code: rejection.code,
+      scope: rejection.scope,
+      retryAfterMs: rejection.retryAfterMs,
+    },
+    false,
+  );
+  client.socket.close(RATE_LIMIT_CLOSE_CODE, "rate limited");
+}
+
+function consumeRoomAttempt(client: Client, scope: RoomAttemptScope): boolean {
+  const rejection = abuseControls.consumeRoomAttempt(client.source, scope);
+  if (rejection === null) return false;
+  rejectRateLimited(client, rejection);
+  return true;
+}
+
+function consumeAction(client: Client): boolean {
+  const rejection = abuseControls.consumeAction(client.source, client.abuse);
+  if (rejection === null) return false;
+  rejectRateLimited(client, rejection);
+  return true;
 }
 
 function sendSnapshot(client: Client): void {
@@ -116,6 +187,7 @@ function handleMessage(client: Client, value: unknown): void {
 
   switch (message.type) {
     case "create": {
+      if (consumeRoomAttempt(client, "create")) return;
       if (client.room) {
         sendError(client, "すでにルームへ接続しています。");
         return;
@@ -136,6 +208,7 @@ function handleMessage(client: Client, value: unknown): void {
       return;
     }
     case "join": {
+      if (consumeRoomAttempt(client, "join")) return;
       if (client.room) {
         sendError(client, "すでにルームへ接続しています。");
         return;
@@ -150,6 +223,7 @@ function handleMessage(client: Client, value: unknown): void {
       return;
     }
     case "resume": {
+      if (consumeRoomAttempt(client, "resume")) return;
       if (client.room) {
         sendError(client, "すでにルームへ接続しています。");
         return;
@@ -166,6 +240,7 @@ function handleMessage(client: Client, value: unknown): void {
       return;
     }
     case "newGame": {
+      if (consumeAction(client)) return;
       if (!client.room || !client.player) {
         sendError(client, "先にルームへ入室してください。");
         return;
@@ -179,6 +254,7 @@ function handleMessage(client: Client, value: unknown): void {
       return;
     }
     case "action": {
+      if (consumeAction(client)) return;
       if (!client.room || !client.player) {
         sendError(client, "先にルームへ入室してください。");
         return;
@@ -218,13 +294,32 @@ function handleMessage(client: Client, value: unknown): void {
   }
 }
 
-function onConnection(socket: WebSocket): void {
-  const client: Client = { socket, room: null, player: null };
+function onConnection(socket: WebSocket, source: string): void {
+  const client: Client = {
+    socket,
+    source,
+    abuse: abuseControls.createClientState(),
+    room: null,
+    player: null,
+  };
   clients.add(client);
   socket.on("message", (data) => {
     if (Buffer.byteLength(data.toString()) > MAX_MESSAGE_BYTES) {
-      sendError(client, "メッセージが大きすぎます。");
+      sendError(
+        client,
+        "メッセージが大きすぎます。",
+        { code: "message_too_large" },
+        false,
+      );
       socket.close(1009, "message too large");
+      return;
+    }
+    const messageRejection = abuseControls.consumeMessage(
+      client.source,
+      client.abuse,
+    );
+    if (messageRejection !== null) {
+      rejectRateLimited(client, messageRejection);
       return;
     }
     try {
@@ -235,6 +330,7 @@ function onConnection(socket: WebSocket): void {
   });
   socket.on("close", () => {
     clients.delete(client);
+    abuseControls.releaseConnection(client.source);
     // 再接続時は旧ソケットのcloseが新ソケットの接続状態を上書きし得る。
     // 同じ席に生きたソケットが残っている間は、切断扱いにしない。
     if (client.room && client.player && !hasOpenPeer(client)) {
@@ -291,7 +387,68 @@ const websocketServer = new WebSocketServer({
   noServer: true,
   maxPayload: MAX_MESSAGE_BYTES,
 });
-websocketServer.on("connection", onConnection);
+
+function connectionSource(request: IncomingMessage): string {
+  const address = request.socket.remoteAddress;
+  if (!address) return "unknown";
+  return address.startsWith("::ffff:")
+    ? address.slice("::ffff:".length)
+    : address;
+}
+
+function activeSourceConnections(source: string): number {
+  let count = 0;
+  for (const client of clients) if (client.source === source) count += 1;
+  for (const pendingSource of pendingUpgrades.values())
+    if (pendingSource === source) count += 1;
+  return count;
+}
+
+function rejectUpgrade(
+  socket: Socket,
+  status: 429 | 503,
+  rejection: AbuseRejection,
+): void {
+  const body = JSON.stringify({
+    ok: false,
+    code: rejection.code,
+    ...(rejection.code === "rate_limited" ? { scope: rejection.scope } : {}),
+    retryAfterMs: rejection.retryAfterMs,
+  });
+  const retryAfterSeconds = Math.max(
+    1,
+    Math.ceil(rejection.retryAfterMs / 1_000),
+  );
+  const reason = status === 429 ? "Too Many Requests" : "Service Unavailable";
+  try {
+    socket.end(
+      `HTTP/1.1 ${status} ${reason}\r\n` +
+        "Connection: close\r\n" +
+        "Content-Type: application/json; charset=utf-8\r\n" +
+        `Content-Length: ${Buffer.byteLength(body)}\r\n` +
+        `Retry-After: ${retryAfterSeconds}\r\n` +
+        "\r\n" +
+        body,
+    );
+  } catch {
+    socket.destroy();
+  }
+}
+
+function reserveUpgrade(socket: Socket, source: string): AbuseRejection | null {
+  const rejection = abuseControls.admitConnection(
+    source,
+    clients.size + pendingUpgrades.size,
+    activeSourceConnections(source),
+  );
+  if (rejection !== null) return rejection;
+  pendingUpgrades.set(socket, source);
+  return null;
+}
+
+websocketServer.on("connection", (socket, request) => {
+  onConnection(socket, connectionSource(request));
+});
 
 httpServer.on("upgrade", (request: IncomingMessage, socket: Socket, head) => {
   const path = new URL(request.url ?? "/", "http://localhost").pathname;
@@ -300,12 +457,42 @@ httpServer.on("upgrade", (request: IncomingMessage, socket: Socket, head) => {
     socket.destroy();
     return;
   }
-  websocketServer.handleUpgrade(request, socket, head, (websocket) => {
-    websocketServer.emit("connection", websocket, request);
-  });
+  const source = connectionSource(request);
+  const rejection = reserveUpgrade(socket, source);
+  if (rejection !== null) {
+    rejectUpgrade(
+      socket,
+      rejection.code === "rate_limited" ? 429 : 503,
+      rejection,
+    );
+    return;
+  }
+  const releaseReservation = () => {
+    if (!pendingUpgrades.delete(socket)) return;
+    socket.off("close", releaseReservation);
+    socket.off("error", releaseReservation);
+    abuseControls.releaseConnection(source);
+  };
+  socket.once("close", releaseReservation);
+  socket.once("error", releaseReservation);
+  try {
+    websocketServer.handleUpgrade(request, socket, head, (websocket) => {
+      releaseReservation();
+      websocketServer.emit("connection", websocket, request);
+    });
+  } catch {
+    releaseReservation();
+    socket.destroy();
+  }
 });
 
-const sweepTimer = setInterval(() => manager.sweep(), 5 * 60 * 1000);
+const sweepTimer = setInterval(
+  () => {
+    manager.sweep();
+    abuseControls.cleanup();
+  },
+  5 * 60 * 1000,
+);
 sweepTimer.unref();
 
 httpServer.listen(PORT, "0.0.0.0", () => {
