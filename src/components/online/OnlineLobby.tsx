@@ -1,19 +1,31 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  type RefObject,
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+} from "react";
 import GameBoard from "@/components/game/GameBoard";
 import OnlineGameProvider, { onlineSocketUrl } from "./OnlineGameProvider";
 import RoomShareControls from "./RoomShareControls";
 import { readSharedRoomCode, roomShareUrl } from "./roomSharing";
 import type {
+  OnlineConnectionStatus,
   OnlineCredentials,
   OnlineServerMessage,
   OnlineSnapshot,
 } from "./types";
 
 const ONLINE_SESSION_KEY = "four-bros-mahjong.online.session.v1";
+const MAX_AUTOMATIC_RECONNECT_ATTEMPTS = 5;
+const CONNECTION_ERROR_MESSAGE =
+  "オンラインサーバーへ接続できません。設定とネットワークを確認してください。";
+const RECONNECTING_ERROR_MESSAGE =
+  "オンラインサーバーとの接続が切れました。再接続しています。";
 
-type ConnectionStatus = "idle" | "connecting" | "connected" | "reconnecting";
+type ConnectionStatus = OnlineConnectionStatus;
 type JoinRequest =
   | { readonly type: "create"; readonly name: string }
   | { readonly type: "join"; readonly code: string; readonly name: string }
@@ -62,6 +74,75 @@ function messageOf(value: unknown): OnlineServerMessage | null {
     : null;
 }
 
+function connectionStatusMessage(status: ConnectionStatus): string {
+  switch (status) {
+    case "connecting":
+      return "オンラインサーバーへ接続しています…";
+    case "connected":
+      return "オンラインサーバーに接続しました。";
+    case "reconnecting":
+      return "オンラインサーバーへ再接続しています…";
+    case "failed":
+      return "オンラインサーバーへの接続に失敗しました。再試行してください。";
+    default:
+      return "接続情報はこのタブのセッション中だけ保存します。";
+  }
+}
+
+interface ConnectionFeedbackProps {
+  readonly status: ConnectionStatus;
+  readonly error: string;
+  readonly canRetry: boolean;
+  readonly feedbackRef: RefObject<HTMLDivElement | null>;
+  readonly onRetry: (restoreFocus: boolean) => void;
+}
+
+function ConnectionFeedback({
+  status,
+  error,
+  canRetry,
+  feedbackRef,
+  onRetry,
+}: ConnectionFeedbackProps) {
+  const retryButtonRef = useRef<HTMLButtonElement>(null);
+
+  return (
+    <div
+      aria-atomic="true"
+      aria-live="polite"
+      className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-foreground/20 px-3 py-2 text-sm"
+      data-connection-status={status}
+      ref={feedbackRef}
+      tabIndex={-1}
+    >
+      <div className="min-w-0">
+        <p>{connectionStatusMessage(status)}</p>
+        {error ? (
+          <p
+            className="mt-1 text-foreground/70"
+            role={status === "failed" ? "alert" : "status"}
+          >
+            {error}
+          </p>
+        ) : null}
+      </div>
+      {status === "failed" ? (
+        <button
+          type="button"
+          disabled={!canRetry}
+          onClick={() =>
+            onRetry(document.activeElement === retryButtonRef.current)
+          }
+          ref={retryButtonRef}
+          className="min-h-11 shrink-0 rounded-lg border border-control-border px-3 py-2 font-medium whitespace-nowrap hover:bg-foreground/5 disabled:cursor-not-allowed disabled:opacity-40"
+        >
+          再試行
+        </button>
+      ) : null}
+    </div>
+  );
+}
+
 export default function OnlineLobby() {
   const [name, setName] = useState("");
   const [roomCode, setRoomCode] = useState("");
@@ -79,7 +160,21 @@ export default function OnlineLobby() {
   const manualCloseRef = useRef(false);
   const restoreTimerRef = useRef<number | null>(null);
   const restoreCanceledRef = useRef(false);
-  const connectRef = useRef<(request: JoinRequest) => void>(() => undefined);
+  const [activeRequest, setActiveRequest] = useState<JoinRequest | null>(null);
+  const pendingSessionSocketRef = useRef<WebSocket | null>(null);
+  const feedbackRef = useRef<HTMLDivElement>(null);
+  const focusAfterRetryRef = useRef(false);
+  const connectRef = useRef<
+    (request: JoinRequest, reconnecting?: boolean) => void
+  >(() => undefined);
+
+  useEffect(() => {
+    if (!focusAfterRetryRef.current) return;
+    feedbackRef.current?.focus({ preventScroll: true });
+    if (status === "connected" || status === "failed") {
+      focusAfterRetryRef.current = false;
+    }
+  }, [snapshot, status]);
 
   const clearReconnectTimer = useCallback(() => {
     if (reconnectTimerRef.current !== null) {
@@ -88,35 +183,112 @@ export default function OnlineLobby() {
     }
   }, []);
 
+  const scheduleReconnect = useCallback(
+    (message = RECONNECTING_ERROR_MESSAGE) => {
+      if (manualCloseRef.current) return;
+      clearReconnectTimer();
+      const attempt = reconnectAttemptRef.current;
+      if (attempt >= MAX_AUTOMATIC_RECONNECT_ATTEMPTS) {
+        setStatus("failed");
+        setError(CONNECTION_ERROR_MESSAGE);
+        return;
+      }
+
+      reconnectAttemptRef.current = attempt + 1;
+      setStatus("reconnecting");
+      setError(message);
+      const delay = Math.min(10_000, 500 * 2 ** Math.min(attempt, 4));
+      reconnectTimerRef.current = window.setTimeout(() => {
+        reconnectTimerRef.current = null;
+        const current = credentialsRef.current;
+        if (current) {
+          connectRef.current({ type: "resume", ...current }, true);
+        }
+      }, delay);
+    },
+    [clearReconnectTimer],
+  );
+
+  const failHandshake = useCallback(
+    (failedSocket: WebSocket, message: string) => {
+      if (socketRef.current !== failedSocket) return;
+      pendingSessionSocketRef.current = null;
+      socketRef.current = null;
+      setSocket(null);
+      setStatus("failed");
+      setError(message);
+      failedSocket.close();
+    },
+    [],
+  );
+
+  const handleTransportFailure = useCallback(
+    (failedSocket: WebSocket, message = CONNECTION_ERROR_MESSAGE) => {
+      if (socketRef.current !== failedSocket) return;
+      pendingSessionSocketRef.current = null;
+      socketRef.current = null;
+      setSocket(null);
+      failedSocket.close();
+      if (manualCloseRef.current) {
+        setStatus("idle");
+        return;
+      }
+      if (credentialsRef.current) {
+        scheduleReconnect(message);
+      } else {
+        setStatus("failed");
+        setError(message);
+      }
+    },
+    [scheduleReconnect],
+  );
+
   const connect = useCallback(
-    (request: JoinRequest) => {
+    (request: JoinRequest, reconnecting = request.type === "resume") => {
       const url = onlineSocketUrl();
       if (!url) {
         setError(
           "オンラインサーバーURLが未設定です。NEXT_PUBLIC_ONLINE_WS_URLをVercelに設定してください。",
         );
-        setStatus("idle");
+        setStatus("failed");
         return;
       }
       clearReconnectTimer();
       const previous = socketRef.current;
+      socketRef.current = null;
+      pendingSessionSocketRef.current = null;
+      setSocket(null);
       if (previous && previous.readyState !== WebSocket.CLOSED)
         previous.close();
       setError("");
-      setStatus(request.type === "resume" ? "reconnecting" : "connecting");
-      const next = new WebSocket(url);
+      setStatus(reconnecting ? "reconnecting" : "connecting");
+      let next: WebSocket;
+      try {
+        next = new WebSocket(url);
+      } catch {
+        setStatus("failed");
+        setError(CONNECTION_ERROR_MESSAGE);
+        return;
+      }
       socketRef.current = next;
+      pendingSessionSocketRef.current = next;
       setSocket(next);
       next.addEventListener("open", () => {
-        reconnectAttemptRef.current = 0;
-        setStatus("connected");
-        next.send(JSON.stringify(request));
+        if (socketRef.current !== next) return;
+        try {
+          next.send(JSON.stringify(request));
+        } catch {
+          handleTransportFailure(next);
+        }
       });
       next.addEventListener("message", (event) => {
+        if (socketRef.current !== next) return;
         try {
           const message = messageOf(JSON.parse(String(event.data)));
           if (!message) return;
           if (message.type === "session") {
+            pendingSessionSocketRef.current = null;
+            reconnectAttemptRef.current = 0;
             const nextCredentials = {
               code: message.snapshot.code,
               token: message.token,
@@ -135,36 +307,45 @@ export default function OnlineLobby() {
             return;
           }
           if (message.type === "error") {
+            if (pendingSessionSocketRef.current === next) {
+              failHandshake(next, message.message);
+              return;
+            }
             setError(message.message);
             return;
           }
         } catch {
-          setError("オンラインサーバーからの応答を読み取れませんでした。");
+          const message =
+            "オンラインサーバーからの応答を読み取れませんでした。";
+          if (pendingSessionSocketRef.current === next) {
+            failHandshake(next, message);
+          } else {
+            setError(message);
+          }
         }
       });
       next.addEventListener("close", () => {
         if (socketRef.current !== next) return;
+        pendingSessionSocketRef.current = null;
         socketRef.current = null;
         setSocket(null);
         if (manualCloseRef.current || !credentialsRef.current) {
-          setStatus("idle");
+          setStatus(manualCloseRef.current ? "idle" : "failed");
+          if (!manualCloseRef.current) setError(CONNECTION_ERROR_MESSAGE);
           return;
         }
-        const attempt = reconnectAttemptRef.current++;
-        const delay = Math.min(10_000, 500 * 2 ** Math.min(attempt, 4));
-        setStatus("reconnecting");
-        reconnectTimerRef.current = window.setTimeout(() => {
-          const current = credentialsRef.current;
-          if (current) connectRef.current({ type: "resume", ...current });
-        }, delay);
+        scheduleReconnect();
       });
       next.addEventListener("error", () => {
-        setError(
-          "オンラインサーバーへ接続できません。設定とネットワークを確認してください。",
-        );
+        handleTransportFailure(next);
       });
     },
-    [clearReconnectTimer],
+    [
+      clearReconnectTimer,
+      failHandshake,
+      handleTransportFailure,
+      scheduleReconnect,
+    ],
   );
   useEffect(() => {
     connectRef.current = connect;
@@ -182,11 +363,13 @@ export default function OnlineLobby() {
         return;
       }
       // StrictModeの初回effect cleanupで立つフラグを、実際の自動復元では解除する。
+      if (socketRef.current || credentialsRef.current) return;
       manualCloseRef.current = false;
       credentialsRef.current = stored;
+      setActiveRequest({ type: "resume", ...stored });
       setCredentials(stored);
       setRoomCode(stored.code);
-      connect({ type: "resume", ...stored });
+      connect({ type: "resume", ...stored }, true);
     }, 0);
     restoreTimerRef.current = timer;
     return () => {
@@ -199,7 +382,10 @@ export default function OnlineLobby() {
     () => () => {
       manualCloseRef.current = true;
       clearReconnectTimer();
-      socketRef.current?.close();
+      const current = socketRef.current;
+      socketRef.current = null;
+      pendingSessionSocketRef.current = null;
+      current?.close();
     },
     [clearReconnectTimer],
   );
@@ -212,7 +398,26 @@ export default function OnlineLobby() {
     }
     manualCloseRef.current = false;
     reconnectAttemptRef.current = 0;
+    focusAfterRetryRef.current = false;
+    if (request.type !== "resume") {
+      credentialsRef.current = null;
+      setCredentials(null);
+      saveCredentials(null);
+    }
+    setActiveRequest(request);
     connect(request);
+  };
+
+  const retry = (restoreFocus = false) => {
+    manualCloseRef.current = false;
+    reconnectAttemptRef.current = 0;
+    focusAfterRetryRef.current = restoreFocus;
+    const current = credentialsRef.current;
+    const request = current
+      ? ({ type: "resume", ...current } satisfies JoinRequest)
+      : activeRequest;
+    if (!request) return;
+    connect(request, true);
   };
 
   const leave = () => {
@@ -223,11 +428,15 @@ export default function OnlineLobby() {
     }
     manualCloseRef.current = true;
     clearReconnectTimer();
+    focusAfterRetryRef.current = false;
     credentialsRef.current = null;
+    setActiveRequest(null);
+    pendingSessionSocketRef.current = null;
     setCredentials(null);
     saveCredentials(null);
-    socketRef.current?.close();
+    const current = socketRef.current;
     socketRef.current = null;
+    current?.close();
     setSocket(null);
     setSnapshot(null);
     setStatus("idle");
@@ -235,15 +444,16 @@ export default function OnlineLobby() {
   };
 
   const onSendError = useCallback((message: string) => setError(message), []);
+  const canRetry = Boolean(credentials || activeRequest);
   const currentTurnName = snapshot?.currentTurn
     ? snapshot.players.find((player) => player.id === snapshot.currentTurn)
         ?.name
     : null;
 
-  if (snapshot && socket) {
+  if (snapshot) {
     return (
       <OnlineGameProvider
-        socket={socket}
+        socket={status === "connected" ? socket : null}
         snapshot={snapshot}
         onSendError={onSendError}
       >
@@ -294,14 +504,13 @@ export default function OnlineLobby() {
             </span>
           </div>
 
-          {error ? (
-            <p
-              role="status"
-              className="rounded-lg border border-foreground/20 px-3 py-2 text-sm"
-            >
-              {error}
-            </p>
-          ) : null}
+          <ConnectionFeedback
+            status={status}
+            error={error}
+            canRetry={canRetry}
+            feedbackRef={feedbackRef}
+            onRetry={retry}
+          />
           <GameBoard resultHref="/online" />
         </section>
       </OnlineGameProvider>
@@ -372,19 +581,13 @@ export default function OnlineLobby() {
         </div>
       </div>
 
-      <p className="text-xs/5 text-foreground/60">
-        {status === "connecting" || status === "reconnecting"
-          ? "オンラインサーバーへ接続しています…"
-          : "接続情報はこのタブのセッション中だけ保存します。"}
-      </p>
-      {error ? (
-        <p
-          role="alert"
-          className="rounded-lg border border-foreground/20 px-3 py-2 text-sm"
-        >
-          {error}
-        </p>
-      ) : null}
+      <ConnectionFeedback
+        status={status}
+        error={error}
+        canRetry={canRetry}
+        feedbackRef={feedbackRef}
+        onRetry={retry}
+      />
       {credentials && !snapshot ? (
         <button
           type="button"

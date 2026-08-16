@@ -30,6 +30,13 @@ export interface OnlineCredentials {
   readonly token: string;
 }
 
+export type OnlineConnectionStatus =
+  | "idle"
+  | "connecting"
+  | "connected"
+  | "reconnecting"
+  | "failed";
+
 export type OnlineServerMessage =
   | {
       readonly type: "session";
