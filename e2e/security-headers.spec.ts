@@ -1,4 +1,6 @@
 import { expect, test } from "@playwright/test";
+import { onlineWebSocketConnectSource } from "../src/app/_lib/securityHeaders";
+import { e2eServerMode } from "./serverMode";
 
 const HTML_ROUTES = [
   "/",
@@ -7,7 +9,17 @@ const HTML_ROUTES = [
   "/rules",
   "/settings",
   "/history",
+  "/online",
 ];
+const PRODUCTION_ONLINE_WEBSOCKET_SOURCE =
+  "wss://four-bros-mahjong-online-production.up.railway.app";
+
+function connectSourceDirective(csp: string): string | undefined {
+  return csp
+    .split(";")
+    .map((directive) => directive.trim())
+    .find((directive) => directive.startsWith("connect-src "));
+}
 
 test.describe("browser security headers", () => {
   for (const route of HTML_ROUTES) {
@@ -32,6 +44,36 @@ test.describe("browser security headers", () => {
       expect(headers["x-frame-options"]).toBe("DENY");
     });
   }
+
+  test("設定済みのオンラインWebSocket originだけをconnect-srcに許可する", async ({
+    request,
+  }) => {
+    const response = await request.get("/online");
+    const csp = response.headers()["content-security-policy"];
+    const development = e2eServerMode() === "development";
+    const source = onlineWebSocketConnectSource(
+      process.env.NEXT_PUBLIC_ONLINE_WS_URL,
+      development,
+    );
+    expect(response.ok()).toBe(true);
+    expect(connectSourceDirective(csp)).toBe(
+      source ? `connect-src 'self' ${source}` : "connect-src 'self'",
+    );
+  });
+
+  test("本番想定のWebSocket originをconnect-srcへ固定して許可する", async ({
+    request,
+  }) => {
+    test.skip(e2eServerMode() !== "production", "production server mode only");
+
+    const response = await request.get("/online");
+    const csp = response.headers()["content-security-policy"];
+
+    expect(response.ok()).toBe(true);
+    expect(connectSourceDirective(csp)).toBe(
+      `connect-src 'self' ${PRODUCTION_ONLINE_WEBSOCKET_SOURCE}`,
+    );
+  });
 
   for (const route of ["/icon.svg", "/tiles/Pin1.svg"]) {
     test(`${route} はcache可能なSVG専用ポリシーを返す`, async ({ request }) => {

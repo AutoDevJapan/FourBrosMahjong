@@ -1,5 +1,7 @@
 /** Browser security policy shared by the request proxy and its regression tests. */
 
+import { normalizeOnlineWebSocketUrl } from "../../lib/onlineWebSocket";
+
 export const STATIC_SECURITY_HEADERS = {
   "X-Content-Type-Options": "nosniff",
   "Referrer-Policy": "strict-origin-when-cross-origin",
@@ -32,7 +34,27 @@ export const SVG_CONTENT_SECURITY_POLICY = [
  * inline JavaScript. `strict-dynamic` lets those trusted runtime scripts load
  * the hashed application chunks they reference.
  */
-export function contentSecurityPolicy(nonce: string, development: boolean) {
+export function onlineWebSocketConnectSource(
+  configuredUrl: string | undefined,
+  development: boolean,
+): string | null {
+  const normalizedUrl = normalizeOnlineWebSocketUrl(configuredUrl, development);
+  return normalizedUrl ? new URL(normalizedUrl).origin : null;
+}
+
+export function contentSecurityPolicy(
+  nonce: string,
+  development: boolean,
+  onlineWebSocketUrl = process.env.NEXT_PUBLIC_ONLINE_WS_URL,
+) {
+  const onlineWebSocketSource = onlineWebSocketConnectSource(
+    onlineWebSocketUrl,
+    development,
+  );
+  const connectSources = [
+    "'self'",
+    ...(onlineWebSocketSource ? [onlineWebSocketSource] : []),
+  ];
   const directives = [
     "default-src 'self'",
     `script-src 'self' 'nonce-${nonce}' 'strict-dynamic'${development ? " 'unsafe-eval'" : ""}`,
@@ -41,7 +63,7 @@ export function contentSecurityPolicy(nonce: string, development: boolean) {
     "style-src 'self' 'unsafe-inline'",
     "img-src 'self' data: blob:",
     "font-src 'self' data:",
-    "connect-src 'self'",
+    `connect-src ${connectSources.join(" ")}`,
     "manifest-src 'self'",
     // service worker(/sw.js)の取得を明示的に許可する。worker-src を省くと
     // child-src → default-src へフォールバックし、ブラウザによって挙動が変わる
