@@ -1,4 +1,10 @@
-import { act, render, screen, waitFor } from "@testing-library/react";
+import {
+  act,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { StrictMode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -262,6 +268,42 @@ describe("OnlineLobby の参加条件", () => {
     expect(joinButton).toHaveAccessibleDescription(
       /参加条件を満たしています。参加できます。/,
     );
+  });
+
+  it("表示名は絵文字を1書記素として制限し、lone surrogateを修復する", async () => {
+    const user = userEvent.setup();
+    render(<OnlineLobby />);
+    const input = screen.getByLabelText("表示名") as HTMLInputElement;
+    const withinLimit = `${"あ".repeat(11)}😀`;
+
+    await user.click(input);
+    await user.paste(`${withinLimit}超過`);
+    expect(input).toHaveValue(withinLimit);
+    expect(input.value).not.toMatch(/[\uD800-\uDFFF]/u);
+
+    fireEvent.change(input, { target: { value: "名前\uD83D" } });
+    expect(input).toHaveValue("名前�");
+  });
+
+  it("IME変換中は読みを保持し、確定時に書記素上限を適用する", () => {
+    render(<OnlineLobby />);
+    const input = screen.getByLabelText("表示名");
+    const reading = "にほんごにゅうりょくてすと";
+    const converted = "日本語入力テスト";
+    const tooLong = "あ".repeat(15);
+
+    fireEvent.compositionStart(input);
+    fireEvent.change(input, { target: { value: reading } });
+    expect(input, "変換中は読みをそのまま保持する").toHaveValue(reading);
+
+    fireEvent.change(input, { target: { value: converted } });
+    fireEvent.compositionEnd(input, { target: { value: converted } });
+    expect(input).toHaveValue(converted);
+
+    fireEvent.compositionStart(input);
+    fireEvent.change(input, { target: { value: tooLong } });
+    fireEvent.compositionEnd(input, { target: { value: tooLong } });
+    expect(input).toHaveValue("あ".repeat(12));
   });
 });
 

@@ -14,6 +14,7 @@ import {
   type PlayerNames,
   setHumanPlayerIds,
 } from "../src/domain/game/engine";
+import { sanitizePlayerName } from "../src/lib/playerName";
 
 const ROOM_CODE_LENGTH = 6;
 const ROOM_CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
@@ -98,8 +99,7 @@ export function normalizePlayerName(
   fallback = "ゲスト",
 ): string {
   if (typeof value !== "string") return fallback;
-  const name = value.trim().slice(0, 12);
-  return name || fallback;
+  return sanitizePlayerName(value) ?? fallback;
 }
 
 function namesOf(room: Room): PlayerNames {
