@@ -688,6 +688,8 @@ test.describe("対局画面(/game)", () => {
       page,
     }) => {
       for (const width of [320, 360] as const) {
+        // 320px側の確定操作で保存された進行状態を、360px側の初期局面へ持ち越さない。
+        if (width === 360) await page.evaluate(() => sessionStorage.clear());
         await page.setViewportSize({ width, height: 800 });
         await page.goto("/game?seed=0");
         await expect(page.locator('[data-pending="humanDiscard"]')).toHaveCount(
@@ -701,6 +703,7 @@ test.describe("対局画面(/game)", () => {
               );
             }),
         );
+        await page.evaluate(() => window.scrollTo(0, 0));
 
         const hand = visibleHand(page);
         const firstTile = hand.getByRole("option").first();
@@ -719,10 +722,11 @@ test.describe("対局画面(/game)", () => {
           .getByRole("listitem");
         const initialDiscards = await discards.count();
 
-        await page.touchscreen.tap(
-          (box?.x ?? 0) + (box?.width ?? 0) / 2,
-          (box?.y ?? 0) + (box?.height ?? 0) / 2,
-        );
+        // Next dev の開発用ポータルが 320px 画面の下中央に重なるため、
+        // 44px の操作領域内で上端寄りをタップする。本番にはこのポータルは存在しない。
+        const tapX = (box?.x ?? 0) + Math.max(8, (box?.width ?? 0) - 8);
+        const tapY = (box?.y ?? 0) + Math.min(8, (box?.height ?? 0) / 2);
+        await page.touchscreen.tap(tapX, tapY);
 
         await expect(hand.getByRole("option")).toHaveCount(14);
         await expect(discards).toHaveCount(initialDiscards);
