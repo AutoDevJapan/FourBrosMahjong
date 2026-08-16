@@ -189,6 +189,11 @@ test.describe("対局画面(/game)", () => {
   test("狭幅表示は自動適用の説明として伝わり、全体盤面をキーボードで開ける(#613)", async ({
     page,
   }) => {
+    // This intentionally performs a fresh /game navigation at both widths. The
+    // cold Next dev-server compilation can exceed Playwright's default 30s test
+    // budget on a constrained CI runner, so keep the allowance local to this
+    // regression without changing assertion or production E2E timeouts.
+    test.setTimeout(60_000);
     for (const width of [320, 360]) {
       await page.setViewportSize({ width, height: 800 });
       await page.goto("/game?seed=0");
@@ -213,8 +218,13 @@ test.describe("対局画面(/game)", () => {
       ).toBeVisible();
       await page.keyboard.press("Escape");
       await expect(opener).toBeFocused();
-      await expect(
-        page.evaluate(() => document.documentElement.scrollWidth <= innerWidth),
+      // Await the browser result before asserting. Passing this Promise directly to
+      // synchronous `toBeTruthy()` would always pass and let teardown cancel the
+      // in-flight evaluation as `page.evaluate: Test ended` (#638).
+      expect(
+        await page.evaluate(
+          () => document.documentElement.scrollWidth <= innerWidth,
+        ),
       ).toBeTruthy();
     }
   });
