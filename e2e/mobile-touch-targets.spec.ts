@@ -7,19 +7,16 @@ const MIN_TOUCH_SIZE = 44;
 async function expectTouchTarget(
   target: Locator,
   label: string,
-  checkWidth = false,
 ): Promise<void> {
   await expect(target, `${label} が表示されていません`).toBeVisible();
   const box = await target.boundingBox();
   expect(box, `${label} の寸法を取得できません`).not.toBeNull();
+  expect(box?.width, `${label} の幅が44px未満`).toBeGreaterThanOrEqual(
+    MIN_TOUCH_SIZE,
+  );
   expect(box?.height, `${label} の高さが44px未満`).toBeGreaterThanOrEqual(
     MIN_TOUCH_SIZE,
   );
-  if (checkWidth) {
-    expect(box?.width, `${label} の幅が44px未満`).toBeGreaterThanOrEqual(
-      MIN_TOUCH_SIZE,
-    );
-  }
 }
 
 async function expectNoHorizontalOverflow(page: Page): Promise<void> {
@@ -55,7 +52,7 @@ test.describe("狭幅の主要操作タップ領域(#608)", () => {
         "ゲームのロビーへ戻る",
       );
       const openButton = page.getByRole("button", { name: "全体盤面" });
-      await expectTouchTarget(openButton, "全体盤面", true);
+      await expectTouchTarget(openButton, "全体盤面");
       const actionButtons = page
         .getByRole("group", { name: "操作パネル" })
         .getByRole("button");
@@ -73,7 +70,6 @@ test.describe("狭幅の主要操作タップ領域(#608)", () => {
       await expectTouchTarget(
         dialog.getByRole("button", { name: "閉じる" }),
         "全体盤面の閉じる",
-        true,
       );
       await expectNoHorizontalOverflow(page);
       await expectAxeClean(page, '[role="dialog"]');
