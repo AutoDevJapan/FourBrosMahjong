@@ -14,10 +14,17 @@ import OnlineLobby from "./OnlineLobby";
 import type { OnlineServerMessage, OnlineSnapshot } from "./types";
 
 vi.mock("@/components/game/GameBoard", () => ({
-  default: ({ interactionDisabled }: { interactionDisabled?: boolean }) => (
+  default: ({
+    interactionDisabled,
+    interactionDisabledReason,
+  }: {
+    interactionDisabled?: boolean;
+    interactionDisabledReason?: "reconnecting" | "failed";
+  }) => (
     <div
       data-testid="game-board"
       data-interaction-disabled={String(interactionDisabled)}
+      data-interaction-disabled-reason={String(interactionDisabledReason)}
     >
       対局盤
     </div>
@@ -375,6 +382,10 @@ describe("OnlineLobby connection recovery", () => {
       "data-interaction-disabled",
       "false",
     );
+    expect(screen.getByTestId("game-board")).toHaveAttribute(
+      "data-interaction-disabled-reason",
+      "undefined",
+    );
 
     act(() => {
       sockets[0]?.message({
@@ -402,6 +413,10 @@ describe("OnlineLobby connection recovery", () => {
     expect(screen.getByTestId("game-board")).toHaveAttribute(
       "data-interaction-disabled",
       "true",
+    );
+    expect(screen.getByTestId("game-board")).toHaveAttribute(
+      "data-interaction-disabled-reason",
+      "reconnecting",
     );
 
     act(() => vi.advanceTimersByTime(3_999));
@@ -508,6 +523,51 @@ describe("OnlineLobby connection recovery", () => {
     expect(screen.getByTestId("game-board")).toHaveAttribute(
       "data-interaction-disabled",
       "false",
+    );
+  });
+
+  it("保持したsnapshotでも自動再接続終了後は再試行案内へ切り替える", () => {
+    vi.useFakeTimers();
+    render(<OnlineLobby />);
+
+    fireEvent.change(screen.getByLabelText("表示名"), {
+      target: { value: "たろう" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "新しいルームを作る" }));
+
+    act(() => {
+      sockets[0]?.open();
+      sockets[0]?.message({
+        type: "session",
+        token: "t".repeat(24),
+        snapshot: snapshotFixture(),
+      });
+      sockets[0]?.close();
+    });
+
+    // 初回を含む5回の自動再接続をすべて失敗させ、6回目の失敗でfailedへ遷移する。
+    for (const [socketIndex, delay] of [
+      [1, 500],
+      [2, 1_000],
+      [3, 2_000],
+      [4, 4_000],
+      [5, 8_000],
+    ] as const) {
+      act(() => vi.advanceTimersByTime(delay));
+      expect(sockets).toHaveLength(socketIndex + 1);
+      act(() => sockets[socketIndex]?.fail());
+    }
+
+    expect(
+      document.querySelector('[data-connection-status="failed"]'),
+    ).not.toBeNull();
+    expect(screen.getByTestId("game-board")).toHaveAttribute(
+      "data-interaction-disabled",
+      "true",
+    );
+    expect(screen.getByTestId("game-board")).toHaveAttribute(
+      "data-interaction-disabled-reason",
+      "failed",
     );
   });
 
