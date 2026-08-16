@@ -6,7 +6,7 @@ GitHub Release の公開識別子である `v*` tag を、公開後に付け替�
 
 2026-08-15 (JST) の適用監査と 2026-08-17 (JST) の follow-up 読み取り監査では、repository ruleset `protect-existing-release-tags` (ID `20858931`) が `active` で適用済みである。対象は `target=tag`、`refs/tags/v*`、除外なし、rules は `update`・`deletion`・`non_fast_forward`、`bypass_actors` は空である。したがって Release Operator を含む全 actor が、公開済み `v*` tag の付け替え・削除・force-update を拒否される。今回この ruleset の適用・再監査にあたり、tag の作成・更新・削除は行っていない。
 
-監査の再現可能性のため、repository 内に read-only helper [`audit-release-tag-ruleset.mjs`](../../.github/scripts/audit-release-tag-ruleset.mjs) を置く。helper は `includes_parents=false` の ruleset 一覧から repository-owned の対象を **ちょうど 1 件**選び、詳細を取得して validator に渡す。`gh api` の GET 以外は実行せず、対象が無い・複数ある・詳細の一部が取得できない場合は fail closed する。`bypass_actors` は GitHub API の仕様上、ruleset への write access がない caller には返されないため、管理者または ruleset の write access を持つ operator の `gh` 認証で実行する。read-only token での欠落を「bypass なし」と解釈しない。
+監査の再現可能性のため、repository 内に read-only helper [`audit-release-tag-ruleset.mjs`](../../.github/scripts/audit-release-tag-ruleset.mjs) を置く。helper は `includes_parents=false` の ruleset 一覧から repository-owned の対象を **ちょうど 1 件**選び、詳細を取得して validator に渡す。各 API 呼び出しは `gh api --method GET` を argv に明示し、将来のオプション追加による method 上書きも拒否する。対象が無い・複数ある・詳細の一部が取得できない場合は fail closed する。`bypass_actors` は GitHub API の仕様上、ruleset への write access がない caller には返されないため、管理者または ruleset の write access を持つ operator の `gh` 認証で実行する。read-only token での欠落を「bypass なし」と解釈しない。
 
 同日の tag / Release inventory には `v*` tag と GitHub Release が存在しない。そのため既存公開物の SHA を変更しておらず、正常 Release の実作成と実 tag 操作による拒否テストは、次の承認済み release rehearsal まで未実施である。
 
@@ -90,7 +90,7 @@ Ruleset JSON export / API 応答と画面 capture を issue #508 に添付し、
 ```bash
 GITHUB_REPOSITORY=AutoDevJapan/FourBrosMahjong \
   node .github/scripts/audit-release-tag-ruleset.mjs
-gh api 'orgs/AutoDevJapan/teams?per_page=100' --paginate
+gh api --method GET 'orgs/AutoDevJapan/teams?per_page=100' --paginate
 ```
 
 helper の出力と API 応答に含まれる `target=tag`、`source_type=Repository`、`enforcement=active`、include pattern、B の update/deletion/non-fast-forward、`bypass_actors=[]`、`current_user_can_bypass=never` を目視照合する。validator はこの契約を機械検証し、条件不一致なら exit 1 で停止する。監査対象を保存する場合は helper 実行とは別に、上記 list/detail の GET 応答をファイルへ保存する。専用 Team が登録された後は、A の creation + Team bypass も同じように全項目を監査する。
