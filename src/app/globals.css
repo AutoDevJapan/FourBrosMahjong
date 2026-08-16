@@ -1,6 +1,39 @@
 @import "tailwindcss";
 
 /*
+ * コンテンツ走査の除外(#329)。パスはこの CSS ファイル(src/app/)からの相対。
+ *
+ * Tailwind v4 は .gitignore を尊重しつつプロジェクト配下を広範に走査し、**文中の
+ * クラス名リテラルもクラス候補として拾う**。そのため「デッドコードを説明する文章」自体が
+ * そのデッドコードを CSS に残し続ける循環が起きていた(#314 では未使用ユーティリティを
+ * 50 個除去したのに生成 CSS がバイト単位で同一だった)。実害は約 1.6KB の未使用 CSS
+ * (#329 時点の実測で 1,671 バイト / 15 クラス)だが、**バンドル差分を変更の正しさの
+ * 根拠にできなくなる**点が問題である。
+ *
+ * 除外するのはいずれも「実行時に描画されないファイル」に限る:
+ *  - Markdown 系(.md / .mdx / .mdc): 本リポジトリは Markdown を実行時にレンダリング
+ *    しない(ルール要約 /rules もデータを .tsx にハードコードしている)。よって由来する
+ *    クラスは常に未使用。.mdc は Cursor のルールファイルで、AGENTS.md 等と同じく
+ *    エージェント向け文書のためクラス名を引用しうる。
+ *  - テスト/E2E: 実行時の DOM を作らない。クラス名は検出用の正規表現やアサーション中の
+ *    リテラルとして現れるだけ。e2e/ は helpers/ 配下に .spec.ts 以外のファイルがあるため
+ *    ディレクトリごと除外する。src/test/ も同様に、テストしか読まないヘルパ
+ *    (appRoutes.ts / bannerLandmarks.ts など *.test.ts 以外の名前を持つ)を含むため
+ *    ディレクトリごと除外する。
+ *
+ * 逆に .ts/.tsx(テストを除く)は除外しない。実行時のクラス供給源であり、除外すると
+ * 実使用クラスが消えて描画が壊れる。
+ *
+ * **将来 Markdown を実行時描画する機能(react-markdown 等)を入れる場合は、下の
+ * Markdown 除外を必ず見直すこと。** 除外したまま .md をレンダリングすると、そこでしか
+ * 使われないクラスが**無音で欠落**して視覚デグレになる(ビルドもテストも通ってしまう)。
+ */
+@source not "../../**/*.{md,mdx,mdc}";
+@source not "../../**/*.{test,spec}.{ts,tsx}";
+@source not "../../e2e";
+@source not "../test";
+
+/*
  * ダークモード: OS 追従を既定にしつつ手動トグルを併用する(スペック5 5.4.1)。
  *  - data-theme 未設定       → prefers-color-scheme に委譲(下の @media)
  *  - data-theme="light|dark" → 手動選択が OS 設定より優先される
@@ -32,12 +65,16 @@
    * 旧値 #b8b2a1 は白系ページ背景(--background=#fff)に対し 2.12:1 で、白地に直接載る
    * 手牌の枠が非テキスト 3:1 を割っていた。フラットな 1 色では白地(暗い方が有利)と緑フェルト
    * (--table-felt, 明るい方が有利)の双方で同時に 3:1 を満たせない(輝度要件が背反)ため、
-   * 主懸念である白地側を優先して暖色系タウプへ暗くし、白地に対し 3.36:1 を確保する。
+   * 主懸念である白地側を優先して暖色系タウプへ暗くし、白地に対し 3.84:1 を確保する。
+   * #388: 牌は `role="option"` の対話コントロールでもあり、自家スロットは手番ハイライト
+   * (`bg-turn-highlight/5`)+ 手牌枠(`bg-foreground/[.03]`)で地が rgb(244,239,236) まで
+   * 明るく色づく。旧値 #928c78 はこの地に対し 2.95:1 で 3:1 を割っていたため #88826f へ
+   * さらに暗くした(色づいた地に対し 3.36:1 / 白地に対し 3.84:1)。
    * フェルト上では牌面 --tile-face が felt に対し 6.27:1 で牌の輪郭を担い、伏せ牌は内側の
    * 明青ウィーブ/インセット環(--tile-back-mark)が輪郭を担うため、枠のフェルト比低下は境界視認に
    * 影響しない。ダーク値 #6b7280(暗背景 #0a0a0a に対し 4.10:1)は退行させず据え置く。
    */
-  --tile-border: #928c78;
+  --tile-border: #88826f;
   --tile-back: #2b5c9b;
   --tile-back-mark: #dbe7f5;
   --tile-accent-red: #c81e2b;
@@ -72,6 +109,20 @@
   --danger: #b91c1c;
   --positive: #15803d;
   --focus-ring: #1d4ed8;
+  /*
+   * 対話コントロール(ボタン・リンクの pill・テキスト入力・ラジオのラベルカード)の境界線
+   * (#388 / WCAG 1.4.11 / スペック5 5.2.4)。**非テキストコントラスト 3:1 が必須**。
+   *
+   * 従来は border-foreground/25 のように --foreground を α で薄めていたが、合成後の実色は
+   * ライト rgb(197,197,197)=1.73:1 / ダーク rgb(66,66,66)=1.97:1 で 3:1 を大きく割っていた。
+   * とりわけ /settings の対局者名入力は地が透明で、枠が唯一のコントロール識別手段になる。
+   *
+   * α 修飾子は「トークンの値」を見ても実際の描画色が分からないため、合成後の色そのものを
+   * 専用トークンとして持つ。ページ背景(--background)とホバー地(--foreground を 5% 重ねた地)の
+   * 双方に対して 3:1 以上を満たす値を選ぶ。装飾目的の枠(1.4.11 対象外)は従来どおり
+   * border-foreground/<α> のままとし、「どちらの意図か」がクラス名から読めるようにする。
+   */
+  --control-border: #858585;
 
   /*
    * 牌サイズの基準ユニット(スペック5 5.3.2 段階①)。すべての牌サイズはこの --u の倍数で
@@ -79,6 +130,18 @@
    * 卓全体を横スクロールなしに流体縮小する。既定値は従来の固定サイズ相当(テーマ非依存)。
    */
   --u: 0.9rem;
+
+  /*
+   * 河牌の --u 倍率。牌寸法(.game-tile--river)と河グリッドの列幅(.river-grid)が
+   * 同じ幅を導くための唯一の定義元。
+   *
+   * **var() を含めてはならない**。カスタムプロパティの計算値は「宣言された要素で var() を
+   * 置換したトークン列」であり、置換済みの値が子孫へ継承される(CSS Variables L1)。
+   * ここで `calc(var(--u) * 1.65)` と書くと :root の --u(0.9rem)で確定してしまい、
+   * .board-cross の --u 上書き(コンテナ幅連動 clamp)が一切効かなくなる。
+   * 倍率だけを共有し、--u との掛け算は使用側(卓内で --u が有効な要素)で行う。
+   */
+  --tile-river-ratio: 1.65;
 }
 
 /* 手動でダークを選択した場合は OS 設定より優先し、全トークンをダーク値にする。 */
@@ -99,6 +162,8 @@
   --danger: #f87171;
   --positive: #4ade80;
   --focus-ring: #60a5fa;
+  /* ダークは暗い地に対して 3:1 を満たす明るめのグレー(#388)。 */
+  --control-border: #6e6e6e;
 }
 
 /* ユーザーが明示選択していない場合のみ OS のダーク設定に追従する。 */
@@ -120,6 +185,8 @@
     --danger: #f87171;
     --positive: #4ade80;
     --focus-ring: #60a5fa;
+    /* ダークは暗い地に対して 3:1 を満たす明るめのグレー(#388)。 */
+    --control-border: #6e6e6e;
   }
 }
 
@@ -154,6 +221,7 @@
   --color-danger: var(--danger);
   --color-positive: var(--positive);
   --color-focus-ring: var(--focus-ring);
+  --color-control-border: var(--control-border);
 }
 
 body {
@@ -161,6 +229,24 @@ body {
   color: var(--foreground);
   /* Issue #72: Arial ハードコードを廃し、@theme の --font-sans(Geist + Noto Sans JP)を参照する。 */
   font-family: var(--font-sans);
+}
+
+/*
+ * 動きを減らす OS 設定(issue #364)。コンポーネント側の `motion-reduce` は意図を局所的に
+ * 示し、この全体規則は今後追加される transition / animation の漏れも防ぐ。状態そのものは
+ * 即時に反映し、フォーカスリングや選択リングなど動きに依存しない手掛かりは維持する。
+ */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    transition-duration: 0s !important;
+    transition-delay: 0s !important;
+    animation-duration: 0.01ms !important;
+    animation-delay: 0s !important;
+    animation-iteration-count: 1 !important;
+  }
 }
 
 /*
@@ -184,11 +270,64 @@ body {
   font-size: calc(var(--u) * 0.95);
 }
 
+/*
+ * タッチ時の自家手牌(#607)。牌面は狭幅でも縮小して卓に収めるが、操作対象の li は
+ * 44px 以上を確保して隣接牌との誤タップを減らす。空いた幅は牌の周囲に残すため、
+ * 牌面そのものの判読性と既存のキーボード/マウス配置を変えない。
+ */
+@media (pointer: coarse), (any-pointer: coarse) {
+  .hand-touch-option {
+    display: inline-flex;
+    min-width: 2.75rem;
+    min-height: 2.75rem;
+    align-items: center;
+    justify-content: center;
+    touch-action: manipulation;
+  }
+}
+
 .game-tile--river {
   height: calc(var(--u) * 2.2);
-  width: calc(var(--u) * 1.65);
+  width: calc(var(--u) * var(--tile-river-ratio));
   /* 牌面テキストは色非依存の識別情報(§5.2.1)。狭幅でも判読性を保つよう字面を確保しつつ幅内に収める。 */
   font-size: calc(var(--u) * 0.7);
+}
+
+/*
+ * 河(捨て牌)のグリッド(#258 / #387)。
+ *
+ * 列は河牌1枚ぶんの固定幅(--tile-river-w)とし、`auto-fill` で「スロット幅に入るぶんだけ」
+ * 列を作る。上限は 6 列で、これは max-width が 7 列ぶんに満たない幅を要求することで効かせる。
+ *
+ * 6 列固定だと最小コンテンツ幅が牌6枚ぶんに固定され、段階①のクロス配置で左右スロットの
+ * 幅(卓幅の 1/3.5)を超えた瞬間にページ全体が横スクロールしていた(#387)。列数を可変に
+ * することで、狭いスロットでは自動的に段数が増えて幅に収まる。
+ * spec 5.3.2「いずれの段階でも横スクロールでのレイアウト成立は採用しない」。
+ *
+ * このルールは Tailwind のユーティリティ層の外(レイヤー外)にあるため、`max-w-*` はもちろん
+ * **`hidden`(display)も無言で no-op になる**(既存の .game-tile* 群は寸法のみでこの罠が無い)。
+ * 河の可視制御が必要になったら、この要素ではなく親要素側で行うこと。
+ */
+.river-grid {
+  /* 牌間隔(従来の gap-0.5 相当)。列数の上限計算にも使うため名前を付ける。 */
+  --river-gap: 0.125rem;
+  /*
+   * --u は「この要素で有効な値」(卓内なら .board-cross の clamp())で解決される。
+   * :root 側で var(--u) ごと確定させてはならない理由は --tile-river-ratio の注記を参照。
+   */
+  --tile-river-w: calc(var(--u) * var(--tile-river-ratio));
+  display: grid;
+  grid-auto-flow: row;
+  grid-auto-rows: min-content;
+  grid-template-columns: repeat(auto-fill, var(--tile-river-w));
+  gap: var(--river-gap);
+  /*
+   * 上限 6 列。`6 * w + 5 * gap`(6 列ぴったり)ではなく gap 1 つぶんの余裕を持たせる。
+   * Gecko はトラック幅を 1/60px 単位で切り上げるため、ぴったりだと合計が max-width を
+   * 数百分の1px 超えて 6 列目が落ち、Firefox でだけ 5 列/段になる。7 列目には
+   * `w + gap`(> gap)が必要なので、この余裕で 7 列になることはない。
+   */
+  max-width: calc(6 * (var(--tile-river-w) + var(--river-gap)));
 }
 
 .game-tile--dora {

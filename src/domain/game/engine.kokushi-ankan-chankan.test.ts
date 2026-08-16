@@ -44,7 +44,7 @@ function armAnkan(
   hand.melds.east = [];
   // pool(= hands + drawn)に暗槓する4枚を含める。残り(1s 9s)は任意。
   hand.hands.east = parseTiles(`${ankanKind} ${ankanKind} ${ankanKind} 1s 9s`);
-  hand.drawn = parseTile(ankanKind);
+  hand.drawn = { tile: parseTile(ankanKind), source: "live" };
   hand.turn = "east";
 
   const ankanTile = parseTile(ankanKind);
@@ -77,7 +77,10 @@ function seatWaits(
   if (hand === null) throw new Error("no hand");
   hand.hands[seat] = parseTiles(notation);
   hand.melds[seat] = [];
-  hand.discards[seat] = discards.flatMap((d) => parseTiles(d));
+  const river = discards.flatMap((d) => parseTiles(d));
+  hand.discards[seat] = river;
+  // 捨て牌フリテンの判定は打牌履歴側を見る(#395)。河と同じ内容で揃える。
+  hand.discardHistory[seat] = [...river];
 }
 
 describe("engine: 国士無双の暗槓槍槓(Q17 フォローアップ・#126)", () => {

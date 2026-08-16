@@ -23,7 +23,7 @@ describe("engine: リーチ宣言牌ロン(#209)", () => {
 
     const declarationTile = parseTile("2z");
     hand.hands.east = parseTiles("123m 456m 789m 234p 5s");
-    hand.drawn = declarationTile;
+    hand.drawn = { tile: declarationTile, source: "live" };
     hand.turn = "east";
 
     const beforePoints = { ...base.points };

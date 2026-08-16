@@ -31,7 +31,7 @@ function expectTileConservation(state: EngineState): void {
       melds.flatMap((meld) => [...meld.tiles]),
     ),
     ...Object.values(hand.discards).flat(),
-    ...(hand.drawn ? [hand.drawn] : []),
+    ...(hand.drawn ? [hand.drawn.tile] : []),
   ];
   for (const count of Object.values(hand.kita)) {
     for (let i = 0; i < count; i++) {
@@ -46,6 +46,29 @@ function expectTileConservation(state: EngineState): void {
   expect(signature(actual)).toEqual(signature(buildTileSet()));
 }
 
+/**
+ * 表示用の河が判定用の打牌履歴の**部分列**であることを検証する(#395)。
+ *
+ * 河は「履歴から鳴かれた牌を抜いたもの」でなければならない。将来 `discards` にだけ
+ * append する経路(または `discardHistory` を鳴きで削る退行)が入ると、ここで落ちる。
+ */
+function expectRiverIsSubsequenceOfHistory(state: EngineState): void {
+  const hand = state.hand;
+  if (hand === null) return;
+  for (const seat of ["east", "south", "west"] as const) {
+    const river = hand.discards[seat];
+    const history = hand.discardHistory[seat];
+    expect(river.length).toBeLessThanOrEqual(history.length);
+    let cursor = 0;
+    for (const tile of river) {
+      while (cursor < history.length && history[cursor] !== tile) cursor += 1;
+      // 実体(参照)一致で照合する。同種の別牌に読み替えられるのを防ぐ。
+      expect(history[cursor]).toBe(tile);
+      cursor += 1;
+    }
+  }
+}
+
 /** 自家は合法牌を切り、鳴き/ロンを見送ってAIの自動判断を観測する決定的ドライバ。 */
 function observeAiActions(
   seed: number,
@@ -56,6 +79,7 @@ function observeAiActions(
 
   for (let guard = 0; guard < 3000 && state.phase !== "gameEnd"; guard++) {
     expectTileConservation(state);
+    expectRiverIsSubsequenceOfHistory(state);
     const before = state.hand
       ? {
           riichi: { ...state.hand.riichi },
@@ -78,7 +102,10 @@ function observeAiActions(
       const hand = state.hand;
       const seat = hand ? seatOfPlayer(hand.seating, "p0") : null;
       if (hand === null || seat === null) break;
-      const pool = [...hand.hands[seat], ...(hand.drawn ? [hand.drawn] : [])];
+      const pool = [
+        ...hand.hands[seat],
+        ...(hand.drawn ? [hand.drawn.tile] : []),
+      ];
       const tile = pool.find(
         (candidate) =>
           !state.pending ||
@@ -134,15 +161,20 @@ function observeAiActions(
 
   expect([...observed]).toEqual(expect.arrayContaining([...wanted]));
   expectTileConservation(state);
+  expectRiverIsSubsequenceOfHistory(state);
   return state;
 }
 
 describe("engine: AIのリーチ・鳴き・カン(#169)", () => {
-  it("seed=1でAIがリーチ・ポン・加槓し、GUI viewへ状態が投影される", () => {
-    observeAiActions(1, ["riichi", "pon", "kakan"]);
+  it("seed=27でAIがリーチ・役あり大明槓・暗槓し、GUI viewへ状態が投影される", () => {
+    // seed は observeAiActions と同一ドライバのオフライン走査で選定
+    // (#294 で 1 → 22、#304 で 22 → 27 へ再選定)。#304 で「向聴を悪化させるカンは
+    // 宣言しない」ガードが入り、seed=22 では暗槓が発火しなくなったため。
+    // seed=27 は修正前後どちらの実装でも3アクションが揃うことを走査で確認済み。
+    observeAiActions(27, ["riichi", "daiminkan", "ankan"]);
   });
 
-  it("seed=7でAIが大明槓・暗槓し、牌保存則を維持する", () => {
-    observeAiActions(7, ["daiminkan", "ankan"]);
+  it("seed=7でAIが役ありポン・加槓し、牌保存則を維持する", () => {
+    observeAiActions(7, ["pon", "kakan"]);
   });
 });

@@ -14,10 +14,9 @@ name: gitleaks-version-check
 #
 # 注意: GitHub は既定の GITHUB_TOKEN によって発生した push/PR 作成イベントでは
 # 他のワークフローの pull_request/push トリガーを自動発火しない(無限ループ防止の
-# 仕様)。そのため、gitleaks.yml は「PR を開いただけ」では自動実行されない。
-# これを補うため、ブランチを push した直後に `gh workflow run gitleaks.yml
-# --ref <branch>` で明示的に workflow_dispatch 起動する。この実行は同じコミット
-# SHA に紐づくため、作成された PR のチェック欄にも反映される。
+# 仕様)。そのため、「PR を開くだけ」では gitleaks と CI の required checks が作られない。
+# これを補うため、ブランチを push した直後に両 workflow を workflow_dispatch 起動する。
+# これらの実行は同じコミット SHA に紐づき、作成された PR のチェック欄にも反映される。
 # マージするかどうかは引き続き人間のレビューに委ねる。
 
 on:
@@ -37,6 +36,8 @@ jobs:
   check-version:
     name: Check gitleaks latest release
     runs-on: ubuntu-latest
+    # 月次ジョブでも異常時に既定の6時間まで runner を占有させない (#491)。
+    timeout-minutes: 10
     # このジョブ自体は読み取りのみ。ブランチ作成・PR 作成が必要な場合だけ
     # 昇格した権限で後続ジョブを呼び出す。
     permissions:
@@ -47,7 +48,7 @@ jobs:
       needs_update: ${{ steps.compare.outputs.needs_update }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Compare pinned version with latest release
         id: compare
@@ -63,11 +64,9 @@ jobs:
           fi
 
           latest_tag="$(gh api repos/gitleaks/gitleaks/releases/latest --jq .tag_name)"
-          latest_version="${latest_tag#v}"
-          if [ -z "$latest_version" ]; then
-            echo "::error::gitleaks の最新リリースを取得できませんでした" >&2
-            exit 1
-          fi
+          # upstream release metadata は信頼せず、output・branch・sed に渡す前に
+          # 安定版の厳密な vMAJOR.MINOR.PATCH へ制限する。
+          latest_version="$(node .github/scripts/gitleaks-version.mjs "$latest_tag")"
 
           echo "current_version=${current_version}" >> "$GITHUB_OUTPUT"
           echo "latest_version=${latest_version}" >> "$GITHUB_OUTPUT"
@@ -85,7 +84,9 @@ jobs:
     needs: check-version
     if: needs.check-version.outputs.needs_update == 'true'
     runs-on: ubuntu-latest
-    # ブランチの push・PR 作成・gitleaks.yml の手動起動のために書き込み権限が必要。
+    # 同上 (#491)。
+    timeout-minutes: 10
+    # ブランチの push・PR 作成・gitleaks.yml と ci.yml の手動起動のために書き込み権限が必要。
     # このジョブ (バージョン差分が検出された場合のみ実行) に限定して付与する。
     permissions:
       contents: write
@@ -97,7 +98,7 @@ jobs:
       LATEST_VERSION: ${{ needs.check-version.outputs.latest_version }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Skip if a bump PR is already open
         id: existing
@@ -122,28 +123,38 @@ jobs:
 
       - name: Commit and push
         if: steps.existing.outputs.skip == 'false'
+        env:
+          BRANCH: ${{ steps.existing.outputs.branch }}
         run: |
           set -euo pipefail
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git checkout -b "${{ steps.existing.outputs.branch }}"
+          git checkout -b "$BRANCH"
           git add .github/workflows/gitleaks.yml
           git commit -m "chore: bump gitleaks CLI to v${LATEST_VERSION}"
           # force-with-lease: 前回の更新提案が未マージのままクローズされ、同名
           # ブランチが remote に残っているケースでも安全に上書きできるようにする。
-          git push --force-with-lease origin "${{ steps.existing.outputs.branch }}"
+          # checkout はその remote branch を fetch しないため、引数なしの lease では
+          # 期待 tip が無く既存 branch を更新できない。直前に観測した tip を明示し、
+          # 観測後に別 actor が更新していれば push を拒否する。
+          node .github/scripts/push-branch-with-lease.mjs "$BRANCH"
 
-      - name: Trigger gitleaks check on the new branch
+      - name: Trigger required checks on the new branch
         if: steps.existing.outputs.skip == 'false'
+        env:
+          BRANCH: ${{ steps.existing.outputs.branch }}
         run: |
           set -euo pipefail
           # GITHUB_TOKEN による push は他ワークフローの pull_request/push トリガーを
-          # 自動発火しないため、gitleaks.yml をこのブランチに対して明示的に起動する。
+          # 自動発火しないため、required checksをこのブランチに対して明示的に起動する。
           # 実行結果は同じコミット SHA に紐づき、後続で作成する PR のチェック欄にも表示される。
-          gh workflow run gitleaks.yml --ref "${{ steps.existing.outputs.branch }}"
+          gh workflow run gitleaks.yml --ref "$BRANCH"
+          gh workflow run ci.yml --ref "$BRANCH"
 
       - name: Open PR
         if: steps.existing.outputs.skip == 'false'
+        env:
+          BRANCH: ${{ steps.existing.outputs.branch }}
         run: |
           set -euo pipefail
           cat > pr-body.md <<EOF
@@ -156,10 +167,10 @@ jobs:
           ## 検証について
 
           既定の GITHUB_TOKEN による push/PR 作成は他ワークフローの自動トリガーを発火しないため、
-          このワークフローが明示的に \`gitleaks.yml\` をこのブランチに対して workflow_dispatch
-          起動しています。新バージョンのダウンロード・チェックサム検証・\`gitleaks detect\` の
-          実行結果は、この PR のチェック欄に反映されます。gitleaks チェックが green になっている
-          ことを確認してからマージしてください。
+          このワークフローが明示的に \`gitleaks.yml\` と \`ci.yml\` をこのブランチに対して
+          workflow_dispatch 起動しています。新バージョンのダウンロード・チェックサム検証・
+          \`gitleaks detect\` と全CIの実行結果は、この PR のチェック欄に反映されます。
+          required checks がすべて green になっていることを確認してからマージしてください。
 
           リリースノート: https://github.com/gitleaks/gitleaks/releases/tag/v${LATEST_VERSION}
           EOF
@@ -168,5 +179,5 @@ jobs:
             --title "chore: bump gitleaks CLI to v${LATEST_VERSION}" \
             --body-file pr-body.md \
             --base main \
-            --head "${{ steps.existing.outputs.branch }}" \
+            --head "$BRANCH" \
             --label ci

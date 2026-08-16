@@ -17,10 +17,10 @@ import {
   createInitialRound,
   dealerOf,
   isOorasu,
-  roundLabel,
   ROUNDS_PER_WIND,
   RoundProgressionError,
   type RoundState,
+  roundLabel,
   seatingOf,
 } from "../round/round";
 import { seatedPlayers } from "../round/seat";

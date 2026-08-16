@@ -27,12 +27,13 @@ import {
   useState,
   useSyncExternalStore,
 } from "react";
+import type { RoundSummary } from "@/domain/game/engine";
 import Modal from "../common/Modal";
 import { tileLabel } from "../common/tileLabel";
 import ActionPanel, { type ActionItem } from "./ActionPanel";
 import { useGame } from "./GameProvider";
+import type { HandProps, HandTileState } from "./Hand";
 import LiveRegion from "./LiveRegion";
-import type { HandTileState } from "./Hand";
 import PlayerSlot from "./PlayerSlot";
 import Table from "./Table";
 import type { SeatPosition, TileData } from "./types";
@@ -55,7 +56,27 @@ export function pulledKitaCount(
   return count - (previous.roundKey === roundKey ? previous.count : 0);
 }
 
-export default function GameBoard() {
+/**
+ * 半荘終了時の残存供託の帰属を告げる一文(#282)。流局で半荘が終わり供託が残存した場合、
+ * その配分は和了内訳(`WinDetails`)に現れないため、hint / 読み上げで唯一の可視サマリになる。
+ * 残存がなければ空文字。
+ */
+export function residualSticksNote(
+  summary: Pick<RoundSummary, "residualSticks"> | null,
+): string {
+  const award = summary?.residualSticks;
+  if (!award) return "";
+  return `残存供託${award.sticks}本（${award.points.toLocaleString("ja-JP")}点）は${award.recipientName}が取得。`;
+}
+
+export interface GameBoardProps {
+  /** 結果ボタンの遷移先。オンライン対局は同じルームへ戻るため上書きする。 */
+  readonly resultHref?: string;
+}
+
+export default function GameBoard({
+  resultHref = "/game/result",
+}: GameBoardProps) {
   const { view, phase, pending, roundSummary, controls } = useGame();
   const { slots, tableInfo, dora } = view;
   const router = useRouter();
@@ -73,6 +94,11 @@ export default function GameBoard() {
   // 全体盤面モーダル(スペック5 5.3.2 段階②): フォーカス表示でコンパクト化された他家情報を
   // クロス配置のまま再確認するための開閉状態。モーダルの表示自体は `< 360px` でのみ意味を持つ。
   const [boardOpen, setBoardOpen] = useState(false);
+  const boardOpenerRef = useRef<HTMLButtonElement>(null);
+  // トリガー(「全体盤面」ボタン)は段階②のサブツリー内にあり、卓幅が 360px 以上へ変わると
+  // コンテナクエリの display:none で到達不能になる。その場合の最終復帰先として、常に描画され
+  // 続ける盤面ルートを渡す(スペック5 5.2.2 / #377)。
+  const boardRootRef = useRef<HTMLDivElement>(null);
   const selfKitaCount =
     slots.self.kind === "seated" ? slots.self.player.kitaCount : 0;
   const roundKey = `${tableInfo.roundWind}-${tableInfo.handNumber}-${tableInfo.honba}`;
@@ -101,22 +127,20 @@ export default function GameBoard() {
     const timer = window.setTimeout(() => setKitaAnnouncement(""), 1500);
     return () => window.clearTimeout(timer);
   }, [kitaAnnouncement]);
-  // 全体盤面を開いている間は盤面本体を `inert` にする(下記 return 参照)。inert 化はトリガー
-  // ボタンから即座にフォーカスを奪う(祖先が inert になると activeElement は body へ落ちる)ため、
-  // Modal 側の「開く前の activeElement へ復帰」だけでは body へ戻ってしまう。トリガー参照を保持し、
-  // モーダルが閉じた(inert 解除後の)タイミングでこのボタンへ確実にフォーカスを戻す。
-  const boardTriggerRef = useRef<HTMLButtonElement>(null);
-  const wasBoardOpen = useRef(boardOpen);
-  useEffect(() => {
-    if (wasBoardOpen.current && !boardOpen) {
-      boardTriggerRef.current?.focus();
-    }
-    wasBoardOpen.current = boardOpen;
-  }, [boardOpen]);
-
   // リーチ宣言モード: オンのとき、次に選んだ手牌が「リーチ宣言牌」として切られる。
   const [riichiArmed, setRiichiArmed] = useState(false);
-  const [tileFeedback, setTileFeedback] = useState("");
+  const [tileFeedback, setTileFeedback] = useState({
+    message: "",
+    eventId: 0,
+  });
+  // live region は同じ文字列を再代入しただけでは DOM mutation が起きず、AT が再通知できない。
+  // 操作イベントごとに連番を進め、LiveRegion 内の子ノードを交換して同一理由も再通知可能にする。
+  const announceBlockedTile = useCallback((message: string) => {
+    setTileFeedback((previous) => ({
+      message,
+      eventId: previous.eventId + 1,
+    }));
+  }, []);
   const canRiichi = pending?.kind === "humanDiscard" && pending.canRiichi;
   // リーチ可能な打牌待ちでなくなったら arming を解除する(レンダー中の前回値比較 =
   // set-state-in-effect を避ける React 公認の「前回レンダー情報の保持」パターン)。
@@ -129,28 +153,14 @@ export default function GameBoard() {
   // 半荘終了 → 結果画面へ(スペック6 6.3)。engine の確定結果は GameProvider が保持し、
   // 遷移先の /game/result が読み取る(スペック6 6.5 / 6.9)。
   //
-  // 自動遷移は「対局中に gameEnd へ**遷移した瞬間**」の1回だけ、`router.replace` で行う(#206 /
-  // #207)。`replace` により履歴へ /game と /game/result の重複エントリを積まず、結果画面から
-  // ブラウザ「戻る」で最終的にロビーへ帰れる。終局済み journal の復元やブラウザバックなど
-  // 「マウント時点で既に gameEnd」の場合は遷移せず、操作パネルの「結果を見る / 新しい半荘を
-  // 開始」を出口として提示する(ロビーの「対局を開始」からの再訪でも /game に留まれる)。
-  // /game/result 直接アクセス時のリロード復元(#190)は GameProvider の journal 再生が担う
-  // ため、この変更の影響を受けない。
-  //
-  // 遷移検知は上記 prevCanRiichi と同じ「レンダー中の前回値比較」パターンで行い、遷移で
-  // 到達した gameEnd だけ `redirecting` を立てる。`redirecting` の間は出口パネルを描かず
-  // 遷移案内のみ表示するため、自動遷移前の1フレームに出口パネルが明滅しない。
-  const [prevPhase, setPrevPhase] = useState(phase);
-  const [redirecting, setRedirecting] = useState(false);
-  if (prevPhase !== phase) {
-    setPrevPhase(phase);
-    setRedirecting(phase === "gameEnd");
-  }
-  useEffect(() => {
-    if (redirecting) {
-      router.replace("/game/result");
-    }
-  }, [redirecting, router]);
+  // 半荘を終える局(トビ / 南4完了 / 親トップやめ)は `roundEnd` を経由せず `gameEnd` へ直行する
+  // (engine spec 2.8)。ここで自動遷移すると最終局の決着(和了内訳・点数移動)が1フレームも
+  // 確認できないため(#277)、gameEnd では自動遷移せず `roundEnd` と同様に決着サマリを表示し、
+  // 主要ボタン「結果を見る」(ユーザー操作の push)で結果画面へ進む。push でも履歴トラップは
+  // 生じない: /game は gameEnd で自動リダイレクトしないため、結果画面から「戻る」→ /game
+  // (最終局の決着表示)→「戻る」→ ロビーと素直に脱出できる(#206/#207 の回帰なし)。
+  // 終局済み journal の復元・結果画面からのブラウザバックなど「マウント時点で既に gameEnd」の
+  // 場合も同じ出口 UI に合流する(リロードでも同じ決着表示が復元される / #193)。
 
   const handleSelectTile = useCallback(
     (_index: number, tile: TileData) => {
@@ -165,7 +175,7 @@ export default function GameBoard() {
       ) {
         return;
       }
-      setTileFeedback("");
+      setTileFeedback((previous) => ({ ...previous, message: "" }));
       if (riichiArmed && pending.canRiichi) {
         controls.riichi(tile);
         setRiichiArmed(false);
@@ -176,17 +186,17 @@ export default function GameBoard() {
     [pending, controls, riichiArmed],
   );
 
+  // 打牌フェーズ(humanDiscard)でのみ自家手牌を対話可能にする。局終了(roundEnd/gameEnd)や
+  // 他家打牌への応答待ち(humanReact)では閲覧専用の静的 list として描画し、牌ごとの
+  // 「禁止」バッジ・理由文を付けない(#257 / スペック5 5.2.3 の読み上げ渋滞回避)。
+  const handInteractive = pending?.kind === "humanDiscard";
+
   const handTileStates = useMemo<readonly HandTileState[]>(() => {
     const self = slots.self;
     if (self.kind !== "seated" || !self.player.hand) return [];
+    // 打牌フェーズ外は `Hand` の readOnly 経路で描画するため、個別の牌状態を構築しない(#257)。
+    if (pending?.kind !== "humanDiscard") return [];
     return self.player.hand.map((tile) => {
-      if (pending?.kind !== "humanDiscard") {
-        return {
-          disabled: true,
-          reason: "現在は打牌できません。",
-          indicator: "禁止",
-        };
-      }
       if (pending.locked) {
         return {
           disabled: true,
@@ -237,9 +247,6 @@ export default function GameBoard() {
       ];
     }
     if (phase === "gameEnd") {
-      // 結果画面への自動遷移(replace)が予約されている間は出口パネルを描かない
-      // (遷移前の1フレームにパネルが明滅するのを避ける)。
-      if (redirecting) return [];
       // 終局後の /game の出口(#207): 結果確認に加えて、その場で新規半荘を開始できる。
       // `newGame` は journal を新規半荘で上書きするため、以後の /game 再訪は新しい対局になる。
       return [
@@ -247,7 +254,7 @@ export default function GameBoard() {
           key: "result",
           label: "結果を見る",
           icon: "▶",
-          onClick: () => router.push("/game/result"),
+          onClick: () => router.push(resultHref),
           primary: true,
         },
         {
@@ -321,7 +328,7 @@ export default function GameBoard() {
           label: riichiArmed ? "リーチ解除" : "リーチ",
           icon: "宣",
           onClick: () => {
-            setTileFeedback("");
+            setTileFeedback((previous) => ({ ...previous, message: "" }));
             setRiichiArmed((armed) => !armed);
           },
           primary: riichiArmed,
@@ -346,14 +353,16 @@ export default function GameBoard() {
       return items;
     }
     return [];
-  }, [phase, pending, controls, router, riichiArmed, redirecting]);
+  }, [phase, pending, controls, router, resultHref, riichiArmed]);
 
   const hint = useMemo(() => {
     if (phase === "roundEnd") return roundSummary?.label ?? "";
     if (phase === "gameEnd") {
-      return redirecting
-        ? "半荘終了。結果画面へ移動します。"
-        : "半荘終了。結果を確認するか、新しい半荘を開始できます。";
+      // 最終局の決着ラベル(流局サマリ含む)も併記する。和了決着の詳細は WinDetails が描く
+      // が、流局で終わる半荘(南4流局完了・トビ流局)はこのラベルが唯一の可視サマリになる(#277)。
+      // 残存供託の帰属(#282)も併記し、供託カウント0・持ち点・デルタの整合を検算可能にする。
+      const label = roundSummary ? `${roundSummary.label}。` : "";
+      return `${label}${residualSticksNote(roundSummary)}半荘終了。結果を確認するか、新しい半荘を開始できます。`;
     }
     if (pending?.kind === "humanReact") {
       // 槍槓応答(#208): 他家の槓宣言への横取りロン機会であることを明示する。
@@ -379,26 +388,32 @@ export default function GameBoard() {
       return "牌を選んで打牌してください(北抜きは自動)。";
     }
     return "";
-  }, [phase, pending, roundSummary, riichiArmed, redirecting]);
+  }, [phase, pending, roundSummary, riichiArmed]);
 
   const announcement = useMemo(() => {
-    if (tileFeedback) return tileFeedback;
+    if (tileFeedback.message) return tileFeedback.message;
     if (pending?.kind === "humanDiscard") return "あなたの手番です。";
     if (pending?.kind === "humanReact") {
       if (pending.chankan !== undefined) return "槍槓ロンできます。";
       return pending.canRon ? "ロンできます。" : "鳴きできます。";
     }
     return "";
-  }, [pending, tileFeedback]);
+  }, [pending, tileFeedback.message]);
 
   const assertive = useMemo(() => {
-    if (phase === "roundEnd" || phase === "gameEnd") {
-      return roundSummary?.label ?? "";
+    if (phase === "roundEnd") return roundSummary?.label ?? "";
+    if (phase === "gameEnd") {
+      // 自動遷移を廃止した(#277)後は /game に留まるため、通常の局終了(「次の局へ」)と
+      // 半荘終了(「結果を見る」)を読み上げで区別できるよう「半荘終了」を明示する。
+      // 残存供託の帰属(#282)も読み上げに含める(視覚の hint と同一情報)。
+      const label = roundSummary ? `${roundSummary.label}。` : "";
+      return `${label}${residualSticksNote(roundSummary)}半荘終了。`;
     }
     return "";
   }, [phase, roundSummary]);
 
-  // `onSelect` を明示的に受け取り、全体盤面モーダル(閲覧専用)では自家手牌の打牌を無効化できる。
+  // `onSelect` を明示的に受け取り、全体盤面モーダル(閲覧専用)や打牌フェーズ外(#257)では
+  // `handReadOnly` で自家手牌を静的 list 表示に切り替える。
   // `PlayerSlot` は position==="self" のときだけ `onSelectTile` を配線するため、他家スロットでは無害。
   const renderSlot = useCallback(
     (
@@ -406,18 +421,22 @@ export default function GameBoard() {
       compact: boolean,
       onSelect?: (index: number, tile: TileData) => void,
       handReadOnly = false,
+      confirmTouchSelection = false,
+      confirmTouchSelectionMode: HandProps["confirmTouchSelectionMode"] = "discard",
     ) => (
       <PlayerSlot
         position={position}
         content={slots[position]}
         compact={compact}
         onSelectTile={onSelect}
+        confirmTouchSelection={confirmTouchSelection}
+        confirmTouchSelectionMode={confirmTouchSelectionMode}
         handReadOnly={handReadOnly}
         handTileStates={handTileStates}
-        onBlockedTile={setTileFeedback}
+        onBlockedTile={announceBlockedTile}
       />
     ),
-    [slots, handTileStates],
+    [slots, handTileStates, announceBlockedTile],
   );
 
   // クロス配置のグリッド(段階①)。可視制御クラスと自家手牌の打牌ハンドラを差し替えて、
@@ -428,6 +447,8 @@ export default function GameBoard() {
       onSelfSelect?: (index: number, tile: TileData) => void,
       withActions = true,
       handReadOnly = false,
+      confirmTouchSelection = false,
+      confirmTouchSelectionMode: HandProps["confirmTouchSelectionMode"] = "discard",
     ) => (
       <div
         className={`board-cross mx-auto w-full max-w-4xl grid-cols-[minmax(0,1fr)_minmax(0,1.5fr)_minmax(0,1fr)] gap-[var(--board-gap)] ${visibilityClass}`}
@@ -445,11 +466,20 @@ export default function GameBoard() {
           {renderSlot("right", false)}
         </div>
         <div className="col-span-3 col-start-1 row-start-3">
-          {renderSlot("self", false, onSelfSelect, handReadOnly)}
+          {renderSlot(
+            "self",
+            false,
+            onSelfSelect,
+            handReadOnly,
+            confirmTouchSelection,
+            confirmTouchSelectionMode,
+          )}
         </div>
         {withActions ? (
           <div className="col-span-3 col-start-1 row-start-4">
-            {phase === "roundEnd" && roundSummary ? (
+            {/* 局終了(roundEnd)に加え、半荘を終える局は gameEnd へ直行するため、
+                gameEnd でも最終局の和了内訳を表示する(#277)。 */}
+            {(phase === "roundEnd" || phase === "gameEnd") && roundSummary ? (
               <WinDetails summary={roundSummary} />
             ) : null}
             <ActionPanel actions={actions} hint={hint} />
@@ -473,6 +503,15 @@ export default function GameBoard() {
 
   return (
     <div
+      ref={boardRootRef}
+      // モーダルの最終復帰先として focus() できるようにするだけで、タブ順には入れない。
+      tabIndex={-1}
+      // 素の <div> はロールもアクセシブル名も持たないため、ここへプログラム的に
+      // フォーカスが移ってもスクリーンリーダには「どこへ移ったか」が伝わらない。
+      // 着地点として名前を持たせる。landmark(region)ではなく group を選ぶ理由は
+      // スペック5 5.2.2 が持つ(#405)。
+      role="group"
+      aria-label="対局盤面"
       className="@container w-full"
       data-phase={phase}
       data-pending={pending?.kind ?? "none"}
@@ -482,13 +521,19 @@ export default function GameBoard() {
        * 盤面本体(段階①/段階②)。いずれか一方だけがコンテナクエリの display:none で
        * 可視化されるため、AT・E2E のロール照会には常に1側だけが露出する(非表示側は
        * display:none で a11y ツリー・ロールクエリ双方から除外される)。
-       * 全体盤面モーダル(段階②の補完)を開いている間はクロス配置を dialog 内に再掲するため、
-       * この盤面本体を `inert` + `aria-hidden` で AT・フォーカス・ロールクエリから確実に外し、
-       * 自家 region / 手牌 listbox 等のアクセシブル名が dialog と二重露出しないようにする。
+       * 全体盤面モーダル(段階②の補完)を開いている間の背景隔離は、Portal 外のページヘッダーも
+       * 含めて Modal が一括して所有する。
        */}
-      <div inert={boardOpen} aria-hidden={boardOpen || undefined}>
+      <div>
         {/* 段階①: 卓幅 >= 360px はクロス配置。牌・隙間は .board-cross の clamp()/cqi で流体縮小。 */}
-        {crossBoard("hidden @min-[360px]:grid", handleSelectTile)}
+        {crossBoard(
+          "hidden @min-[360px]:grid",
+          handleSelectTile,
+          true,
+          !handInteractive,
+          handInteractive,
+          riichiArmed ? "riichi" : "discard",
+        )}
 
         {/* 段階②: 卓幅 < 360px は自家フォーカス表示。他家はコンパクト帯へ縮小。 */}
         <div className="flex flex-col gap-3 @min-[360px]:hidden">
@@ -497,10 +542,10 @@ export default function GameBoard() {
               自分手番フォーカス表示
             </p>
             <button
-              ref={boardTriggerRef}
+              ref={boardOpenerRef}
               type="button"
               onClick={() => setBoardOpen(true)}
-              className="inline-flex items-center gap-1.5 rounded-lg border border-foreground/25 px-3 py-1.5 text-xs font-medium hover:bg-foreground/5"
+              className="inline-flex items-center gap-1.5 rounded-lg border border-control-border px-3 py-1.5 text-xs font-medium hover:bg-foreground/5"
             >
               <span aria-hidden="true">▦</span>
               全体盤面
@@ -512,8 +557,15 @@ export default function GameBoard() {
             {renderSlot("across", true)}
             {renderSlot("right", true)}
           </div>
-          {renderSlot("self", false, handleSelectTile)}
-          {phase === "roundEnd" && roundSummary ? (
+          {renderSlot(
+            "self",
+            false,
+            handleSelectTile,
+            !handInteractive,
+            handInteractive,
+            riichiArmed ? "riichi" : "discard",
+          )}
+          {(phase === "roundEnd" || phase === "gameEnd") && roundSummary ? (
             <WinDetails summary={roundSummary} />
           ) : null}
           <ActionPanel actions={actions} hint={hint} />
@@ -522,7 +574,12 @@ export default function GameBoard() {
 
       {/* 全体盤面モーダル(段階②の補完): クロス配置を閲覧専用で再表示。フォーカストラップ/Escape は Modal が担保。 */}
       {boardOpen ? (
-        <Modal title="全体盤面" onClose={() => setBoardOpen(false)}>
+        <Modal
+          title="全体盤面"
+          onClose={() => setBoardOpen(false)}
+          returnFocusRef={boardOpenerRef}
+          fallbackFocusRef={boardRootRef}
+        >
           <div className="@container">
             {crossBoard("grid", undefined, false, true)}
           </div>
@@ -531,6 +588,7 @@ export default function GameBoard() {
 
       <LiveRegion
         politeMessage={announcement}
+        politeMessageKey={tileFeedback.eventId}
         secondaryPoliteMessage={kitaAnnouncement}
         assertiveMessage={assertive}
       />

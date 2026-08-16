@@ -22,17 +22,20 @@ describe("blessingForTsumo(#185)", () => {
   });
 
   it("本人が一度でも打牌した後は不成立", () => {
-    const discards = { ...empty(), south: [{}] as never[] };
-    expect(blessingForTsumo("south", discards, false)).toBeUndefined();
+    // 判定入力は表示用の河ではなく打牌履歴(#395)。
+    const discardHistory = { ...empty(), south: [{}] as never[] };
+    expect(blessingForTsumo("south", discardHistory, false)).toBeUndefined();
   });
 
   it("親の初回国士自摸を天和+国士の2倍役満としてGUIスナップショットへ渡す", () => {
     const base = createGame({ seed: 185 });
     if (base.hand === null) throw new Error("hand not started");
     base.hand.hands.east = parseTiles("19m 19p 19s 1234567z");
-    base.hand.drawn = parseTile("1m");
+    base.hand.drawn = { tile: parseTile("1m"), source: "live" };
     base.hand.melds.east = [];
     base.hand.discards.east = [];
+    // 天和の判定ゲートは履歴側(#395)。河だけ空にしても成立しない構成を避ける。
+    base.hand.discardHistory.east = [];
     base.hand.callsMade = false;
     const state = {
       ...base,

@@ -3,7 +3,7 @@
  *
  * スペック2 2.4「フリテンリーチあり・ただしツモ和了のみ可(ロン不可)」に準拠。
  * フリテンは3種を扱う:
- * 1. **捨て牌フリテン**: 自分の待ち牌のいずれかが自分の河にある(恒久)。
+ * 1. **捨て牌フリテン**: 自分の待ち牌のいずれかを自分が打っている(恒久 / #395)。
  * 2. **同巡内フリテン**: 同巡中に当たり牌を見逃した(次のツモまで一時的)。文脈入力。
  * 3. **リーチ後フリテン**: リーチ後に一度でも当たり牌を見逃した(そのリーチ中は恒久)。文脈入力。
  *
@@ -14,18 +14,24 @@
 
 import type { Tile } from "../tiles/tile";
 import type { MeldInput } from "./decompose";
-import { sameKind } from "./tile-identity";
 import { waitingTiles } from "./tenpai";
+import { sameKind } from "./tile-identity";
 
 /** フリテンの原因種別。 */
-type FuritenReason = "discard" | "temporary" | "riichi";
+export type FuritenReason = "discard" | "temporary" | "riichi";
 
 export interface FuritenContext {
   /** テンパイ手(和了牌を含まない 13 − 3×副露 枚)。 */
   readonly concealedTiles: readonly Tile[];
   readonly melds?: readonly MeldInput[];
-  /** 自分の河(捨て牌)。捨て牌フリテンの判定に使う。 */
-  readonly ownDiscards: readonly Tile[];
+  /**
+   * 自分の**打牌履歴**。捨て牌フリテンの判定に使う。
+   *
+   * 他家に鳴かれて河(表示)から取り除かれた牌も**必ず含める**(#395)。
+   * 捨て牌フリテンは恒久であり、鳴きという自分の意思と無関係な事象では解除されない。
+   * 表示用の河をそのまま渡してはならない。
+   */
+  readonly ownDiscardHistory: readonly Tile[];
   /** 同巡内で当たり牌を見逃した(次のツモまで一時フリテン)。 */
   readonly temporaryMiss?: boolean;
   /** リーチ後に当たり牌を見逃した(そのリーチ中は恒久フリテン)。 */
@@ -43,7 +49,7 @@ export interface FuritenResult {
 /** フリテン状態を判定する。 */
 export function evaluateFuriten(ctx: FuritenContext): FuritenResult {
   const waits = waitingTiles(ctx.concealedTiles, ctx.melds ?? []);
-  const discardFuriten = ctx.ownDiscards.some((discard) =>
+  const discardFuriten = ctx.ownDiscardHistory.some((discard) =>
     waits.some((wait) => sameKind(wait, discard)),
   );
 

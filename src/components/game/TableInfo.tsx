@@ -35,14 +35,17 @@ export default function TableInfo({ info }: TableInfoProps) {
         <dt className="sr-only">場と局</dt>
         <dd className="text-base font-bold">{roundLabel}</dd>
       </div>
-      <div
-        className="flex items-baseline gap-1"
-        aria-label={`サイコロ ${dice[0]}と${dice[1]}、ドラ${doraCount}枚`}
-      >
-        <dt className="text-xs opacity-80">サイコロ</dt>
+      <div className="flex items-baseline gap-1" data-testid="dice-info">
+        <dt className="sr-only">サイコロ</dt>
         <dd className="font-mono tabular-nums">
-          {DIE_FACE[dice[0]] ?? dice[0]} {dice[0]}・
-          {DIE_FACE[dice[1]] ?? dice[1]} {dice[1]} → ドラ{doraCount}枚
+          <span className="sr-only">
+            {dice[0]}と{dice[1]}、ドラ{doraCount}枚
+          </span>
+          <span aria-hidden="true">
+            <span className="text-xs opacity-80">サイコロ</span>{" "}
+            {DIE_FACE[dice[0]] ?? dice[0]} {dice[0]}・
+            {DIE_FACE[dice[1]] ?? dice[1]} {dice[1]} → ドラ{doraCount}枚
+          </span>
         </dd>
       </div>
       <div className="flex items-baseline gap-1">
@@ -55,7 +58,7 @@ export default function TableInfo({ info }: TableInfoProps) {
       </div>
       <div
         className="flex items-baseline gap-1 whitespace-nowrap"
-        aria-label={`残り山 ${remainingLiveTiles}枚`}
+        data-testid="remaining-live-tiles"
       >
         <dt className="text-xs opacity-80">残り山</dt>
         <dd className="font-mono tabular-nums">{remainingLiveTiles}枚</dd>

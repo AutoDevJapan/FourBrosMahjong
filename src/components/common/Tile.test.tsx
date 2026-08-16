@@ -44,6 +44,8 @@ describe("Tile", () => {
     expectFace(el, "Pin5-Dora");
     // 色のみに依存しない形状手がかり:「赤」バッジ。
     expect(el).toHaveTextContent("赤");
+    // 赤枠もバッジと同じ isRedDora から導出する。片方だけ落ちる退行を捕まえる。
+    expect(el).toHaveClass("border-tile-accent-red");
   });
 
   it("赤5索も -Dora 素材へ写像する", () => {
@@ -57,6 +59,7 @@ describe("Tile", () => {
     const el = screen.getByRole("img", { name: "五索" });
     expectFace(el, "Sou5");
     expect(el).not.toHaveTextContent("赤");
+    expect(el).not.toHaveClass("border-tile-accent-red");
   });
 
   it("伏せ牌は設計トークン由来の裏面(game-tile--back)で描き 伏せ牌 とラベルする(Issue #149)", () => {

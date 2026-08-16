@@ -1,9 +1,9 @@
 import { describe, expect, it } from "vitest";
 import { computeScore } from "./points";
 import {
+  resolveWinPayment,
   type SeatedPlayerRef,
   type WinPaymentInput,
-  resolveWinPayment,
 } from "./win-payment";
 
 const D: SeatedPlayerRef = { id: "dealer", isDealer: true };
@@ -111,5 +111,22 @@ describe("resolveWinPayment — パオ × 本場の複合(issue #120)", () => {
     const dealerHonbaDelta = base.deltas.dealer - withHonba.deltas.dealer;
     expect(dealerHonbaDelta).toBe(300 * honba);
     expectZeroSum(withHonba.deltas);
+  });
+
+  it("役満単位APIでも単独責任者の既存ツモ本場簡略を維持する", () => {
+    const honba = 2;
+    const { deltas } = resolveWinPayment({
+      winner: C1,
+      winType: "tsumo",
+      score: yakuman,
+      others: [D, C2],
+      yakumanComponents: [{ multiplier: 1, paoResponsibleId: "dealer" }],
+      honba,
+    });
+    const expected = yakuman.tsumo.total + 300 * honba;
+    expect(deltas.dealer).toBe(-expected);
+    expect(deltas.child2).toBe(0);
+    expect(deltas.child1).toBe(expected);
+    expectZeroSum(deltas);
   });
 });

@@ -30,6 +30,38 @@ describe("RulesPage (/rules)", () => {
     expect(screen.getAllByText(/四槓散了/).length).toBeGreaterThan(0);
   });
 
+  it("確定済みの独自仕様4項目を記載する(#283)", () => {
+    render(<RulesPage />);
+
+    // 1. リーチ宣言牌ロン時のリーチ不成立・供託なし
+    // (docs/四兄弟麻雀ルール.md / documents/spec/game-flow.md 準拠)
+    expect(
+      screen.getByText(
+        /宣言牌がロンされた場合はリーチ不成立となり、1,000点は供託しない/,
+      ),
+    ).toBeInTheDocument();
+
+    // 2. 槍槓あり(国士無双テンパイ他家に限り暗槓槍槓可)
+    expect(screen.getAllByText(/槍槓/).length).toBeGreaterThan(0);
+    expect(
+      screen.getByText(
+        /国士無双テンパイの他家に限り、暗槓に対しても槍槓ロンできる/,
+      ),
+    ).toBeInTheDocument();
+
+    // 3. リーチ後の暗槓(条件付き許可)
+    expect(
+      screen.getByText(/送り槓・七対子テンパイでの暗槓は不可/),
+    ).toBeInTheDocument();
+
+    // 4. トビ(持ち点マイナスで半荘即終了)
+    expect(
+      screen.getByText(
+        /いずれかのプレイヤーの持ち点がマイナスに達した時点で半荘は即終了/,
+      ),
+    ).toBeInTheDocument();
+  });
+
   it("折りたたみセクションを details/summary で提供する", () => {
     const { container } = render(<RulesPage />);
     const sections = container.querySelectorAll("details");

@@ -7,7 +7,7 @@
  */
 
 import Discards from "./Discards";
-import Hand, { type HandTileState } from "./Hand";
+import Hand, { type HandProps, type HandTileState } from "./Hand";
 import KitaDisplay from "./KitaDisplay";
 import Melds from "./Melds";
 import OpponentHand from "./OpponentHand";
@@ -15,7 +15,8 @@ import ScoreDisplay from "./ScoreDisplay";
 import StatusBadge from "./StatusBadge";
 import type { SeatedPlayerView, SeatWind, TileData } from "./types";
 
-const SEAT_WIND_LABEL: Record<SeatWind, string> = {
+/** 席風の日本語ラベル。和了者名の席表記(`WinDetails` #259)でも共用する。 */
+export const SEAT_WIND_LABEL: Record<SeatWind, string> = {
   east: "東家",
   south: "南家",
   west: "西家",
@@ -29,17 +30,29 @@ export interface PlayerAreaProps {
   compact?: boolean;
   /** 自家の打牌選択ハンドラ(UIイベントのみ)。 */
   onSelectTile?: (index: number, tile: TileData) => void;
+  /** タッチ端末では牌の選択と打牌確定を分離する。 */
+  confirmTouchSelection?: boolean;
+  /** タッチ選択の確定対象。 */
+  confirmTouchSelectionMode?: HandProps["confirmTouchSelectionMode"];
   /** 自家手牌を閲覧専用の静的リストとして表示する。 */
   handReadOnly?: boolean;
   handTileStates?: readonly HandTileState[];
   onBlockedTile?: (message: string) => void;
 }
 
+const FURITEN_LABEL = {
+  discard: "フリテン（捨て牌）",
+  temporary: "フリテン（同巡内）",
+  riichi: "フリテン（リーチ後）",
+} as const;
+
 export default function PlayerArea({
   player,
   isSelf,
   compact = false,
   onSelectTile,
+  confirmTouchSelection = false,
+  confirmTouchSelectionMode = "discard",
   handReadOnly = false,
   handTileStates,
   onBlockedTile,
@@ -77,6 +90,13 @@ export default function PlayerArea({
         {status?.hasDeclaredRiichi ? (
           <StatusBadge icon="宣" label="リーチ" variant="riichi" />
         ) : null}
+        {status?.furitenReason ? (
+          <StatusBadge
+            icon="禁"
+            label={FURITEN_LABEL[status.furitenReason]}
+            variant="furiten"
+          />
+        ) : null}
       </header>
 
       <ScoreDisplay points={points} delta={pointsDelta} />
@@ -90,6 +110,8 @@ export default function PlayerArea({
               tiles={hand}
               readOnly={handReadOnly}
               onSelect={onSelectTile}
+              confirmTouchSelection={confirmTouchSelection}
+              confirmTouchSelectionMode={confirmTouchSelectionMode}
               tileStates={handTileStates}
               onBlockedSelect={onBlockedTile}
             />

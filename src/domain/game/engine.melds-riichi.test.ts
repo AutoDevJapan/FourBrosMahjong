@@ -1,27 +1,33 @@
 import { describe, expect, it } from "vitest";
+import { parseTile, parseTiles } from "@/domain/hand/notation";
+import { TOTAL_POINTS } from "../scoring/settlement";
+import {
+  advanceEngine,
+  firstLegalDiscard,
+} from "./__testing__/engine-fixtures";
 import {
   createGame,
-  declareAnkan,
-  declareKakan,
-  declareKan,
   declarePon,
   declareRiichi,
-  declareRon,
-  declareTsumo,
   discard,
   type EngineState,
   passRon,
-  proceedToNextRound,
+  potTotal,
+  type SeatKey,
   seatOfPlayer,
-  tsumogiri,
 } from "./engine";
 
 /**
  * 鳴き(ポン/カン)・リーチ・裏ドラ・一発の結線検証(#97 / スペック2 2.2・2.4)。
  *
  * 盤面は seed 固定の乱数で決まるため、個別牌姿を直接組み立てず「提示された合法手を
- * 積極的に選ぶドライバ」で全公開アクション(riichi/pon/kan/ankan/kakan/ron/tsumo)を
- * 実際に走らせ、不変条件で正しさを担保する。決定的な確認はシード走査で行う。
+ * 積極的に選ぶ単一方策」で半荘を完走させ、不変条件で正しさを担保する。固定 seed 列の
+ * 実測では riichi / pon / ankan / kakan を踏む一方、ron / tsumo / 大明槓は踏まない。
+ * 大明槓は `canKan` なら `canPon` でもあり、この方策がポンを先に選ぶため構造的に
+ * 到達しない。ron / tsumo はこの配牌群では提示されないため、本テストの保証対象外。
+ *
+ * 公開アクション全11種の保存則は、方策を `kanFirst` / `passive` / `riichiFirst` にも
+ * 分けて未踏経路を明示的に落とす `engine.pot-invariant.test.ts` が担う(issue #458)。
  */
 
 interface ActionTally {
@@ -34,80 +40,84 @@ interface ActionTally {
   tsumo: number;
 }
 
-/** 提示された合法手を積極的に選び、1半荘を完走させる(全アクション経路を踏む)。 */
+/** 提示された合法手を積極的に選び、1半荘を完走させる単一方策。 */
 function playAggressive(seed: number, tally: ActionTally): EngineState {
   let s = createGame({ seed });
   for (let guard = 0; guard < 8000 && s.phase !== "gameEnd"; guard++) {
-    if (s.phase === "roundEnd") {
-      s = proceedToNextRound(s);
-      continue;
-    }
-    const pending = s.pending;
-    if (pending?.kind === "humanReact") {
-      if (pending.canRon) {
-        tally.ron += 1;
-        s = declareRon(s);
-      } else if (pending.canPon) {
-        tally.pon += 1;
-        s = declarePon(s);
-      } else if (pending.canKan) {
-        tally.kan += 1;
-        s = declareKan(s);
-      } else {
-        s = passRon(s);
-      }
-      continue;
-    }
-    if (pending?.kind === "humanDiscard") {
-      if (pending.canTsumo) {
-        tally.tsumo += 1;
-        s = declareTsumo(s);
-        continue;
-      }
-      if (pending.locked) {
-        s = tsumogiri(s);
-        continue;
-      }
-      if (pending.kakanTiles.length > 0) {
-        tally.kakan += 1;
-        s = declareKakan(s, pending.kakanTiles[0]);
-        continue;
-      }
-      if (pending.ankanTiles.length > 0) {
-        tally.ankan += 1;
-        s = declareAnkan(s, pending.ankanTiles[0]);
-        continue;
-      }
-      if (pending.canRiichi) {
-        tally.riichi += 1;
-        s = declareRiichi(s, pending.riichiTiles[0]);
-        continue;
-      }
-      // ツモ牌があればツモ切り。無い(ポン直後など)なら門前手牌から切る。
-      // 喰い替え禁止(#105)でポンした牌種は切れないため、それを避けて選ぶ。
-      const hand = s.hand;
-      const seat = hand ? seatOfPlayer(hand.seating, "p0") : null;
-      const forbidden = pending.forbiddenDiscards;
-      const isForbidden = (t: { suit: string; rank: number }): boolean =>
-        forbidden.some((f) => f.suit === t.suit && f.rank === t.rank);
-      let tile = hand?.drawn ?? undefined;
-      if ((tile == null || isForbidden(tile)) && hand && seat) {
-        tile = hand.hands[seat].find((t) => !isForbidden(t));
-      }
-      if (tile == null)
-        throw new Error("humanDiscard without a discardable tile");
-      s = discard(s, tile);
-      continue;
-    }
-    throw new Error(
-      `stuck: phase=${s.phase} pending=${s.pending?.kind ?? "none"}`,
-    );
+    const { next, action } = advanceEngine(s, "aggressive", firstLegalDiscard);
+    if (action === "declareRon") tally.ron += 1;
+    if (action === "declarePon") tally.pon += 1;
+    if (action === "declareKan") tally.kan += 1;
+    if (action === "declareAnkan") tally.ankan += 1;
+    if (action === "declareKakan") tally.kakan += 1;
+    if (action === "declareTsumo") tally.tsumo += 1;
+    if (action === "declareRiichi") tally.riichi += 1;
+    s = next;
   }
   return s;
 }
 
+/** #450 で確認した、自家の第一打に `canRiichi` が提示される固定 seed。 */
+const RIICHI_OFFER_SEED = 782;
+
+/**
+ * 非0供託からリーチを宣言できる決定的局面を組む。
+ *
+ * ライブ壁を0枚にすることで、宣言牌の処理後に `pump` が他家のツモ・リーチ・和了を
+ * 挟まず即流局する。したがって返り値はリーチ宣言自身の差分だけを保持する。
+ */
+function armDeterministicRiichi(): {
+  state: EngineState;
+  declarationTile: ReturnType<typeof parseTile>;
+  seat: SeatKey;
+} {
+  const state = createGame({ seed: 1 });
+  const hand = state.hand;
+  if (hand === null) throw new Error("initial hand should exist");
+  const seat = seatOfPlayer(hand.seating, "p0");
+  if (seat !== "east") throw new Error("initial human seat should be east");
+
+  while (hand.wall.remainingLiveTiles > 0) hand.wall.draw();
+
+  hand.hands.east = parseTiles("123p 456p 789p 123s 5s");
+  // 流局時のノーテン罰符で点棒差分を汚さないよう、3家とも同じテンパイ形にする。
+  hand.hands.south = parseTiles("123p 456p 789p 123s 5s");
+  hand.hands.west = parseTiles("123p 456p 789p 123s 5s");
+  for (const current of ["east", "south", "west"] as SeatKey[]) {
+    hand.melds[current] = [];
+    hand.discards[current] = [];
+    hand.discardHistory[current] = [];
+    hand.riichi[current] = false;
+    hand.doubleRiichi[current] = false;
+    hand.riichiMiss[current] = false;
+    hand.tempMiss[current] = false;
+  }
+  const declarationTile = parseTile("9s");
+  hand.drawn = { tile: declarationTile, source: "live" };
+  hand.turn = seat;
+
+  return {
+    declarationTile,
+    seat,
+    state: {
+      ...state,
+      riichiSticks: 2,
+      pending: {
+        kind: "humanDiscard",
+        canTsumo: false,
+        canRiichi: true,
+        riichiTiles: [declarationTile],
+        ankanTiles: [],
+        kakanTiles: [],
+        forbiddenDiscards: [],
+        locked: false,
+      },
+    },
+  };
+}
+
 describe("engine: 鳴き・リーチ・裏ドラ・一発(#97)", () => {
-  it("全公開アクションを走らせても半荘は完走し、供託込みでゼロサムを保つ", () => {
+  it("積極的に鳴く単一方策でも半荘は完走し、供託込みでゼロサムを保つ", () => {
     const tally: ActionTally = {
       riichi: 0,
       pon: 0,
@@ -122,65 +132,48 @@ describe("engine: 鳴き・リーチ・裏ドラ・一発(#97)", () => {
       expect(s.phase, `seed=${seed}`).toBe("gameEnd");
       expect(s.result).toHaveLength(4);
 
-      // 持ち点総和 === 140,000 − 場に残る供託(未回収リーチ棒 × 1,000)。
-      // 半荘終了時の残存供託は単独1位の素点へ加算する(Q15 確定・1位取得 / #130)。
-      // 単独1位が取得したときは供託が素点へ移り `riichiSticks` が 0 になる(総和=140,000)。
-      // 同点最高で単独1位が無い場合のみ暫定で据え置く(Q20/#131 → 総和=140,000−供託ぶん)。
-      // どちらの分岐でも本式は成立する(残存供託の帰属詳細は engine.residual-riichi.test.ts)。
+      // 保存則: 持ち点総和 + 場に残る供託 = 140,000。供託は種別ごとの本数ではなく
+      // 集約 `potTotal` で数える(#430)。半荘終了時は残存供託の帰属先が一意に定まる
+      // (Q15 = 1位取得 / #130、Q20 = 同点最高は席順上位 / #131)ため全額が素点へ移り、
+      // 実際には `potTotal(s) === 0`(帰属の詳細は engine.residual-riichi.test.ts、
+      // 保存則そのものは engine.pot-invariant.test.ts)。
       const total = Object.values(s.points).reduce((a, b) => a + b, 0);
-      expect(total).toBe(140000 - 1000 * s.riichiSticks);
+      expect(total + potTotal(s), `seed=${seed}`).toBe(TOTAL_POINTS);
+      expect(potTotal(s), `seed=${seed} pot at gameEnd`).toBe(0);
       // 持ち点はすべて整数(端数処理の破綻がない)。
       for (const p of Object.values(s.points)) {
         expect(Number.isInteger(p)).toBe(true);
       }
     }
-    // 積極ドライバで少なくとも鳴きとリーチの経路が実際に踏まれている(カバレッジ保証)。
-    expect(tally.pon + tally.riichi).toBeGreaterThan(0);
+    // この固定 seed 列で実際に踏むと明記した4経路を個別に固定する。合算では片方が
+    // 0になっても通るため、docblock と実測カバレッジの乖離を検出できない(issue #458)。
+    expect(tally.riichi, "riichi が未踏").toBeGreaterThan(0);
+    expect(tally.pon, "pon が未踏").toBeGreaterThan(0);
+    expect(tally.ankan, "ankan が未踏").toBeGreaterThan(0);
+    expect(tally.kakan, "kakan が未踏").toBeGreaterThan(0);
   });
 
-  // #98 で他家 AI が手牌効率ベースになり全局シミュレーションが重くなったため、
-  // 多シード走査で合法リーチ局面を探す本テストは既定 5s では収まらない。検証内容は
-  // 不変なので明示的にタイムアウトを延長する(assert は据え置き)。
-  it("リーチ宣言で 1,000 点が供託され、リーチ・一発フラグが立つ", () => {
-    // ツモ切りで進めて自家がリーチ可能になった局面で宣言し、その宣言巡でまだ局が
-    // 続く(AI 和了/流局で局が終わらない)ケースを探して純粋な事後条件を検証する。
-    let verified = false;
-    for (let seed = 1; seed <= 300 && !verified; seed++) {
-      let s = createGame({ seed });
-      for (let guard = 0; guard < 600 && s.phase !== "gameEnd"; guard++) {
-        if (s.phase === "roundEnd") {
-          s = proceedToNextRound(s);
-          continue;
-        }
-        const pending = s.pending;
-        if (pending?.kind === "humanDiscard") {
-          const hand = s.hand;
-          if (hand === null) break;
-          const seat = seatOfPlayer(hand.seating, "p0");
-          if (seat === null) break;
-          if (pending.canRiichi) {
-            const before = s.points.p0;
-            const beforeSticks = s.riichiSticks;
-            const after = declareRiichi(s, pending.riichiTiles[0]);
-            // 宣言と同時に局が決着(AI 和了/流局)した場合は別 seed で再検証する。
-            if (after.phase !== "playing" || after.hand === null) break;
-            expect(after.riichiSticks).toBe(beforeSticks + 1);
-            expect(after.points.p0).toBe(before - 1000);
-            expect(after.hand.riichi[seat]).toBe(true);
-            verified = true;
-            break;
-          }
-          const tile = hand.drawn ?? hand.hands[seat][0];
-          s = discard(s, tile);
-        } else if (pending?.kind === "humanReact") {
-          s = passRon(s);
-        } else {
-          break;
-        }
-      }
-    }
-    expect(verified).toBe(true);
-  }, 30000);
+  it("固定 seed の実配牌でエンジンがリーチを提示する", () => {
+    const state = createGame({ seed: RIICHI_OFFER_SEED });
+    expect(state.pending?.kind).toBe("humanDiscard");
+    if (state.pending?.kind !== "humanDiscard") return;
+    expect(state.pending.canRiichi).toBe(true);
+    expect(state.pending.riichiTiles.length).toBeGreaterThan(0);
+  });
+
+  it("非0供託からのリーチ宣言で供託+1・点棒-1,000・フラグ設定を保つ", () => {
+    const { state, declarationTile, seat } = armDeterministicRiichi();
+    const beforeSticks = state.riichiSticks;
+    const beforePoints = state.points.p0;
+
+    const after = declareRiichi(state, declarationTile);
+
+    expect(after.phase).toBe("roundEnd");
+    expect(after.lastRound?.kind).toBe("draw");
+    expect(after.riichiSticks).toBe(beforeSticks + 1);
+    expect(after.points.p0).toBe(beforePoints - 1000);
+    expect(after.hand?.riichi[seat]).toBe(true);
+  });
 
   it("ポン宣言で明刻が晒され、門前手牌が2枚減り手番が自家に移る", () => {
     // 自家が他家打牌にポンできる humanReact を探索する。
@@ -196,7 +189,7 @@ describe("engine: 鳴き・リーチ・裏ドラ・一発(#97)", () => {
         if (pending?.kind === "humanReact") {
           s = passRon(s);
         } else if (pending?.kind === "humanDiscard") {
-          const drawn = s.hand?.drawn;
+          const drawn = s.hand?.drawn?.tile;
           if (drawn == null) break;
           s = discard(s, drawn);
         } else {
@@ -252,7 +245,7 @@ describe("engine: 喰い替え(現物)禁止(#105)", () => {
         if (pending?.kind === "humanReact") {
           s = passRon(s);
         } else if (pending?.kind === "humanDiscard") {
-          const drawn = s.hand?.drawn;
+          const drawn = s.hand?.drawn?.tile;
           if (drawn == null) break;
           s = discard(s, drawn);
         } else {

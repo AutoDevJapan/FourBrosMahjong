@@ -74,6 +74,20 @@ function ceil100(value: number): number {
   return Math.ceil(value / 100) * 100;
 }
 
+function assertNonNegativeSafeInteger(value: number, name: string): void {
+  if (!Number.isSafeInteger(value) || value < 0) {
+    throw new RangeError(
+      `${name} must be a non-negative safe integer, received ${value}.`,
+    );
+  }
+}
+
+function assertSafeScore(value: number, name: string): void {
+  if (!Number.isSafeInteger(value) || value < 0) {
+    throw new RangeError(`${name} exceeds the safe integer range.`);
+  }
+}
+
 /** 合計翻から区分と基本点 `a` を求める(構成役満は別扱い)。 */
 function categorize(han: number): {
   category: ScoreCategory;
@@ -125,6 +139,7 @@ export function computeScore(
   value: HandValueInput,
   isDealerWin: boolean,
 ): ScoreResult {
+  assertNonNegativeSafeInteger(value.yakumanMultiplier, "yakumanMultiplier");
   const isTrueYakuman = value.yakumanMultiplier > 0;
 
   let category: ScoreCategory;
@@ -135,9 +150,9 @@ export function computeScore(
     category = "yakuman";
     basePoints = 8000 * value.yakumanMultiplier;
   } else {
-    if (!Number.isInteger(value.han) || value.han < 1) {
+    if (!Number.isSafeInteger(value.han) || value.han < 1) {
       throw new RangeError(
-        `han must be a positive integer for a non-yakuman hand, received ${value.han}.`,
+        `han must be a positive safe integer for a non-yakuman hand, received ${value.han}.`,
       );
     }
     const c = categorize(value.han);
@@ -149,6 +164,11 @@ export function computeScore(
   const dealerMultiplier = isDealerWin ? 6 : 4;
   const ronTotal = ceil100(basePoints * dealerMultiplier);
   const tsumo = computeTsumo(basePoints, isDealerWin);
+  assertSafeScore(basePoints, "basePoints");
+  assertSafeScore(ronTotal, "ronTotal");
+  assertSafeScore(tsumo.fromDealer, "tsumo.fromDealer");
+  assertSafeScore(tsumo.fromNonDealer, "tsumo.fromNonDealer");
+  assertSafeScore(tsumo.total, "tsumo.total");
 
   return {
     category,

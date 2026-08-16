@@ -1,0 +1,374 @@
+"use client";
+
+/**
+ * 戦績一覧(`/history`)の対話部分(issue #293)。
+ *
+ * `localStorage` の保存済み戦績(`matchHistory.ts`)を新しい順に一覧し、各半荘を
+ * 展開すると結果画面と同じ確定内訳(最終順位 `RankingTable`+ソシー内訳
+ * `SoshiiBreakdown`)を閲覧できる。末尾に全件削除(2段階確認)を備える。
+ *
+ * アクセシビリティ(スペック5):
+ * - 展開はネイティブ `<details>`/`<summary>` でキーボード操作・状態通知を担保する。
+ * - 削除確認はインラインの明示ボタン2択とし、結果は `role="status"` で通知する。
+ * - 順位・増減は色に依存せずテキスト+符号で伝える(既存の結果コンポーネントを再利用)。
+ *
+ * `localStorage` はクライアントでのみ読めるため、SSR/初回 hydration は読み込み中
+ * 表示に揃え、マウント後に一覧へ切り替える。読み込みは `useSyncExternalStore` による
+ * ストア購読で行い、描画中に `localStorage` を読んだり書いたりしない(issue #302)。
+ */
+import Link from "next/link";
+import { useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { localStorageOrNull } from "@/components/common/browserStorage";
+import {
+  clearHistoryAcrossTabs,
+  getHistorySnapshot,
+  getServerHistorySnapshot,
+  type HistoryClearResult,
+  MAX_HISTORY_ENTRIES,
+  type MatchHistoryEntry,
+  notifyHistoryChanged,
+  subscribeHistory,
+} from "@/components/game/matchHistory";
+import RankingTable from "@/components/result/RankingTable";
+import SoshiiBreakdown from "@/components/result/SoshiiBreakdown";
+import { formatSignedSoshii } from "@/components/result/soshiiFormat";
+
+/**
+ * 終了日時の表示フォーマット(例: 2026/07/20 14:05)。
+ * 一覧はマウント後にのみ描画されるため、SSR とのロケール差異による
+ * hydration 不一致は発生しない。
+ */
+const finishedAtFormat = new Intl.DateTimeFormat("ja-JP", {
+  dateStyle: "medium",
+  timeStyle: "short",
+});
+
+/**
+ * 削除できなかった場合の案内(issue #489)。
+ *
+ * 原因ごとに**利用者が取るべき行動が違う**ため文面を分ける。以前は理由を問わず
+ * 「ブラウザの設定を確認してください」と案内していたが、非セキュアコンテキスト
+ * (平文 http)では設定をいくら見ても解決せず、誤案内になっていた。
+ * なお非セキュアコンテキストは ADR-0004 により失敗しなくなったため、ここには現れない。
+ */
+const CLEAR_FAILURE_MESSAGE: Record<
+  Exclude<HistoryClearResult, "cleared">,
+  string
+> = {
+  // 「排他できなかった」の内訳は他タブの保持がほとんどだが、lock API 側の失敗も
+  // 同じ経路へ来る。断定すると #489 と同じ誤案内になるため、両方を含む言い回しにする。
+  "lock-busy":
+    "他のタブが戦績を更新中か、排他制御を利用できなかったため、削除できませんでした。他のタブを閉じるか、しばらく待ってからもう一度お試しください。",
+  "storage-failed":
+    "この端末のストレージを操作できず、戦績を削除できませんでした。ブラウザのストレージ設定(プライベートモードや空き容量)を確認してください。",
+};
+
+/**
+ * 「削除しています…」を読み上げるまでの猶予(ms)。
+ *
+ * lock が空いていれば削除はミリ秒で終わるので、その場合は進行中を読み上げず結果だけを
+ * 通知する(`role="status"` の連続更新を避ける / スペック5 5.2.3)。待たされたときだけ
+ * 進行中が出る。値は「人が遅いと感じ始める境界」に合わせた小さめの猶予。
+ */
+const CLEAR_PROGRESS_DELAY_MS = 150;
+
+/** 半荘1件の見出し+展開内訳。 */
+function HistoryItem({ entry }: { entry: MatchHistoryEntry }) {
+  const finishedAt = finishedAtFormat.format(new Date(entry.finishedAt));
+  const ordered = [...entry.players].sort((a, b) => a.rank - b.rank);
+  const top = ordered[0];
+  const topTotal = formatSignedSoshii(top.soshiiTotal);
+
+  return (
+    <details className="group rounded-lg border border-control-border">
+      <summary className="flex cursor-pointer flex-wrap items-baseline gap-x-3 gap-y-1 rounded-lg p-4 text-sm hover:bg-foreground/5">
+        <span className="font-medium">{finishedAt}</span>
+        <span className="text-foreground/70">
+          1位 {top.name}(<span aria-hidden="true">{topTotal.display}</span>
+          <span className="sr-only">{topTotal.srLabel}</span>)
+        </span>
+        <span
+          aria-hidden="true"
+          className="ml-auto text-foreground/70 transition-transform motion-reduce:transition-none group-open:rotate-90"
+        >
+          →
+        </span>
+      </summary>
+      <div className="flex flex-col gap-4 border-t border-foreground/10 p-4">
+        {/* 見出しは h1(ページ)→ h2(本節)→ h3(SoshiiBreakdown 内の選手名)の順で
+            レベルを飛ばさない(axe heading-order / スペック5)。 */}
+        <section
+          aria-label={`${finishedAt}の最終順位`}
+          className="flex flex-col gap-2"
+        >
+          <h2 className="text-sm font-semibold">最終順位</h2>
+          <RankingTable players={ordered} />
+        </section>
+        <section
+          aria-label={`${finishedAt}のソシー内訳`}
+          className="flex flex-col gap-2"
+        >
+          <h2 className="text-sm font-semibold">ソシー内訳(素点+ウマ+祝儀)</h2>
+          <div className="grid gap-3 sm:grid-cols-2">
+            {ordered.map((player) => (
+              // 名前は重複し得る(#291)ため、一意な rank を key にする。
+              <SoshiiBreakdown key={player.rank} player={player} />
+            ))}
+          </div>
+        </section>
+      </div>
+    </details>
+  );
+}
+
+export default function MatchHistoryList() {
+  // localStorage は React の外にある可変ストアなので `useSyncExternalStore` で購読する
+  // (issue #302 / `playerNames.ts` と同じ方式)。サーバー描画・初回 hydration は
+  // `null`(= 読み込み中)で一致させ、マウント後に保存値へ切り替える。全件削除や
+  // 別タブでの変更は購読経由で反映されるため、描画中に localStorage は読まない。
+  const entries = useSyncExternalStore<readonly MatchHistoryEntry[] | null>(
+    subscribeHistory,
+    getHistorySnapshot,
+    getServerHistorySnapshot,
+  );
+  const [confirmingClear, setConfirmingClear] = useState(false);
+  const [statusMessage, setStatusMessage] = useState("");
+  // 削除は Web Lock の取得を待つ非同期処理で、最大 `HISTORY_LOCK_TIMEOUT_MS` 掛かる
+  // (issue #488)。待機中は「反応しない画面」に見えるため、進行中であることを示す。
+  const [clearing, setClearing] = useState(false);
+  // 連打の抑止は ref で行う。同一タスク内の2回目のクリックでは `clearing` の
+  // 再描画が済んでおらず、state を見るハンドラは古い値(false)を読んでしまう。
+  const clearingRef = useRef(false);
+  // 全件削除すると「削除する」ボタンごと一覧セクションが消えるため、フォーカスが
+  // body へ落ちてキーボード利用者が文脈を失う。削除直後だけ空状態へフォーカスを移す。
+  const emptyStateRef = useRef<HTMLDivElement>(null);
+  // 削除完了までに別タブの終局保存が届くと一覧が再び描かれ、空状態が存在しない。
+  // その場合の着地点(名前とロールを持つ「戦績をすべて削除」ボタン)。
+  const clearButtonRef = useRef<HTMLButtonElement>(null);
+  // 「削除直後の1回だけ」を表す一過性のフラグ。state にすると描画に影響しない値で
+  // 再描画が走るうえ、効果内での state 更新になるため ref で持つ。
+  const pendingFocusRef = useRef(false);
+
+  useEffect(() => {
+    if (!pendingFocusRef.current) return;
+    // 着地点は空状態が第一候補。削除完了までに別タブの終局保存が届くと一覧が再び描かれ、
+    // 空状態が存在しないため、そのときは「戦績をすべて削除」ボタンへ連鎖する。
+    // 到達可否は DOM 接続では判定できない(#377)ので、実際に activeElement が移ったかで
+    // 実測してから次の候補へ進む(スペック5 5.2.2 / `Modal` と同じ規約)。
+    // 外部ストア通知と確認UIのstate更新が別コミットになることがあるため、候補がまだ
+    // 描画されていない中間renderではフラグを消費しない。先に消費すると、次のrenderで
+    // 空状態が現れてもフォーカスを取りこぼし、bodyへ落ちる(#482)。
+    let hasCandidate = false;
+    for (const candidate of [emptyStateRef.current, clearButtonRef.current]) {
+      if (candidate === null) continue;
+      hasCandidate = true;
+      candidate.focus();
+      if (candidate.ownerDocument.activeElement === candidate) {
+        pendingFocusRef.current = false;
+        return;
+      }
+    }
+    if (!hasCandidate) return;
+    pendingFocusRef.current = false;
+    // 削除成功時は必ず確認UIを畳むため、通常はどちらかへ到達する。到達できないのは
+    // 着地点が隠されている等の契約違反であり、黙って <body> へ落とさず知らせる。
+    if (process.env.NODE_ENV !== "production") {
+      console.warn(
+        "MatchHistoryList: 全件削除後のフォーカス着地点へ到達できませんでした(スペック5 5.2.2)。",
+      );
+    }
+  });
+
+  const executeClear = async () => {
+    // 待機中の再クリックは無視する(要求を積み上げない / issue #488)。
+    if (clearingRef.current) return;
+    clearingRef.current = true;
+    setClearing(true);
+    // 直前の結果は伏せる(古い成否が残っていると、いま起きたことと混同する)。
+    setStatusMessage("");
+    // 進行中の読み上げは**待たされたときだけ**出す。lock が空いていれば削除は
+    // ミリ秒で終わり、進行中→結果を続けて流すと `role="status"` を1フレームに2回
+    // 更新することになる(スペック5 5.2.3 は「まとめて1回」を求める)。
+    // 視覚側の即時フィードバックはボタンのラベル変化が担う。
+    const progressTimer = setTimeout(() => {
+      setStatusMessage("戦績を削除しています…");
+    }, CLEAR_PROGRESS_DELAY_MS);
+    try {
+      const storage = localStorageOrNull();
+      // Storage の getter 自体が例外を投げる環境も「ストレージを操作できない」に含める。
+      const result: HistoryClearResult =
+        storage === null
+          ? "storage-failed"
+          : await clearHistoryAcrossTabs(storage);
+      if (result === "cleared") {
+        // 購読通知は同期的に再描画を起こし得るため、通知より先に着地点を予約する。
+        // 先に通知すると、その再描画で effect が走った時点ではフラグがまだ falseで、
+        // 高負荷時にフォーカス移動を取りこぼして body へ落ちる(#482 / スペック5 5.2.2)。
+        pendingFocusRef.current = true;
+        // 永続化と購読者への通知は分離されているため、削除後に明示的に知らせる(#302)。
+        notifyHistoryChanged();
+        // 「削除する」ボタンごと一覧セクションが消えるので、着地点へフォーカスを移す。
+        setConfirmingClear(false);
+        setStatusMessage("保存されていた戦績をすべて削除しました。");
+        return;
+      }
+      // 削除できなかった場合は一覧が残る。「削除しました」と読み上げると実態と食い違う。
+      // 確認UIも畳まない ─ 畳むと押した「削除する」ボタンが消える一方で空状態も描かれず、
+      // フォーカスの行き先が無くなって body へ落ちるため(成功時と同じ a11y 契約を守る)。
+      setStatusMessage(CLEAR_FAILURE_MESSAGE[result]);
+    } finally {
+      clearTimeout(progressTimer);
+      clearingRef.current = false;
+      setClearing(false);
+    }
+  };
+
+  if (entries === null) {
+    return (
+      <div
+        role="status"
+        className="flex min-h-40 items-center justify-center rounded-lg border border-foreground/15 p-6 text-sm text-foreground/70"
+      >
+        戦績を読み込んでいます…
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex flex-col gap-6">
+      {entries.length === 0 ? (
+        <div
+          ref={emptyStateRef}
+          // 削除直後にフォーカスを受け取るため、プログラム的にのみフォーカス可能にする。
+          tabIndex={-1}
+          className="flex flex-col items-start gap-4 rounded-lg border border-foreground/15 p-6"
+        >
+          <p className="text-sm text-foreground/70">
+            保存された戦績はまだありません。半荘終了時にこの端末のストレージが利用できる場合、最終順位とソシー内訳が自動で記録されます。記録されない場合は、ブラウザのストレージ設定や空き容量を確認してください。
+          </p>
+          <Link
+            href="/game"
+            className="inline-flex min-h-11 items-center rounded-full bg-foreground px-4 py-2 text-sm font-medium text-background hover:opacity-90"
+          >
+            対局を開始
+          </Link>
+        </div>
+      ) : (
+        <>
+          <p className="text-sm text-foreground/70">
+            半荘の結果を新しい順に表示しています(この端末に最大
+            {MAX_HISTORY_ENTRIES}
+            件まで保存され、超えた分は古い記録から削除されます)。
+          </p>
+          {/* role="list" は冗長だが明示する — Tailwind preflight の list-style 除去により Safari が
+              list セマンティクスを落とし、VoiceOver がリスト名ごと読まなくなる既知挙動への対処
+              (スペック5 5.2.5 / #313)。 */}
+          <ol
+            role="list"
+            aria-label="保存された半荘結果"
+            className="flex flex-col gap-3"
+          >
+            {entries.map((entry) => (
+              <li key={`${entry.seed}-${entry.finishedAt}`}>
+                <HistoryItem entry={entry} />
+              </li>
+            ))}
+          </ol>
+
+          <section
+            aria-labelledby="clear-history-heading"
+            className="flex flex-col items-start gap-3 border-t border-foreground/15 pt-6"
+          >
+            <h2 id="clear-history-heading" className="text-sm font-semibold">
+              戦績の削除
+            </h2>
+            {confirmingClear ? (
+              <div className="flex flex-col items-start gap-3">
+                <p className="text-sm text-foreground/70">
+                  保存されているすべての戦績(この端末の
+                  {entries.length}件)を削除します。よろしいですか?
+                </p>
+                {/*
+                  待機中の操作不能は `disabled` ではなく `aria-disabled` + ハンドラ側の
+                  ガードで表す。`disabled` にすると押した瞬間にボタンがフォーカスを失って
+                  <body> へ落ち、削除後の着地点まで文脈が途切れる(スペック5 5.2.2 の
+                  フォーカス契約 / #482)。
+
+                  視覚の伝え方は2つのボタンで異なる。「削除する」は**実行中**なので
+                  ラベルの変化で示し(淡色化すると進行中の文字まで読みにくくなる)、
+                  「キャンセル」は**単に効かない**ので、既存の非活性表現(`Hand` /
+                  `ActionPanel` と同じ淡色化)に揃える。
+                */}
+                <div className="flex flex-wrap gap-3">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      void executeClear();
+                    }}
+                    aria-disabled={clearing || undefined}
+                    className={`rounded-full border border-danger px-4 py-2 text-sm font-medium text-danger ${
+                      clearing ? "cursor-progress" : "hover:bg-danger/10"
+                    }`}
+                  >
+                    {clearing ? "削除しています…" : "削除する"}
+                  </button>
+                  <button
+                    type="button"
+                    // 待機中にキャンセルで確認UIを畳むと、押した「削除する」ボタンが
+                    // 消える一方で削除はまだ終わっておらず、フォーカスの行き先が無い。
+                    onClick={() => {
+                      if (clearingRef.current) return;
+                      setConfirmingClear(false);
+                    }}
+                    aria-disabled={clearing || undefined}
+                    className={`rounded-full border border-control-border px-4 py-2 text-sm ${
+                      clearing
+                        ? "cursor-not-allowed opacity-45"
+                        : "hover:bg-foreground/5"
+                    }`}
+                  >
+                    キャンセル
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <button
+                ref={clearButtonRef}
+                type="button"
+                onClick={() => {
+                  setStatusMessage("");
+                  setConfirmingClear(true);
+                }}
+                className="rounded-full border border-control-border px-4 py-2 text-sm hover:bg-foreground/5"
+              >
+                戦績をすべて削除
+              </button>
+            )}
+          </section>
+        </>
+      )}
+
+      {/*
+        削除の進行中・結果を通知する。読み上げ用に `role="status"` を常設したまま、
+        メッセージがあるときは**目でも読める**ように可視化する(スペック5 5.2.2 /
+        issue #488)。sr-only のままだと、削除失敗や進行中であることが晴眼の利用者へ
+        まったく伝わらない(成功時だけは一覧の消失という視覚的変化がある)。
+
+        置き場所は一覧の**後ろ** ─ 操作した「削除する」ボタン(ページ末尾)のすぐ近くに
+        出す。先頭に置くと、最大20件の一覧を挟んだ画面外で通知が更新され、失敗しても
+        視界の中では何も起きていないように見える。空状態のときも直後に続く。
+        分岐の外に置くことで、一覧↔空状態の切り替えでライブリージョンが作り直されない。
+      */}
+      <p
+        role="status"
+        className={
+          statusMessage === ""
+            ? "sr-only"
+            : "rounded-lg border border-foreground/15 p-4 text-sm text-foreground"
+        }
+      >
+        {statusMessage}
+      </p>
+    </div>
+  );
+}

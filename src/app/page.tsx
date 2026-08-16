@@ -31,9 +31,21 @@ const menuItems: MenuItem[] = [
     ready: true,
   },
   {
+    title: "オンライン対戦",
+    description: "ルームコードを共有して別端末の友人と対局する",
+    href: "/online",
+    ready: true,
+  },
+  {
     title: "ルールを見る",
     description: "オール赤5・ガリ・サイコロ連動ドラなど独自ルールの説明",
     href: "/rules",
+    ready: true,
+  },
+  {
+    title: "戦績",
+    description: "この端末に保存された半荘結果(順位・ソシー内訳)の一覧",
+    href: "/history",
     ready: true,
   },
   {
@@ -88,12 +100,12 @@ export default function Home() {
               return (
                 <li
                   key={item.href}
-                  className="rounded-lg border border-foreground/15"
+                  className="rounded-lg border border-control-border"
                 >
                   {item.ready ? (
                     <Link
                       href={item.href}
-                      className="flex items-center justify-between gap-4 rounded-lg p-4 transition-colors hover:bg-foreground/5 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-foreground"
+                      className="flex items-center justify-between gap-4 rounded-lg p-4 transition-colors motion-reduce:transition-none hover:bg-foreground/5"
                     >
                       {content}
                     </Link>

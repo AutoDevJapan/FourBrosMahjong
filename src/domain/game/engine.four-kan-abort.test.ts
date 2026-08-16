@@ -1,12 +1,13 @@
 import { describe, expect, it } from "vitest";
 import type { Meld } from "@/domain/hand/meld";
 import { parseTile, parseTiles } from "@/domain/hand/notation";
-import type { Tile } from "@/domain/tiles/tile";
+import { sameKind } from "@/domain/hand/tile-identity";
+import { HONOR, type Tile } from "@/domain/tiles/tile";
 import {
   createGame,
   declareAnkan,
-  declareKan,
   declareKakan,
+  declareKan,
   discard,
   type EngineState,
   type Pending,
@@ -59,6 +60,10 @@ function expectFourKanDraw(
     honba: before.round.honba + 1,
   });
   expect(after.hand?.wall.remainingLiveTiles).toBe(liveTilesBefore);
+  // 四槓散了は嶺上補充の**前**に局を打ち切るため、カン成立時に `drawn` を消す各経路を
+  // この唯一の露出点で確認する。牌と供給元は同じ nullable 値なので、null なら供給元も
+  // 構造的に残らない(#440)。
+  expect(after.hand?.drawn).toBeNull();
 }
 
 function baseWithThreeKans(seed = 1): EngineState {
@@ -73,13 +78,72 @@ function baseWithThreeKans(seed = 1): EngineState {
   return { ...state, riichiSticks: 2 };
 }
 
+/**
+ * AI(south)が「通常ツモでカン → その嶺上牌でさらにカン」と連鎖し、2組目で四槓散了に
+ * なる局面を作る。east / west が1組ずつ持つので south の2組目が4組目・3家にまたがる。
+ *
+ * 次のツモ牌はライブ壁の先頭、次の嶺上牌は王牌の**末尾**(`Wall.deadWall` の契約)。
+ * どちらも北だと自動で抜かれ、同種だと2回目のカンが作れないため、条件を満たす seed を
+ * 決定的に探索する(探索条件は牌の形だけで、四槓散了になるかどうかは見ない)。
+ */
+function setupAiKanChain(kind: "ankan" | "kakan"): {
+  armed: EngineState;
+  humanDiscard: Tile;
+  live: number;
+} {
+  const isNorth = (t: Tile) => t.suit === "honor" && t.rank === HONOR.NORTH;
+  for (let seed = 1; seed <= 300; seed++) {
+    const state = createGame({ seed });
+    const hand = state.hand;
+    if (!hand) continue;
+    const first = hand.wall.liveWall[0];
+    const rinshan = hand.wall.deadWall.at(-1);
+    if (rinshan === undefined) continue;
+    if (isNorth(first) || isNorth(rinshan) || sameKind(first, rinshan))
+      continue;
+
+    const junk = parseTiles(JUNK).filter(
+      (t) => !sameKind(t, first) && !sameKind(t, rinshan),
+    );
+    hand.melds.east = [kan("2p 2p 2p 2p")];
+    hand.melds.west = [kan("4p 4p 4p 4p", false)];
+    hand.hands.east = parseTiles("1m 2m 3m 1s 2s 3s");
+    hand.hands.west = parseTiles(JUNK);
+    if (kind === "ankan") {
+      hand.melds.south = [];
+      hand.hands.south = [
+        first,
+        first,
+        first,
+        rinshan,
+        rinshan,
+        rinshan,
+        ...junk.slice(0, 7),
+      ];
+    } else {
+      hand.melds.south = [pon(first), pon(rinshan)];
+      hand.hands.south = junk.slice(0, 7);
+    }
+
+    const humanDiscard = parseTile("9m");
+    hand.drawn = { tile: humanDiscard, source: "live" };
+    hand.turn = "east";
+    return {
+      armed: { ...state, pending: discardPending() },
+      humanDiscard,
+      live: hand.wall.remainingLiveTiles,
+    };
+  }
+  throw new Error("no seed satisfies the kan-chain shape requirements");
+}
+
 describe("engine: 四槓散了(#183)", () => {
   it("人間の暗槓: 複数家の4組目は嶺上補充前に途中流局する", () => {
     const state = baseWithThreeKans();
     const hand = state.hand;
     if (!hand) throw new Error("hand required");
     hand.hands.east = parseTiles("1m 1m 1m 2s 3s 4s");
-    hand.drawn = parseTile("1m");
+    hand.drawn = { tile: parseTile("1m"), source: "kanReplacement" };
     hand.turn = "east";
     const armed = {
       ...state,
@@ -98,7 +162,7 @@ describe("engine: 四槓散了(#183)", () => {
     hand.melds.east = [hand.melds.east[0], hand.melds.east[1], pon(tile)];
     hand.melds.west = [kan("4p 4p 4p 4p")];
     hand.hands.east = parseTiles("5s 1m 9m 1s 9s");
-    hand.drawn = parseTile("9m");
+    hand.drawn = { tile: parseTile("9m"), source: "kanReplacement" };
     hand.turn = "east";
     const armed = {
       ...state,
@@ -115,7 +179,7 @@ describe("engine: 四槓散了(#183)", () => {
     if (!hand) throw new Error("hand required");
     const tile = parseTile("6s");
     hand.hands.east = parseTiles("6s 6s 6s 1m 9m");
-    hand.pendingDiscard = { seat: "south", tile };
+    hand.pendingDiscard = { seat: "south", tile, haitei: false };
     hand.turn = "south";
     const armed = {
       ...state,
@@ -145,7 +209,7 @@ describe("engine: 四槓散了(#183)", () => {
     hand.melds.south = [];
     hand.melds.west = [];
     hand.hands.east = parseTiles("1m 1m 1m");
-    hand.drawn = parseTile("1m");
+    hand.drawn = { tile: parseTile("1m"), source: "live" };
     hand.turn = "east";
     hand.hands.south = parseTiles(JUNK);
     hand.hands.west = parseTiles(JUNK);
@@ -168,7 +232,7 @@ describe("engine: 四槓散了(#183)", () => {
     const tile = parseTile("3p");
     hand.melds.east = [hand.melds.east[0], hand.melds.east[1], pon(tile)];
     hand.hands.east = parseTiles("3p 1m 9m 1s 9s");
-    hand.drawn = parseTile("9m");
+    hand.drawn = { tile: parseTile("9m"), source: "live" };
     hand.turn = "east";
     hand.hands.south = parseTiles("2p 4p 123s 789s 678p 99p");
     hand.melds.south = [];
@@ -189,16 +253,34 @@ describe("engine: 四槓散了(#183)", () => {
     const state = baseWithThreeKans(5);
     const hand = state.hand;
     if (!hand) throw new Error("hand required");
-    const tile = parseTile("7s");
-    hand.hands.east = parseTiles("7s 1m 9m 1s 9s");
-    hand.drawn = tile;
+    // AI の戦略ゲート(#210)を通る役牌(白)の大明槓にする。
+    const tile = parseTile("5z");
+    hand.hands.east = parseTiles("5z 1m 9m 1s 9s");
+    hand.drawn = { tile: tile, source: "live" };
     hand.turn = "east";
-    hand.hands.south = parseTiles("7s 7s 7s 2m 4m 6m 8m 2s 4s 2p 4p 6p 8p");
+    hand.hands.south = parseTiles("5z 5z 5z 2m 4m 6m 8m 2s 4s 2p 4p 6p 8p");
     const armed = { ...state, pending: discardPending() };
     const live = hand.wall.remainingLiveTiles;
 
     expectFourKanDraw(armed, discard(armed, tile), live);
   });
+
+  it.each(["ankan", "kakan"] as const)(
+    "AIが嶺上牌で連続%sして四槓散了になっても drawn は null になる(#440)",
+    (kind) => {
+      // AI が「通常ツモでカン → 嶺上牌でさらにカン」と連鎖し、2回目で四槓散了になる局面。
+      // 2回目のカンは嶺上補充の前に打ち切られるため、`drawn` の消去を直接観測できる。
+      const setup = setupAiKanChain(kind);
+
+      // ライブ牌は通常ツモ1枚 + 1回目のカンの嶺上補充による王牌への補填1枚で 2 減る
+      // (2回目のカンは嶺上補充の前に打ち切られるため減らない)。
+      expectFourKanDraw(
+        setup.armed,
+        discard(setup.armed, setup.humanDiscard),
+        setup.live - 2,
+      );
+    },
+  );
 
   it.each(["ankan", "kakan"] as const)(
     "AIの%s経路も共通判定で途中流局する",
@@ -209,7 +291,7 @@ describe("engine: 四槓散了(#183)", () => {
       const next = hand.wall.liveWall[0];
       const humanDiscard = parseTile("9m");
       hand.hands.east = parseTiles("1m 2m 3m 1s 2s 3s");
-      hand.drawn = humanDiscard;
+      hand.drawn = { tile: humanDiscard, source: "live" };
       hand.turn = "east";
       hand.hands.west = parseTiles(JUNK);
       if (kind === "ankan") {

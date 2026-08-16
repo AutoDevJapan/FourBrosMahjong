@@ -8,110 +8,307 @@ on:
     branches: [main, dev, stg]
   push:
     branches: [main, dev, stg]
+  # GITHUB_TOKEN で自動生成する gitleaks version bump PR は pull_request event を
+  # 再発火しないため、作成元 workflow が同じ head SHA の required check を明示起動する。
+  # event に base/before が無いので scope 判定は fail-open し、全検証を実行する。
+  workflow_dispatch:
 
 # 同一ブランチで新しい push があれば古い実行をキャンセルして無駄を省く
 concurrency:
-  group: ci-${{ github.workflow }}-${{ github.ref }}
+  # 手動起動が同じrefのpush runをキャンセルするとrequired evidenceを失うためeventも分離する。
+  group: ci-${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}
   cancel-in-progress: true
 
-# 最小権限の原則: このワークフローはチェックアウトして読むだけなので read-only で十分
+# 最小権限の原則。いずれも read のみ。
+# `pull-requests` / `checks` / `actions` は、マージ後 push のスキップ前提を実行時に検証するために要る
+# (マージ済み PR 由来か / 当 job の check と元の workflow run が緑だったか) (#496)。
+# branch protection API (`administration:read`) は**使わない** — 設定の記述ではなく
+# 検証済みであることの証拠そのものを見る設計のため、昇格した権限が不要になっている。
 permissions:
   contents: read
+  pull-requests: read
+  checks: read
+  actions: read
+
+# 実行範囲の判定方針 (#491)
+# Actions の課金は **job ごとに分単位へ切り上げ**られるため、判定用の軽量 job + 集約 gate job を
+# 足す構成は 1 run あたり常に +2 分を上乗せし、実測 job 時間 (ci 3.9 分 / e2e 5.4 分) では
+# スキップの節約をほぼ食い潰す。したがって判定は **各 job の先頭 step** で行い、重い step だけを
+# `if:` で落とす (試算: 判定 job 方式 9.80 分/PR に対し job 内短絡 8.10 分/PR)。
+#
+# この形なら job 自体は常に実行され常に成功を報告するため、「skip された required check が
+# 永久に pending になる」罠を構造的に回避でき、branch protection の context 名も変えずに済む。
+# つまり `ci` job そのものが「変更が無関係でも短時間で成功する安定した gate」として働く。
+# 判定ロジックと根拠は .github/scripts/verification-scope.mjs、不変条件は
+# src/test/ci-workflow.test.ts が固定する。
+
+# キャッシュ方針 (#380)
+# GitHub Actions のキャッシュ予算はリポジトリあたり 10GB で、超過分は LRU で退避される。
+# キャッシュは ref スコープで、PR (`refs/pull/N/merge`) 用に保存したエントリは他の PR から
+# 参照できないため、全 job が無条件に save すると同一内容が ref の数だけ複製され、
+# 数日で予算が一巡して「保存はするが復元前に消える」恒常ミス状態になる。
+#
+# したがって本ワークフローでは **保存は既定ブランチ (main) の push 実行のみ** に限定し、
+# PR / dev / stg は復元専用とする。既定ブランチのキャッシュは全ブランチ・全 PR から
+# 復元できるため、ヒット率を落とさずに複製だけを止められる。
+# この不変条件は `src/test/ci-workflow.test.ts` が回帰テストとして固定している。
 
 jobs:
   ci:
     name: lint / typecheck / format / test / build
     runs-on: ubuntu-latest
+    # 個別ツールが終了しない回帰でも、既定の6時間まで品質ゲートを占有させない。
+    # 通常実行時間には十分な余裕を持たせつつ、異常時は30分で失敗として返す。
+    timeout-minutes: 30
     steps:
       - name: Checkout
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # 次の step が merge-base からの差分 (base...head) を取るため全履歴が要る。
+          # 浅い clone だと merge-base を計算できず、判定は「特定不能」として
+          # フェイルオープンし全検証を実行する (安全側だが削減効果は消える)。
+          fetch-depth: 0
+          # 判定に必要なのはコミットとツリーだけで、ファイル内容は要らない
+          # (`--name-only --no-renames` は blob を読まない)。この step は判定前に
+          # 無条件で走る唯一のコストなので、blob の取得を省いて最小化する。
+          filter: blob:none
+
+      - name: Resolve verification scope
+        id: scope
+        env:
+          SCOPE_JOB: ci
+          SCOPE_EVENT_NAME: ${{ github.event_name }}
+          SCOPE_REF: ${{ github.ref }}
+          SCOPE_BASE_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
+          SCOPE_HEAD_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+          # main / dev / stg へのマージ後 push のスキップ前提を実行時に検証するための入力 (#496)。
+          # `SCOPE_CHECK_NAME` は **この job 自身の name**。PR 側で「この job が緑だった」
+          # ことを確認するため、job の name を変えたらここも必ず追随させる
+          # (src/test/ci-workflow.test.ts が一致を固定する)。
+          SCOPE_FORCED: ${{ github.event.forced }}
+          SCOPE_CHECK_NAME: lint / typecheck / format / test / build
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: node .github/scripts/verification-scope.mjs
 
       - name: Setup pnpm
-        uses: pnpm/action-setup@v6
+        if: steps.scope.outputs.setup == 'true'
+        uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
 
       - name: Setup Node.js
-        uses: actions/setup-node@v6
+        if: steps.scope.outputs.setup == 'true'
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           # .nvmrc がリポジトリの Node バージョンの単一の情報源。
           # dependency-cruiser@18 の engines.node が Node 22+ を要求し、
           # .npmrc の engine-strict=true により Node 20 では install が失敗するため 22 LTS を .nvmrc に固定している。
           node-version-file: ".nvmrc"
-          cache: pnpm
+          # `cache: pnpm` は使わない。setup-node の内蔵キャッシュは ref スコープで無条件に save するため、
+          # PR ref ごとに同一内容の pnpm store (約 165MB) が複製され 10GB 予算を食い潰す (#380)。
+          # 代わりに下の restore / save を使い、save を main に限定する。
 
+      - name: Resolve pnpm store path
+        if: steps.scope.outputs.setup == 'true'
+        id: pnpm-store
+        run: echo "path=$(pnpm store path --silent)" >> "$GITHUB_OUTPUT"
+
+      # main で保存したキャッシュは既定ブランチ由来のため PR / dev / stg からも復元できる。
+      # PR 側は復元専用にして、ref ごとの複製を作らない (#380)。
+      - name: Restore pnpm store
+        if: steps.scope.outputs.setup == 'true'
+        id: pnpm-cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ steps.pnpm-store.outputs.path }}
+          key: pnpm-store-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
+
+      # `setup` のときは常に実行する。後続の `pnpm exec playwright install` が node_modules を
+      # 必要とするため、「pnpm キャッシュはヒットしたが Playwright キャッシュは外れた」
+      # (2 つのキャッシュは同じキーでも LRU で独立に退避されうる: #380) の組み合わせで
+      # node_modules 無しに playwright install が走って落ちる。実測 3 秒なので条件は付けない。
       - name: Install dependencies
+        if: steps.scope.outputs.setup == 'true'
         run: pnpm install --frozen-lockfile
 
+      # pnpm store のキーは e2e job と共通のため、保存は ci job のみが行う。
+      # 両 job から同一キーで save すると後発が "Cache already exists" 警告になるだけで無駄。
+      - name: Save pnpm store
+        if: steps.scope.outputs.setup == 'true' && github.ref == 'refs/heads/main' && steps.pnpm-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ steps.pnpm-store.outputs.path }}
+          key: pnpm-store-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
+
       - name: Lint (eslint)
+        if: steps.scope.outputs.verify == 'true'
         run: pnpm lint
 
       - name: Typecheck (tsc --noEmit)
+        if: steps.scope.outputs.verify == 'true'
         run: pnpm typecheck
 
-      - name: Format check (biome)
-        run: pnpm format:check
+      # `biome check` は `biome format` の上位互換(整形 + assist。linter は
+      # biome.json で無効)。`format:check` だけをゲートにしていた間に assist
+      # (organizeImports) の違反が 38 件たまり、`pnpm check` が main で一度も
+      # 緑にならない状態になっていた (#418)。ステップは増やさず check へ寄せる。
+      - name: Format & assist check (biome)
+        if: steps.scope.outputs.verify == 'true'
+        run: pnpm check
 
       - name: Test (vitest)
+        if: steps.scope.outputs.verify == 'true'
         run: pnpm test
 
       - name: Knip
+        if: steps.scope.outputs.verify == 'true'
         run: pnpm knip
 
       - name: Dependency Cruiser
+        if: steps.scope.outputs.verify == 'true'
         run: pnpm depcruise
 
       - name: Build (next build)
+        if: steps.scope.outputs.verify == 'true'
+        env:
+          # 実配布buildでは未設定のE2E専用フラグ。production成果物でも決定的seedを使い、
+          # dev/prodの主要導線を同じ局面で比較する(#432)。
+          NEXT_PUBLIC_E2E_SEED_ENABLED: "1"
+          # Production E2Eで本番想定のconnect-src許可を独立検証するための公開設定。
+          NEXT_PUBLIC_ONLINE_WS_URL: "https://four-bros-mahjong-online-production.up.railway.app/ws"
         run: pnpm build
 
-  e2e:
-    name: E2E (Playwright)
-    runs-on: ubuntu-latest
-    # 既存の ci ジョブ (lint/typecheck/format/test/build) とは独立に並列実行する。
-    # playwright.config.ts の webServer は `pnpm dev` を自前で起動するためビルド成果物に依存せず、
-    # ci ジョブの完了を待つ必要がない。
-    # ハングした場合にジョブを長時間占有し続けないようタイムアウトを明示する。
-    timeout-minutes: 15
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v7
+      # Service Worker は production build でのみ登録されるため、通常の dev E2E job では
+      # pwa-offline.spec.ts の全件が意図的に skip される。既にこのjobで作った `.next` を
+      # そのまま `next start` し、依存install/buildを重複させずPWAと主要導線のprod parityを固定する。
 
-      - name: Setup pnpm
-        uses: pnpm/action-setup@v6
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v6
-        with:
-          # .nvmrc がリポジトリの Node バージョンの単一の情報源。
-          node-version-file: ".nvmrc"
-          cache: pnpm
-
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
-
-      # ブラウザバイナリ (~/.cache/ms-playwright) を pnpm-lock.yaml のハッシュ (= @playwright/test の
-      # バージョン変化を含む) をキーにキャッシュし、CI 実行時間を短縮する。OS 依存パッケージの apt install
-      # はキャッシュの有無に関わらず --with-deps で毎回実行するため、キャッシュヒット時もブラウザ本体の
-      # 再ダウンロードのみがスキップされる。
-      - name: Cache Playwright browsers
-        uses: actions/cache@v4
+      # キャッシュキーにはインストールするブラウザ集合を必ず含める。両 job が同じ path を
+      # 同じキーで共有すると、先に保存した側(chromium のみ)の内容がキーを占有し、
+      # webkit を要求する e2e job は毎回ダウンロードし直しになる(exact hit のため保存も走らない)。
+      - name: Restore Playwright browser for production PWA E2E
+        if: steps.scope.outputs.setup == 'true'
+        id: pwa-playwright-cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.cache/ms-playwright
-          key: playwright-browsers-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
+          key: playwright-browsers-${{ runner.os }}-chromium-${{ hashFiles('pnpm-lock.yaml') }}
 
-      # Ubuntu ランナーで --with-deps が apt-get 経由で依存パッケージを更新する際、needrestart が
-      # 対話的な再起動確認プロンプトを出して非対話環境でハングすることがあるため、
-      # 環境変数で明示的に自動応答させる。
-      - name: Install Playwright browsers (chromium + OS deps)
+      # 同上。検証しない run でキャッシュも既にあるなら取得する意味が無い (#491)。
+      - name: Install Playwright browser for production PWA E2E
+        if: steps.scope.outputs.setup == 'true' && (steps.scope.outputs.verify == 'true' || steps.pwa-playwright-cache.outputs.cache-hit != 'true')
         env:
           DEBIAN_FRONTEND: noninteractive
           NEEDRESTART_MODE: a
         run: pnpm exec playwright install --with-deps chromium
 
+      - name: Save Playwright browser for production PWA E2E
+        if: steps.scope.outputs.setup == 'true' && github.ref == 'refs/heads/main' && steps.pwa-playwright-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-browsers-${{ runner.os }}-chromium-${{ hashFiles('pnpm-lock.yaml') }}
+
+      - name: Production E2E (PWA / persistence / modal focus / security / metadata / a11y)
+        if: steps.scope.outputs.verify == 'true'
+        env:
+          E2E_PORT: "3101"
+          NEXT_PUBLIC_ONLINE_WS_URL: "https://four-bros-mahjong-online-production.up.railway.app/ws"
+        run: pnpm test:e2e:prod:prebuilt
+
+  e2e:
+    name: E2E (Playwright)
+    runs-on: ubuntu-latest
+    # Playwright's browser cache contains binaries only; it cannot provision the
+    # host packages required by WebKit. Use the exact Playwright image instead of
+    # invoking apt on every fresh hosted runner. The tag is version-matched to
+    # @playwright/test in pnpm-lock.yaml and pinned to the amd64 manifest used by
+    # the standard GitHub-hosted Ubuntu runner.
+    container:
+      image: mcr.microsoft.com/playwright:v1.62.1-noble@sha256:c091b21d9fae78c76e85cd4356431e9b018402f172a214fc7d7a5e9a7e29d8ac
+      options: --init --ipc=host
+    # 既存の ci ジョブ (lint/typecheck/format/test/build) とは独立に並列実行する。
+    # playwright.config.ts の webServer は `pnpm dev` を自前で起動するためビルド成果物に依存せず、
+    # ci ジョブの完了を待つ必要がない。
+    # ハングした場合にジョブを長時間占有し続けないようタイムアウトを明示する。
+    # webkit 追加(#369)を含むブラウザ本体とOS依存は上の公式イメージに固定する。
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # 次の step が merge-base からの差分 (base...head) を取るため全履歴が要る。
+          # 浅い clone だと merge-base を計算できず、判定は「特定不能」として
+          # フェイルオープンし全検証を実行する (安全側だが削減効果は消える)。
+          fetch-depth: 0
+          # 判定に必要なのはコミットとツリーだけで、ファイル内容は要らない
+          # (`--name-only --no-renames` は blob を読まない)。この step は判定前に
+          # 無条件で走る唯一のコストなので、blob の取得を省いて最小化する。
+          filter: blob:none
+
+      - name: Resolve verification scope
+        id: scope
+        env:
+          SCOPE_JOB: e2e
+          SCOPE_EVENT_NAME: ${{ github.event_name }}
+          SCOPE_REF: ${{ github.ref }}
+          SCOPE_BASE_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
+          SCOPE_HEAD_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+          # main / dev / stg へのマージ後 push のスキップ前提を実行時に検証するための入力 (#496)。
+          # `SCOPE_CHECK_NAME` は **この job 自身の name**。PR 側で「この job が緑だった」
+          # ことを確認するため、job の name を変えたらここも必ず追随させる
+          # (src/test/ci-workflow.test.ts が一致を固定する)。
+          SCOPE_FORCED: ${{ github.event.forced }}
+          SCOPE_CHECK_NAME: E2E (Playwright)
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: node .github/scripts/verification-scope.mjs
+
+      - name: Setup pnpm
+        if: steps.scope.outputs.setup == 'true'
+        uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
+
+      - name: Setup Node.js
+        if: steps.scope.outputs.setup == 'true'
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          # .nvmrc がリポジトリの Node バージョンの単一の情報源。
+          node-version-file: ".nvmrc"
+          # `cache: pnpm` を使わない理由と代替は ci job 側のコメントを参照 (#380)。
+          # pnpm store の保存は ci job のみが行い、この job は復元専用。
+
+      - name: Resolve pnpm store path
+        if: steps.scope.outputs.setup == 'true'
+        id: pnpm-store
+        run: echo "path=$(pnpm store path --silent)" >> "$GITHUB_OUTPUT"
+
+      - name: Restore pnpm store
+        if: steps.scope.outputs.setup == 'true'
+        id: pnpm-cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ steps.pnpm-store.outputs.path }}
+          key: pnpm-store-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
+
+      # 検証時だけテスト実行用の node_modules を導入する。verified post-merge では
+      # Playwright固定イメージにcache writerも無いため、scopeがsetup=falseになりこのjobの
+      # 依存導入自体を省略する (#569)。
+      - name: Install dependencies
+        if: steps.scope.outputs.setup == 'true'
+        run: pnpm install --frozen-lockfile
+
+      # The image provisions the exact Chromium/WebKit pair and their host
+      # dependencies. Check the expected launchers before the test command so a
+      # future image update cannot silently turn browser coverage into a no-op.
+      - name: Verify Playwright browsers are provisioned
+        if: steps.scope.outputs.verify == 'true'
+        run: |
+          test -x /ms-playwright/chromium-*/chrome-linux64/chrome
+          test -x /ms-playwright/webkit-*/pw_run.sh
+
       - name: Test (playwright e2e)
+        if: steps.scope.outputs.verify == 'true'
         run: pnpm test:e2e
 
       - name: Upload Playwright report
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: playwright-report
           path: playwright-report/

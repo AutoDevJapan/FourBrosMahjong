@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { HONOR } from "../tiles/tile";
 import type { Meld, MeldType } from "./meld";
 import { parseTile, parseTiles } from "./notation";
-import { type WinContext, analyzeWin, isWinningHand } from "./win";
+import { analyzeWin, isWinningHand, type WinContext } from "./win";
 
 function ids(ctx: WinContext): string[] {
   const analysis = analyzeWin(ctx);
@@ -103,7 +103,7 @@ describe("通常役の判定", () => {
 
   it("清一色(門前6翻)", () => {
     const ctx: WinContext = {
-      concealedTiles: parseTiles("111p 234p 567p 789p 99p"),
+      concealedTiles: parseTiles("123p 123p 456p 789p 99p"),
       winningTile: parseTile("9p"),
       winType: "ron",
     };

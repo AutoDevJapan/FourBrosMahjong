@@ -187,7 +187,7 @@ export function ThemeToggle() {
           return (
             <label
               key={option.value}
-              className="flex cursor-pointer items-center gap-3 rounded-lg border border-foreground/15 px-4 py-3 has-[:focus-visible]:outline has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-offset-2 has-[:focus-visible]:outline-foreground"
+              className="flex cursor-pointer items-center gap-3 rounded-lg border border-control-border px-4 py-3"
             >
               <input
                 type="radio"

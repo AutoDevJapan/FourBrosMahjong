@@ -10,10 +10,10 @@
  * 純関数・決定的・React/DOM 非依存。
  */
 
-import type { Tile } from "../tiles/tile";
-import { type MeldInput, type WinForm, decomposeAll } from "./decompose";
-import { type Meld, isConcealedHand } from "./meld";
-import { type PaoYaku, type Yaku, type YakuInput, detectYaku } from "./yaku";
+import type { PlayableWind, Tile } from "../tiles/tile";
+import { decomposeAll, type MeldInput, type WinForm } from "./decompose";
+import { isConcealedHand, type Meld } from "./meld";
+import { detectYaku, type PaoYaku, type Yaku, type YakuInput } from "./yaku";
 
 /** 和了判定の入力(手牌+文脈)。席割り当て(Q9)・ドラ(#64)には依存しない。 */
 export interface WinContext {
@@ -23,8 +23,8 @@ export interface WinContext {
   readonly melds?: readonly Meld[];
   readonly winningTile: Tile;
   readonly winType: "tsumo" | "ron";
-  readonly seatWind?: number;
-  readonly roundWind?: number;
+  readonly seatWind?: PlayableWind;
+  readonly roundWind?: PlayableWind;
   readonly riichi?: boolean;
   readonly doubleRiichi?: boolean;
   readonly ippatsu?: boolean;

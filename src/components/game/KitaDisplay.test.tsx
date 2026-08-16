@@ -6,7 +6,9 @@ describe("KitaDisplay", () => {
   it.each([1, 2, 4])("ガリ%d枚を公開牌と枚数で表示する", (count) => {
     const { container } = render(<KitaDisplay count={count} />);
 
-    expect(screen.getByLabelText(`抜き北 ガリ${count}枚`)).toBeInTheDocument();
+    const display = screen.getByTestId("kita-display");
+    expect(display).toHaveTextContent(`抜き北 ガリ${count}枚`);
+    expect(display).not.toHaveAttribute("aria-label");
     expect(container.querySelectorAll('[data-face="Pei"]')).toHaveLength(count);
   });
 

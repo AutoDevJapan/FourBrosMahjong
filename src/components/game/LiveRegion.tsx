@@ -11,6 +11,8 @@
 export interface LiveRegionProps {
   /** 進行通知(`aria-live="polite"`)。 */
   politeMessage?: string;
+  /** 同一文言の別イベントを live region の DOM mutation として識別するキー。 */
+  politeMessageKey?: React.Key;
   /** 通常進行を上書きせず並行して伝える一時的な進行通知。 */
   secondaryPoliteMessage?: string;
   /** 結果確定通知(`role="alert"` = `aria-live="assertive"`)。 */
@@ -19,13 +21,14 @@ export interface LiveRegionProps {
 
 export default function LiveRegion({
   politeMessage = "",
+  politeMessageKey,
   secondaryPoliteMessage = "",
   assertiveMessage = "",
 }: LiveRegionProps) {
   return (
     <>
       <div aria-live="polite" aria-atomic="true" className="sr-only">
-        {politeMessage}
+        <span key={politeMessageKey}>{politeMessage}</span>
       </div>
       <div aria-live="polite" aria-atomic="true" className="sr-only">
         {secondaryPoliteMessage}

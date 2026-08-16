@@ -20,6 +20,12 @@ export type DiceRoll = readonly [Die, Die];
  */
 export type DoraCount = 1 | 2 | 3;
 
+/**
+ * 表ドラ枚数の上限(= 裏ドラ枚数の上限)。6のゾロ目のときの値。
+ * 王牌にドラ表示牌用として確保する枚数の導出元(→ `wall.ts` の `DORA_INDICATOR_RESERVE`)。
+ */
+export const MAX_OMOTE_DORA_COUNT: DoraCount = 3;
+
 const MIN_PIP = 1;
 const MAX_PIP = 6;
 
@@ -54,7 +60,7 @@ export function omoteDoraCount(roll: DiceRoll): DoraCount {
     return 1; // 通常(ゾロ目でない)
   }
   if (a === MAX_PIP) {
-    return 3; // 6のゾロ目(6・6)のみ
+    return MAX_OMOTE_DORA_COUNT; // 6のゾロ目(6・6)のみ
   }
   return 2; // それ以外のゾロ目
 }

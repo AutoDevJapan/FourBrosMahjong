@@ -6,12 +6,12 @@ import {
   dealerOf,
   type InitialSeating,
   isOorasu,
-  type RoundNumber,
-  type RoundState,
-  RoundProgressionError,
-  roundLabel,
   ROUNDS_PER_WIND,
+  type RoundNumber,
+  RoundProgressionError,
+  type RoundState,
   type RoundWind,
+  roundLabel,
   seatingOf,
 } from "./round";
 

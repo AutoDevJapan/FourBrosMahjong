@@ -7,8 +7,8 @@
  *
  * ここに含まれるのは表示のためのラベル整形のみで、ゲームロジックは一切含まない。
  */
+import { isRedDora } from "@/domain/tiles/tile";
 import type { TileData } from "../game/types";
-import { isRedDora } from "./tileImage";
 
 /** 漢数字(1〜9)。牌面印字と `aria-label` の双方で用いる。 */
 const KANJI_DIGITS = [

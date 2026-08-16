@@ -66,6 +66,9 @@ describe("buildTileSet(スペック1 1.2)", () => {
       const fivePin = tiles.filter((t) => t.suit === "pin" && t.rank === 5);
       expect(fivePin).toHaveLength(4);
       expect(fivePin.every((t) => t.isRed)).toBe(true);
+      // 同一牌種の4枚は独立したオブジェクト。1枚ずつ抜き差しする山として
+      // 成立させるため、ファクトリがインスタンスを共有していないことを押さえる。
+      expect(new Set(fivePin).size).toBe(4);
     });
 
     it("5索4枚がすべて赤", () => {
