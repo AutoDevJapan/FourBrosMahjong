@@ -1,8 +1,8 @@
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-const EXPECTED_RULESET_NAME = "protect-existing-release-tags";
-const EXPECTED_TAG_PATTERN = "refs/tags/v*";
+export const EXPECTED_RULESET_NAME = "protect-existing-release-tags";
+export const EXPECTED_TAG_PATTERN = "refs/tags/v*";
 const EXPECTED_RULE_TYPES = ["deletion", "non_fast_forward", "update"];
 
 /**
@@ -24,6 +24,11 @@ export function validateReleaseTagRuleset(input) {
   if (ruleset.name !== EXPECTED_RULESET_NAME) {
     throw new Error(`unexpected ruleset name: ${String(ruleset.name)}`);
   }
+  if (ruleset.source_type !== "Repository") {
+    throw new Error(
+      `ruleset source must be Repository: ${String(ruleset.source_type)}`,
+    );
+  }
   if (ruleset.target !== "tag") {
     throw new Error(`ruleset target must be tag: ${String(ruleset.target)}`);
   }
@@ -43,7 +48,11 @@ export function validateReleaseTagRuleset(input) {
   }
   const include = /** @type {Record<string, unknown>} */ (refName).include;
   const exclude = /** @type {Record<string, unknown>} */ (refName).exclude;
-  if (!Array.isArray(include) || !include.includes(EXPECTED_TAG_PATTERN)) {
+  if (
+    !Array.isArray(include) ||
+    include.length !== 1 ||
+    include[0] !== EXPECTED_TAG_PATTERN
+  ) {
     throw new Error("ruleset must include exactly the v* tag pattern");
   }
   if (!Array.isArray(exclude) || exclude.length !== 0) {
@@ -54,10 +63,7 @@ export function validateReleaseTagRuleset(input) {
   if (!Array.isArray(bypassActors) || bypassActors.length !== 0) {
     throw new Error("immutable release-tag ruleset must have no bypass actors");
   }
-  if (
-    "current_user_can_bypass" in ruleset &&
-    ruleset.current_user_can_bypass !== "never"
-  ) {
+  if (ruleset.current_user_can_bypass !== "never") {
     throw new Error(
       `current user must not bypass immutable tags: ${String(ruleset.current_user_can_bypass)}`,
     );
