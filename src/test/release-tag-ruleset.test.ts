@@ -1,7 +1,8 @@
-import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
-import { selectImmutableReleaseTagRuleset } from "../../.github/scripts/audit-release-tag-ruleset.mjs";
+import {
+  buildGhApiArgv,
+  selectImmutableReleaseTagRuleset,
+} from "../../.github/scripts/audit-release-tag-ruleset.mjs";
 import { validateReleaseTagRuleset } from "../../.github/scripts/verify-release-tag-ruleset.mjs";
 
 const ruleset = {
@@ -99,12 +100,38 @@ describe("release tag ruleset audit selector (#508)", () => {
 });
 
 describe("release tag ruleset audit helper", () => {
-  it("contains only a GET-based gh API invocation", () => {
-    const source = readFileSync(
-      resolve(process.cwd(), ".github/scripts/audit-release-tag-ruleset.mjs"),
-      "utf8",
+  it("pins GET in the argv for paginated list and detail requests", () => {
+    expect(
+      buildGhApiArgv("repos/AutoDevJapan/FourBrosMahjong/rulesets", [
+        "--paginate",
+        "--slurp",
+      ]),
+    ).toEqual([
+      "api",
+      "--method",
+      "GET",
+      "--paginate",
+      "--slurp",
+      "repos/AutoDevJapan/FourBrosMahjong/rulesets",
+    ]);
+    expect(
+      buildGhApiArgv("repos/AutoDevJapan/FourBrosMahjong/rulesets/42"),
+    ).toEqual([
+      "api",
+      "--method",
+      "GET",
+      "repos/AutoDevJapan/FourBrosMahjong/rulesets/42",
+    ]);
+  });
+
+  it.each([
+    ["--method", "POST"],
+    ["--method=POST"],
+    ["-X", "DELETE"],
+    ["-XDELETE"],
+  ])("rejects a method override in read-only options: %s", (...options) => {
+    expect(() => buildGhApiArgv("repos/example", options)).toThrow(
+      /must not override GET/,
     );
-    expect(source).toContain('execFileSync("gh", ["api", ...options, path]');
-    expect(source).not.toMatch(/--method\s+(POST|PUT|PATCH|DELETE)/);
   });
 });

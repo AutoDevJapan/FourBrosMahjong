@@ -61,9 +61,35 @@ function validateRepository(repository) {
   return repository;
 }
 
+/**
+ * Build the argv for a read-only GitHub API request.
+ *
+ * Keep GET explicit in the argv instead of relying on `gh api`'s default.
+ * Options are currently pagination flags only; reject anything that could
+ * override the method if a caller extends this helper in the future.
+ *
+ * @param {string} path
+ * @param {string[]} [options]
+ */
+export function buildGhApiArgv(path, options = []) {
+  for (const [index, option] of options.entries()) {
+    if (
+      option === "--method" ||
+      option === "-X" ||
+      option.startsWith("--method=") ||
+      option.startsWith("-X") ||
+      (index > 0 && options[index - 1] === "--method") ||
+      (index > 0 && options[index - 1] === "-X")
+    ) {
+      throw new Error("read-only gh api options must not override GET");
+    }
+  }
+  return ["api", "--method", "GET", ...options, path];
+}
+
 /** @param {string} path @param {string[]} [options] */
 function ghApi(path, options = []) {
-  return execFileSync("gh", ["api", ...options, path], {
+  return execFileSync("gh", buildGhApiArgv(path, options), {
     encoding: "utf8",
     timeout: 15_000,
     stdio: ["ignore", "pipe", "pipe"],
