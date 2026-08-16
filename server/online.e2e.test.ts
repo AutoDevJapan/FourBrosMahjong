@@ -332,6 +332,13 @@ class OnlineTestClient {
     );
   }
 
+  async waitForPong(): Promise<Extract<ProtocolMessage, { type: "pong" }>> {
+    return this.waitFor(
+      (message): message is Extract<ProtocolMessage, { type: "pong" }> =>
+        message.type === "pong",
+    );
+  }
+
   async waitForRateLimit(
     scope: RateLimitedScope,
   ): Promise<Extract<ProtocolMessage, { type: "error" }>> {
@@ -682,6 +689,42 @@ describe("online multiplayer local E2E (#629)", () => {
         (candidate) => candidate.version === version,
       );
       expect(snapshot.version).toBe(version);
+    },
+    TEST_TIMEOUT_MS,
+  );
+
+  it(
+    "keeps an idle seat alive through the application ping/pong contract",
+    async () => {
+      if (server === undefined)
+        throw new Error("オンラインサーバーが起動していません。");
+
+      const client = new OnlineTestClient(server.url, TEST_ORIGIN);
+      clients.push(client);
+      await client.open();
+      client.send({ type: "create", name: "keepalive検証" });
+      const session = await client.waitForSession();
+
+      client.send({ type: "ping" });
+      await expect(client.waitForPong()).resolves.toEqual({ type: "pong" });
+
+      client.send({
+        type: "action",
+        version: session.snapshot.version + 1,
+        action: { type: "tsumogiri" },
+      });
+      await expect(client.waitForError()).resolves.toMatchObject({
+        type: "error",
+        message: "対局状態が更新されています。最新状態を受信しました。",
+      });
+      await expect(
+        client.waitForSnapshot(
+          (snapshot) => snapshot.version === session.snapshot.version,
+        ),
+      ).resolves.toMatchObject({
+        version: session.snapshot.version,
+        players: [{ id: "p0", connected: true }],
+      });
     },
     TEST_TIMEOUT_MS,
   );

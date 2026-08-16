@@ -16,6 +16,7 @@ import {
   hasOpenPeer as hasOpenPeerConnection,
   registerReplacementBeforeClose,
 } from "./connectionState";
+import { runHeartbeat, SERVER_HEARTBEAT_INTERVAL_MS } from "./heartbeat";
 import {
   normalizePlayerName,
   normalizeRoomCode,
@@ -28,11 +29,13 @@ import {
 const PORT = Number(process.env.PORT ?? 8080);
 const MAX_MESSAGE_BYTES = 32 * 1024;
 const RATE_LIMIT_CLOSE_CODE = 1013;
+export const ONLINE_HEARTBEAT_INTERVAL_MS = SERVER_HEARTBEAT_INTERVAL_MS;
 
 interface Client {
   readonly socket: WebSocket;
   readonly source: string;
   readonly abuse: ClientAbuseState;
+  isAlive: boolean;
   room: RoomSession["room"] | null;
   player: RoomPlayer | null;
 }
@@ -292,6 +295,9 @@ function handleMessage(client: Client, value: unknown): void {
       return;
     }
     case "ping":
+      if (client.room && client.player) {
+        manager.touch(client.room, client.player);
+      }
       send(client, { type: "pong" });
       return;
     default:
@@ -304,10 +310,17 @@ function onConnection(socket: WebSocket, source: string): void {
     socket,
     source,
     abuse: abuseControls.createClientState(),
+    isAlive: true,
     room: null,
     player: null,
   };
   clients.add(client);
+  socket.on("pong", () => {
+    client.isAlive = true;
+    if (client.room && client.player) {
+      manager.touch(client.room, client.player);
+    }
+  });
   socket.on("message", (data) => {
     if (Buffer.byteLength(data.toString()) > MAX_MESSAGE_BYTES) {
       sendError(
@@ -499,6 +512,12 @@ const sweepTimer = setInterval(
   5 * 60 * 1000,
 );
 sweepTimer.unref();
+
+const heartbeatTimer = setInterval(
+  () => runHeartbeat(clients),
+  ONLINE_HEARTBEAT_INTERVAL_MS,
+);
+heartbeatTimer.unref();
 
 httpServer.listen(PORT, "0.0.0.0", () => {
   console.log(`FourBrosMahjong online server listening on ${PORT}`);
