@@ -36,7 +36,7 @@ function allowedOrigins(): readonly string[] {
 function originAllowed(origin: string | undefined): boolean {
   const allowed = allowedOrigins();
   return (
-    allowed.length === 0 || origin === undefined || allowed.includes(origin)
+    allowed.length === 0 || (origin !== undefined && allowed.includes(origin))
   );
 }
 
