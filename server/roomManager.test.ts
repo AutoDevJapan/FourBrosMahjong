@@ -1,4 +1,6 @@
 import { describe, expect, it } from "vitest";
+import { walkToGameEnd } from "../src/components/game/finishedGameFixture";
+import { createGame } from "../src/domain/game/engine";
 import { MAX_PLAYER_NAME_LENGTH } from "../src/lib/playerName";
 import {
   normalizePlayerName,
@@ -6,8 +8,6 @@ import {
   RoomManager,
   type RoomSession,
 } from "./roomManager";
-import { walkToGameEnd } from "../src/components/game/finishedGameFixture";
-import { createGame } from "../src/domain/game/engine";
 
 function reachGameEnd(manager: RoomManager, host: RoomSession): void {
   const { journal } = walkToGameEnd(2024);
