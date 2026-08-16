@@ -20,6 +20,9 @@ import { readSharedRoomCode, roomShareUrl } from "./roomSharing";
 import type {
   OnlineConnectionStatus,
   OnlineCredentials,
+  OnlineErrorCode,
+  OnlineRateLimitScope,
+  OnlineServerError,
   OnlineServerMessage,
   OnlineSnapshot,
 } from "./types";
@@ -36,6 +39,8 @@ const NAME_REQUIREMENT_ID = "online-lobby-name-requirement";
 const ROOM_CODE_REQUIREMENT_ID = "online-lobby-room-code-requirement";
 const JOIN_REQUIREMENT_ID = "online-lobby-join-requirement";
 const MAX_AUTOMATIC_RECONNECT_ATTEMPTS = 5;
+// サーバーからの異常値で、UIを長時間ロックしないための上限。
+const MAX_SERVER_RETRY_AFTER_MS = 10 * 60 * 1000;
 const CONNECTION_ERROR_MESSAGE =
   "オンラインサーバーへ接続できません。設定とネットワークを確認してください。";
 const RECONNECTING_ERROR_MESSAGE =
@@ -46,6 +51,7 @@ type JoinRequest =
   | { readonly type: "create"; readonly name: string }
   | { readonly type: "join"; readonly code: string; readonly name: string }
   | { readonly type: "resume"; readonly code: string; readonly token: string };
+type ConnectionFailure = Pick<OnlineServerError, "message" | "retryAfterMs">;
 
 function readCredentials(): OnlineCredentials | null {
   if (typeof window === "undefined") return null;
@@ -82,12 +88,53 @@ function saveCredentials(credentials: OnlineCredentials | null): void {
   }
 }
 
+function isOnlineErrorCode(value: unknown): value is OnlineErrorCode {
+  return (
+    value === "connection_limit" ||
+    value === "message_too_large" ||
+    value === "rate_limited"
+  );
+}
+
+function isOnlineRateLimitScope(value: unknown): value is OnlineRateLimitScope {
+  return (
+    value === "connection" ||
+    value === "create" ||
+    value === "join" ||
+    value === "resume" ||
+    value === "action" ||
+    value === "message"
+  );
+}
+
+function normalizeRetryAfterMs(value: unknown): number | undefined {
+  if (typeof value !== "number" || !Number.isFinite(value) || value < 0) {
+    return undefined;
+  }
+  return Math.min(MAX_SERVER_RETRY_AFTER_MS, Math.ceil(value));
+}
+
 function messageOf(value: unknown): OnlineServerMessage | null {
   if (value === null || typeof value !== "object") return null;
-  const message = value as Partial<OnlineServerMessage>;
-  return typeof message.type === "string"
-    ? (message as OnlineServerMessage)
-    : null;
+  const message = value as Record<string, unknown>;
+  if (typeof message.type !== "string") return null;
+  if (message.type !== "error") {
+    return message as unknown as OnlineServerMessage;
+  }
+  if (typeof message.message !== "string") return null;
+
+  const code = isOnlineErrorCode(message.code) ? message.code : undefined;
+  const scope = isOnlineRateLimitScope(message.scope)
+    ? message.scope
+    : undefined;
+  const retryAfterMs = normalizeRetryAfterMs(message.retryAfterMs);
+  return {
+    type: "error",
+    message: message.message,
+    ...(code === undefined ? {} : { code }),
+    ...(scope === undefined ? {} : { scope }),
+    ...(retryAfterMs === undefined ? {} : { retryAfterMs }),
+  };
 }
 
 function nameRequirementMessage(name: string): string {
@@ -160,10 +207,15 @@ function connectionStatusMessage(status: ConnectionStatus): string {
   }
 }
 
+function retryAfterMessage(retryAfterMs: number): string {
+  return `再試行まで約${Math.max(1, Math.ceil(retryAfterMs / 1000))}秒お待ちください。`;
+}
+
 interface ConnectionFeedbackProps {
   readonly status: ConnectionStatus;
   readonly error: string;
   readonly canRetry: boolean;
+  readonly retryAfterMs: number;
   readonly feedbackRef: RefObject<HTMLDivElement | null>;
   readonly onRetry: (restoreFocus: boolean) => void;
 }
@@ -172,6 +224,7 @@ function ConnectionFeedback({
   status,
   error,
   canRetry,
+  retryAfterMs,
   feedbackRef,
   onRetry,
 }: ConnectionFeedbackProps) {
@@ -196,11 +249,16 @@ function ConnectionFeedback({
             {error}
           </p>
         ) : null}
+        {retryAfterMs > 0 ? (
+          <p className="mt-1 text-foreground/70" role="status">
+            {retryAfterMessage(retryAfterMs)}
+          </p>
+        ) : null}
       </div>
       {status === "failed" ? (
         <button
           type="button"
-          disabled={!canRetry}
+          disabled={!canRetry || retryAfterMs > 0}
           onClick={() =>
             onRetry(document.activeElement === retryButtonRef.current)
           }
@@ -224,6 +282,7 @@ export default function OnlineLobby() {
   const [socket, setSocket] = useState<WebSocket | null>(null);
   const [status, setStatus] = useState<ConnectionStatus>("idle");
   const [error, setError] = useState("");
+  const [retryAfterMs, setRetryAfterMs] = useState(0);
   const socketRef = useRef<WebSocket | null>(null);
   const credentialsRef = useRef<OnlineCredentials | null>(null);
   const reconnectAttemptRef = useRef(0);
@@ -236,6 +295,12 @@ export default function OnlineLobby() {
   const pendingSessionSocketRef = useRef<WebSocket | null>(null);
   const feedbackRef = useRef<HTMLDivElement>(null);
   const focusAfterRetryRef = useRef(false);
+  const retryAfterUntilRef = useRef(0);
+  const retryAfterTimerRef = useRef<number | null>(null);
+  const serverFailureRef = useRef<{
+    readonly socket: WebSocket;
+    readonly failure: ConnectionFailure;
+  } | null>(null);
   const connectRef = useRef<
     (request: JoinRequest, reconnecting?: boolean) => void
   >(() => undefined);
@@ -255,21 +320,59 @@ export default function OnlineLobby() {
     }
   }, []);
 
+  const clearRetryCooldown = useCallback(() => {
+    if (retryAfterTimerRef.current !== null) {
+      window.clearInterval(retryAfterTimerRef.current);
+      retryAfterTimerRef.current = null;
+    }
+    retryAfterUntilRef.current = 0;
+    setRetryAfterMs(0);
+  }, []);
+
+  const applyRetryCooldown = useCallback((value: unknown) => {
+    const normalized = normalizeRetryAfterMs(value);
+    if (normalized === undefined || normalized <= 0) return;
+
+    const nextUntil = Date.now() + normalized;
+    if (nextUntil <= retryAfterUntilRef.current) return;
+    retryAfterUntilRef.current = nextUntil;
+    setRetryAfterMs(normalized);
+    if (retryAfterTimerRef.current !== null) {
+      window.clearInterval(retryAfterTimerRef.current);
+    }
+    const timer = window.setInterval(() => {
+      const remaining = Math.max(0, retryAfterUntilRef.current - Date.now());
+      setRetryAfterMs(remaining);
+      if (remaining === 0) {
+        retryAfterUntilRef.current = 0;
+        window.clearInterval(timer);
+        if (retryAfterTimerRef.current === timer) {
+          retryAfterTimerRef.current = null;
+        }
+      }
+    }, 250);
+    retryAfterTimerRef.current = timer;
+  }, []);
+
   const scheduleReconnect = useCallback(
-    (message = RECONNECTING_ERROR_MESSAGE) => {
+    (message = RECONNECTING_ERROR_MESSAGE, serverRetryAfterMs?: number) => {
       if (manualCloseRef.current) return;
       clearReconnectTimer();
+      const retryAfter = normalizeRetryAfterMs(serverRetryAfterMs);
       const attempt = reconnectAttemptRef.current;
       if (attempt >= MAX_AUTOMATIC_RECONNECT_ATTEMPTS) {
         setStatus("failed");
-        setError(CONNECTION_ERROR_MESSAGE);
+        setError(message);
+        applyRetryCooldown(retryAfter);
         return;
       }
 
       reconnectAttemptRef.current = attempt + 1;
       setStatus("reconnecting");
       setError(message);
-      const delay = Math.min(10_000, 500 * 2 ** Math.min(attempt, 4));
+      applyRetryCooldown(retryAfter);
+      const backoffDelay = Math.min(10_000, 500 * 2 ** Math.min(attempt, 4));
+      const delay = Math.max(backoffDelay, retryAfter ?? 0);
       reconnectTimerRef.current = window.setTimeout(() => {
         reconnectTimerRef.current = null;
         const current = credentialsRef.current;
@@ -278,25 +381,36 @@ export default function OnlineLobby() {
         }
       }, delay);
     },
-    [clearReconnectTimer],
+    [applyRetryCooldown, clearReconnectTimer],
   );
 
   const failHandshake = useCallback(
-    (failedSocket: WebSocket, message: string) => {
+    (failedSocket: WebSocket, failure: ConnectionFailure) => {
       if (socketRef.current !== failedSocket) return;
       pendingSessionSocketRef.current = null;
+      serverFailureRef.current = null;
       socketRef.current = null;
       setSocket(null);
       setStatus("failed");
-      setError(message);
+      setError(failure.message);
+      applyRetryCooldown(failure.retryAfterMs);
       failedSocket.close();
     },
-    [],
+    [applyRetryCooldown],
   );
 
   const handleTransportFailure = useCallback(
-    (failedSocket: WebSocket, message = CONNECTION_ERROR_MESSAGE) => {
+    (
+      failedSocket: WebSocket,
+      fallback: ConnectionFailure = { message: CONNECTION_ERROR_MESSAGE },
+    ) => {
       if (socketRef.current !== failedSocket) return;
+      const serverFailure =
+        serverFailureRef.current?.socket === failedSocket
+          ? serverFailureRef.current.failure
+          : null;
+      serverFailureRef.current = null;
+      const failure = serverFailure ?? fallback;
       pendingSessionSocketRef.current = null;
       socketRef.current = null;
       setSocket(null);
@@ -306,13 +420,14 @@ export default function OnlineLobby() {
         return;
       }
       if (credentialsRef.current) {
-        scheduleReconnect(message);
+        scheduleReconnect(failure.message, failure.retryAfterMs);
       } else {
         setStatus("failed");
-        setError(message);
+        setError(failure.message);
+        applyRetryCooldown(failure.retryAfterMs);
       }
     },
-    [scheduleReconnect],
+    [applyRetryCooldown, scheduleReconnect],
   );
 
   const connect = useCallback(
@@ -326,6 +441,8 @@ export default function OnlineLobby() {
         return;
       }
       clearReconnectTimer();
+      clearRetryCooldown();
+      serverFailureRef.current = null;
       const previous = socketRef.current;
       socketRef.current = null;
       pendingSessionSocketRef.current = null;
@@ -379,34 +496,61 @@ export default function OnlineLobby() {
             return;
           }
           if (message.type === "error") {
+            const failure: ConnectionFailure = {
+              message: message.message,
+              ...(message.code === "rate_limited" &&
+              message.retryAfterMs !== undefined
+                ? { retryAfterMs: message.retryAfterMs }
+                : {}),
+            };
             if (pendingSessionSocketRef.current === next) {
-              failHandshake(next, message.message);
+              failHandshake(next, failure);
               return;
+            }
+            if (
+              message.code === "rate_limited" ||
+              message.code === "message_too_large"
+            ) {
+              serverFailureRef.current = { socket: next, failure };
+              applyRetryCooldown(failure.retryAfterMs);
             }
             setError(message.message);
             return;
           }
         } catch {
-          const message =
-            "オンラインサーバーからの応答を読み取れませんでした。";
+          const failure: ConnectionFailure = {
+            message: "オンラインサーバーからの応答を読み取れませんでした。",
+          };
           if (pendingSessionSocketRef.current === next) {
-            failHandshake(next, message);
+            failHandshake(next, failure);
           } else {
-            setError(message);
+            setError(failure.message);
           }
         }
       });
       next.addEventListener("close", () => {
         if (socketRef.current !== next) return;
+        const serverFailure =
+          serverFailureRef.current?.socket === next
+            ? serverFailureRef.current.failure
+            : null;
+        serverFailureRef.current = null;
         pendingSessionSocketRef.current = null;
         socketRef.current = null;
         setSocket(null);
         if (manualCloseRef.current || !credentialsRef.current) {
           setStatus(manualCloseRef.current ? "idle" : "failed");
-          if (!manualCloseRef.current) setError(CONNECTION_ERROR_MESSAGE);
+          if (!manualCloseRef.current) {
+            setError(serverFailure?.message ?? CONNECTION_ERROR_MESSAGE);
+            applyRetryCooldown(serverFailure?.retryAfterMs);
+          }
           return;
         }
-        scheduleReconnect();
+        if (serverFailure) {
+          scheduleReconnect(serverFailure.message, serverFailure.retryAfterMs);
+        } else {
+          scheduleReconnect();
+        }
       });
       next.addEventListener("error", () => {
         handleTransportFailure(next);
@@ -414,6 +558,8 @@ export default function OnlineLobby() {
     },
     [
       clearReconnectTimer,
+      clearRetryCooldown,
+      applyRetryCooldown,
       failHandshake,
       handleTransportFailure,
       scheduleReconnect,
@@ -454,12 +600,14 @@ export default function OnlineLobby() {
     () => () => {
       manualCloseRef.current = true;
       clearReconnectTimer();
+      clearRetryCooldown();
+      serverFailureRef.current = null;
       const current = socketRef.current;
       socketRef.current = null;
       pendingSessionSocketRef.current = null;
       current?.close();
     },
-    [clearReconnectTimer],
+    [clearReconnectTimer, clearRetryCooldown],
   );
 
   const start = (request: JoinRequest) => {
@@ -471,6 +619,8 @@ export default function OnlineLobby() {
     manualCloseRef.current = false;
     reconnectAttemptRef.current = 0;
     focusAfterRetryRef.current = false;
+    clearRetryCooldown();
+    serverFailureRef.current = null;
     if (request.type !== "resume") {
       credentialsRef.current = null;
       setCredentials(null);
@@ -481,9 +631,12 @@ export default function OnlineLobby() {
   };
 
   const retry = (restoreFocus = false) => {
+    if (retryAfterMs > 0) return;
     manualCloseRef.current = false;
     reconnectAttemptRef.current = 0;
     focusAfterRetryRef.current = restoreFocus;
+    clearRetryCooldown();
+    serverFailureRef.current = null;
     const current = credentialsRef.current;
     const request = current
       ? ({ type: "resume", ...current } satisfies JoinRequest)
@@ -500,6 +653,8 @@ export default function OnlineLobby() {
     }
     manualCloseRef.current = true;
     clearReconnectTimer();
+    clearRetryCooldown();
+    serverFailureRef.current = null;
     focusAfterRetryRef.current = false;
     credentialsRef.current = null;
     setActiveRequest(null);
@@ -580,6 +735,7 @@ export default function OnlineLobby() {
             status={status}
             error={error}
             canRetry={canRetry}
+            retryAfterMs={retryAfterMs}
             feedbackRef={feedbackRef}
             onRetry={retry}
           />
@@ -731,6 +887,7 @@ export default function OnlineLobby() {
           status={status}
           error={error}
           canRetry={canRetry}
+          retryAfterMs={retryAfterMs}
           feedbackRef={feedbackRef}
           onRetry={retry}
         />
