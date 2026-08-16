@@ -16,6 +16,7 @@
  * 表示に揃え、マウント後に一覧へ切り替える。読み込みは `useSyncExternalStore` による
  * ストア購読で行い、描画中に `localStorage` を読んだり書いたりしない(issue #302)。
  */
+import Link from "next/link";
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { localStorageOrNull } from "@/components/common/browserStorage";
 import {
@@ -240,11 +241,17 @@ export default function MatchHistoryList() {
           ref={emptyStateRef}
           // 削除直後にフォーカスを受け取るため、プログラム的にのみフォーカス可能にする。
           tabIndex={-1}
-          className="flex flex-col items-start gap-2 rounded-lg border border-foreground/15 p-6"
+          className="flex flex-col items-start gap-4 rounded-lg border border-foreground/15 p-6"
         >
           <p className="text-sm text-foreground/70">
             保存された戦績はまだありません。半荘終了時にこの端末のストレージが利用できる場合、最終順位とソシー内訳が自動で記録されます。記録されない場合は、ブラウザのストレージ設定や空き容量を確認してください。
           </p>
+          <Link
+            href="/game"
+            className="inline-flex min-h-11 items-center rounded-full bg-foreground px-4 py-2 text-sm font-medium text-background hover:opacity-90"
+          >
+            対局を開始
+          </Link>
         </div>
       ) : (
         <>
