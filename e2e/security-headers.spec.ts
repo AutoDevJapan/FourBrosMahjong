@@ -40,16 +40,20 @@ test.describe("browser security headers", () => {
   }) => {
     const response = await request.get("/online");
     const csp = response.headers()["content-security-policy"];
+    const development = process.env.E2E_PROD !== "1";
     const source = onlineWebSocketConnectSource(
       process.env.NEXT_PUBLIC_ONLINE_WS_URL,
-      false,
+      development,
     );
+    const connectSourceDirective = csp
+      .split(";")
+      .map((directive) => directive.trim())
+      .find((directive) => directive.startsWith("connect-src "));
 
     expect(response.ok()).toBe(true);
-    expect(csp).toContain(
+    expect(connectSourceDirective).toBe(
       source ? `connect-src 'self' ${source}` : "connect-src 'self'",
     );
-    expect(csp).not.toContain("connect-src *");
   });
 
   for (const route of ["/icon.svg", "/tiles/Pin1.svg"]) {
