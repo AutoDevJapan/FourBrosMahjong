@@ -245,6 +245,34 @@ describe("OnlineLobby のキーボード送信", () => {
       name: "たろう",
     });
   });
+
+  it("フォームsubmitは作成要求を1回だけ送る", () => {
+    render(<OnlineLobby />);
+
+    fireEvent.change(screen.getByLabelText("表示名"), {
+      target: { value: "たろう" },
+    });
+    fireEvent.submit(
+      screen.getByRole("form", { name: "オンラインルーム接続" }),
+    );
+
+    expect(sockets).toHaveLength(1);
+    act(() => sockets[0]?.open());
+    expect(JSON.parse(sockets[0]?.sent[0] ?? "{}")).toEqual({
+      type: "create",
+      name: "たろう",
+    });
+  });
+
+  it("IME変換中のEnterでは送信しない", () => {
+    render(<OnlineLobby />);
+
+    const nameInput = screen.getByLabelText("表示名");
+    fireEvent.change(nameInput, { target: { value: "たろう" } });
+    fireEvent.keyDown(nameInput, { key: "Enter", isComposing: true });
+
+    expect(sockets).toHaveLength(0);
+  });
 });
 
 describe("OnlineLobby の参加条件", () => {

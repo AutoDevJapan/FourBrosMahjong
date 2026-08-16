@@ -1,6 +1,7 @@
 "use client";
 
 import {
+  type FormEvent,
   type RefObject,
   useCallback,
   useEffect,
@@ -840,7 +841,7 @@ export default function OnlineLobby() {
       name: normalizedName ?? "",
     });
   };
-  const submitLobby = (event: React.FormEvent<HTMLFormElement>) => {
+  const submitLobby = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     const submitter = (event.nativeEvent as SubmitEvent).submitter;
     const intent = submitter?.getAttribute("data-intent");
