@@ -270,7 +270,7 @@ export default function MatchHistoryList() {
                     id="history-local-game-description"
                     className="mt-1 text-sm/5 text-foreground/70"
                   >
-                    すぐに開始できます。
+                    ローカル対局をすぐに開始できます。
                   </p>
                 </div>
                 <Link
@@ -293,7 +293,7 @@ export default function MatchHistoryList() {
                     id="history-online-game-description"
                     className="mt-1 text-sm/5 text-foreground/70"
                   >
-                    表示名と6文字のルームコードが必要です。
+                    表示名が必要です。参加する場合は6文字のルームコードも必要です。
                   </p>
                 </div>
                 <Link

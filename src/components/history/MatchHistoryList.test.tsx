@@ -73,12 +73,14 @@ describe("MatchHistoryList (#293)", () => {
     ).toBeInTheDocument();
     const startGameLink = screen.getByRole("link", { name: "対局を開始" });
     expect(startGameLink).toHaveAttribute("href", "/game");
-    expect(startGameLink).toHaveAccessibleDescription("すぐに開始できます。");
+    expect(startGameLink).toHaveAccessibleDescription(
+      "ローカル対局をすぐに開始できます。",
+    );
 
     const onlineLink = screen.getByRole("link", { name: "オンライン対戦へ" });
     expect(onlineLink).toHaveAttribute("href", "/online");
     expect(onlineLink).toHaveAccessibleDescription(
-      "表示名と6文字のルームコードが必要です。",
+      "表示名が必要です。参加する場合は6文字のルームコードも必要です。",
     );
 
     // CTA自体もキーボードで到達でき、既存のローカル導線の名前を維持する。

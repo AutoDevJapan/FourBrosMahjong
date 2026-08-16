@@ -405,7 +405,7 @@ test.describe("戦績のローカル保存・閲覧(#293)", () => {
       const startGameLink = page.getByRole("link", { name: "対局を開始" });
       await expect(startGameLink).toHaveAttribute("href", "/game");
       await expect(startGameLink).toHaveAccessibleDescription(
-        "すぐに開始できます。",
+        "ローカル対局をすぐに開始できます。",
       );
       await expect(
         await startGameLink.evaluate(
@@ -416,7 +416,7 @@ test.describe("戦績のローカル保存・閲覧(#293)", () => {
       const onlineLink = page.getByRole("link", { name: "オンライン対戦へ" });
       await expect(onlineLink).toHaveAttribute("href", "/online");
       await expect(onlineLink).toHaveAccessibleDescription(
-        "表示名と6文字のルームコードが必要です。",
+        "表示名が必要です。参加する場合は6文字のルームコードも必要です。",
       );
       await expect(
         await onlineLink.evaluate(
