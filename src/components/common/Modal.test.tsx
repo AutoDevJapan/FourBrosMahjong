@@ -29,6 +29,31 @@ describe("Modal (spec 5.2.2 dialog / focus trap / Escape)", () => {
     expect(screen.getByRole("dialog", { name: "全体盤面" })).toHaveFocus();
   });
 
+  it("本文だけがスクロールし、タイトルと閉じる操作は固定される(#609)", () => {
+    render(
+      <Modal title="全体盤面" onClose={vi.fn()}>
+        <p>本文</p>
+      </Modal>,
+    );
+    const dialog = screen.getByRole("dialog", { name: "全体盤面" });
+    const scrollArea = dialog.querySelector(
+      "[data-modal-scroll-area]",
+    ) as HTMLElement | null;
+
+    expect(scrollArea).not.toBeNull();
+    expect(scrollArea).toHaveClass(
+      "min-h-0",
+      "flex-1",
+      "overflow-auto",
+      "overscroll-contain",
+    );
+    expect(scrollArea).toHaveAttribute("tabindex", "0");
+    expect(scrollArea?.querySelector("h2")).toBeNull();
+    expect(scrollArea?.querySelector('button[aria-label="閉じる"]')).toBeNull();
+    expect(dialog.querySelector("h2")).toHaveTextContent("全体盤面");
+    expect(dialog.querySelector('button[aria-label="閉じる"]')).not.toBeNull();
+  });
+
   it("Escape で onClose が呼ばれる", async () => {
     const onClose = vi.fn();
     const user = userEvent.setup();
