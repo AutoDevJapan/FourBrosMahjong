@@ -741,10 +741,7 @@ export default function OnlineLobby() {
         snapshot={snapshot}
         onSendError={onSendError}
       >
-        <section
-          className="flex flex-col gap-4"
-          aria-labelledby="online-game-heading"
-        >
+        <section className="flex flex-col gap-4" aria-label="オンライン対局">
           <h1 id="online-game-heading" className="text-2xl font-bold">
             オンライン対戦
           </h1>

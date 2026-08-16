@@ -737,6 +737,9 @@ describe("OnlineLobby connection recovery", () => {
         name: "オンライン対戦",
       }),
     ).toHaveLength(1);
+    expect(
+      screen.getByRole("region", { name: "オンライン対局" }),
+    ).toBeInTheDocument();
     expect(screen.getByTestId("game-board")).toHaveAttribute(
       "data-interaction-disabled",
       "false",
