@@ -12,14 +12,49 @@ import type {
  * 本番WebSocketやPlaywrightを使わず、ローカルserver:startだけをfixture内で起動する。
  */
 const TEST_ORIGIN = "http://online-e2e.local";
+const UNAUTHORIZED_ORIGIN = "http://unauthorized-online-e2e.local";
 const TEST_TIMEOUT_MS = 30_000;
 const SERVER_START_TIMEOUT_MS = 10_000;
+const SERVER_STOP_TIMEOUT_MS = 2_000;
 
 type ProtocolMessage = OnlineServerMessage;
 
 interface LocalOnlineServer {
   readonly child: ChildProcess;
   readonly url: string;
+}
+
+function childExited(child: ChildProcess): boolean {
+  return child.exitCode !== null || child.signalCode !== null;
+}
+
+async function terminateChild(child: ChildProcess): Promise<void> {
+  if (childExited(child)) return;
+  await new Promise<void>((resolve) => {
+    let finished = false;
+    const forceTimer: { id?: ReturnType<typeof setTimeout> } = {};
+    const finish = () => {
+      if (finished) return;
+      finished = true;
+      if (forceTimer.id !== undefined) clearTimeout(forceTimer.id);
+      child.removeListener("exit", finish);
+      resolve();
+    };
+
+    child.once("exit", finish);
+    if (childExited(child)) {
+      child.removeListener("exit", finish);
+      resolve();
+      return;
+    }
+    forceTimer.id = setTimeout(() => {
+      if (!childExited(child)) child.kill("SIGKILL");
+      // SIGKILLでもexitイベントの到着を待つが、異常なchild実装で
+      // イベントが来ない場合にafterAllを永久に塞がない。
+      setTimeout(finish, 100);
+    }, SERVER_STOP_TIMEOUT_MS);
+    child.kill("SIGTERM");
+  });
 }
 
 function delay(milliseconds: number): Promise<void> {
@@ -91,25 +126,14 @@ async function startLocalOnlineServer(): Promise<LocalOnlineServer> {
   try {
     await waitForServer(url, child, output);
   } catch (error) {
-    if (child.exitCode === null) child.kill("SIGTERM");
+    await terminateChild(child);
     throw error;
   }
   return { child, url };
 }
 
 async function stopLocalOnlineServer(server: LocalOnlineServer): Promise<void> {
-  if (server.child.exitCode !== null) return;
-  server.child.kill("SIGTERM");
-  await new Promise<void>((resolve) => {
-    const timeout = setTimeout(() => {
-      if (server.child.exitCode === null) server.child.kill("SIGKILL");
-      resolve();
-    }, 2_000);
-    server.child.once("exit", () => {
-      clearTimeout(timeout);
-      resolve();
-    });
-  });
+  await terminateChild(server.child);
 }
 
 type MessagePredicate = (message: ProtocolMessage) => boolean;
@@ -124,8 +148,11 @@ class OnlineTestClient {
     readonly timer: ReturnType<typeof setTimeout>;
   }> = [];
 
-  constructor(readonly url: string) {
-    this.socket = new WebSocket(`${url}/ws`, { origin: TEST_ORIGIN });
+  constructor(
+    readonly url: string,
+    origin = TEST_ORIGIN,
+  ) {
+    this.socket = new WebSocket(`${url}/ws`, { origin });
     this.socket.on("message", (data) => {
       let message: ProtocolMessage;
       try {
@@ -143,6 +170,11 @@ class OnlineTestClient {
         error instanceof Error
           ? error
           : new Error("オンラインWebSocketでエラーが発生しました。"),
+      );
+    });
+    this.socket.on("close", () => {
+      this.rejectAll(
+        new Error("オンラインWebSocketが予期せず切断されました。"),
       );
     });
   }
@@ -205,6 +237,13 @@ class OnlineTestClient {
     );
   }
 
+  async waitForError(): Promise<Extract<ProtocolMessage, { type: "error" }>> {
+    return this.waitFor(
+      (message): message is Extract<ProtocolMessage, { type: "error" }> =>
+        message.type === "error",
+    );
+  }
+
   async waitForSnapshot(
     predicate: (snapshot: OnlineSnapshot) => boolean,
   ): Promise<OnlineSnapshot> {
@@ -219,8 +258,20 @@ class OnlineTestClient {
 
   async close(): Promise<void> {
     if (this.socket.readyState === WebSocket.CLOSED) return;
+    this.rejectAll(new Error("オンラインWebSocketを閉じました。"));
     await new Promise<void>((resolve) => {
-      this.socket.once("close", () => resolve());
+      let settled = false;
+      const finish = () => {
+        if (settled) return;
+        settled = true;
+        this.socket.removeListener("close", finish);
+        resolve();
+      };
+      this.socket.once("close", finish);
+      if (this.socket.readyState === WebSocket.CLOSED) {
+        finish();
+        return;
+      }
       this.socket.close();
     });
   }
@@ -410,7 +461,6 @@ describe("online multiplayer local E2E (#629)", () => {
           );
           expect(hostSnapshot.phase).toBe(guestSnapshot.phase);
           reconnectVerified = true;
-          clients.push(resumedGuest);
           // 以降は再接続後のクライアントをguestとして扱う。
           guest = resumedGuest;
         }
@@ -454,6 +504,43 @@ describe("online multiplayer local E2E (#629)", () => {
       if (result === null) throw new Error("終局結果がありません。");
       expect(result.players).toHaveLength(4);
       expect(new Set(result.players.map((player) => player.rank)).size).toBe(4);
+    },
+    TEST_TIMEOUT_MS,
+  );
+
+  it(
+    "禁止Originとstale versionをサーバー境界で拒否する",
+    async () => {
+      if (server === undefined)
+        throw new Error("テストサーバーが起動していません。");
+
+      const unauthorized = new OnlineTestClient(
+        server.url,
+        UNAUTHORIZED_ORIGIN,
+      );
+      await expect(unauthorized.open()).rejects.toThrow(
+        "Unexpected server response: 403",
+      );
+      await unauthorized.close();
+
+      const client = new OnlineTestClient(server.url);
+      clients.push(client);
+      await client.open();
+      client.send({ type: "create", name: "stale検証" });
+      const session = await client.waitForSession();
+      const version = session.snapshot.version;
+
+      client.send({
+        type: "action",
+        version: version + 1,
+        action: { type: "tsumogiri" },
+      });
+      const error = await client.waitForError();
+      expect(error.message).toContain("対局状態が更新されています");
+      const snapshot = await client.waitForSnapshot(
+        (candidate) => candidate.version === version,
+      );
+      expect(snapshot.version).toBe(version);
     },
     TEST_TIMEOUT_MS,
   );
