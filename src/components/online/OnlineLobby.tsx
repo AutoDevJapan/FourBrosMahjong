@@ -623,9 +623,16 @@ export default function OnlineLobby() {
     const timer = window.setTimeout(() => {
       restoreTimerRef.current = null;
       if (restoreCanceledRef.current) return;
+      const sharedCode = readSharedRoomCode();
       const stored = readCredentials();
+      // A deliberate room link takes precedence over an unrelated session left
+      // in this tab. Otherwise opening a friend's link silently resumes the
+      // previous room and never exposes the linked code in the join form.
+      if (sharedCode && (!stored || stored.code !== sharedCode)) {
+        setRoomCode(sharedCode);
+        return;
+      }
       if (!stored) {
-        const sharedCode = readSharedRoomCode();
         if (sharedCode) setRoomCode(sharedCode);
         return;
       }
@@ -733,7 +740,13 @@ export default function OnlineLobby() {
         snapshot={snapshot}
         onSendError={onSendError}
       >
-        <section className="flex flex-col gap-4" aria-label="オンライン対局">
+        <section
+          className="flex flex-col gap-4"
+          aria-labelledby="online-game-heading"
+        >
+          <h1 id="online-game-heading" className="text-2xl font-bold">
+            オンライン対戦
+          </h1>
           <header className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-control-border p-4">
             <RoomShareControls
               key={snapshot.code}
@@ -815,132 +828,173 @@ export default function OnlineLobby() {
   const nameRequirement = nameRequirementMessage(name);
   const roomCodeRequirement = roomCodeRequirementMessage(roomCode);
   const joinRequirement = joinRequirementMessage(name, roomCode, status);
+  const createRoom = () => {
+    if (!canSubmit) return;
+    start({ type: "create", name: normalizedName ?? "" });
+  };
+  const joinRoom = () => {
+    if (joinDisabled) return;
+    start({
+      type: "join",
+      code: normalizedRoomCode,
+      name: normalizedName ?? "",
+    });
+  };
+  const submitLobby = (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const submitter = (event.nativeEvent as SubmitEvent).submitter;
+    const intent = submitter?.getAttribute("data-intent");
+    if (intent === "join") {
+      joinRoom();
+      return;
+    }
+    createRoom();
+  };
   return (
     <>
       <ScreenNavigation currentPath="/online" />
       <section className="mx-auto flex w-full max-w-md flex-col gap-6 rounded-xl border border-control-border p-6">
-        <header>
-          <p className="text-xs tracking-widest text-foreground/60 uppercase">
-            FourBrosMahjong
-          </p>
-          <h1 className="mt-2 text-2xl font-bold">オンライン対戦</h1>
-          <p className="mt-2 text-sm/6 text-foreground/70">
-            ルームコードを共有して、同じ半荘を別端末からプレイできます。空席はAIが担当します。
-          </p>
-          <p className="mt-2 text-sm/6 text-foreground/70">
-            参加するには表示名と6文字のルームコードが必要です。
-          </p>
-        </header>
-
-        <div className="flex flex-col gap-2 text-sm font-medium">
-          <label htmlFor={NAME_INPUT_ID}>表示名</label>
-          <input
-            id={NAME_INPUT_ID}
-            type="text"
-            value={name}
-            onCompositionStart={() => {
-              composingNameRef.current = true;
-            }}
-            onCompositionEnd={(event) => {
-              composingNameRef.current = false;
-              setName(limitPlayerName(event.currentTarget.value));
-            }}
-            // `compositionend` を落とす IME(一部の Android)でも、フォーカスアウト時に上限を復帰させる。
-            onBlur={(event) => {
-              if (!composingNameRef.current) return;
-              composingNameRef.current = false;
-              setName(limitPlayerName(event.currentTarget.value));
-            }}
-            onChange={(event) =>
-              setName(
-                composingNameRef.current
-                  ? event.target.value
-                  : limitPlayerName(event.target.value),
-              )
-            }
-            placeholder="例: たろう"
-            required
-            aria-invalid={name.trim().length === 0}
-            aria-describedby={NAME_REQUIREMENT_ID}
-            className="min-h-11 rounded-lg border border-control-border bg-transparent px-3 py-2 font-normal"
-          />
-          <span
-            id={NAME_REQUIREMENT_ID}
-            aria-live="polite"
-            className="text-xs/5 font-normal text-foreground/70"
-          >
-            {nameRequirement}
-          </span>
-        </div>
-
-        <div className="flex flex-col gap-3">
-          <button
-            type="button"
-            disabled={!canSubmit}
-            aria-describedby={NAME_REQUIREMENT_ID}
-            onClick={() =>
-              start({ type: "create", name: normalizedName ?? "" })
-            }
-            className="min-h-11 rounded-lg bg-foreground px-4 py-3 font-medium text-background disabled:cursor-not-allowed disabled:opacity-40"
-          >
-            新しいルームを作る
-          </button>
-          <div className="flex items-end gap-2">
-            <div className="flex min-w-0 flex-1 flex-col gap-2 text-sm font-medium">
-              <label htmlFor={ROOM_CODE_INPUT_ID}>ルームコード</label>
-              <input
-                id={ROOM_CODE_INPUT_ID}
-                type="text"
-                value={roomCode}
-                onChange={(event) =>
-                  setRoomCode(event.target.value.toUpperCase().slice(0, 6))
-                }
-                maxLength={6}
-                inputMode="text"
-                autoCapitalize="characters"
-                placeholder="ABC234"
-                required
-                aria-invalid={
-                  normalizedRoomCode.length !== ROOM_CODE_LENGTH ||
-                  !ROOM_CODE_PATTERN.test(normalizedRoomCode)
-                }
-                aria-describedby={ROOM_CODE_REQUIREMENT_ID}
-                className="min-h-11 rounded-lg border border-control-border bg-transparent px-3 py-2 font-mono font-normal tracking-widest"
-              />
-              <span
-                id={ROOM_CODE_REQUIREMENT_ID}
-                aria-live="polite"
-                className="text-xs/5 font-normal text-foreground/70"
-              >
-                {roomCodeRequirement}
-              </span>
-            </div>
-            <button
-              type="button"
-              disabled={joinDisabled}
-              aria-describedby={`${NAME_REQUIREMENT_ID} ${ROOM_CODE_REQUIREMENT_ID} ${JOIN_REQUIREMENT_ID}`}
-              onClick={() =>
-                start({
-                  type: "join",
-                  code: roomCode.trim(),
-                  name: normalizedName ?? "",
-                })
-              }
-              className="min-h-11 rounded-lg border border-control-border px-4 py-2.5 font-medium disabled:cursor-not-allowed disabled:opacity-40"
-            >
-              参加する
-            </button>
-          </div>
-        </div>
-
-        <p
-          id={JOIN_REQUIREMENT_ID}
-          role="status"
-          aria-atomic="true"
-          className="text-sm/6 text-foreground/70"
+        <form
+          aria-label="オンラインルーム接続"
+          onSubmit={submitLobby}
+          className="flex flex-col gap-6"
         >
-          {joinRequirement}
-        </p>
+          <header>
+            <p className="text-xs tracking-widest text-foreground/60 uppercase">
+              FourBrosMahjong
+            </p>
+            <h1 className="mt-2 text-2xl font-bold">オンライン対戦</h1>
+            <p className="mt-2 text-sm/6 text-foreground/70">
+              ルームコードを共有して、同じ半荘を別端末からプレイできます。空席はAIが担当します。
+            </p>
+            <p className="mt-2 text-sm/6 text-foreground/70">
+              参加するには表示名と6文字のルームコードが必要です。
+            </p>
+          </header>
+
+          <div className="flex flex-col gap-2 text-sm font-medium">
+            <label htmlFor={NAME_INPUT_ID}>表示名</label>
+            <input
+              id={NAME_INPUT_ID}
+              type="text"
+              value={name}
+              onCompositionStart={() => {
+                composingNameRef.current = true;
+              }}
+              onCompositionEnd={(event) => {
+                composingNameRef.current = false;
+                setName(limitPlayerName(event.currentTarget.value));
+              }}
+              // `compositionend` を落とす IME(一部の Android)でも、フォーカスアウト時に上限を復帰させる。
+              onBlur={(event) => {
+                if (!composingNameRef.current) return;
+                composingNameRef.current = false;
+                setName(limitPlayerName(event.currentTarget.value));
+              }}
+              onChange={(event) =>
+                setName(
+                  composingNameRef.current
+                    ? event.target.value
+                    : limitPlayerName(event.target.value),
+                )
+              }
+              onKeyDown={(event) => {
+                if (event.key !== "Enter" || event.nativeEvent.isComposing)
+                  return;
+                event.preventDefault();
+                createRoom();
+              }}
+              placeholder="例: たろう"
+              required
+              aria-invalid={name.trim().length === 0}
+              aria-describedby={NAME_REQUIREMENT_ID}
+              className="min-h-11 rounded-lg border border-control-border bg-transparent px-3 py-2 font-normal"
+            />
+            <span
+              id={NAME_REQUIREMENT_ID}
+              aria-live="polite"
+              className="text-xs/5 font-normal text-foreground/70"
+            >
+              {nameRequirement}
+            </span>
+          </div>
+
+          <div className="flex flex-col gap-3">
+            <button
+              type="submit"
+              data-intent="create"
+              formNoValidate
+              disabled={!canSubmit}
+              aria-describedby={NAME_REQUIREMENT_ID}
+              onClick={(event) => {
+                event.preventDefault();
+                createRoom();
+              }}
+              className="min-h-11 rounded-lg bg-foreground px-4 py-3 font-medium text-background disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              新しいルームを作る
+            </button>
+            <div className="flex items-end gap-2">
+              <div className="flex min-w-0 flex-1 flex-col gap-2 text-sm font-medium">
+                <label htmlFor={ROOM_CODE_INPUT_ID}>ルームコード</label>
+                <input
+                  id={ROOM_CODE_INPUT_ID}
+                  type="text"
+                  value={roomCode}
+                  onChange={(event) =>
+                    setRoomCode(event.target.value.toUpperCase().slice(0, 6))
+                  }
+                  onKeyDown={(event) => {
+                    if (event.key !== "Enter" || event.nativeEvent.isComposing)
+                      return;
+                    event.preventDefault();
+                    joinRoom();
+                  }}
+                  maxLength={6}
+                  inputMode="text"
+                  autoCapitalize="characters"
+                  placeholder="ABC234"
+                  required
+                  aria-invalid={
+                    normalizedRoomCode.length !== ROOM_CODE_LENGTH ||
+                    !ROOM_CODE_PATTERN.test(normalizedRoomCode)
+                  }
+                  aria-describedby={ROOM_CODE_REQUIREMENT_ID}
+                  className="min-h-11 rounded-lg border border-control-border bg-transparent px-3 py-2 font-mono font-normal tracking-widest"
+                />
+                <span
+                  id={ROOM_CODE_REQUIREMENT_ID}
+                  aria-live="polite"
+                  className="text-xs/5 font-normal text-foreground/70"
+                >
+                  {roomCodeRequirement}
+                </span>
+              </div>
+              <button
+                type="submit"
+                data-intent="join"
+                disabled={joinDisabled}
+                aria-describedby={`${NAME_REQUIREMENT_ID} ${ROOM_CODE_REQUIREMENT_ID} ${JOIN_REQUIREMENT_ID}`}
+                onClick={(event) => {
+                  event.preventDefault();
+                  joinRoom();
+                }}
+                className="min-h-11 rounded-lg border border-control-border px-4 py-2.5 font-medium disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                参加する
+              </button>
+            </div>
+          </div>
+
+          <p
+            id={JOIN_REQUIREMENT_ID}
+            role="status"
+            aria-atomic="true"
+            className="text-sm/6 text-foreground/70"
+          >
+            {joinRequirement}
+          </p>
+        </form>
 
         <ConnectionFeedback
           status={status}

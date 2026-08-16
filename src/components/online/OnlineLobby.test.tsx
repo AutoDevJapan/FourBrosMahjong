@@ -190,6 +190,61 @@ describe("OnlineLobby (#605)", () => {
     act(() => sockets[0]?.close());
     await waitFor(() => expect(sockets).toHaveLength(2), { timeout: 1_500 });
   });
+
+  it("prefers a different shared room over an old restored session", async () => {
+    window.sessionStorage.setItem(
+      "four-bros-mahjong.online.session.v1",
+      JSON.stringify({ code: "OLD234", token: "o".repeat(24) }),
+    );
+    window.history.replaceState({}, "", "/online?room=ABC234");
+
+    render(
+      <StrictMode>
+        <OnlineLobby />
+      </StrictMode>,
+    );
+
+    await waitFor(() =>
+      expect(screen.getByLabelText("ルームコード")).toHaveValue("ABC234"),
+    );
+    expect(sockets).toHaveLength(0);
+  });
+});
+
+describe("OnlineLobby のキーボード送信", () => {
+  it("表示名入力でEnterを押すと新しいルームを作る", async () => {
+    const user = userEvent.setup();
+    render(<OnlineLobby />);
+
+    const nameInput = screen.getByLabelText("表示名");
+    await user.type(nameInput, "たろう");
+    await user.keyboard("{Enter}");
+
+    expect(sockets).toHaveLength(1);
+    act(() => sockets[0]?.open());
+    expect(JSON.parse(sockets[0]?.sent[0] ?? "{}")).toEqual({
+      type: "create",
+      name: "たろう",
+    });
+  });
+
+  it("ルームコード入力でEnterを押すと参加する", async () => {
+    const user = userEvent.setup();
+    render(<OnlineLobby />);
+
+    await user.type(screen.getByLabelText("表示名"), "たろう");
+    const roomCodeInput = screen.getByLabelText("ルームコード");
+    await user.type(roomCodeInput, "ABC234");
+    await user.keyboard("{Enter}");
+
+    expect(sockets).toHaveLength(1);
+    act(() => sockets[0]?.open());
+    expect(JSON.parse(sockets[0]?.sent[0] ?? "{}")).toEqual({
+      type: "join",
+      code: "ABC234",
+      name: "たろう",
+    });
+  });
 });
 
 describe("OnlineLobby の参加条件", () => {
@@ -622,6 +677,12 @@ describe("OnlineLobby connection recovery", () => {
     expect(
       document.querySelector('[data-connection-status="connected"]'),
     ).toHaveFocus();
+    expect(
+      screen.getAllByRole("heading", {
+        level: 1,
+        name: "オンライン対戦",
+      }),
+    ).toHaveLength(1);
     expect(screen.getByTestId("game-board")).toHaveAttribute(
       "data-interaction-disabled",
       "false",
