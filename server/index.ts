@@ -11,6 +11,7 @@ import {
   OnlineAbuseControls,
   type RoomAttemptScope,
 } from "./abuseControl";
+import { registerReplacement } from "./connectionReplacement";
 import {
   type ConnectionState,
   hasOpenPeer as hasOpenPeerConnection,
@@ -152,17 +153,7 @@ function hasOpenPeer(client: Client): boolean {
 }
 
 function attach(client: Client, session: RoomSession): void {
-  for (const other of clients) {
-    if (
-      other !== client &&
-      other.room === session.room &&
-      other.player?.id === session.player.id
-    ) {
-      other.socket.close(4001, "reconnected");
-    }
-  }
-  client.room = session.room;
-  client.player = session.player;
+  registerReplacement(client, session, clients);
   manager.touch(session.room, session.player);
   send(client, {
     type: "session",

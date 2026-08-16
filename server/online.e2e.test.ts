@@ -551,13 +551,7 @@ describe("online multiplayer local E2E (#629)", () => {
         }
 
         if (!reconnectVerified && version >= 2) {
-          await guest.close();
-          hostSnapshot = await host.waitForSnapshot(
-            (snapshot) =>
-              snapshot.version === version && !playerConnected(snapshot, "p1"),
-          );
-          expect(hostSnapshot.phase).toBe("playing");
-
+          const oldGuest = guest;
           const resumedGuest = new OnlineTestClient(server.url, TEST_ORIGIN);
           clients.push(resumedGuest);
           await resumedGuest.open();
@@ -576,6 +570,7 @@ describe("online multiplayer local E2E (#629)", () => {
             (snapshot) =>
               snapshot.version === version && playerConnected(snapshot, "p1"),
           );
+          await oldGuest.waitForClose();
           expect(hostSnapshot.phase).toBe(guestSnapshot.phase);
           reconnectVerified = true;
           // 以降は再接続後のクライアントをguestとして扱う。
