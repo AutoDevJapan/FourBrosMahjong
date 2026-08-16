@@ -425,6 +425,108 @@ describe("OnlineLobby connection recovery", () => {
     expect(sockets).toHaveLength(2);
   });
 
+  it("detects a silent half-open socket and enters reconnecting state", () => {
+    vi.useFakeTimers();
+    render(<OnlineLobby />);
+
+    fireEvent.change(screen.getByLabelText("表示名"), {
+      target: { value: "たろう" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "新しいルームを作る" }));
+
+    act(() => {
+      sockets[0]?.open();
+      sockets[0]?.message({
+        type: "session",
+        token: "t".repeat(24),
+        snapshot: snapshotFixture(),
+      });
+      vi.advanceTimersByTime(15_000);
+    });
+
+    expect(
+      sockets[0]?.sent.some((value) => JSON.parse(value).type === "ping"),
+    ).toBe(true);
+
+    act(() => vi.advanceTimersByTime(30_000));
+
+    expect(
+      document.querySelector('[data-connection-status="reconnecting"]'),
+    ).not.toBeNull();
+    expect(
+      screen.getByText(
+        "オンラインサーバーの応答が確認できないため、再接続しています。",
+      ),
+    ).toBeInTheDocument();
+    expect(screen.getByTestId("game-board")).toHaveAttribute(
+      "data-interaction-disabled",
+      "true",
+    );
+    expect(sockets[0]?.readyState).toBe(TestWebSocket.CLOSED);
+    expect(sockets).toHaveLength(1);
+  });
+
+  it("keeps an idle connection alive when pong responses arrive", () => {
+    vi.useFakeTimers();
+    render(<OnlineLobby />);
+
+    fireEvent.change(screen.getByLabelText("表示名"), {
+      target: { value: "たろう" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "新しいルームを作る" }));
+
+    act(() => {
+      sockets[0]?.open();
+      sockets[0]?.message({
+        type: "session",
+        token: "t".repeat(24),
+        snapshot: snapshotFixture(),
+      });
+    });
+
+    for (let index = 0; index < 4; index += 1) {
+      act(() => vi.advanceTimersByTime(15_000));
+      act(() => sockets[0]?.message({ type: "pong" }));
+    }
+
+    expect(
+      document.querySelector('[data-connection-status="connected"]'),
+    ).not.toBeNull();
+    expect(sockets).toHaveLength(1);
+  });
+
+  it("stops heartbeat and automatic reconnect after a deliberate leave", () => {
+    vi.useFakeTimers();
+    render(<OnlineLobby />);
+
+    fireEvent.change(screen.getByLabelText("表示名"), {
+      target: { value: "たろう" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "新しいルームを作る" }));
+
+    act(() => {
+      sockets[0]?.open();
+      sockets[0]?.message({
+        type: "session",
+        token: "t".repeat(24),
+        snapshot: snapshotFixture(),
+      });
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "退出" }));
+    expect(sockets[0]?.readyState).toBe(TestWebSocket.CLOSED);
+
+    act(() => vi.advanceTimersByTime(60_000));
+
+    expect(sockets).toHaveLength(1);
+    expect(
+      sockets[0]?.sent.filter((value) => JSON.parse(value).type === "ping"),
+    ).toHaveLength(0);
+    expect(
+      document.querySelector('[data-connection-status="idle"]'),
+    ).not.toBeNull();
+  });
+
   it("bounds an oversized retryAfterMs value", () => {
     vi.useFakeTimers();
     render(<OnlineLobby />);

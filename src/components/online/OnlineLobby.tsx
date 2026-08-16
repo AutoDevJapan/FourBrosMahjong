@@ -41,10 +41,16 @@ const JOIN_REQUIREMENT_ID = "online-lobby-join-requirement";
 const MAX_AUTOMATIC_RECONNECT_ATTEMPTS = 5;
 // サーバーからの異常値で、UIを長時間ロックしないための上限。
 const MAX_SERVER_RETRY_AFTER_MS = 10 * 60 * 1000;
+// The application ping also exercises the server's JSON response path.
+const CLIENT_HEARTBEAT_INTERVAL_MS = 15 * 1000;
+// Three missed application pongs transition the existing reconnect state.
+const CLIENT_HEARTBEAT_TIMEOUT_MS = 45 * 1000;
 const CONNECTION_ERROR_MESSAGE =
   "オンラインサーバーへ接続できません。設定とネットワークを確認してください。";
 const RECONNECTING_ERROR_MESSAGE =
   "オンラインサーバーとの接続が切れました。再接続しています。";
+const HEARTBEAT_TIMEOUT_MESSAGE =
+  "オンラインサーバーの応答が確認できないため、再接続しています。";
 
 type ConnectionStatus = OnlineConnectionStatus;
 type JoinRequest =
@@ -462,18 +468,59 @@ export default function OnlineLobby() {
       socketRef.current = next;
       pendingSessionSocketRef.current = next;
       setSocket(next);
+      let heartbeatTimer: number | null = null;
+      let lastPongAt = Date.now();
+      const clearHeartbeat = () => {
+        if (heartbeatTimer !== null) {
+          window.clearInterval(heartbeatTimer);
+          heartbeatTimer = null;
+        }
+      };
+      const sendHeartbeat = () => {
+        if (socketRef.current !== next) {
+          clearHeartbeat();
+          return;
+        }
+        if (next.readyState !== WebSocket.OPEN) return;
+        if (Date.now() - lastPongAt >= CLIENT_HEARTBEAT_TIMEOUT_MS) {
+          clearHeartbeat();
+          handleTransportFailure(next, { message: HEARTBEAT_TIMEOUT_MESSAGE });
+          return;
+        }
+        try {
+          next.send(JSON.stringify({ type: "ping" }));
+        } catch {
+          clearHeartbeat();
+          handleTransportFailure(next);
+        }
+      };
       next.addEventListener("open", () => {
         if (socketRef.current !== next) return;
+        lastPongAt = Date.now();
+        clearHeartbeat();
+        heartbeatTimer = window.setInterval(
+          sendHeartbeat,
+          CLIENT_HEARTBEAT_INTERVAL_MS,
+        );
         try {
           next.send(JSON.stringify(request));
         } catch {
+          clearHeartbeat();
           handleTransportFailure(next);
         }
       });
       next.addEventListener("message", (event) => {
         if (socketRef.current !== next) return;
         try {
-          const message = messageOf(JSON.parse(String(event.data)));
+          const raw = JSON.parse(String(event.data));
+          if (
+            raw !== null &&
+            typeof raw === "object" &&
+            (raw as Record<string, unknown>).type === "pong"
+          ) {
+            lastPongAt = Date.now();
+          }
+          const message = messageOf(raw);
           if (!message) return;
           if (message.type === "session") {
             pendingSessionSocketRef.current = null;
@@ -529,6 +576,7 @@ export default function OnlineLobby() {
         }
       });
       next.addEventListener("close", () => {
+        clearHeartbeat();
         if (socketRef.current !== next) return;
         const serverFailure =
           serverFailureRef.current?.socket === next
@@ -553,6 +601,7 @@ export default function OnlineLobby() {
         }
       });
       next.addEventListener("error", () => {
+        clearHeartbeat();
         handleTransportFailure(next);
       });
     },
