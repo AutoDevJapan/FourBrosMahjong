@@ -12,6 +12,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { socialMetadata } from "@/app/_lib/metadata";
 import MatchHistoryList from "@/components/history/MatchHistoryList";
+import ScreenNavigation from "@/components/layout/ScreenNavigation";
 
 const description =
   "四兄弟麻雀でこの端末に保存された半荘ごとの戦績(最終順位・ソシー内訳)を新しい順に閲覧できます。";
@@ -45,6 +46,7 @@ export default function HistoryPage() {
           </p>
         </header>
 
+        <ScreenNavigation currentPath="/history" />
         <MatchHistoryList />
       </main>
     </div>

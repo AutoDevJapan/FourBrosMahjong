@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useSyncExternalStore } from "react";
 import { useGame } from "@/components/game/GameProvider";
+import ScreenNavigation from "@/components/layout/ScreenNavigation";
 import RankingTable from "@/components/result/RankingTable";
 import SoshiiBreakdown from "@/components/result/SoshiiBreakdown";
 
@@ -49,6 +50,7 @@ export default function ResultPageClient() {
             ロビーへ戻る
           </Link>
         </header>
+        <ScreenNavigation currentPath="/game/result" showGameLink={false} />
 
         {!mounted ? (
           <div

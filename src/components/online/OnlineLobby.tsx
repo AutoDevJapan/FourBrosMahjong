@@ -8,6 +8,7 @@ import {
   useState,
 } from "react";
 import GameBoard from "@/components/game/GameBoard";
+import ScreenNavigation from "@/components/layout/ScreenNavigation";
 import OnlineGameProvider, { onlineSocketUrl } from "./OnlineGameProvider";
 import RoomShareControls from "./RoomShareControls";
 import { readSharedRoomCode, roomShareUrl } from "./roomSharing";
@@ -593,122 +594,129 @@ export default function OnlineLobby() {
   const roomCodeRequirement = roomCodeRequirementMessage(roomCode);
   const joinRequirement = joinRequirementMessage(name, roomCode, status);
   return (
-    <section className="mx-auto flex w-full max-w-md flex-col gap-6 rounded-xl border border-control-border p-6">
-      <header>
-        <p className="text-xs tracking-widest text-foreground/60 uppercase">
-          FourBrosMahjong
-        </p>
-        <h1 className="mt-2 text-2xl font-bold">オンライン対戦</h1>
-        <p className="mt-2 text-sm/6 text-foreground/70">
-          ルームコードを共有して、同じ半荘を別端末からプレイできます。空席はAIが担当します。
-        </p>
-        <p className="mt-2 text-sm/6 text-foreground/70">
-          参加するには表示名と6文字のルームコードが必要です。
-        </p>
-      </header>
+    <>
+      <ScreenNavigation currentPath="/online" />
+      <section className="mx-auto flex w-full max-w-md flex-col gap-6 rounded-xl border border-control-border p-6">
+        <header>
+          <p className="text-xs tracking-widest text-foreground/60 uppercase">
+            FourBrosMahjong
+          </p>
+          <h1 className="mt-2 text-2xl font-bold">オンライン対戦</h1>
+          <p className="mt-2 text-sm/6 text-foreground/70">
+            ルームコードを共有して、同じ半荘を別端末からプレイできます。空席はAIが担当します。
+          </p>
+          <p className="mt-2 text-sm/6 text-foreground/70">
+            参加するには表示名と6文字のルームコードが必要です。
+          </p>
+        </header>
 
-      <div className="flex flex-col gap-2 text-sm font-medium">
-        <label htmlFor={NAME_INPUT_ID}>表示名</label>
-        <input
-          id={NAME_INPUT_ID}
-          type="text"
-          value={name}
-          onChange={(event) => setName(event.target.value.slice(0, 12))}
-          maxLength={12}
-          placeholder="例: たろう"
-          required
-          aria-invalid={name.trim().length === 0}
-          aria-describedby={NAME_REQUIREMENT_ID}
-          className="min-h-11 rounded-lg border border-control-border bg-transparent px-3 py-2 font-normal"
-        />
-        <span
-          id={NAME_REQUIREMENT_ID}
-          aria-live="polite"
-          className="text-xs/5 font-normal text-foreground/70"
-        >
-          {nameRequirement}
-        </span>
-      </div>
+        <div className="flex flex-col gap-2 text-sm font-medium">
+          <label htmlFor={NAME_INPUT_ID}>表示名</label>
+          <input
+            id={NAME_INPUT_ID}
+            type="text"
+            value={name}
+            onChange={(event) => setName(event.target.value.slice(0, 12))}
+            maxLength={12}
+            placeholder="例: たろう"
+            required
+            aria-invalid={name.trim().length === 0}
+            aria-describedby={NAME_REQUIREMENT_ID}
+            className="min-h-11 rounded-lg border border-control-border bg-transparent px-3 py-2 font-normal"
+          />
+          <span
+            id={NAME_REQUIREMENT_ID}
+            aria-live="polite"
+            className="text-xs/5 font-normal text-foreground/70"
+          >
+            {nameRequirement}
+          </span>
+        </div>
 
-      <div className="flex flex-col gap-3">
-        <button
-          type="button"
-          disabled={!canSubmit}
-          aria-describedby={NAME_REQUIREMENT_ID}
-          onClick={() => start({ type: "create", name: name.trim() })}
-          className="min-h-11 rounded-lg bg-foreground px-4 py-3 font-medium text-background disabled:cursor-not-allowed disabled:opacity-40"
-        >
-          新しいルームを作る
-        </button>
-        <div className="flex items-end gap-2">
-          <div className="flex min-w-0 flex-1 flex-col gap-2 text-sm font-medium">
-            <label htmlFor={ROOM_CODE_INPUT_ID}>ルームコード</label>
-            <input
-              id={ROOM_CODE_INPUT_ID}
-              type="text"
-              value={roomCode}
-              onChange={(event) =>
-                setRoomCode(event.target.value.toUpperCase().slice(0, 6))
-              }
-              maxLength={6}
-              inputMode="text"
-              autoCapitalize="characters"
-              placeholder="ABC234"
-              required
-              aria-invalid={
-                normalizedRoomCode.length !== ROOM_CODE_LENGTH ||
-                !ROOM_CODE_PATTERN.test(normalizedRoomCode)
-              }
-              aria-describedby={ROOM_CODE_REQUIREMENT_ID}
-              className="min-h-11 rounded-lg border border-control-border bg-transparent px-3 py-2 font-mono font-normal tracking-widest"
-            />
-            <span
-              id={ROOM_CODE_REQUIREMENT_ID}
-              aria-live="polite"
-              className="text-xs/5 font-normal text-foreground/70"
-            >
-              {roomCodeRequirement}
-            </span>
-          </div>
+        <div className="flex flex-col gap-3">
           <button
             type="button"
-            disabled={joinDisabled}
-            aria-describedby={`${NAME_REQUIREMENT_ID} ${ROOM_CODE_REQUIREMENT_ID} ${JOIN_REQUIREMENT_ID}`}
-            onClick={() =>
-              start({ type: "join", code: roomCode.trim(), name: name.trim() })
-            }
-            className="min-h-11 rounded-lg border border-control-border px-4 py-2.5 font-medium disabled:cursor-not-allowed disabled:opacity-40"
+            disabled={!canSubmit}
+            aria-describedby={NAME_REQUIREMENT_ID}
+            onClick={() => start({ type: "create", name: name.trim() })}
+            className="min-h-11 rounded-lg bg-foreground px-4 py-3 font-medium text-background disabled:cursor-not-allowed disabled:opacity-40"
           >
-            参加する
+            新しいルームを作る
           </button>
+          <div className="flex items-end gap-2">
+            <div className="flex min-w-0 flex-1 flex-col gap-2 text-sm font-medium">
+              <label htmlFor={ROOM_CODE_INPUT_ID}>ルームコード</label>
+              <input
+                id={ROOM_CODE_INPUT_ID}
+                type="text"
+                value={roomCode}
+                onChange={(event) =>
+                  setRoomCode(event.target.value.toUpperCase().slice(0, 6))
+                }
+                maxLength={6}
+                inputMode="text"
+                autoCapitalize="characters"
+                placeholder="ABC234"
+                required
+                aria-invalid={
+                  normalizedRoomCode.length !== ROOM_CODE_LENGTH ||
+                  !ROOM_CODE_PATTERN.test(normalizedRoomCode)
+                }
+                aria-describedby={ROOM_CODE_REQUIREMENT_ID}
+                className="min-h-11 rounded-lg border border-control-border bg-transparent px-3 py-2 font-mono font-normal tracking-widest"
+              />
+              <span
+                id={ROOM_CODE_REQUIREMENT_ID}
+                aria-live="polite"
+                className="text-xs/5 font-normal text-foreground/70"
+              >
+                {roomCodeRequirement}
+              </span>
+            </div>
+            <button
+              type="button"
+              disabled={joinDisabled}
+              aria-describedby={`${NAME_REQUIREMENT_ID} ${ROOM_CODE_REQUIREMENT_ID} ${JOIN_REQUIREMENT_ID}`}
+              onClick={() =>
+                start({
+                  type: "join",
+                  code: roomCode.trim(),
+                  name: name.trim(),
+                })
+              }
+              className="min-h-11 rounded-lg border border-control-border px-4 py-2.5 font-medium disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              参加する
+            </button>
+          </div>
         </div>
-      </div>
 
-      <p
-        id={JOIN_REQUIREMENT_ID}
-        role="status"
-        aria-atomic="true"
-        className="text-sm/6 text-foreground/70"
-      >
-        {joinRequirement}
-      </p>
-
-      <ConnectionFeedback
-        status={status}
-        error={error}
-        canRetry={canRetry}
-        feedbackRef={feedbackRef}
-        onRetry={retry}
-      />
-      {credentials && !snapshot ? (
-        <button
-          type="button"
-          className="inline-flex min-h-11 items-center text-left text-sm underline"
-          onClick={leave}
+        <p
+          id={JOIN_REQUIREMENT_ID}
+          role="status"
+          aria-atomic="true"
+          className="text-sm/6 text-foreground/70"
         >
-          保存済みのルーム接続を解除
-        </button>
-      ) : null}
-    </section>
+          {joinRequirement}
+        </p>
+
+        <ConnectionFeedback
+          status={status}
+          error={error}
+          canRetry={canRetry}
+          feedbackRef={feedbackRef}
+          onRetry={retry}
+        />
+        {credentials && !snapshot ? (
+          <button
+            type="button"
+            className="inline-flex min-h-11 items-center text-left text-sm underline"
+            onClick={leave}
+          >
+            保存済みのルーム接続を解除
+          </button>
+        ) : null}
+      </section>
+    </>
   );
 }
