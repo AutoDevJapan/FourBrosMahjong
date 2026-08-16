@@ -1,7 +1,23 @@
 import { describe, expect, it } from "vitest";
-import { parseGameAction, RoomManager } from "./roomManager";
+import { MAX_PLAYER_NAME_LENGTH } from "../src/lib/playerName";
+import {
+  normalizePlayerName,
+  parseGameAction,
+  RoomManager,
+} from "./roomManager";
 
 describe("online room manager", () => {
+  it("normalizes names by grapheme and repairs malformed UTF-16 at the server boundary", () => {
+    const withinLimit = `${"あ".repeat(MAX_PLAYER_NAME_LENGTH - 1)}😀`;
+
+    expect(normalizePlayerName(withinLimit)).toBe(withinLimit);
+    expect(normalizePlayerName("😀".repeat(MAX_PLAYER_NAME_LENGTH + 1))).toBe(
+      "😀".repeat(MAX_PLAYER_NAME_LENGTH),
+    );
+    expect(normalizePlayerName("名前\uD83D")).toBe("名前�");
+    expect(normalizePlayerName("   ")).toBe("ゲスト");
+  });
+
   it("creates a room, assigns the next human seat, and rejects stale actions", () => {
     const manager = new RoomManager();
     const host = manager.create("ホスト");

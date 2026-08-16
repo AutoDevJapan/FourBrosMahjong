@@ -9,6 +9,11 @@ import {
 } from "react";
 import GameBoard from "@/components/game/GameBoard";
 import ScreenNavigation from "@/components/layout/ScreenNavigation";
+import {
+  limitPlayerName,
+  MAX_PLAYER_NAME_LENGTH,
+  sanitizePlayerName,
+} from "@/lib/playerName";
 import OnlineGameProvider, { onlineSocketUrl } from "./OnlineGameProvider";
 import RoomShareControls from "./RoomShareControls";
 import { readSharedRoomCode, roomShareUrl } from "./roomSharing";
@@ -87,8 +92,8 @@ function messageOf(value: unknown): OnlineServerMessage | null {
 
 function nameRequirementMessage(name: string): string {
   return name.trim().length > 0
-    ? "表示名は入力されています(12文字以内)。"
-    : "参加には表示名が必要です。表示名を入力してください(12文字以内)。";
+    ? `表示名は入力されています(${MAX_PLAYER_NAME_LENGTH}文字以内)。`
+    : `参加には表示名が必要です。表示名を入力してください(${MAX_PLAYER_NAME_LENGTH}文字以内)。`;
 }
 
 function roomCodeRequirementMessage(roomCode: string): string {
@@ -222,6 +227,7 @@ export default function OnlineLobby() {
   const socketRef = useRef<WebSocket | null>(null);
   const credentialsRef = useRef<OnlineCredentials | null>(null);
   const reconnectAttemptRef = useRef(0);
+  const composingNameRef = useRef(false);
   const reconnectTimerRef = useRef<number | null>(null);
   const manualCloseRef = useRef(false);
   const restoreTimerRef = useRef<number | null>(null);
@@ -583,8 +589,9 @@ export default function OnlineLobby() {
     );
   }
 
+  const normalizedName = sanitizePlayerName(name);
   const canSubmit =
-    name.trim().length > 0 &&
+    normalizedName !== null &&
     status !== "connecting" &&
     status !== "reconnecting";
   const normalizedRoomCode = roomCode.trim();
@@ -616,8 +623,26 @@ export default function OnlineLobby() {
             id={NAME_INPUT_ID}
             type="text"
             value={name}
-            onChange={(event) => setName(event.target.value.slice(0, 12))}
-            maxLength={12}
+            onCompositionStart={() => {
+              composingNameRef.current = true;
+            }}
+            onCompositionEnd={(event) => {
+              composingNameRef.current = false;
+              setName(limitPlayerName(event.currentTarget.value));
+            }}
+            // `compositionend` を落とす IME(一部の Android)でも、フォーカスアウト時に上限を復帰させる。
+            onBlur={(event) => {
+              if (!composingNameRef.current) return;
+              composingNameRef.current = false;
+              setName(limitPlayerName(event.currentTarget.value));
+            }}
+            onChange={(event) =>
+              setName(
+                composingNameRef.current
+                  ? event.target.value
+                  : limitPlayerName(event.target.value),
+              )
+            }
             placeholder="例: たろう"
             required
             aria-invalid={name.trim().length === 0}
@@ -638,7 +663,9 @@ export default function OnlineLobby() {
             type="button"
             disabled={!canSubmit}
             aria-describedby={NAME_REQUIREMENT_ID}
-            onClick={() => start({ type: "create", name: name.trim() })}
+            onClick={() =>
+              start({ type: "create", name: normalizedName ?? "" })
+            }
             className="min-h-11 rounded-lg bg-foreground px-4 py-3 font-medium text-background disabled:cursor-not-allowed disabled:opacity-40"
           >
             新しいルームを作る
@@ -681,7 +708,7 @@ export default function OnlineLobby() {
                 start({
                   type: "join",
                   code: roomCode.trim(),
-                  name: name.trim(),
+                  name: normalizedName ?? "",
                 })
               }
               className="min-h-11 rounded-lg border border-control-border px-4 py-2.5 font-medium disabled:cursor-not-allowed disabled:opacity-40"
