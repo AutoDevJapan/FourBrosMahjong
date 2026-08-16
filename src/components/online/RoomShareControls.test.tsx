@@ -128,6 +128,21 @@ describe("RoomShareControls (#605)", () => {
     expect(status).toHaveTextContent("共有シートを開きました。");
   });
 
+  it("shows a manual URL when Web Share API rejects", async () => {
+    const share = vi.fn().mockRejectedValue(new Error("Not allowed"));
+    const user = userEvent.setup();
+    setNavigatorProperty("share", share);
+    renderControls();
+
+    await user.click(screen.getByRole("button", { name: "共有" }));
+
+    const status = await screen.findByRole("status");
+    expect(status).toHaveTextContent("共有できませんでした");
+    expect(screen.getByLabelText("共有URL")).toHaveValue(
+      "https://mahjong.example/online?room=ABC234",
+    );
+  });
+
   it("shows a manual URL when Web Share API is unavailable", async () => {
     const user = userEvent.setup();
     setNavigatorProperty("share", undefined);
