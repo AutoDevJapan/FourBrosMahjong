@@ -47,9 +47,9 @@ test.describe("狭幅の主要操作タップ領域(#608)", () => {
         page.getByRole("listbox", { name: "自家の手牌" }).first(),
       ).toBeVisible();
 
-      const narrowStatus = page.getByTestId("narrow-board-status");
-      await expect(narrowStatus).toBeVisible();
-      await expect(narrowStatus).toHaveText(
+      const narrowDescription = page.getByTestId("narrow-board-description");
+      await expect(narrowDescription).toBeVisible();
+      await expect(narrowDescription).toHaveText(
         "狭い画面のため、自分の手牌を自動で優先表示しています。",
       );
       await expect(

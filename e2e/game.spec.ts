@@ -193,9 +193,9 @@ test.describe("対局画面(/game)", () => {
       await page.setViewportSize({ width, height: 800 });
       await page.goto("/game?seed=0");
 
-      const status = page.getByTestId("narrow-board-status");
-      await expect(status).toBeVisible();
-      await expect(status).toHaveText(
+      const description = page.getByTestId("narrow-board-description");
+      await expect(description).toBeVisible();
+      await expect(description).toHaveText(
         "狭い画面のため、自分の手牌を自動で優先表示しています。",
       );
       await expect(
@@ -204,7 +204,7 @@ test.describe("対局画面(/game)", () => {
 
       const opener = page.getByRole("button", { name: "全体盤面" });
       expect(await opener.getAttribute("aria-describedby")).toBe(
-        await status.getAttribute("id"),
+        await description.getAttribute("id"),
       );
       await opener.focus();
       await page.keyboard.press("Enter");

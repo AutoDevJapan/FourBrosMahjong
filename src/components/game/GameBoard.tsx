@@ -81,7 +81,7 @@ export default function GameBoard({
   const { view, phase, pending, roundSummary, controls } = useGame();
   const { slots, tableInfo, dora } = view;
   const router = useRouter();
-  const narrowBoardStatusId = useId();
+  const narrowBoardDescriptionId = useId();
 
   // 実対局は乱数(クライアント固有)で生成されるため、盤面はマウント後のクライアントでのみ描画する。
   // これにより SSR プリレンダーとの牌のハイドレーション不一致を避け、初回描画後の盤面も安定させる。
@@ -541,10 +541,8 @@ export default function GameBoard({
         <div className="flex flex-col gap-3 @min-[360px]:hidden">
           <div className="flex items-start justify-between gap-2">
             <p
-              id={narrowBoardStatusId}
-              data-testid="narrow-board-status"
-              role="status"
-              aria-live="polite"
+              id={narrowBoardDescriptionId}
+              data-testid="narrow-board-description"
               className="min-w-0 flex-1 text-xs leading-5 text-foreground/70"
             >
               狭い画面のため、自分の手牌を自動で優先表示しています。
@@ -553,7 +551,7 @@ export default function GameBoard({
               ref={boardOpenerRef}
               type="button"
               onClick={() => setBoardOpen(true)}
-              aria-describedby={narrowBoardStatusId}
+              aria-describedby={narrowBoardDescriptionId}
               className="inline-flex min-h-11 shrink-0 items-center gap-1.5 rounded-lg border border-control-border px-3 py-1.5 text-xs font-medium hover:bg-foreground/5"
             >
               <span aria-hidden="true">▦</span>

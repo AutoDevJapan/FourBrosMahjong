@@ -190,18 +190,19 @@ describe("GameBoard (spec 6.6 client island / engine-driven)", () => {
     const user = userEvent.setup();
     renderBoard();
 
-    const status = screen.getByTestId("narrow-board-status");
-    expect(status).toHaveAttribute("role", "status");
-    expect(status).toHaveTextContent(
+    const description = screen.getByTestId("narrow-board-description");
+    expect(description).not.toHaveAttribute("role");
+    expect(description).not.toHaveAttribute("aria-live");
+    expect(description).toHaveTextContent(
       "狭い画面のため、自分の手牌を自動で優先表示しています。",
     );
-    expect(status).not.toHaveAttribute("tabindex");
+    expect(description).not.toHaveAttribute("tabindex");
     expect(
       screen.queryByRole("button", { name: "自分手番フォーカス表示" }),
     ).not.toBeInTheDocument();
 
     const opener = screen.getByRole("button", { name: "全体盤面" });
-    expect(opener).toHaveAttribute("aria-describedby", status.id);
+    expect(opener).toHaveAttribute("aria-describedby", description.id);
     opener.focus();
     await user.keyboard("{Enter}");
     expect(screen.getByRole("dialog", { name: "全体盤面" })).toBeVisible();
