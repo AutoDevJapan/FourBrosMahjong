@@ -634,6 +634,10 @@ describe("GameBoard 対話 a11y 経路(#285)", () => {
     ).toBeGreaterThan(0);
   });
 
+  // `walkTo` executes the real engine until a post-pon state. Under the full
+  // multi-project run it can exceed the component project's 5s default while
+  // still completing promptly in isolation; keep a bounded, case-specific
+  // budget instead of weakening the global hang detector.
   it("ポン直後の打牌待ちでは喰い替え禁止牌に「禁止」+理由が付き、クリックしても打牌が進行しない", async () => {
     const user = userEvent.setup();
     // seed=4 をポン方針で進めると、發ポン直後に手牌へ發が1枚残る打牌待ちに到達する。
@@ -675,7 +679,7 @@ describe("GameBoard 対話 a11y 経路(#285)", () => {
     // 禁止でない牌(西)は打牌でき、対局が進行して禁止バッジが消える。
     await user.click(screen.getAllByRole("option", { name: "西" })[0]);
     expect(screen.queryAllByText("禁止")).toHaveLength(0);
-  });
+  }, 30_000);
 
   it("暗槓できる牌があるとき「暗槓 <牌>」ボタンが現れ、実行すると自家の副露に暗槓が並ぶ", async () => {
     const user = userEvent.setup();

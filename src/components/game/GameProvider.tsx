@@ -92,7 +92,7 @@ export interface GameContextValue {
   readonly controls: GameControls;
 }
 
-const GameContext = createContext<GameContextValue | null>(null);
+export const GameContext = createContext<GameContextValue | null>(null);
 
 /**
  * 決定的再現用の乱数 seed を URL クエリ `?seed=<非負整数>` から読む(テスト専用フック)。

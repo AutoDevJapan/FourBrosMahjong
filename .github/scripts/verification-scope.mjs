@@ -123,7 +123,7 @@ export function classifyChangedPaths(paths) {
  *   永続ブランチへのマージ後 push で、着地treeが直前にchecksを通過したPR headと
  *   同一だと証拠判定済みか。trueなら検証は重複である。
  * @param {boolean} [input.seedCaches=false]
- *   既定ブランチの push として共有キャッシュを投入するか。dev / stg の cache は
+ *   既定ブランチの ci job として共有キャッシュを投入するか。dev / stg の cache は
  *   保存しないため、検証済み昇格 push で setup を行っても消費するだけで再利用されない。
  * @returns {{ setup: boolean, verify: boolean }}
  *   `verify`: 検証コマンド (lint/test/build/playwright) を実行するか。
@@ -138,16 +138,25 @@ export function resolveScope({
   const { docsOnly, unitTestOnly } = classifyChangedPaths(paths);
   const irrelevant = job === "e2e" ? unitTestOnly : docsOnly;
   const verify = !irrelevant && !postMergeDuplicate;
-  // マージ後 push は検証しない。既定ブランチではキャッシュの投入だけを行う。
+  // マージ後 push は検証しない。既定ブランチの **ci job だけ**がキャッシュを投入する。
+  // E2E job は Playwright の固定イメージを使い、現在はキャッシュを書き込まないため、
+  // verify=false の post-merge E2E で依存を導入する理由がない (#569)。
   // Actions のキャッシュは既定ブランチ (main) で保存したものだけが全 PR から復元できるため
-  // (#380)、main の run が導入を止めると全 PR が毎回ダウンロードし直しになる。
-  return { setup: verify || (postMergeDuplicate && seedCaches), verify };
+  // (#380)、main の ci run が導入を止めると全 PR が毎回ダウンロードし直しになる。
+  const seed = job === "ci" && postMergeDuplicate && seedCaches;
+  return { setup: verify || seed, verify };
 }
 
 export const SCOPE_OUTPUT_KEYS = /** @type {const} */ (["setup", "verify"]);
 
 /** API / ref 取得が job 全体の timeout まで居座らないための上限。 */
 export const EVIDENCE_IO_TIMEOUT_MS = 15_000;
+
+// GitHub Compare API は 1 ページ最大 100 件で、変更ファイルは最大 300 件まで返す。
+// 上限に達した場合は一覧の完全性を証明できないため、変更パス判定を null に戻して
+// 呼び出し側の fail-open (全検証) を選ぶ。
+const COMPARE_FILES_PAGE_SIZE = 100;
+const COMPARE_FILES_MAX_PAGES = 3;
 
 /** 成功 check をこのワークフローの PR run に束縛する。 */
 const TRUSTED_CHECK_APP = "github-actions";
@@ -176,12 +185,7 @@ const TRUSTED_WORKFLOW_PATH = ".github/workflows/ci.yml";
  */
 export function changedPaths(baseSha, headSha) {
   // 新規ブランチへの push では `github.event.before` が全 0 になり、比較対象が無い。
-  /** @param {string | undefined} sha */
-  const isUsable = (sha) =>
-    typeof sha === "string" &&
-    /^[0-9a-f]{40}$/.test(sha) &&
-    !/^0{40}$/.test(sha);
-  if (!isUsable(baseSha) || !isUsable(headSha)) return null;
+  if (!isUsableSha(baseSha) || !isUsableSha(headSha)) return null;
   try {
     const output = execFileSync(
       "git",
@@ -201,6 +205,120 @@ export function changedPaths(baseSha, headSha) {
   } catch {
     return null;
   }
+}
+
+/** @param {unknown} sha */
+function isUsableSha(sha) {
+  return (
+    typeof sha === "string" &&
+    /^[0-9a-f]{40}$/.test(sha) &&
+    !/^0{40}$/.test(sha)
+  );
+}
+
+/**
+ * local git diff の代替として GitHub Compare API から変更パスを取得する (#567)。
+ *
+ * Actions の E2E job は Playwright container 内で別の partial checkout を使うため、
+ * 同じ SHA の compare でも local git の object/ref 解決結果が job ごとに揺れることがある。
+ * API のファイル一覧を使うことで、checkout の状態に依存しない immutable SHA の判定にする。
+ * local `--no-renames` と同じ安全性を保つため、rename の旧パスも含める。
+ *
+ * @param {object} input
+ * @param {string} input.repo `owner/name`
+ * @param {string | undefined} input.baseSha
+ * @param {string | undefined} input.headSha
+ * @param {(path: string) => Promise<unknown>} input.api
+ * @returns {Promise<string[] | null>}
+ */
+export async function changedPathsFromApi({ repo, baseSha, headSha, api }) {
+  if (!isUsableSha(baseSha) || !isUsableSha(headSha)) return null;
+
+  /** @type {string[]} */
+  const paths = [];
+  const seen = new Set();
+  const append = (/** @type {unknown} */ value) => {
+    if (typeof value !== "string" || value.length === 0) return false;
+    if (!seen.has(value)) {
+      seen.add(value);
+      paths.push(value);
+    }
+    return true;
+  };
+
+  for (let page = 1; page <= COMPARE_FILES_MAX_PAGES; page += 1) {
+    /** @type {any} */
+    let comparison;
+    try {
+      comparison = await api(
+        `/repos/${repo}/compare/${baseSha}...${headSha}?per_page=${COMPARE_FILES_PAGE_SIZE}&page=${page}`,
+      );
+    } catch {
+      return null;
+    }
+
+    const files = comparison?.files;
+    if (!Array.isArray(files)) return null;
+    for (const file of files) {
+      if (!append(file?.filename)) return null;
+      // Compare API exposes the source path of a rename as previous_filename.
+      // Include it even when status is omitted so the safety property does not
+      // depend on an optional response field.
+      if (
+        file &&
+        Object.prototype.hasOwnProperty.call(file, "previous_filename") &&
+        !append(file.previous_filename)
+      ) {
+        return null;
+      }
+    }
+
+    if (files.length < COMPARE_FILES_PAGE_SIZE)
+      return paths.length > 0 ? paths : null;
+    // GitHub documents a 300-file cap for Compare API. A full third page means
+    // the complete list cannot be proven, so keep the fail-open behavior.
+    if (page === COMPARE_FILES_MAX_PAGES) return null;
+  }
+
+  return null;
+}
+
+/**
+ * local diff を優先し、container/partial clone で解決できないときだけ API に補完させる。
+ * API も解決できなければ `unresolved` のままにして全検証を実行する。
+ *
+ * @param {object} input
+ * @param {string} input.repo
+ * @param {string | undefined} input.baseSha
+ * @param {string | undefined} input.headSha
+ * @param {(path: string) => Promise<unknown>} input.api
+ * @param {(baseSha: string | undefined, headSha: string | undefined) => string[] | null} [input.local]
+ * @returns {Promise<{ paths: string[] | null, source: "git" | "github-api" | "unresolved" }>}
+ */
+export async function resolveChangedPaths({
+  repo,
+  baseSha,
+  headSha,
+  api,
+  local = changedPaths,
+}) {
+  let localPaths = null;
+  try {
+    localPaths = local(baseSha, headSha);
+  } catch {
+    // Treat injected or future local resolution failures the same as git's
+    // existing fail-open behavior.
+  }
+  if (localPaths) return { paths: localPaths, source: "git" };
+
+  const apiPaths = await changedPathsFromApi({
+    repo,
+    baseSha,
+    headSha,
+    api,
+  });
+  if (apiPaths) return { paths: apiPaths, source: "github-api" };
+  return { paths: null, source: "unresolved" };
 }
 
 /**
@@ -225,9 +343,11 @@ export function changedPaths(baseSha, headSha) {
  * 3. **この job 自身の check run** が PR head SHA で `success` になっている。
  *    「required だったか」ではなく「実際に緑だったか」を見るため、required checks の
  *    設定変更から独立している。
- * 4. 通常PRでは push 前の宛先 tip が PR head の祖先である。環境昇格では merge commit の親が
- *    **push 前の宛先 tip, PR head** の順で完全一致する。main→dev / dev→stg は環境固有の過去の
- *    merge commit により履歴が分岐するため、親の一致で分岐を許しつつ任意commitの混入を防ぐ。
+ * 4. 通常PRでは push 前の宛先 tip が PR head の祖先である。環境昇格では push 前の宛先 tip が
+ *    **着地した commit の祖先**である。main→dev / dev→stg は環境固有の過去の履歴により
+ *    分岐するため、merge commit の親配列を固定せず Compare API で fast-forward / rebase /
+ *    squash を含む前進を検証する。任意 commit の混入は、source branch、PR checks、tree 一致
+ *    の検証で防ぐ。
  * 5. 着地したツリーが **PR head のツリーと完全一致**する。3 で緑を確認した中身が
  *    そのまま入ったことを、内容そのもので照合する。
  *
@@ -244,7 +364,6 @@ export function changedPaths(baseSha, headSha) {
  * @param {string} input.branch push 先ブランチ名 (PR の base と突き合わせる)
  * @param {string} input.checkName この job の check run 名
  * @param {(path: string) => Promise<unknown>} input.api GitHub REST 呼び出し
- * @param {(args: string[]) => string} input.git git 実行 (stdout を返す)
  * @returns {Promise<{ skip: boolean, reason: string }>} `reason` は安定した ASCII 列挙
  */
 export async function resolvePostMergeEvidence({
@@ -255,7 +374,6 @@ export async function resolvePostMergeEvidence({
   branch,
   checkName,
   api,
-  git,
 }) {
   const isSha = (/** @type {unknown} */ value) =>
     typeof value === "string" && /^[0-9a-f]{40}$/.test(value);
@@ -343,51 +461,75 @@ export async function resolvePostMergeEvidence({
   if (!successfulEligibleRun)
     return { skip: false, reason: "own-check-run-not-successful" };
 
-  // PR head の commit は merge 後も `refs/pull/N/head` で取得できる
-  // (`refs/pull/N/merge` は merge 時に削除されるため使えない)。
+  // マージ後は PR の head branch / `refs/pull/N/head` が削除されることがある。
+  // ephemeral な ref に依存すると、並列 job の片方だけが証拠検証に失敗して
+  // 重い検証を重複実行するため、head commit は GitHub API の immutable SHA で読む。
+  /** @type {any} */
+  let headCommit;
   try {
-    git(["fetch", "--quiet", "origin", `refs/pull/${pull.number}/head`]);
+    headCommit = await api(`/repos/${repo}/git/commits/${headSha}`);
   } catch {
-    return { skip: false, reason: "pull-head-fetch-failed" };
+    return { skip: false, reason: "pull-head-commit-api-failed" };
+  }
+  if (
+    headCommit?.sha !== headSha ||
+    !/^[0-9a-f]{40}$/.test(String(headCommit?.tree?.sha ?? ""))
+  ) {
+    return { skip: false, reason: "pull-head-commit-invalid" };
   }
 
   if (branch === "main") {
+    /** @type {any} */
+    let comparison;
     try {
-      git(["merge-base", "--is-ancestor", String(before), headSha]);
+      comparison = await api(`/repos/${repo}/compare/${before}...${headSha}`);
     } catch {
-      return { skip: false, reason: "base-not-ancestor-of-pull-head" };
+      return { skip: false, reason: "base-ancestor-api-failed" };
     }
-  } else {
-    try {
-      const mergeLine = git([
-        "rev-list",
-        "--parents",
-        "-n",
-        "1",
-        String(sha),
-      ]).trim();
-      const [commit, ...parents] = mergeLine.split(/\s+/);
-      if (
-        commit !== sha ||
-        parents.length !== 2 ||
-        parents[0] !== String(before) ||
-        parents[1] !== headSha
-      ) {
-        return { skip: false, reason: "merge-parents-mismatch" };
-      }
-    } catch {
-      return { skip: false, reason: "merge-parents-unresolved" };
+    // `identical` is also an ancestor relationship; GitHub normally reports
+    // `ahead` for a PR head that contains the pre-merge base tip.
+    if (comparison?.status !== "ahead" && comparison?.status !== "identical") {
+      return { skip: false, reason: "base-not-ancestor-of-pull-head" };
     }
   }
 
+  // The checkout is not a stable source of merge metadata: a partial clone or
+  // an unavailable object can make the same post-merge evidence resolve
+  // differently in parallel jobs. Read the landed commit and its tree through
+  // the immutable GitHub API, just like the PR head above.
+  /** @type {any} */
+  let landedCommit;
   try {
-    const landed = git(["rev-parse", `${sha}^{tree}`]).trim();
-    const verified = git(["rev-parse", `${headSha}^{tree}`]).trim();
-    if (!landed || landed !== verified)
-      return { skip: false, reason: "tree-mismatch" };
+    landedCommit = await api(`/repos/${repo}/git/commits/${sha}`);
   } catch {
-    return { skip: false, reason: "tree-resolution-failed" };
+    return { skip: false, reason: "landed-commit-api-failed" };
   }
+  if (
+    landedCommit?.sha !== sha ||
+    !/^[0-9a-f]{40}$/.test(String(landedCommit?.tree?.sha ?? ""))
+  ) {
+    return { skip: false, reason: "landed-commit-invalid" };
+  }
+
+  if (branch !== "main") {
+    /** @type {any} */
+    let comparison;
+    try {
+      comparison = await api(`/repos/${repo}/compare/${before}...${sha}`);
+    } catch {
+      return { skip: false, reason: "landed-ancestor-api-failed" };
+    }
+    // Promotion methods may produce a one-parent fast-forward/rebase commit or
+    // a two-parent merge commit. Only the ancestry relation matters here; the
+    // source branch, PR checks, and landed tree are verified independently.
+    if (comparison?.status !== "ahead" && comparison?.status !== "identical") {
+      return { skip: false, reason: "base-not-ancestor-of-landed-commit" };
+    }
+  }
+
+  const landed = String(landedCommit.tree.sha);
+  const verified = String(headCommit.tree.sha);
+  if (landed !== verified) return { skip: false, reason: "tree-mismatch" };
 
   return { skip: true, reason: "verified-by-merged-pull-request" };
 }
@@ -408,19 +550,6 @@ export async function githubApi(/** @type {string} */ path) {
   // 権限不足 (403) や存在しない (404) も「確認できなかった」として扱う。
   if (!response.ok) throw new Error(`GitHub API ${path} -> ${response.status}`);
   return response.json();
-}
-
-/** `resolvePostMergeEvidence` に渡す既定の git 実行。 */
-export function runGit(
-  /** @type {string[]} */ args,
-  /** @type {typeof execFileSync} */ exec = execFileSync,
-) {
-  return exec("git", args, {
-    encoding: "utf8",
-    maxBuffer: 32 * 1024 * 1024,
-    timeout: EVIDENCE_IO_TIMEOUT_MS,
-    stdio: ["ignore", "pipe", "pipe"],
-  });
 }
 
 /**
@@ -457,14 +586,16 @@ async function main() {
       branch: pushBranch,
       checkName: String(process.env.SCOPE_CHECK_NAME ?? ""),
       api: githubApi,
-      git: runGit,
     });
   }
 
-  const paths = changedPaths(
-    process.env.SCOPE_BASE_SHA,
-    process.env.SCOPE_HEAD_SHA,
-  );
+  const changed = await resolveChangedPaths({
+    repo: String(process.env.GITHUB_REPOSITORY ?? ""),
+    baseSha: process.env.SCOPE_BASE_SHA,
+    headSha: process.env.SCOPE_HEAD_SHA,
+    api: githubApi,
+  });
+  const paths = changed.paths;
   const scope = resolveScope({
     job,
     paths,
@@ -478,6 +609,7 @@ async function main() {
     `job=${job}`,
     `pushBranch=${pushBranch ?? "none"}`,
     `postMergeEvidence=${evidence.reason}`,
+    `changedPathsSource=${changed.source}`,
     paths
       ? `changedPaths=${paths.length}`
       : "changedPaths=unresolved (fail-open)",

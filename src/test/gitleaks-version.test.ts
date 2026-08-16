@@ -1,5 +1,12 @@
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 import { versionFromGitleaksReleaseTag } from "../../.github/scripts/gitleaks-version.mjs";
+
+const GITLEAKS_WORKFLOW = resolve(
+  process.cwd(),
+  ".github/workflows/gitleaks.yml",
+);
 
 describe("gitleaks upstream release metadata", () => {
   it.each([
@@ -24,5 +31,17 @@ describe("gitleaks upstream release metadata", () => {
     "",
   ])("rejects unsafe or unsupported metadata: %j", (tag) => {
     expect(() => versionFromGitleaksReleaseTag(tag)).toThrow(/invalid/);
+  });
+});
+
+describe("gitleaks binary integrity gate", () => {
+  it("does not allow a missing archive entry to pass verification", () => {
+    const workflow = readFileSync(GITLEAKS_WORKFLOW, "utf8");
+
+    expect(workflow).not.toContain("--ignore-missing");
+    expect(workflow).toContain("sha256sum --check --strict -");
+    expect(workflow).toContain(
+      "checksum manifest must contain exactly one entry",
+    );
   });
 });

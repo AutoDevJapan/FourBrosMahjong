@@ -16,6 +16,7 @@
  * 表示に揃え、マウント後に一覧へ切り替える。読み込みは `useSyncExternalStore` による
  * ストア購読で行い、描画中に `localStorage` を読んだり書いたりしない(issue #302)。
  */
+import Link from "next/link";
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { localStorageOrNull } from "@/components/common/browserStorage";
 import {
@@ -150,16 +151,25 @@ export default function MatchHistoryList() {
 
   useEffect(() => {
     if (!pendingFocusRef.current) return;
-    pendingFocusRef.current = false;
     // 着地点は空状態が第一候補。削除完了までに別タブの終局保存が届くと一覧が再び描かれ、
     // 空状態が存在しないため、そのときは「戦績をすべて削除」ボタンへ連鎖する。
     // 到達可否は DOM 接続では判定できない(#377)ので、実際に activeElement が移ったかで
     // 実測してから次の候補へ進む(スペック5 5.2.2 / `Modal` と同じ規約)。
+    // 外部ストア通知と確認UIのstate更新が別コミットになることがあるため、候補がまだ
+    // 描画されていない中間renderではフラグを消費しない。先に消費すると、次のrenderで
+    // 空状態が現れてもフォーカスを取りこぼし、bodyへ落ちる(#482)。
+    let hasCandidate = false;
     for (const candidate of [emptyStateRef.current, clearButtonRef.current]) {
       if (candidate === null) continue;
+      hasCandidate = true;
       candidate.focus();
-      if (candidate.ownerDocument.activeElement === candidate) return;
+      if (candidate.ownerDocument.activeElement === candidate) {
+        pendingFocusRef.current = false;
+        return;
+      }
     }
+    if (!hasCandidate) return;
+    pendingFocusRef.current = false;
     // 削除成功時は必ず確認UIを畳むため、通常はどちらかへ到達する。到達できないのは
     // 着地点が隠されている等の契約違反であり、黙って <body> へ落とさず知らせる。
     if (process.env.NODE_ENV !== "production") {
@@ -191,11 +201,14 @@ export default function MatchHistoryList() {
           ? "storage-failed"
           : await clearHistoryAcrossTabs(storage);
       if (result === "cleared") {
+        // 購読通知は同期的に再描画を起こし得るため、通知より先に着地点を予約する。
+        // 先に通知すると、その再描画で effect が走った時点ではフラグがまだ falseで、
+        // 高負荷時にフォーカス移動を取りこぼして body へ落ちる(#482 / スペック5 5.2.2)。
+        pendingFocusRef.current = true;
         // 永続化と購読者への通知は分離されているため、削除後に明示的に知らせる(#302)。
         notifyHistoryChanged();
         // 「削除する」ボタンごと一覧セクションが消えるので、着地点へフォーカスを移す。
         setConfirmingClear(false);
-        pendingFocusRef.current = true;
         setStatusMessage("保存されていた戦績をすべて削除しました。");
         return;
       }
@@ -228,11 +241,17 @@ export default function MatchHistoryList() {
           ref={emptyStateRef}
           // 削除直後にフォーカスを受け取るため、プログラム的にのみフォーカス可能にする。
           tabIndex={-1}
-          className="flex flex-col items-start gap-2 rounded-lg border border-foreground/15 p-6"
+          className="flex flex-col items-start gap-4 rounded-lg border border-foreground/15 p-6"
         >
           <p className="text-sm text-foreground/70">
             保存された戦績はまだありません。半荘終了時にこの端末のストレージが利用できる場合、最終順位とソシー内訳が自動で記録されます。記録されない場合は、ブラウザのストレージ設定や空き容量を確認してください。
           </p>
+          <Link
+            href="/game"
+            className="inline-flex min-h-11 items-center rounded-full bg-foreground px-4 py-2 text-sm font-medium text-background hover:opacity-90"
+          >
+            対局を開始
+          </Link>
         </div>
       ) : (
         <>

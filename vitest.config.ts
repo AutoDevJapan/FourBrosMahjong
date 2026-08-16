@@ -27,6 +27,9 @@ checkNodeVersion();
  * ランタイム値を、ページ/コンポーネントを直接読み込むテストでも解決できるようにする。
  */
 const srcAlias = { "@": fileURLToPath(new URL("./src", import.meta.url)) };
+const jsdomEnvironmentOptions = {
+  jsdom: { url: "http://localhost:3000" },
+};
 
 export default defineConfig({
   resolve: { alias: srcAlias },
@@ -46,8 +49,14 @@ export default defineConfig({
         test: {
           name: "unit",
           environment: "node",
+          environmentOptions: jsdomEnvironmentOptions,
           globals: true,
-          include: ["src/**/*.{test,spec}.ts"],
+          setupFiles: ["./vitest.browser-storage.setup.ts"],
+          include: ["src/**/*.{test,spec}.ts", "server/**/*.{test,spec}.ts"],
+          // 3 worktree のローカルゲートを同時に走らせても、重い決定的テストが
+          // worker のCPU競合で飢餓状態にならないよう、unit は直列実行する。
+          fileParallelism: false,
+          maxWorkers: 1,
           // 重い決定的テスト(例: cross-validation の 40k 手オラクル照合、
           // engine.melds-riichi の全公開アクション走破)は、全ファイル並列実行時の
           // CPU 競合で Vitest 既定の 5,000ms を超えることがある(issue #262)。
@@ -65,9 +74,19 @@ export default defineConfig({
         test: {
           name: "component",
           environment: "jsdom",
+          environmentOptions: jsdomEnvironmentOptions,
           globals: true,
-          setupFiles: ["./vitest.setup.ts"],
+          setupFiles: [
+            "./vitest.setup.ts",
+            "./vitest.browser-storage.setup.ts",
+          ],
           include: ["src/**/*.{test,spec}.tsx"],
+          // jsdom の起動コストが大きいUIテストをworktree間で安定して走らせる。
+          fileParallelism: false,
+          maxWorkers: 1,
+          // componentテストはprocess.chdir()に依存せず、forkの起動を繰り返すと
+          // 3 worktree負荷下で最後のjsdom workerが60秒待ちになるためthreadsを再利用する。
+          pool: "threads",
         },
       },
     ],

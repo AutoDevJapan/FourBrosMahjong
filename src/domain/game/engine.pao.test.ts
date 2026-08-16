@@ -4,9 +4,9 @@
  * `pao.ts`(判定)・`win-payment.ts`(点棒移動)は単体テスト済みのため、本ファイルは
  * engine の公開 API(鳴き→和了宣言)を通した結線のみを検証する:
  * - 鳴き受理(`declarePon` / `declareKan` / AI の `applyAiCall`)が
- *   `recordPaoResponsible` で責任者を **和了者席キー** に記録すること。
- * - `settleWin` がパオ役満(`analysis.pao`)のときだけ記録済み責任者を引き当て、
- *   `resolveWinPayment` の責任払い(ロン折半 / ツモ全額)へ流すこと。
+ *   `recordPaoResponsible` で責任者を **和了者席+役満種類** に記録すること。
+ * - `settleWin` が役満単位の責任情報を `resolveWinPayment` へ流し、
+ *   責任払い(ロン折半 / ツモ全額)と通常役満の配分を分けること。
  * - 責任払いの点棒差分をゼロサムだけに依存せず**明示的に**アサートする。
  *
  * 盤面はスペック3 3.3(パオ)に基づき crafted state で直接組む
@@ -95,7 +95,11 @@ function armedForThirdDragonPon(seed: number): EngineState {
   hand.hands.east = parseTiles("7z 7z 1m 1m 1m 9m");
   hand.hands.south = parseTiles(JUNK);
   hand.hands.west = parseTiles(JUNK);
-  hand.pendingDiscard = { seat: "south", tile: parseTile("7z") };
+  hand.pendingDiscard = {
+    seat: "south",
+    tile: parseTile("7z"),
+    haitei: false,
+  };
   hand.turn = "south";
   hand.drawn = null;
   return {
@@ -114,11 +118,17 @@ describe("engine: パオ(責任払い)の結線(#284 / スペック3 3.3)", () =
     const ponState = declarePon(armed);
 
     // recordPaoResponsible: 和了者席(east)キーで、中の打牌者(南=p1)を記録。
-    expect(ponState.hand?.paoResponsible).toEqual({ east: "p1" });
+    expect(ponState.hand?.paoResponsible).toEqual({
+      east: { daisangen: "p1" },
+    });
 
     // 西家(p2)の 9m 放銃でロン(親・役満 48,000)。
     const hand = requireHand(ponState);
-    hand.pendingDiscard = { seat: "west", tile: parseTile("9m") };
+    hand.pendingDiscard = {
+      seat: "west",
+      tile: parseTile("9m"),
+      haitei: false,
+    };
     hand.turn = "west";
     hand.drawn = null;
     const after = declareRon({
@@ -158,7 +168,9 @@ describe("engine: パオ(責任払い)の結線(#284 / スペック3 3.3)", () =
   it("大三元パオ・ツモ: 責任者が全額を負担し非責任者は0", () => {
     const armed = armedForThirdDragonPon(12);
     const ponState = declarePon(armed);
-    expect(ponState.hand?.paoResponsible).toEqual({ east: "p1" });
+    expect(ponState.hand?.paoResponsible).toEqual({
+      east: { daisangen: "p1" },
+    });
 
     // 9m をツモって和了(親・役満ツモ 48,000)。責任者の全額負担でトビに
     // ならないよう p1 の持ち点だけ引き上げておく(検証対象は差分のみ)。
@@ -198,7 +210,11 @@ describe("engine: パオ(責任払い)の結線(#284 / スペック3 3.3)", () =
     hand.hands.east = parseTiles("6s 6s 6s 9p");
     hand.hands.south = parseTiles(JUNK);
     hand.hands.west = parseTiles(JUNK);
-    hand.pendingDiscard = { seat: "south", tile: parseTile("6s") };
+    hand.pendingDiscard = {
+      seat: "south",
+      tile: parseTile("6s"),
+      haitei: false,
+    };
     hand.turn = "south";
     hand.drawn = null;
     const armed = {
@@ -215,7 +231,9 @@ describe("engine: パオ(責任払い)の結線(#284 / スペック3 3.3)", () =
     // 単独4槓は四槓散了にならず続行し、責任者(6s の打牌者=南=p1)を記録する。
     expect(kanState.phase).toBe("playing");
     expect(kanState.hand?.melds.east).toHaveLength(4);
-    expect(kanState.hand?.paoResponsible).toEqual({ east: "p1" });
+    expect(kanState.hand?.paoResponsible).toEqual({
+      east: { suukantsu: "p1" },
+    });
 
     // 嶺上ツモを 9p に差し替えて四槓子をツモ和了(親・役満ツモ 48,000)。
     const kanHand = requireHand(kanState);
@@ -239,7 +257,7 @@ describe("engine: パオ(責任払い)の結線(#284 / スペック3 3.3)", () =
     });
   });
 
-  it("未確定Q37: 異なる責任者の複数パオは後勝ちで上書きし、後の1人へダブル役満総額を寄せる(現行非規範挙動)", () => {
+  it("複数パオ: 役満種類ごとに異なる責任者を保持し、各単位を個別精算する(#525)", () => {
     const state = createGame({ seed: 17 });
     const hand = requireHand(state);
     // 白・發を槓済み。南家(p1)の中で大三元パオ、続いて
@@ -250,7 +268,11 @@ describe("engine: パオ(責任払い)の結線(#284 / スペック3 3.3)", () =
     hand.hands.east = parseTiles("7z 7z 7z 6s 6s 6s 9p");
     hand.hands.south = parseTiles(JUNK);
     hand.hands.west = parseTiles(JUNK);
-    hand.pendingDiscard = { seat: "south", tile: parseTile("7z") };
+    hand.pendingDiscard = {
+      seat: "south",
+      tile: parseTile("7z"),
+      haitei: false,
+    };
     hand.turn = "south";
     hand.drawn = null;
 
@@ -263,10 +285,16 @@ describe("engine: パオ(責任払い)の結線(#284 / スペック3 3.3)", () =
       }),
     });
     // 1つ目のパオは大三元を確定させた南家(p1)。
-    expect(daisangen.hand?.paoResponsible).toEqual({ east: "p1" });
+    expect(daisangen.hand?.paoResponsible).toEqual({
+      east: { daisangen: "p1" },
+    });
 
     const daisangenHand = requireHand(daisangen);
-    daisangenHand.pendingDiscard = { seat: "west", tile: parseTile("6s") };
+    daisangenHand.pendingDiscard = {
+      seat: "west",
+      tile: parseTile("6s"),
+      haitei: false,
+    };
     daisangenHand.turn = "west";
     daisangenHand.drawn = null;
     const suukantsu = declareKan({
@@ -279,17 +307,19 @@ describe("engine: パオ(責任払い)の結線(#284 / スペック3 3.3)", () =
     });
     expect(suukantsu.phase).toBe("playing");
     expect(suukantsu.hand?.melds.east).toHaveLength(4);
-    // 現行は「役満種類 → 責任者」を持たず「席 → 1人」だけのため、
-    // 後に四槓子を確定させたp2がp1を上書きする。これはQ37の裁定ではない。
-    expect(suukantsu.hand?.paoResponsible).toEqual({ east: "p2" });
+    // 2つ目のパオでも、先に確定した大三元の責任者を上書きしない。
+    expect(suukantsu.hand?.paoResponsible).toEqual({
+      east: { daisangen: "p1", suukantsu: "p2" },
+    });
 
     const suukantsuHand = requireHand(suukantsu);
     suukantsuHand.drawn = { tile: parseTile("9p"), source: "kanReplacement" };
     suukantsuHand.turn = "east";
     const after = declareTsumo({
       ...suukantsu,
-      // 現行のダブル役満総額96,000を支払っても終局処理まで到達させる。
-      points: { ...suukantsu.points, p2: 120000 },
+      // 親ダブル役満(各48,000)を2人の責任者が1単位ずつ負担しても終局処理まで到達させる。
+      // 入力点も保存則(140,000)を満たし、支払後にトビにならないようにする。
+      points: { p0: 10000, p1: 60000, p2: 60000, p3: 10000 },
       pending: discardPending({ canTsumo: true }),
     });
 
@@ -297,18 +327,49 @@ describe("engine: パオ(責任払い)の結線(#284 / スペック3 3.3)", () =
     expect(after.lastRound?.winDetails?.yaku.map((y) => y.name)).toEqual(
       expect.arrayContaining(["大三元", "四槓子"]),
     );
-    // analysis.pao が複数要素でも settleWin は役ごとの責任者/額を渡せず、
-    // 最後に記録された1人(p2)へ親ダブル役満総額96,000を寄せる。
-    // Q37の回答後はこの非規範テストを裁定に合わせて置き換える。
     expect(after.lastRound?.deltas).toEqual({
       p0: 96000,
-      p1: 0,
-      p2: -96000,
+      p1: -48000,
+      p2: -48000,
       p3: 0,
     });
     expect(after.lastRound?.winDetails?.payments).toEqual([
-      { name: "二郎", amount: 96000 },
+      { name: "一郎", amount: 48000 },
+      { name: "二郎", amount: 48000 },
     ]);
+    // 祝儀はパオ責任者へ寄せず、和了者以外の3兄弟から各1,000を維持する。
+    expect(after.bonus).toEqual({ p0: 3000, p1: -1000, p2: -1000, p3: -1000 });
+  });
+
+  it("パオ対象+非対象役満: ツモは対象単位だけ責任払い、非対象単位と本場は通常配分する", () => {
+    const armed = armedForThirdDragonPon(18);
+    const ponState = declarePon(armed);
+    const hand = requireHand(ponState);
+    // 三元牌3副露 + 字一色の残り1刻子/雀頭。大三元(パオ対象)と字一色(非対象)の複合。
+    hand.hands.east = parseTiles("1z 1z 2z 2z");
+    hand.drawn = { tile: parseTile("1z"), source: "live" };
+    hand.turn = "east";
+    const after = declareTsumo({
+      ...ponState,
+      round: { ...ponState.round, honba: 2 },
+      // 親ダブル役満96,000 + 複合ツモ本場400を受けてもトビにしない。
+      points: { p0: 5000, p1: 80000, p2: 45000, p3: 10000 },
+      pending: discardPending({ canTsumo: true }),
+    });
+
+    expect(after.phase).toBe("roundEnd");
+    expect(after.lastRound?.winDetails?.yaku.map((y) => y.name)).toEqual(
+      expect.arrayContaining(["大三元", "字一色"]),
+    );
+    // 大三元: p1 が48,000。字一色: 通常親ツモで p1/p2 が各24,000。
+    // 複合時の本場は各200なので p1=72,200、p2=24,200。
+    expect(after.lastRound?.deltas).toEqual({
+      p0: 96400,
+      p1: -72200,
+      p2: -24200,
+      p3: 0,
+    });
+    expect(after.bonus).toEqual({ p0: 3000, p1: -1000, p2: -1000, p3: -1000 });
   });
 
   it("門前完成(暗槓のみ)はパオ無し: 責任者は記録されず通常のツモ配分になる", () => {
@@ -363,7 +424,11 @@ describe("engine: パオ(責任払い)の結線(#284 / スペック3 3.3)", () =
     hand.hands.east = parseTiles("6z 6z 7z 7z 1m 1m 1m 9m");
     hand.hands.south = parseTiles(JUNK);
     hand.hands.west = parseTiles(JUNK);
-    hand.pendingDiscard = { seat: "south", tile: parseTile("6z") };
+    hand.pendingDiscard = {
+      seat: "south",
+      tile: parseTile("6z"),
+      haitei: false,
+    };
     hand.turn = "south";
     hand.drawn = null;
 
@@ -380,7 +445,11 @@ describe("engine: パオ(責任払い)の結線(#284 / スペック3 3.3)", () =
 
     // 3種目(中)を西家(p2)が打牌 → この鳴きで大三元が確定しパオ発火。
     const secondHand = requireHand(second);
-    secondHand.pendingDiscard = { seat: "west", tile: parseTile("7z") };
+    secondHand.pendingDiscard = {
+      seat: "west",
+      tile: parseTile("7z"),
+      haitei: false,
+    };
     secondHand.turn = "west";
     secondHand.drawn = null;
     const third = declarePon({
@@ -391,7 +460,9 @@ describe("engine: パオ(責任払い)の結線(#284 / スペック3 3.3)", () =
         canPon: true,
       }),
     });
-    expect(third.hand?.paoResponsible).toEqual({ east: "p2" });
+    expect(third.hand?.paoResponsible).toEqual({
+      east: { daisangen: "p2" },
+    });
   });
 
   it("AIの鳴き経路: 自家が鳴かせた3種目でAI側に責任者が記録され、責任者=放銃者のロンは全額負担になる", () => {
@@ -412,7 +483,9 @@ describe("engine: パオ(責任払い)の結線(#284 / スペック3 3.3)", () =
       parseTile("7z"),
     );
     expect(called.phase).toBe("playing");
-    expect(called.hand?.paoResponsible).toEqual({ south: "p0" });
+    expect(called.hand?.paoResponsible).toEqual({
+      south: { daisangen: "p0" },
+    });
 
     // 南家を 4p 単騎テンパイに固定し、自家の 4p 放銃で大三元ロン(子・役満 32,000)。
     // 責任者(p0)=放銃者のため折半ではなく1人で全額負担する。

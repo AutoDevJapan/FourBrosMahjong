@@ -13,14 +13,15 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { parse } from "yaml";
 import {
   changedPaths,
+  changedPathsFromApi,
   classifyPath,
   DOCUMENTATION_EXCEPTIONS,
   EVIDENCE_IO_TIMEOUT_MS,
   githubApi,
   protectedPushBranch,
+  resolveChangedPaths,
   resolvePostMergeEvidence,
   resolveScope,
-  runGit,
 } from "../../.github/scripts/verification-scope.mjs";
 import playwrightConfig from "../../playwright.config";
 
@@ -40,11 +41,55 @@ type Workflow = {
   permissions?: Record<string, string>;
   jobs?: Record<
     string,
-    { name?: string; "timeout-minutes"?: unknown; steps?: Step[] }
+    {
+      name?: string;
+      "timeout-minutes"?: unknown;
+      container?: { image?: string; options?: string };
+      steps?: Step[];
+    }
   >;
 };
 
 const WORKFLOW_DIR = resolve(process.cwd(), ".github/workflows");
+const E2E_DIR = resolve(process.cwd(), "e2e");
+
+/**
+ * #554 の prebuilt production E2E は、配布物でしか見えない差分を優先して検証する。
+ * 既存のPWA/状態復元/モーダル回帰に加え、headers・metadata・axe契約を同じ build で走らせる。
+ */
+const PRODUCTION_E2E_SPECS = [
+  "e2e/pwa-offline.spec.ts",
+  "e2e/persistence.spec.ts",
+  "e2e/modal-focus.spec.ts",
+  "e2e/security-headers.spec.ts",
+  "e2e/metadata.spec.ts",
+  "e2e/a11y.spec.ts",
+] as const;
+
+/**
+ * production prebuilt の時間・環境依存を意図して含めない spec。
+ * これらは通常のdev E2Eで検証し、production側へ追加するときは上の契約を更新する。
+ */
+const PRODUCTION_E2E_EXCLUDED_SPECS = [
+  "e2e/game.spec.ts",
+  "e2e/history.spec.ts",
+  "e2e/home.spec.ts",
+  "e2e/non-text-contrast.spec.ts",
+  "e2e/player-names.spec.ts",
+] as const;
+
+function readPackageJson(): { scripts?: Record<string, string> } {
+  return JSON.parse(
+    readFileSync(resolve(process.cwd(), "package.json"), "utf8"),
+  ) as { scripts?: Record<string, string> };
+}
+
+function e2eSpecPaths(): string[] {
+  return readdirSync(E2E_DIR, { recursive: true, encoding: "utf8" })
+    .filter((entry) => entry.endsWith(".spec.ts"))
+    .map((entry) => `e2e/${entry.replaceAll("\\", "/")}`)
+    .sort();
+}
 
 function workflowFilenames(): string[] {
   // `.yaml` で追加されたワークフローが検査から丸ごと漏れないよう両方を見る。
@@ -264,17 +309,62 @@ describe("production E2E parity gate (#432)", () => {
       "prebuilt production成果物に対する主要E2Eがci jobに無い",
     ).toBeDefined();
   });
+
+  it("prebuilt production E2Eの対象とdev専用除外を明示する(#554)", () => {
+    const command = readPackageJson().scripts?.["test:e2e:prod:prebuilt"];
+    expect(command, "production prebuilt E2E scriptが無い").toBeTypeOf(
+      "string",
+    );
+
+    const selected = command?.match(/e2e\/[\w./-]+\.spec\.ts/g) ?? [];
+    expect(selected).toEqual(PRODUCTION_E2E_SPECS);
+
+    const classified = [
+      ...PRODUCTION_E2E_SPECS,
+      ...PRODUCTION_E2E_EXCLUDED_SPECS,
+    ].sort();
+    expect(classified).toEqual(e2eSpecPaths());
+  });
+});
+
+describe("Playwright E2E provisioned environment (#557)", () => {
+  it("uses a pinned Playwright image with Chromium and WebKit already provisioned", () => {
+    const job = readWorkflow().jobs?.e2e;
+    const image = job?.container?.image ?? "";
+    const steps = job?.steps ?? [];
+
+    expect(image).toBe(
+      "mcr.microsoft.com/playwright:v1.62.1-noble@sha256:c091b21d9fae78c76e85cd4356431e9b018402f172a214fc7d7a5e9a7e29d8ac",
+    );
+    expect(job?.container?.options).toContain("--ipc=host");
+    expect(job?.container?.options).toContain("--init");
+    expect(steps.some((step) => step.run?.includes("playwright install"))).toBe(
+      false,
+    );
+    expect(
+      steps.some((step) => step.with?.path === PLAYWRIGHT_CACHE_PATH),
+    ).toBe(false);
+
+    const provisionCheck = steps.find(
+      (step) => step.name === "Verify Playwright browsers are provisioned",
+    );
+    expect(provisionCheck?.if).toBe("steps.scope.outputs.verify == 'true'");
+    expect(provisionCheck?.run).toContain(
+      "/ms-playwright/chromium-*/chrome-linux64/chrome",
+    );
+    expect(provisionCheck?.run).toContain("/ms-playwright/webkit-*/pw_run.sh");
+  });
 });
 
 /**
- * 複数 job が同じ `~/.cache/ms-playwright` を異なるブラウザ集合で使うため、キャッシュキーが
- * ブラウザ集合を含まないと、先に保存した job の内容(例: chromium のみ)がキーを占有し、
- * webkit を要求する job は exact hit で保存もスキップされたまま毎回再ダウンロードになる。
+ * ローカルのproduction E2E jobは `~/.cache/ms-playwright` を使う。E2E jobは
+ * #557 の公式Playwright imageにブラウザを固定しているため、ここでは残るキャッシュが
+ * 要求するブラウザ集合と衝突しないことを確認する。
  */
 describe("Playwright browser cache keys", () => {
   it("インストールするブラウザ集合をキーに含め、job 間で衝突しない", () => {
     const caches = playwrightBrowserCaches(readWorkflow());
-    expect(caches.length).toBeGreaterThanOrEqual(2);
+    expect(caches.length).toBeGreaterThanOrEqual(1);
 
     for (const { job, key, install, browsers } of caches) {
       expect(
@@ -466,9 +556,8 @@ describe("変更パスによる実行範囲の絞り込み (#491)", () => {
   );
 
   /**
-   * ブラウザの導入は「検証する」か「キャッシュがまだ無い」ときだけ必要。
-   * マージ後 push でキャッシュが既にヒットしている場合、入れても使わず保存もしないため
-   * 丸ごと無駄になる (#491)。実測で 31〜99 秒を占める最大の無駄。
+   * ホストrunner上で残るブラウザ導入は「検証する」か「キャッシュがまだ無い」ときだけ必要。
+   * E2E jobのChromium/WebKit導入は #557 の公式Playwright imageへ移し、apt経路を持たない。
    */
   it("ブラウザの導入はキャッシュミス時のみ実行される", () => {
     const workflow = readWorkflowFile("ci.yml");
@@ -489,7 +578,7 @@ describe("変更パスによる実行範囲の絞り込み (#491)", () => {
         );
       }
     }
-    expect(checked, "playwright install を 1 つも検出できなかった").toBe(2);
+    expect(checked, "playwright install を 1 つも検出できなかった").toBe(1);
   });
 
   /**
@@ -524,8 +613,10 @@ describe("変更パスによる実行範囲の絞り込み (#491)", () => {
   });
 
   /**
-   * `verify` が false でも `setup` は true になりうる (マージ後 push のキャッシュ投入)。
-   * 逆に `setup` が false なら依存が入っていないため `verify` も false でなければならない。
+   * `verify` が false でも `setup` は ci job だけ true になりうる
+   * (main のマージ後 push で共有キャッシュを投入するため)。
+   * E2E job は Playwright 固定イメージを使いキャッシュを書き込まないため、
+   * verify=false のとき setup も false でなければならない (#569)。
    */
   it("setup を伴わない verify は存在しない", () => {
     for (const job of ["ci", "e2e"] as const) {
@@ -552,6 +643,25 @@ describe("変更パスによる実行範囲の絞り込み (#491)", () => {
         }
       }
     }
+  });
+
+  it("main のマージ後でも E2E は不要な setup を行わない (#569)", () => {
+    expect(
+      resolveScope({
+        job: "ci",
+        paths: [".github/scripts/verification-scope.mjs"],
+        postMergeDuplicate: true,
+        seedCaches: true,
+      }),
+    ).toEqual({ setup: true, verify: false });
+    expect(
+      resolveScope({
+        job: "e2e",
+        paths: [".github/scripts/verification-scope.mjs"],
+        postMergeDuplicate: true,
+        seedCaches: true,
+      }),
+    ).toEqual({ setup: false, verify: false });
   });
 });
 
@@ -630,7 +740,7 @@ describe("verification-scope の分類契約 (#491)", () => {
     ).toBe(false);
   });
 
-  it("main のマージ後 push は検証せず共有キャッシュ投入だけを行う", () => {
+  it("main のマージ後 push は検証せず ci だけ共有キャッシュを投入する", () => {
     for (const job of ["ci", "e2e"] as const) {
       const scope = resolveScope({
         job,
@@ -641,8 +751,8 @@ describe("verification-scope の分類契約 (#491)", () => {
       expect(scope.verify, `${job}: 同一ツリーは PR 側で検証済み`).toBe(false);
       expect(
         scope.setup,
-        `${job}: main が導入を止めると全 PR がキャッシュを復元できなくなる (#380)`,
-      ).toBe(true);
+        `${job}: main の共有キャッシュ投入は ci job だけが行う (#380, #569)`,
+      ).toBe(job === "ci");
     }
   });
 
@@ -972,6 +1082,101 @@ describe("変更ファイルの取得範囲 (#491)", () => {
   });
 });
 
+describe("container の変更パス判定 API fallback (#567)", () => {
+  const REPO = "AutoDevJapan/FourBrosMahjong";
+  const BASE = "a".repeat(40);
+  const HEAD = "b".repeat(40);
+
+  it("local git が解決できないとき Compare API の一覧へ切り替える", async () => {
+    const api = vi.fn(async (path: string) => {
+      expect(path).toBe(
+        `/repos/${REPO}/compare/${BASE}...${HEAD}?per_page=100&page=1`,
+      );
+      return { files: [{ filename: "src/domain/game/engine.ts" }] };
+    });
+
+    await expect(
+      resolveChangedPaths({
+        repo: REPO,
+        baseSha: BASE,
+        headSha: HEAD,
+        local: () => null,
+        api,
+      }),
+    ).resolves.toEqual({
+      paths: ["src/domain/game/engine.ts"],
+      source: "github-api",
+    });
+  });
+
+  it("local git が解決できるとき API を余分に呼ばない", async () => {
+    const api = vi.fn();
+    await expect(
+      resolveChangedPaths({
+        repo: REPO,
+        baseSha: BASE,
+        headSha: HEAD,
+        local: () => ["docs/only.md"],
+        api,
+      }),
+    ).resolves.toEqual({ paths: ["docs/only.md"], source: "git" });
+    expect(api).not.toHaveBeenCalled();
+  });
+
+  it("rename は旧パスと新パスをどちらも分類対象にする", async () => {
+    await expect(
+      changedPathsFromApi({
+        repo: REPO,
+        baseSha: BASE,
+        headSha: HEAD,
+        api: async () => ({
+          files: [
+            {
+              filename: "docs/ships.md",
+              previous_filename: "src/ships.ts",
+              status: "renamed",
+            },
+          ],
+        }),
+      }),
+    ).resolves.toEqual(["docs/ships.md", "src/ships.ts"]);
+  });
+
+  it.each([
+    [
+      "API が失敗",
+      async () => {
+        throw new Error("network");
+      },
+    ],
+    ["レスポンスが不正", async () => ({ files: "not-an-array" })],
+    ["ファイル要素が不正", async () => ({ files: [{}] })],
+  ])("%s は unresolved のまま fail-open する", async (_label, api) => {
+    await expect(
+      changedPathsFromApi({
+        repo: REPO,
+        baseSha: BASE,
+        headSha: HEAD,
+        api,
+      }),
+    ).resolves.toBeNull();
+  });
+
+  it("Compare API の 300 件上限に達したら完全性を保証せず fail-open する", async () => {
+    const fullPage = Array.from({ length: 100 }, (_, index) => ({
+      filename: `src/generated-${index}.ts`,
+    }));
+    await expect(
+      changedPathsFromApi({
+        repo: REPO,
+        baseSha: BASE,
+        headSha: HEAD,
+        api: async () => ({ files: fullPage }),
+      }),
+    ).resolves.toBeNull();
+  });
+});
+
 /**
  * マージ後 push のスキップは「`main` に着地するツリーは直前に PR の checks が緑にした
  * ツリーと一致する」という前提に立つ。その前提は branch protection が支えているが、
@@ -986,6 +1191,8 @@ describe("マージ後 push のスキップ前提を実行時に検証する (#4
   const SHA = "a".repeat(40);
   const BEFORE = "b".repeat(40);
   const HEAD = "c".repeat(40);
+  const TREE = "e".repeat(40);
+  const OTHER_TREE = "f".repeat(40);
   const CHECK = "lint / typecheck / format / test / build";
 
   it.each([
@@ -1011,10 +1218,11 @@ describe("マージ後 push のスキップ前提を実行時に検証する (#4
       checkRuns?: unknown;
       workflowRun?: unknown;
       workflowRuns?: Record<string, unknown>;
+      commit?: unknown;
+      landedCommit?: unknown;
+      comparison?: unknown;
       apiError?: string;
-      gitFails?: string;
       trees?: Record<string, string>;
-      parents?: Record<string, string[]>;
     } = {},
   ) {
     const pulls = overrides.pulls ?? [
@@ -1043,7 +1251,17 @@ describe("マージ後 push のスキップ前提を実行時に検証する (#4
       head_sha: HEAD,
       conclusion: "success",
     };
-    const trees = overrides.trees ?? { [SHA]: "tree1", [HEAD]: "tree1" };
+    const trees = overrides.trees ?? { [SHA]: TREE, [HEAD]: TREE };
+    const candidateHead = Array.isArray(pulls)
+      ? (pulls[0] as { head?: { sha?: unknown } })?.head?.sha
+      : undefined;
+    const defaultHead =
+      typeof candidateHead === "string" ? candidateHead : HEAD;
+    const commit = overrides.commit ?? {
+      sha: defaultHead,
+      tree: { sha: trees[defaultHead] ?? TREE },
+    };
+    const comparison = overrides.comparison ?? { status: "ahead" };
 
     const api = async (path: string) => {
       if (overrides.apiError && path.includes(overrides.apiError)) {
@@ -1053,28 +1271,20 @@ describe("マージ後 push のスキップ前提を実行時に検証する (#4
       if (path.includes("/check-runs?")) return checkRuns;
       const runId = path.match(/\/actions\/runs\/(\d+)$/)?.[1];
       if (runId) return overrides.workflowRuns?.[runId] ?? workflowRun;
+      const commitSha = path.match(/\/git\/commits\/([^/]+)$/)?.[1];
+      if (commitSha) {
+        if (commitSha === defaultHead) return commit;
+        return (
+          overrides.landedCommit ?? {
+            sha: commitSha,
+            tree: { sha: trees[commitSha] ?? TREE },
+          }
+        );
+      }
+      if (path.includes("/compare/")) return comparison;
       throw new Error(`unexpected path ${path}`);
     };
-    const git = (args: string[]) => {
-      const command = args.join(" ");
-      if (overrides.gitFails && command.includes(overrides.gitFails)) {
-        throw new Error("git failed");
-      }
-      if (args[0] === "rev-parse") {
-        const sha = args[1].replace("^{tree}", "");
-        const tree = trees[sha];
-        if (!tree) throw new Error("unknown rev");
-        return `${tree}\n`;
-      }
-      if (args[0] === "rev-list") {
-        const sha = args[4];
-        const parents = sha ? overrides.parents?.[sha] : undefined;
-        if (!sha || !parents) throw new Error("unknown commit parents");
-        return `${[sha, ...parents].join(" ")}\n`;
-      }
-      return "";
-    };
-    return { api, git };
+    return { api };
   }
 
   const call = (
@@ -1104,7 +1314,7 @@ describe("マージ後 push のスキップ前提を実行時に検証する (#4
     });
   });
 
-  it("PR #519型の履歴が分岐したmain→dev昇格を親とtreeの一致で許可する", async () => {
+  it("PR #519型の履歴が分岐したmain→dev昇格を祖先比較とtreeの一致で許可する", async () => {
     const merge = "545e1e05517bee2c526c07596b3fbe7b1b7be56f";
     const devBefore = "b9a05e53894113613342e9b0cfabe55b8c20df5b";
     const mainHead = "85efd840ef6c23183a80ad6dd20f6dfb38b09527";
@@ -1129,8 +1339,7 @@ describe("マージ後 push のスキップ前提を実行時に検証する (#4
           head_sha: mainHead,
           conclusion: "success",
         },
-        parents: { [merge]: [devBefore, mainHead] },
-        trees: { [merge]: "promoted-tree", [mainHead]: "promoted-tree" },
+        trees: { [merge]: TREE, [mainHead]: TREE },
       },
       { sha: merge, before: devBefore, branch: "dev" },
     );
@@ -1177,7 +1386,6 @@ describe("マージ後 push のスキップ前提を実行時に検証する (#4
             head: { ref: "dev", sha: HEAD, repo: { full_name: REPO } },
           },
         ],
-        parents: { [SHA]: [BEFORE, HEAD] },
       },
       { branch: "stg" },
     );
@@ -1187,7 +1395,7 @@ describe("マージ後 push のスキップ前提を実行時に検証する (#4
     });
   });
 
-  it("昇格mergeの親がpush前tipとsource headに一致しなければ拒否する", async () => {
+  it("昇格先tipが着地commitの祖先でなければ拒否する", async () => {
     const result = await call(
       {
         pulls: [
@@ -1199,13 +1407,57 @@ describe("マージ後 push のスキップ前提を実行時に検証する (#4
             head: { ref: "main", sha: HEAD, repo: { full_name: REPO } },
           },
         ],
-        parents: { [SHA]: ["d".repeat(40), HEAD] },
+        comparison: { status: "behind" },
       },
       { branch: "dev" },
     );
     expect(result).toEqual({
       skip: false,
-      reason: "merge-parents-mismatch",
+      reason: "base-not-ancestor-of-landed-commit",
+    });
+  });
+
+  it("一親のfast-forward/rebase昇格も祖先比較とtreeの一致で許可する", async () => {
+    const result = await call(
+      {
+        pulls: [
+          {
+            number: 522,
+            merged_at: "2026-08-14T16:30:35Z",
+            merge_commit_sha: SHA,
+            base: { ref: "dev" },
+            head: { ref: "main", sha: HEAD, repo: { full_name: REPO } },
+          },
+        ],
+        comparison: { status: "ahead" },
+      },
+      { branch: "dev" },
+    );
+    expect(result).toEqual({
+      skip: true,
+      reason: "verified-by-merged-pull-request",
+    });
+  });
+
+  it("昇格先の祖先比較APIが失敗したらスキップしない", async () => {
+    const result = await call(
+      {
+        apiError: "/compare/",
+        pulls: [
+          {
+            number: 523,
+            merged_at: "2026-08-14T16:30:35Z",
+            merge_commit_sha: SHA,
+            base: { ref: "dev" },
+            head: { ref: "main", sha: HEAD, repo: { full_name: REPO } },
+          },
+        ],
+      },
+      { branch: "dev" },
+    );
+    expect(result).toEqual({
+      skip: false,
+      reason: "landed-ancestor-api-failed",
     });
   });
 
@@ -1384,20 +1636,44 @@ describe("マージ後 push のスキップ前提を実行時に検証する (#4
       "own-check-run-not-successful",
     ],
     [
-      "PR head の取得に失敗",
-      { gitFails: "fetch" },
+      "PR head commit API が失敗",
+      { apiError: "/git/commits/" },
       {},
-      "pull-head-fetch-failed",
+      "pull-head-commit-api-failed",
+    ],
+    [
+      "PR head commit の形が不正",
+      { commit: { sha: HEAD } },
+      {},
+      "pull-head-commit-invalid",
+    ],
+    [
+      "着地 commit API が失敗",
+      { apiError: `/git/commits/${SHA}` },
+      {},
+      "landed-commit-api-failed",
+    ],
+    [
+      "着地 commit の形が不正",
+      { landedCommit: { sha: SHA } },
+      {},
+      "landed-commit-invalid",
+    ],
+    [
+      "main ancestry compare API が失敗",
+      { apiError: "/compare/" },
+      {},
+      "base-ancestor-api-failed",
     ],
     [
       "陳腐化した PR (before が PR head の祖先でない)",
-      { gitFails: "merge-base" },
+      { comparison: { status: "behind" } },
       {},
       "base-not-ancestor-of-pull-head",
     ],
     [
       "着地したツリーが検証済みツリーと違う",
-      { trees: { [SHA]: "landed", [HEAD]: "verified" } },
+      { trees: { [SHA]: OTHER_TREE, [HEAD]: TREE } },
       {},
       "tree-mismatch",
     ],
@@ -1505,11 +1781,62 @@ describe("マージ後 push のスキップ前提を実行時に検証する (#4
         paths.push(path);
         return dependencies.api(path);
       },
-      git: dependencies.git,
     });
+    expect(paths).toContain(`/repos/${REPO}/git/commits/${HEAD}`);
+    expect(paths).toContain(`/repos/${REPO}/git/commits/${SHA}`);
     expect(paths).toContain(
       `/repos/${REPO}/commits/${HEAD}/check-runs?per_page=100`,
     );
+    expect(paths).toContain(`/repos/${REPO}/compare/${BEFORE}...${HEAD}`);
+  });
+
+  it("昇格の祖先関係もCompare APIで確認し、ローカルgitのcommit形状に依存しない", async () => {
+    const paths: string[] = [];
+    const dependencies = happyPath({
+      pulls: [
+        {
+          number: 519,
+          merged_at: "2026-08-14T16:30:35Z",
+          merge_commit_sha: SHA,
+          base: { ref: "dev" },
+          head: { ref: "main", sha: HEAD, repo: { full_name: REPO } },
+        },
+      ],
+    });
+    const result = await resolvePostMergeEvidence({
+      repo: REPO,
+      sha: SHA,
+      before: BEFORE,
+      forced: false,
+      branch: "dev",
+      checkName: CHECK,
+      api: async (path) => {
+        paths.push(path);
+        return dependencies.api(path);
+      },
+    });
+    expect(result).toEqual({
+      skip: true,
+      reason: "verified-by-merged-pull-request",
+    });
+    expect(paths).toContain(`/repos/${REPO}/compare/${BEFORE}...${SHA}`);
+  });
+
+  it("着地 tree は commit API で検証し、ローカル git の tree 解決に依存しない", async () => {
+    const dependencies = happyPath();
+    const result = await resolvePostMergeEvidence({
+      repo: REPO,
+      sha: SHA,
+      before: BEFORE,
+      forced: false,
+      branch: "main",
+      checkName: CHECK,
+      api: dependencies.api,
+    });
+    expect(result).toEqual({
+      skip: true,
+      reason: "verified-by-merged-pull-request",
+    });
   });
 });
 
@@ -1532,16 +1859,6 @@ describe("マージ後証拠の外部 I/O timeout (#496)", () => {
       vi.unstubAllGlobals();
       vi.unstubAllEnvs();
     }
-  });
-
-  it("git/ref fetch に同じ bounded timeout を渡す", () => {
-    const exec = vi.fn().mockReturnValue("");
-    runGit(["fetch", "origin", "refs/pull/1/head"], exec);
-    expect(exec).toHaveBeenCalledWith(
-      "git",
-      ["fetch", "origin", "refs/pull/1/head"],
-      expect.objectContaining({ timeout: EVIDENCE_IO_TIMEOUT_MS }),
-    );
   });
 });
 
@@ -1603,17 +1920,19 @@ describe("ガードが参照する check 名が job 名と一致する (#496)", 
 });
 
 /**
- * 上のテストは `git` を差し替えて分岐を網羅するが、**実際に発行する git コマンドが
- * 意図どおり動くか**は検証していない。`refs/pull/N/merge` は merge 時に削除されるため
- * 使えず `refs/pull/N/head` を使う、といった前提は実物でしか確かめられない。
- * 本物のリポジトリで squash マージを再現して固定する (#496)。
+ * 上のテストは API を差し替えて分岐を網羅するが、**実際に発行する API の組み合わせが
+ * 意図どおり動くか**は検証していない。マージ後は PR head ref が消えることがあるため、
+ * ephemeral ref や checkout の commit 形状に依存せず、landed / PR head の commit API の
+ * tree と compare API で証拠を確認する。本物のリポジトリで squash マージを再現して
+ * 固定する (#496)。
  */
-describe("マージ後ガードの git 操作が実物で動く (#496)", () => {
+describe("マージ後ガードの API 操作が実物で動く (#496)", () => {
   type Repo = {
     dir: string;
     landed: string;
     pullHead: string;
     before: string;
+    stale: boolean;
     cleanup: () => void;
   };
 
@@ -1654,9 +1973,6 @@ describe("マージ後ガードの git 操作が実物で動く (#496)", () => {
     run(work, "add", "-A");
     run(work, "commit", "--quiet", "-m", "feature");
     const pullHead = run(work, "rev-parse", "HEAD");
-    // GitHub が保持する PR head ref を再現する。
-    run(work, "push", "--quiet", "origin", `HEAD:refs/pull/492/head`);
-
     run(work, "checkout", "--quiet", "main");
     if (stale) {
       // main が独自に進む = PR は古い main のまま(strict を外した状況)。
@@ -1677,17 +1993,10 @@ describe("マージ後ガードの git 操作が実物で動く (#496)", () => {
       landed,
       pullHead,
       before,
+      stale,
       cleanup: () => rmSync(root, { recursive: true, force: true }),
     };
   }
-
-  /** 本番コードが組み立てた引数をそのまま、対象リポジトリで実行する。 */
-  const gitIn = (dir: string) => (args: string[]) =>
-    execFileSync("git", args, {
-      cwd: dir,
-      encoding: "utf8",
-      stdio: ["ignore", "pipe", "pipe"],
-    });
 
   function apiFor(repo: Repo, checkName: string) {
     return async (path: string) => {
@@ -1719,13 +2028,35 @@ describe("マージ後ガードの git 操作が実物で動く (#496)", () => {
           head_sha: repo.pullHead,
           conclusion: "success",
         };
+      if (path.endsWith(`/git/commits/${repo.landed}`))
+        return {
+          sha: repo.landed,
+          tree: {
+            sha: execFileSync("git", ["rev-parse", `${repo.landed}^{tree}`], {
+              cwd: repo.dir,
+              encoding: "utf8",
+            }).trim(),
+          },
+        };
+      if (path.endsWith(`/git/commits/${repo.pullHead}`))
+        return {
+          sha: repo.pullHead,
+          tree: {
+            sha: execFileSync("git", ["rev-parse", `${repo.pullHead}^{tree}`], {
+              cwd: repo.dir,
+              encoding: "utf8",
+            }).trim(),
+          },
+        };
+      if (path.includes(`/compare/${repo.before}...${repo.pullHead}`))
+        return { status: repo.stale ? "behind" : "ahead" };
       throw new Error(`unexpected ${path}`);
     };
   }
 
   const CHECK = "lint / typecheck / format / test / build";
 
-  it("最新の main を取り込んだ PR の squash マージはスキップを許す", async () => {
+  it("PR head ref が消えていても commit API の証拠で squash マージをスキップする", async () => {
     const repo = createMergedRepository(false);
     try {
       const result = await resolvePostMergeEvidence({
@@ -1736,7 +2067,6 @@ describe("マージ後ガードの git 操作が実物で動く (#496)", () => {
         branch: "main",
         checkName: CHECK,
         api: apiFor(repo, CHECK),
-        git: gitIn(repo.dir),
       });
       expect(result).toEqual({
         skip: true,
@@ -1760,7 +2090,6 @@ describe("マージ後ガードの git 操作が実物で動く (#496)", () => {
         branch: "main",
         checkName: CHECK,
         api: apiFor(repo, CHECK),
-        git: gitIn(repo.dir),
       });
       expect(result.skip, "未検証のツリーが検証されずに素通りする").toBe(false);
       expect(result.reason).toBe("base-not-ancestor-of-pull-head");

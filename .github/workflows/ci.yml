@@ -172,6 +172,8 @@ jobs:
           # 実配布buildでは未設定のE2E専用フラグ。production成果物でも決定的seedを使い、
           # dev/prodの主要導線を同じ局面で比較する(#432)。
           NEXT_PUBLIC_E2E_SEED_ENABLED: "1"
+          # Production E2Eで本番想定のconnect-src許可を独立検証するための公開設定。
+          NEXT_PUBLIC_ONLINE_WS_URL: "https://four-bros-mahjong-online-production.up.railway.app/ws"
         run: pnpm build
 
       # Service Worker は production build でのみ登録されるため、通常の dev E2E job では
@@ -204,21 +206,29 @@ jobs:
           path: ~/.cache/ms-playwright
           key: playwright-browsers-${{ runner.os }}-chromium-${{ hashFiles('pnpm-lock.yaml') }}
 
-      - name: Production E2E (PWA / persistence / modal focus)
+      - name: Production E2E (PWA / persistence / modal focus / security / metadata / a11y)
         if: steps.scope.outputs.verify == 'true'
         env:
           E2E_PORT: "3101"
+          NEXT_PUBLIC_ONLINE_WS_URL: "https://four-bros-mahjong-online-production.up.railway.app/ws"
         run: pnpm test:e2e:prod:prebuilt
 
   e2e:
     name: E2E (Playwright)
     runs-on: ubuntu-latest
+    # Playwright's browser cache contains binaries only; it cannot provision the
+    # host packages required by WebKit. Use the exact Playwright image instead of
+    # invoking apt on every fresh hosted runner. The tag is version-matched to
+    # @playwright/test in pnpm-lock.yaml and pinned to the amd64 manifest used by
+    # the standard GitHub-hosted Ubuntu runner.
+    container:
+      image: mcr.microsoft.com/playwright:v1.62.1-noble@sha256:c091b21d9fae78c76e85cd4356431e9b018402f172a214fc7d7a5e9a7e29d8ac
+      options: --init --ipc=host
     # 既存の ci ジョブ (lint/typecheck/format/test/build) とは独立に並列実行する。
     # playwright.config.ts の webServer は `pnpm dev` を自前で起動するためビルド成果物に依存せず、
     # ci ジョブの完了を待つ必要がない。
     # ハングした場合にジョブを長時間占有し続けないようタイムアウトを明示する。
-    # webkit 追加(#369)で --with-deps の apt install(gstreamer 系等)とバイナリ取得が増えた分、
-    # 15分から引き上げている。
+    # webkit 追加(#369)を含むブラウザ本体とOS依存は上の公式イメージに固定する。
     timeout-minutes: 20
     steps:
       - name: Checkout
@@ -276,44 +286,21 @@ jobs:
           path: ${{ steps.pnpm-store.outputs.path }}
           key: pnpm-store-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
 
-      # `setup` のときは常に実行する。後続の `pnpm exec playwright install` が node_modules を
-      # 必要とするため、「pnpm キャッシュはヒットしたが Playwright キャッシュは外れた」
-      # (2 つのキャッシュは同じキーでも LRU で独立に退避されうる: #380) の組み合わせで
-      # node_modules 無しに playwright install が走って落ちる。実測 3 秒なので条件は付けない。
+      # 検証時だけテスト実行用の node_modules を導入する。verified post-merge では
+      # Playwright固定イメージにcache writerも無いため、scopeがsetup=falseになりこのjobの
+      # 依存導入自体を省略する (#569)。
       - name: Install dependencies
         if: steps.scope.outputs.setup == 'true'
         run: pnpm install --frozen-lockfile
 
-      # ブラウザバイナリ (~/.cache/ms-playwright) を pnpm-lock.yaml のハッシュ (= @playwright/test の
-      # バージョン変化を含む) とインストールするブラウザ集合をキーにキャッシュし、CI 実行時間を短縮する。
-      # ブラウザ集合をキーに含めないと、chromium のみを入れる ci job とキーが衝突して webkit が
-      # 常にキャッシュから漏れる。OS 依存パッケージの apt install はキャッシュの有無に関わらず
-      # --with-deps で毎回実行するため、キャッシュヒット時もブラウザ本体の再ダウンロードのみがスキップされる。
-      - name: Restore Playwright browsers
-        if: steps.scope.outputs.setup == 'true'
-        id: playwright-cache
-        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: ~/.cache/ms-playwright
-          key: playwright-browsers-${{ runner.os }}-chromium-webkit-${{ hashFiles('pnpm-lock.yaml') }}
-
-      # Ubuntu ランナーで --with-deps が apt-get 経由で依存パッケージを更新する際、needrestart が
-      # 対話的な再起動確認プロンプトを出して非対話環境でハングすることがあるため、
-      # 環境変数で明示的に自動応答させる。
-      # 同上 (#491)。
-      - name: Install Playwright browsers (chromium / webkit + OS deps)
-        if: steps.scope.outputs.setup == 'true' && (steps.scope.outputs.verify == 'true' || steps.playwright-cache.outputs.cache-hit != 'true')
-        env:
-          DEBIAN_FRONTEND: noninteractive
-          NEEDRESTART_MODE: a
-        run: pnpm exec playwright install --with-deps chromium webkit
-
-      - name: Save Playwright browsers
-        if: steps.scope.outputs.setup == 'true' && github.ref == 'refs/heads/main' && steps.playwright-cache.outputs.cache-hit != 'true'
-        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: ~/.cache/ms-playwright
-          key: playwright-browsers-${{ runner.os }}-chromium-webkit-${{ hashFiles('pnpm-lock.yaml') }}
+      # The image provisions the exact Chromium/WebKit pair and their host
+      # dependencies. Check the expected launchers before the test command so a
+      # future image update cannot silently turn browser coverage into a no-op.
+      - name: Verify Playwright browsers are provisioned
+        if: steps.scope.outputs.verify == 'true'
+        run: |
+          test -x /ms-playwright/chromium-*/chrome-linux64/chrome
+          test -x /ms-playwright/webkit-*/pw_run.sh
 
       - name: Test (playwright e2e)
         if: steps.scope.outputs.verify == 'true'

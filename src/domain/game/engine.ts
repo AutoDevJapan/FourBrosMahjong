@@ -35,9 +35,9 @@
  *   (`canAnkanAfterRiichi` が判定)。加槓に対する槍槓横取りは Q17 / #115 の範囲。
  * - 北抜き(ガリ)は**自動**で処理する(手動選択は未対応)。
  * - パオ(責任払い)は**鳴きで確定した大三元/大四喜/四槓子**に対応(#99)。ポン/大明槓で
- *   パオ役満が確定した瞬間に責任者(打牌者)を記録し、和了時 `resolveWinPayment` で責任払い
- *   (ロン折半・ツモ全額・本場)を行う(判定は `scoring/pao.ts`)。役満祝儀は別枠で、支払者は
- *   **抜け番を含む和了者以外の3兄弟**とする(Q14 確定・ユーザー承認 2026-07-17 / #129)。
+ *   パオ役満が確定した瞬間に役満種類ごとの責任者(打牌者)を記録し、和了時
+ *   `resolveWinPayment` へ役満単位で渡す(ロン折半・ツモ全額・本場 / #525)。役満祝儀は
+ *   別枠で、支払者は**抜け番を含む和了者以外の3兄弟**とする(Q14 確定・#129)。
  * - `SAFETY_ROUND_CAP` で局数に上限を設け、南4連荘の理論的無限ループを防ぐ(通常は発火しない)。
  *
  * 決定性: `createGame({ seed })` で `createSeededRng` を用いるため、同じ seed + 同じ操作列から
@@ -65,6 +65,7 @@ import { isConcealedHand, type Meld } from "@/domain/hand/meld";
 import { isTenpai, waitingTiles } from "@/domain/hand/tenpai";
 import { sameKind, tileKey } from "@/domain/hand/tile-identity";
 import { analyzeWin, type WinAnalysis } from "@/domain/hand/win";
+import type { PaoYaku } from "@/domain/hand/yaku";
 import { createSeededRng, type Rng } from "@/domain/random/rng";
 import {
   advanceRound,
@@ -76,7 +77,7 @@ import {
   seatingOf,
 } from "@/domain/round/round";
 import type { PlayerRing, Seating } from "@/domain/round/seat";
-import { isPaoTriggeringCall } from "@/domain/scoring/pao";
+import { paoYakuForCall } from "@/domain/scoring/pao";
 import { computeScore, handValueFromHan } from "@/domain/scoring/points";
 import {
   RETURN_POINTS,
@@ -91,7 +92,7 @@ import {
 import { HONOR, type PlayableWind, type Tile } from "@/domain/tiles/tile";
 import { buildWall, type Wall, WallEmptyError } from "@/domain/wall/wall";
 
-/** プレイヤー識別子(4兄弟)。`p0` は常に自家(人間)。 */
+/** プレイヤー識別子(4兄弟)。後方互換の通常対局では `p0` が自家。 */
 export type PlayerId = "p0" | "p1" | "p2" | "p3";
 
 /** 自家(人間プレイヤー)のID。 */
@@ -134,6 +135,9 @@ interface EnginePlayer {
 /** 席ごとの真偽フラグ。 */
 type SeatFlags = Record<SeatKey, boolean>;
 
+/** 和了席ごとのパオ対象役満 → その役を確定させた責任者。 */
+type PaoResponsibility = Partial<Record<PaoYaku, PlayerId>>;
+
 function seatFlags(value = false): SeatFlags {
   return { east: value, south: value, west: value };
 }
@@ -142,8 +146,9 @@ function seatFlags(value = false): SeatFlags {
  * ツモ牌の供給元(#415)。
  *
  * - `"live"` … ライブ壁からの通常ツモ(`drawn` が無いときの既定値でもある)
- * - `"kanReplacement"` … カン(暗槓/加槓/大明槓)後の嶺上牌
- * - `"kitaReplacement"` … 北抜き(ガリ)後の嶺上牌
+ * - `"kanReplacement"` … カン(暗槓/加槓/大明槓)を起点とする一連の嶺上補充。
+ *   途中の北抜き(ガリ)で再補充してもこの値を維持する(嶺上開花の対象)
+ * - `"kitaReplacement"` … 通常ツモを起点とする北抜き(ガリ)後の嶺上牌
  */
 export type DrawSource = "live" | "kanReplacement" | "kitaReplacement";
 
@@ -179,8 +184,9 @@ interface HandState {
    * 現在の手番がツモった牌(打牌待ち)と供給元。未ツモは null。
    *
    * 役判定は2つの別条件をここから導く:
-   * - **嶺上開花**: `source === "kanReplacement"`。カン限定(spec 3.2「**槓の**
-   *   嶺上牌で和了」)なので、北抜きの嶺上牌には付かない。
+   * - **嶺上開花**: `source === "kanReplacement"`。カン起点の一連の補充は、途中で
+   *   北抜き→再嶺上になってもこの値を維持する(spec 3.0 / Q36)。通常ツモ起点の
+   *   北抜きは `"kitaReplacement"` なので付かない。
    * - **海底摸月の抑止**: `source !== "live"`。海底摸月は「ライブ壁の最後の1枚を
    *   ツモった」ことが条件で、嶺上牌のツモは**カン・北抜きのいずれも**対象外
    *   (`isHaiteiTsumo` の契約 / #396)。
@@ -205,15 +211,18 @@ interface HandState {
   /** この局で鳴き(ポン/カン)が発生したか(ダブルリーチ判定用)。 */
   callsMade: boolean;
   /**
-   * パオ責任者(スペック3 3.3 / #99)。パオ役満(大三元/大四喜/四槓子)を
-   * **鳴き(ポン/大明槓)で確定させた席 → その確定牌を打った責任者ID**。
-   * その席が和了したとき `settleWin` が責任払いへ渡す。
-   * 複数のパオ役満と役ごとの責任者は表現できず、後の確定で上書きされる。
-   * この未確定境界は Q37 / #525。裁定前に状態形式を拡張しない。
+   * パオ責任者(スペック3 3.3 / #99 / #525)。パオ役満を
+   * **鳴き(ポン/大明槓)で確定させた席 → 役満種類 → その確定牌を打った責任者ID**
+   * を保持する。複数のパオ役満が異なる打牌者で確定しても上書きせず、和了時に
+   * 役満単位の精算コンポーネントへ渡す。
    */
-  paoResponsible: Partial<Record<SeatKey, PlayerId>>;
-  /** 直前の打牌(ロン/鳴き判定の対象)。解決後に null。 */
-  pendingDiscard: { seat: SeatKey; tile: Tile } | null;
+  paoResponsible: Partial<Record<SeatKey, PaoResponsibility>>;
+  /**
+   * 直前の打牌(ロン/鳴き判定の対象)。解決後に null。
+   * `haitei` は打牌時点のツモがライブ牌由来かで固定する。北抜き/嶺上の補充牌を
+   * 打ったとき、壁残数だけを後から見ると河底撈魚を誤付与するため(#396)。
+   */
+  pendingDiscard: { seat: SeatKey; tile: Tile; haitei: boolean } | null;
   /** 宣言牌の応答解決待ちのリーチ席。ロンされなければ供託を確定する。 */
   pendingRiichiSeat: SeatKey | null;
   /** 直前の打牌に対しロン/鳴きを見送った席(頭ハネ解決の再入で参照)。 */
@@ -325,6 +334,8 @@ export interface RoundSummary {
 export type Pending =
   | {
       readonly kind: "humanDiscard";
+      /** この入力を担当する人間席。旧fixtureは省略でき、既定でp0として扱う。 */
+      readonly playerId?: PlayerId;
       /** ツモ和了できるか。 */
       readonly canTsumo: boolean;
       /** リーチ宣言できるか(門前テンパイ・1,000点以上)。 */
@@ -345,6 +356,8 @@ export type Pending =
     }
   | {
       readonly kind: "humanReact";
+      /** この入力を担当する人間席。旧fixtureは省略でき、既定でp0として扱う。 */
+      readonly playerId?: PlayerId;
       readonly tile: Tile;
       readonly from: SeatKey;
       /** ロンできるか。 */
@@ -378,6 +391,8 @@ export type GamePhase = "playing" | "roundEnd" | "gameEnd";
 export interface EngineState {
   readonly players: readonly EnginePlayer[];
   readonly order: PlayerRing<PlayerId>;
+  /** 人間が操作する席。未指定の旧テスト状態は `[p0]` として扱う。 */
+  readonly humanPlayerIds?: readonly PlayerId[];
   readonly round: RoundState<PlayerId>;
   /** 各プレイヤーの持ち点(素点)。半荘開始時 35,000。 */
   readonly points: Record<PlayerId, number>;
@@ -415,6 +430,8 @@ export interface CreateGameOptions {
   readonly seed?: number;
   /** 4兄弟の表示名(index 0 = 自家)。 */
   readonly names?: PlayerNames;
+  /** オンライン対局などで人間が担当するプレイヤーID。既定は `[p0]`。 */
+  readonly humanPlayerIds?: readonly PlayerId[];
 }
 
 /**
@@ -426,6 +443,7 @@ export interface CreateGameOptions {
 export const DEFAULT_NAMES: PlayerNames = ["あなた", "一郎", "二郎", "三郎"];
 
 const ALL_IDS: PlayerRing<PlayerId> = ["p0", "p1", "p2", "p3"];
+const DEFAULT_HUMAN_PLAYER_IDS: readonly PlayerId[] = [HUMAN_ID];
 
 // ---------------------------------------------------------------------------
 // 純ヘルパ
@@ -448,8 +466,26 @@ export function seatOfPlayer(
 }
 
 /** 自家(人間)の席(抜け番なら null)。 */
-function humanSeatOf(hand: HandState): SeatKey | null {
-  return seatOfPlayer(hand.seating, HUMAN_ID);
+function humanSeatOf(
+  hand: HandState,
+  playerId: PlayerId = HUMAN_ID,
+): SeatKey | null {
+  return seatOfPlayer(hand.seating, playerId);
+}
+
+function humanPlayerIdsOf(state: EngineState): readonly PlayerId[] {
+  return state.humanPlayerIds ?? DEFAULT_HUMAN_PLAYER_IDS;
+}
+
+function isHumanPlayer(state: EngineState, playerId: PlayerId): boolean {
+  return humanPlayerIdsOf(state).includes(playerId);
+}
+
+function pendingBelongsTo(state: EngineState, playerId: PlayerId): boolean {
+  if (!isHumanPlayer(state, playerId)) return false;
+  const pendingPlayerId = state.pending?.playerId;
+  if (pendingPlayerId !== undefined) return pendingPlayerId === playerId;
+  return playerId === HUMAN_ID;
 }
 
 /** 場風の番号(東場=東1・南場=南2)。 */
@@ -656,6 +692,7 @@ export function createGame(options: CreateGameOptions = {}): EngineState {
   const base: EngineState = {
     players,
     order: ALL_IDS,
+    humanPlayerIds: [...(options.humanPlayerIds ?? DEFAULT_HUMAN_PLAYER_IDS)],
     round,
     points,
     bonus,
@@ -671,6 +708,29 @@ export function createGame(options: CreateGameOptions = {}): EngineState {
     roundsPlayed: 0,
   };
   return beginRound(base);
+}
+
+/**
+ * オンライン入室者を人間席として追加する。
+ *
+ * 対局の乱数・山・得点は変更せず、以後そのプレイヤーの手番をAIから入力待ちへ
+ * 切り替える。退室時も席をAIへ戻さず、再接続まで入力待ちに留めることで、他端末の
+ * 切断が勝手なAI操作へ置き換わって対局結果が変わることを防ぐ。
+ */
+export function setHumanPlayerIds(
+  state: EngineState,
+  playerIds: readonly PlayerId[],
+): EngineState {
+  const unique = ALL_IDS.filter((id) => playerIds.includes(id));
+  const current = humanPlayerIdsOf(state);
+  if (
+    current.length === unique.length &&
+    current.every((id, index) => id === unique[index])
+  ) {
+    return state;
+  }
+  const next = { ...state, humanPlayerIds: unique };
+  return next.pending === null && next.phase === "playing" ? pump(next) : next;
 }
 
 /** 現局の席割り・配牌・ドラを用意し、進行を人間の意思決定点まで進める。 */
@@ -772,8 +832,8 @@ function autoPullDealtNorths(hand: HandState): void {
  * カン後の嶺上補充(北抜きも自動処理)。`drawn` を更新する。
  *
  * 嶺上牌が北で続けて抜かれた場合も `"kanReplacement"` のままにする(カンを起点とした
- * 一連の補充なので嶺上開花の対象)。この解釈は #396 以前からの既存挙動で、spec 3.2 の
- * 「北抜きの嶺上牌では付かない」との境界は未確定(→ #437)。
+ * 一連の補充なので嶺上開花の対象 / Q36・#437)。`"kitaReplacement"` は通常ツモ起点の
+ * 北抜きにだけ使い、北抜きの直近性でカン起点の供給元を上書きしない。
  */
 function drawKanReplacement(hand: HandState, seat: SeatKey): void {
   let tile: Tile;
@@ -964,11 +1024,13 @@ function resolveChankan(
     const win = analyzeRon(state, candidate, kanTile, false, true);
     if (win === null) continue;
     if (kind === "ankan" && win.form.kind !== "thirteenOrphans") continue;
-    if (seatOccupant(hand.seating, candidate) === HUMAN_ID) {
+    const candidateId = seatOccupant(hand.seating, candidate);
+    if (isHumanPlayer(state, candidateId)) {
       return {
         ...state,
         pending: {
           kind: "humanReact",
+          playerId: candidateId,
           tile: kanTile,
           from: seat,
           canRon: true,
@@ -1164,7 +1226,8 @@ function pump(state: EngineState): EngineState {
     if (s.pending !== null) return s;
     const hand = s.hand;
     const seat = hand.turn;
-    const isHuman = seatOccupant(hand.seating, seat) === HUMAN_ID;
+    const occupant = seatOccupant(hand.seating, seat);
+    const isHuman = isHumanPlayer(s, occupant);
 
     // 1. ツモ(未ツモなら山から引く)。山が尽きていれば流局。
     if (hand.drawn === null) {
@@ -1198,6 +1261,7 @@ function pump(state: EngineState): EngineState {
             ...s,
             pending: {
               kind: "humanDiscard",
+              playerId: occupant,
               canTsumo: tsumo !== null,
               canRiichi: false,
               riichiTiles: [],
@@ -1509,6 +1573,7 @@ function buildHumanPending(state: EngineState, seat: SeatKey): Pending {
 
   return {
     kind: "humanDiscard",
+    playerId: occupant,
     canTsumo,
     canRiichi: canDeclareRiichi({
       hasDrawn: drawn !== null,
@@ -1535,6 +1600,7 @@ function applyDiscard(
 ): EngineState {
   const hand = state.hand;
   if (hand === null) return state;
+  const drawSource = hand.drawn?.source;
   // 手牌(+ツモ)から捨て牌1枚を取り除く。
   const pool = [...hand.hands[seat], hand.drawn?.tile ?? null].filter(
     (t): t is Tile => t !== null,
@@ -1549,7 +1615,13 @@ function applyDiscard(
   hand.drawn = null;
   hand.ponnedKind = null; // 打牌で喰い替え禁止の窓(ポン直後の1打)を閉じる。
   hand.ippatsu[seat] = false; // 自分の打牌で一発の権利は消える。
-  hand.pendingDiscard = { seat, tile: discarded };
+  hand.pendingDiscard = {
+    seat,
+    tile: discarded,
+    // 河底撈魚は最後のライブ牌を引いた後の打牌だけ。北抜き/嶺上の補充牌は
+    // ライブ壁を尽くしていても河底にはならない。鳴き後の手出しも対象外。
+    haitei: drawSource === "live" && isHaitei(hand.wall.remainingLiveTiles),
+  };
   hand.passedRonSeats = [];
   return resolveDiscard(state);
 }
@@ -1600,26 +1672,42 @@ function commitPendingRiichi(
 function resolveDiscard(state: EngineState): EngineState {
   const hand = state.hand;
   if (hand === null || hand.pendingDiscard === null) return state;
-  const { seat: discarder, tile } = hand.pendingDiscard;
-  const haitei = isHaitei(hand.wall.remainingLiveTiles);
-  const humanSeat = humanSeatOf(hand);
-
+  const { seat: discarder, tile, haitei } = hand.pendingDiscard;
+  // 鳴きの可否は「ライブ壁が尽きているか」で判定する。これは河底役の有無とは
+  // 独立しており、北抜き/嶺上牌の打牌でも残り0なら鳴きは許可しない(#396)。
+  const wallExhausted = isHaitei(hand.wall.remainingLiveTiles);
   // 1. ロン(頭ハネ順)。ロンは鳴きより優先。
   for (const candidate of ronOrder(discarder)) {
     if (hand.passedRonSeats.includes(candidate)) continue;
     const analysis = analyzeRon(state, candidate, tile, haitei);
     if (analysis === null) continue;
-    if (seatOccupant(hand.seating, candidate) === HUMAN_ID) {
+    const candidateId = seatOccupant(hand.seating, candidate);
+    if (isHumanPlayer(state, candidateId)) {
       // 自家のロン機会 → 入力待ちで停止(同じ打牌へのポン/カンも併せて提示)。
       return {
         ...state,
         pending: {
           kind: "humanReact",
+          playerId: candidateId,
           tile,
           from: discarder,
           canRon: true,
-          canPon: canHumanCall(hand, humanSeat, discarder, tile, haitei, 2),
-          canKan: canHumanCall(hand, humanSeat, discarder, tile, haitei, 3),
+          canPon: canHumanCall(
+            hand,
+            candidate,
+            discarder,
+            tile,
+            wallExhausted,
+            2,
+          ),
+          canKan: canHumanCall(
+            hand,
+            candidate,
+            discarder,
+            tile,
+            wallExhausted,
+            3,
+          ),
         },
       };
     }
@@ -1646,7 +1734,7 @@ function resolveDiscard(state: EngineState): EngineState {
       tile,
       need: 2,
       inRiichi: hand.riichi[candidate],
-      haitei,
+      haitei: wallExhausted,
       isDiscarder: false,
     });
     const canKan = canCallMeldOnDiscard({
@@ -1654,15 +1742,17 @@ function resolveDiscard(state: EngineState): EngineState {
       tile,
       need: 3,
       inRiichi: hand.riichi[candidate],
-      haitei,
+      haitei: wallExhausted,
       isDiscarder: false,
     });
     if (!canPon && !canKan) continue;
-    if (candidate === humanSeat) {
+    const candidateId = seatOccupant(hand.seating, candidate);
+    if (isHumanPlayer(state, candidateId)) {
       return {
         ...resolvedState,
         pending: {
           kind: "humanReact",
+          playerId: candidateId,
           tile,
           from: discarder,
           canRon: false,
@@ -1859,18 +1949,26 @@ function settleWin(state: EngineState, win: WinInput): EngineState {
       ? seatOccupant(hand.seating, win.discarderSeat)
       : undefined;
 
-  // パオ(責任払い): 和了手にパオ役満が含まれ、その席がパオ確定牌を鳴いていれば
-  // 記録済みの責任者へ寄せる(スペック3 3.3 / #99)。門前完成はパオなし。
-  const paoResponsibleId =
-    analysis.pao.length > 0 ? hand.paoResponsible[winnerSeat] : undefined;
-
   const payment = resolveWinPayment({
     winner: { id: winnerId, isDealer: isDealerWin },
     winType,
     score,
     discarderId,
     others,
-    paoResponsibleId,
+    // true役満を役満役ごとに分解する。パオ対象役満だけ責任者を付け、
+    // 非対象役満は undefined のまま通常配分にする(#525)。
+    yakumanComponents:
+      analysis.yakuman > 0
+        ? analysis.yaku
+            .filter(({ yakuman }) => yakuman > 0)
+            .map(({ id, yakuman }) => ({
+              multiplier: yakuman,
+              paoResponsibleId:
+                hand.paoResponsible[winnerSeat]?.[
+                  id as keyof PaoResponsibility
+                ],
+            }))
+        : undefined,
     honba: state.round.honba,
     riichiSticks: state.riichiSticks,
   });
@@ -2368,15 +2466,20 @@ function publicAction<Args extends readonly unknown[]>(
 /** 自家の打牌。`tile` は表示手牌から選ばれた牌(リーチ後は無視され `drawn` を切る)。 */
 export const discard = publicAction("discard", discardImpl);
 
-function discardImpl(state: EngineState, tile: Tile): EngineState {
+function discardImpl(
+  state: EngineState,
+  tile: Tile,
+  playerId: PlayerId = HUMAN_ID,
+): EngineState {
   if (
     state.phase !== "playing" ||
     state.pending?.kind !== "humanDiscard" ||
+    !pendingBelongsTo(state, playerId) ||
     state.hand === null
   ) {
     return state;
   }
-  const seat = seatOfPlayer(state.hand.seating, HUMAN_ID);
+  const seat = seatOfPlayer(state.hand.seating, playerId);
   if (seat === null || state.hand.turn !== seat) return state;
   const useTile =
     state.pending.locked && state.hand.drawn !== null
@@ -2402,16 +2505,20 @@ function discardImpl(state: EngineState, tile: Tile): EngineState {
 /** 自家のツモ切り(リーチ後にツモ和了しないとき用)。 */
 export const tsumogiri = publicAction("tsumogiri", tsumogiriImpl);
 
-function tsumogiriImpl(state: EngineState): EngineState {
+function tsumogiriImpl(
+  state: EngineState,
+  playerId: PlayerId = HUMAN_ID,
+): EngineState {
   if (
     state.phase !== "playing" ||
     state.pending?.kind !== "humanDiscard" ||
+    !pendingBelongsTo(state, playerId) ||
     state.hand === null ||
     state.hand.drawn === null
   ) {
     return state;
   }
-  const seat = seatOfPlayer(state.hand.seating, HUMAN_ID);
+  const seat = seatOfPlayer(state.hand.seating, playerId);
   if (seat === null || state.hand.turn !== seat) return state;
   const after = applyDiscard(
     { ...state, pending: null },
@@ -2424,17 +2531,22 @@ function tsumogiriImpl(state: EngineState): EngineState {
 /** 自家のリーチ宣言(門前テンパイ・1,000点供託)。`tile` は宣言牌(捨て牌)。 */
 export const declareRiichi = publicAction("declareRiichi", declareRiichiImpl);
 
-function declareRiichiImpl(state: EngineState, tile: Tile): EngineState {
+function declareRiichiImpl(
+  state: EngineState,
+  tile: Tile,
+  playerId: PlayerId = HUMAN_ID,
+): EngineState {
   if (
     state.phase !== "playing" ||
     state.pending?.kind !== "humanDiscard" ||
+    !pendingBelongsTo(state, playerId) ||
     !state.pending.canRiichi ||
     state.hand === null ||
     state.hand.drawn === null
   ) {
     return state;
   }
-  const seat = seatOfPlayer(state.hand.seating, HUMAN_ID);
+  const seat = seatOfPlayer(state.hand.seating, playerId);
   if (seat === null || state.hand.turn !== seat) return state;
   // 宣言牌はテンパイを保つ牌でなければならない。
   if (!state.pending.riichiTiles.some((t) => sameTile(t, tile))) return state;
@@ -2468,7 +2580,8 @@ function declareRiichiImpl(state: EngineState, tile: Tile): EngineState {
 
 /**
  * 相手の打牌を鳴いた副露(ポン/大明槓)がパオ役満(大三元/大四喜/四槓子)を
- * 確定させたら、責任者(= その確定牌を打った者)を記録する(スペック3 3.3 / #99)。
+ * 確定させたら、責任者(= その確定牌を打った者)を**役満種類ごと**に記録する
+ * (スペック3 3.3 / #99 / #525)。
  * `existingMelds` は **この鳴きを加える前**の副露列。
  */
 function recordPaoResponsible(
@@ -2478,20 +2591,32 @@ function recordPaoResponsible(
   existingMelds: readonly Meld[],
   newMeld: Meld,
 ): void {
-  if (
-    isPaoTriggeringCall({ existingMelds, newMeld, fromOpponentDiscard: true })
-  ) {
-    hand.paoResponsible[seat] = seatOccupant(hand.seating, discarder);
+  const triggered = paoYakuForCall({
+    existingMelds,
+    newMeld,
+    fromOpponentDiscard: true,
+  });
+  if (triggered.length > 0) {
+    const responsibility = hand.paoResponsible[seat] ?? {};
+    const responsibleId = seatOccupant(hand.seating, discarder);
+    for (const paoYaku of triggered) {
+      responsibility[paoYaku] = responsibleId;
+    }
+    hand.paoResponsible[seat] = responsibility;
   }
 }
 
 /** 自家のポン(直前の他家打牌に対して)。 */
 export const declarePon = publicAction("declarePon", declarePonImpl);
 
-function declarePonImpl(state: EngineState): EngineState {
+function declarePonImpl(
+  state: EngineState,
+  playerId: PlayerId = HUMAN_ID,
+): EngineState {
   if (
     state.phase !== "playing" ||
     state.pending?.kind !== "humanReact" ||
+    !pendingBelongsTo(state, playerId) ||
     !state.pending.canPon ||
     state.hand === null ||
     state.hand.pendingDiscard === null
@@ -2499,7 +2624,7 @@ function declarePonImpl(state: EngineState): EngineState {
     return state;
   }
   const hand = state.hand;
-  const seat = humanSeatOf(hand);
+  const seat = humanSeatOf(hand, playerId);
   if (seat === null || hand.pendingDiscard === null) return state;
   const { seat: discarder, tile } = hand.pendingDiscard;
   state = commitPendingRiichi(state, discarder);
@@ -2530,10 +2655,14 @@ function declarePonImpl(state: EngineState): EngineState {
 /** 自家の明槓(大明槓・直前の他家打牌に対して)。 */
 export const declareKan = publicAction("declareKan", declareKanImpl);
 
-function declareKanImpl(state: EngineState): EngineState {
+function declareKanImpl(
+  state: EngineState,
+  playerId: PlayerId = HUMAN_ID,
+): EngineState {
   if (
     state.phase !== "playing" ||
     state.pending?.kind !== "humanReact" ||
+    !pendingBelongsTo(state, playerId) ||
     !state.pending.canKan ||
     state.hand === null ||
     state.hand.pendingDiscard === null
@@ -2541,7 +2670,7 @@ function declareKanImpl(state: EngineState): EngineState {
     return state;
   }
   const hand = state.hand;
-  const seat = humanSeatOf(hand);
+  const seat = humanSeatOf(hand, playerId);
   if (seat === null || hand.pendingDiscard === null) return state;
   const { seat: discarder, tile } = hand.pendingDiscard;
   state = commitPendingRiichi(state, discarder);
@@ -2572,10 +2701,15 @@ function declareKanImpl(state: EngineState): EngineState {
 /** 自家の暗槓(自ツモ番)。`tile` は槓子にする牌種。 */
 export const declareAnkan = publicAction("declareAnkan", declareAnkanImpl);
 
-function declareAnkanImpl(state: EngineState, tile: Tile): EngineState {
+function declareAnkanImpl(
+  state: EngineState,
+  tile: Tile,
+  playerId: PlayerId = HUMAN_ID,
+): EngineState {
   if (
     state.phase !== "playing" ||
     state.pending?.kind !== "humanDiscard" ||
+    !pendingBelongsTo(state, playerId) ||
     state.hand === null ||
     state.hand.drawn === null
   ) {
@@ -2586,7 +2720,7 @@ function declareAnkanImpl(state: EngineState, tile: Tile): EngineState {
   // 海底(ライブ牌 0 = 嶺上を引けない)ではカン不可(#128)。pending でも空にしているが
   // 直接呼び出しに対する防御として no-op で拒否する。
   if (isHaitei(hand.wall.remainingLiveTiles)) return state;
-  const seat = humanSeatOf(hand);
+  const seat = humanSeatOf(hand, playerId);
   if (seat === null || hand.turn !== seat || hand.drawn === null) return state;
 
   const pool = [...hand.hands[seat], hand.drawn.tile];
@@ -2628,10 +2762,15 @@ function declareAnkanImpl(state: EngineState, tile: Tile): EngineState {
 /** 自家の加槓(自ツモ番・既存ポンに4枚目)。`tile` は加える牌。 */
 export const declareKakan = publicAction("declareKakan", declareKakanImpl);
 
-function declareKakanImpl(state: EngineState, tile: Tile): EngineState {
+function declareKakanImpl(
+  state: EngineState,
+  tile: Tile,
+  playerId: PlayerId = HUMAN_ID,
+): EngineState {
   if (
     state.phase !== "playing" ||
     state.pending?.kind !== "humanDiscard" ||
+    !pendingBelongsTo(state, playerId) ||
     state.hand === null ||
     state.hand.drawn === null
   ) {
@@ -2642,7 +2781,7 @@ function declareKakanImpl(state: EngineState, tile: Tile): EngineState {
   // 海底(ライブ牌 0 = 嶺上を引けない)ではカン不可(#128)。pending でも空にしているが
   // 直接呼び出しに対する防御として no-op で拒否する。
   if (isHaitei(hand.wall.remainingLiveTiles)) return state;
-  const seat = humanSeatOf(hand);
+  const seat = humanSeatOf(hand, playerId);
   if (seat === null || hand.turn !== seat || hand.drawn === null) return state;
 
   const pool = [...hand.hands[seat], hand.drawn.tile];
@@ -2687,17 +2826,21 @@ function declareKakanImpl(state: EngineState, tile: Tile): EngineState {
 /** 自家のツモ和了宣言。 */
 export const declareTsumo = publicAction("declareTsumo", declareTsumoImpl);
 
-function declareTsumoImpl(state: EngineState): EngineState {
+function declareTsumoImpl(
+  state: EngineState,
+  playerId: PlayerId = HUMAN_ID,
+): EngineState {
   if (
     state.phase !== "playing" ||
     state.pending?.kind !== "humanDiscard" ||
+    !pendingBelongsTo(state, playerId) ||
     !state.pending.canTsumo ||
     state.hand === null ||
     state.hand.drawn === null
   ) {
     return state;
   }
-  const seat = seatOfPlayer(state.hand.seating, HUMAN_ID);
+  const seat = seatOfPlayer(state.hand.seating, playerId);
   if (seat === null) return state;
   const haitei = isHaiteiTsumo(
     state.hand.wall.remainingLiveTiles,
@@ -2720,21 +2863,26 @@ function declareTsumoImpl(state: EngineState): EngineState {
 /** 自家のロン和了宣言(通常ロン / 槍槓ロン)。 */
 export const declareRon = publicAction("declareRon", declareRonImpl);
 
-function declareRonImpl(state: EngineState): EngineState {
+function declareRonImpl(
+  state: EngineState,
+  playerId: PlayerId = HUMAN_ID,
+): EngineState {
   if (
     state.phase !== "playing" ||
     state.pending?.kind !== "humanReact" ||
+    !pendingBelongsTo(state, playerId) ||
     !state.pending.canRon ||
     state.hand === null
   ) {
     return state;
   }
   const { tile, from, chankan } = state.pending;
-  const seat = seatOfPlayer(state.hand.seating, HUMAN_ID);
+  const seat = seatOfPlayer(state.hand.seating, playerId);
   if (seat === null) return state;
-  // 槍槓は嶺上ツモ前の割り込みのため海底(河底)とは併存しない(#115)。
+  // 通常ロンは打牌時に固定した河底フラグを使う。槍槓は嶺上補充前の割り込みで、
+  // 河底とは併存しない(#115)。
   const haitei =
-    chankan === undefined && isHaitei(state.hand.wall.remainingLiveTiles);
+    chankan === undefined && state.hand.pendingDiscard?.haitei === true;
   const analysis = analyzeRon(state, seat, tile, haitei, chankan !== undefined);
   if (analysis === null) return state;
   // 暗槓への槍槓は国士無双のみ(Q17 フォローアップ・#126)。pending 構築時にも
@@ -2758,15 +2906,19 @@ function declareRonImpl(state: EngineState): EngineState {
 /** 自家のロン/鳴き見送り(スルー)。頭ハネの残り候補を解決して進行を続ける。 */
 export const passRon = publicAction("passRon", passRonImpl);
 
-function passRonImpl(state: EngineState): EngineState {
+function passRonImpl(
+  state: EngineState,
+  playerId: PlayerId = HUMAN_ID,
+): EngineState {
   if (
     state.phase !== "playing" ||
     state.pending?.kind !== "humanReact" ||
+    !pendingBelongsTo(state, playerId) ||
     state.hand === null
   ) {
     return state;
   }
-  const seat = seatOfPlayer(state.hand.seating, HUMAN_ID);
+  const seat = seatOfPlayer(state.hand.seating, playerId);
   if (seat === null) return state;
   const hand = state.hand;
   // ロンを見送った場合はフリテン(同巡内 / リーチ後は恒久)。槍槓の見逃しも同じ扱い(#208)。

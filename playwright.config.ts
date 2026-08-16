@@ -1,4 +1,5 @@
 import { defineConfig, devices } from "@playwright/test";
+import { e2eServerMode } from "./e2e/serverMode";
 
 const e2ePort = process.env.E2E_PORT ?? "3100";
 
@@ -16,7 +17,7 @@ const e2eBaseURL = `http://127.0.0.1:${e2ePort}`;
 // E2E_PROD=1 で production ビルド(pnpm build && pnpm start)に対して実行する。
 // service worker は production でのみ登録されるため(dev はキャッシュ汚染防止で無効)、
 // PWA オフライン系と、本番成果物との主要parityスペックはこのモードで動かす。
-const useProdServer = process.env.E2E_PROD === "1";
+const useProdServer = e2eServerMode() === "production";
 // CI の品質ジョブは Playwright より先に `pnpm build` を完了している。同じ job/workspace の
 // `.next` を再利用し、production E2Eのためだけに二重 build しない。単独ローカル実行は既定どおり
 // build から行うため、このフラグは明示した場合にだけ有効。

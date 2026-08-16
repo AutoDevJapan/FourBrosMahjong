@@ -69,6 +69,15 @@ export const SCREENS: readonly NonTextContrastScreen[] = [
     nonTextContrastMinMeasured: 4,
   },
   {
+    path: "/online",
+    name: "オンライン対戦",
+    heading: "オンライン対戦",
+    clientReady: (page) =>
+      page.getByRole("button", { name: "新しいルームを作る" }),
+    // 初期状態では作成/参加ボタンが disabled のため、監査対象は表示名・ルームコードの入力2件。
+    nonTextContrastMinMeasured: 2,
+  },
+  {
     path: "/rules",
     name: "ルール説明",
     heading: "ルール説明",

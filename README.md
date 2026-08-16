@@ -2,7 +2,7 @@
 
 粗品 Official Channel「ギャンブル四兄弟」の麻雀企画をベースにした、関西式三人打ち(サンマ)麻雀のデジタル実装プロジェクトです。オールレッド5・北抜きドラ「ガリ」・サイコロ連動のドラ枚数・4人による着席ローテーション・「ソシー」精算など、番組独自のルールを再現します。
 
-> **プロジェクトの現状**: 開発中です。牌・山・配牌・ドラ・和了判定・局進行・点数精算を担うドメイン層と、ロビー(`/`)・ルール(`/rules`)・設定(`/settings`)・対局(`/game`)・結果(`/game/result`)・戦績(`/history`)の各画面を実装しています。対局画面は実対局エンジンで動作し、同一タブ内では操作履歴を `sessionStorage` に保存してリロード後に復元します。Service Worker によるオフライン対応(PWA)も組み込み済みです。Vitest でドメイン/コンポーネントを、Playwright で実際の対局操作や半荘終了までの導線を検証しています。バックエンドや複数端末間の状態同期は未実装です。
+> **プロジェクトの現状**: 開発中です。牌・山・配牌・ドラ・和了判定・局進行・点数精算を担うドメイン層と、ロビー(`/`)・オンラインロビー(`/online`)・ルール(`/rules`)・設定(`/settings`)・対局(`/game`)・結果(`/game/result`)・戦績(`/history`)の各画面を実装しています。対局画面は実対局エンジンで動作し、同一タブ内では操作履歴を `sessionStorage` に保存してリロード後に復元します。Service Worker によるオフライン対応(PWA)も組み込み済みです。オンラインロビーでは匿名のルームコードで複数端末を接続し、Railway の WebSocket サーバーが対局状態を権威的に同期します(空席は AI)。Vitest でドメイン/コンポーネントを、Playwright で実際の対局操作や半荘終了までの導線を検証しています。オンラインルームは現状インメモリのため、Railway の再起動時に破棄されます。
 
 ## 技術スタック
 
@@ -55,9 +55,10 @@ pnpm docs           # TypeDoc → docs/api(gitignore対象)
 ## ディレクトリ構成
 
 ```
-src/app/          Next.js App Router の各画面(`/`・`/rules`・`/settings`・`/game`・`/game/result`・`/history`)と PWA 資産(`sw.js`・`manifest.ts`)
+src/app/          Next.js App Router の各画面(`/`・`/online`・`/rules`・`/settings`・`/game`・`/game/result`・`/history`)と PWA 資産(`sw.js`・`manifest.ts`)
 src/components/   対局盤面・結果・共通 UI コンポーネント
 src/domain/       牌・山・和了判定・対局進行・点数精算などのゲームロジック
+server/           Railway で動かす WebSocket ルームサーバー(`/healthz`・`/ws`)
 e2e/              Playwright E2E テスト
 docs/             ゲームルール・ドキュメントの入口(人間向け)
 documents/spec/   実装スペック(SpecDD SSOT) — GoDD の docs_dir
@@ -73,7 +74,7 @@ Vitest は**ファイル拡張子でテスト環境を分割**する 2 プロジ
 | `*.{test,spec}.ts` | `node` | 純粋なゲーム/ルール/ロジック(DOM 不要) | `unit` |
 | `*.{test,spec}.tsx` | `jsdom` | React コンポーネント(DOM が必要) | `component` |
 
-`pnpm test` で両プロジェクトを一括実行し、`pnpm test:unit` / `pnpm test:component` で片方だけを実行できます。個別ファイルで方針を上書きしたい場合は先頭に `// @vitest-environment jsdom`(または `node`)のドックブロックを付けます。
+`pnpm test` で両プロジェクトを一括実行します。unit/componentの重いテストが同時にCPUを奪い合わないよう、統合runはworker 1個に固定しています。片方だけを高速に確認する場合は `pnpm test:unit` / `pnpm test:component` を使えます。個別ファイルで方針を上書きしたい場合は先頭に `// @vitest-environment jsdom`(または `node`)のドックブロックを付けます。
 
 ### 構成要素
 
@@ -136,10 +137,10 @@ pnpm test:e2e:ui    # Playwright UI モード(対話的にテストを選択・�
 
 ### CI での実行に関する注意
 
-- `.github/workflows/ci.yml` の `E2E (Playwright)` ジョブが、PR および main への push 時にヘッドレスで `pnpm test:e2e` を実行します([#29](https://github.com/AutoDevJapan/FourBrosMahjong/issues/29) で組み込み済み)。
+- `.github/workflows/ci.yml` の `E2E (Playwright)` ジョブが、検証対象の変更を含むPRやscope判定で検証が必要なpushに対して、ヘッドレスで `pnpm test:e2e` を実行します([#29](https://github.com/AutoDevJapan/FourBrosMahjong/issues/29) で組み込み済み)。検証済みmain pushなど、PR側で同じtreeを検証済みと確認できた場合は重複実行を省略します。
 - Service Worker はdev serverでは無効なため、通常E2Eでは `e2e/pwa-offline.spec.ts` の全件をskipします。CIは品質ジョブの既存production buildを再利用して `pnpm test:e2e:pwa:prebuilt` を実行し、初回登録の追加オンライン再読込みなしでのオフライン起動・実打によるhydrate確認・登録・プリキャッシュ・対局復元を別途検証します。`prebuilt` はCI内部用で、ローカルではbuild込みの `pnpm test:e2e:pwa` を使ってください。
-- CI ではブラウザバイナリ(`~/.cache/ms-playwright`)と pnpm store をキャッシュします。`playwright install --with-deps` はキャッシュの有無に関わらず毎回実行し、キャッシュヒット時はブラウザ本体の再ダウンロードのみスキップされます(OS 依存パッケージは毎回導入されます)。
-- **キャッシュの保存は `main` への push 実行のみ**に限定しています([#380](https://github.com/AutoDevJapan/FourBrosMahjong/issues/380))。GitHub Actions のキャッシュ予算はリポジトリあたり 10GB・超過分は LRU で退避されるうえ、キャッシュは ref スコープなので、PR ref (`refs/pull/N/merge`) でも保存すると同一内容が ref の数だけ複製されて予算が数日で一巡し、「保存はするが復元前に消える」恒常ミス状態になります。既定ブランチのキャッシュは全ブランチ・全 PR から復元できるため、保存を `main` に限定してもヒット率は落ちません。PR / dev / stg の実行は `actions/cache/restore` による復元専用です。この不変条件は `src/test/ci-workflow.test.ts` が回帰テストとして固定しています。
+- CI の `ci` job では production E2E 用の Chromium と pnpm store をキャッシュします。通常の `E2E (Playwright)` job は Chromium/WebKit とOS依存を含むバージョン固定のPlaywrightイメージを使うため、毎回の `playwright install --with-deps` やE2E専用ブラウザcacheはありません。検証済みmain pushのE2Eは重複検証とsetupを省略し、共有cacheのseedは `ci` job だけが行います。
+- **キャッシュの保存は `main` の `ci` job に限定しています**([#380](https://github.com/AutoDevJapan/FourBrosMahjong/issues/380))。GitHub Actions のキャッシュ予算はリポジトリあたり 10GB・超過分は LRU で退避されるうえ、キャッシュは ref スコープなので、PR ref (`refs/pull/N/merge`) でも保存すると同一内容が ref の数だけ複製されて予算が数日で一巡し、「保存するが復元前に消える」恒常ミス状態になります。既定ブランチの `ci` cacheは全ブランチ・全 PR から復元できるため、保存をmainに限定してもヒット率は落ちません。PR / dev / stg の `ci` jobは `actions/cache/restore` による復元専用です。E2E jobは固定Playwrightイメージを使いブラウザcacheを持ちません。この不変条件は `src/test/ci-workflow.test.ts` が回帰テストとして固定しています。
 - `playwright.config.ts` は `retries: process.env.CI ? 2 : 0` としており、CI 環境(`CI=true`)でのみ失敗テストを自動リトライします。
 - E2E テストは lint/typecheck 等と比べて不安定化(flaky)しやすいため、現時点ではブランチ保護の必須ステータスチェックには含めていません(結果は PR 上で可視化されます。必要になれば別途判断して追加します)。
 
@@ -166,4 +167,15 @@ pnpm test:e2e:ui    # Playwright UI モード(対話的にテストを選択・�
 ## 開発時の注意
 
 - 詳細な開発ガイドライン(ツール構成・コーディング規約など)は [`CLAUDE.md`](./CLAUDE.md) を参照してください。
-- フロントエンドは Vercel の Git Integration と連携済みで、PR Preview と `dev` / `stg` / `main`(`prd`)の昇格フローを運用しています。環境ごとの状態・URL・手順は [`docs/デプロイ環境運用.md`](./docs/デプロイ環境運用.md) を参照してください。バックエンドは未実装のため、Railway リソースはまだ作成していません。
+- フロントエンドは Vercel の Git Integration と連携済みで、PR Preview と `dev` / `stg` / `main`(`prd`)の昇格フローを運用しています。環境ごとの状態・URL・手順は [`docs/デプロイ環境運用.md`](./docs/デプロイ環境運用.md) を参照してください。オンライン対戦バックエンドは Railway の `server/index.ts` で動かし、Vercel の `NEXT_PUBLIC_ONLINE_WS_URL` から `/ws` に接続します。
+
+### オンライン対戦の設定
+
+ローカルでは、Next.js と Railway サーバーを別々に起動します。
+
+```bash
+pnpm server:dev       # ws://localhost:8080/ws
+pnpm dev              # http://localhost:3000
+```
+
+Vercel では `NEXT_PUBLIC_ONLINE_WS_URL` に Railway の公開 URL(`https://...` または `wss://...`)を設定します。WebSocket の Origin 制限を有効にする場合は、Railway の `ALLOWED_ORIGINS` に Vercel の本番URLをカンマ区切りで指定してください。ルームは匿名トークンで再接続できますが、認証・永続化・観戦・途中参加者の座席予約はまだ対象外です。

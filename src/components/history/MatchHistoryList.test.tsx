@@ -65,12 +65,18 @@ afterEach(() => {
 });
 
 describe("MatchHistoryList (#293)", () => {
-  it("保存が無ければ空状態の説明を表示する", async () => {
+  it("保存が無ければ空状態の説明と対局開始CTAを表示する", async () => {
     render(<MatchHistoryList />);
 
     expect(
       await screen.findByText(/保存された戦績はまだありません/),
     ).toBeInTheDocument();
+    const startGameLink = screen.getByRole("link", { name: "対局を開始" });
+    expect(startGameLink).toHaveAttribute("href", "/game");
+
+    // CTA自体もキーボードで到達できる。
+    startGameLink.focus();
+    expect(startGameLink).toHaveFocus();
   });
 
   it("保存済み戦績を新しい順に一覧し、展開で内訳を閲覧できる", async () => {
@@ -91,6 +97,9 @@ describe("MatchHistoryList (#293)", () => {
     expect(items[0]).toHaveTextContent(formatted(1_753_100_000_000));
     expect(items[0]).toHaveTextContent("1位 四郎");
     expect(items[1]).toHaveTextContent("1位 三郎");
+    expect(
+      screen.queryByRole("link", { name: "対局を開始" }),
+    ).not.toBeInTheDocument();
 
     // 展開すると結果画面と同じ最終順位・ソシー内訳を閲覧できる。
     const details = items[0].querySelector("details");
@@ -137,9 +146,11 @@ describe("MatchHistoryList (#293)", () => {
     expect(
       await screen.findByText(/保存された戦績はまだありません/),
     ).toBeInTheDocument();
-    expect(
-      screen.getByText("保存されていた戦績をすべて削除しました。"),
-    ).toBeInTheDocument();
+    await waitFor(() =>
+      expect(
+        screen.getByText("保存されていた戦績をすべて削除しました。"),
+      ).toBeInTheDocument(),
+    );
   });
 
   it("破損データは空状態で描画し、次回以降のために削除する(#302)", async () => {

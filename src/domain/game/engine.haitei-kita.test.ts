@@ -5,6 +5,7 @@ import { sameKind } from "@/domain/hand/tile-identity";
 import { HONOR, type Tile } from "@/domain/tiles/tile";
 import {
   createGame,
+  declareRon,
   declareTsumo,
   discard,
   type EngineState,
@@ -160,6 +161,31 @@ function yakuNames(state: EngineState): string[] {
   return state.lastRound?.winDetails?.yaku.map((y) => y.name) ?? [];
 }
 
+/**
+ * 北抜き後の嶺上牌を、リーチ後の南家に自動ツモ切りさせる局面を組む。
+ * 東家はその牌を待つが、白ポン以外に役を持たせない。
+ */
+function armKitaReplacementDiscard(meld: "white" | "plain"): Fixture {
+  const fixture = armKitaWin(48, {
+    liveTiles: 1,
+    winner: "south",
+    meld: "white",
+  });
+  const hand = fixture.state.hand;
+  if (hand === null) throw new Error("hand should exist");
+
+  hand.melds.east = [meld === "white" ? whitePon() : plainPon()];
+  hand.hands.east = tenpaiOn(fixture.winTile);
+  hand.melds.south = [];
+  hand.hands.south = parseTiles(JUNK_13);
+  hand.riichi.south = true;
+  hand.doubleRiichi.south = false;
+  hand.ippatsu.south = false;
+  hand.callsMade = true;
+
+  return fixture;
+}
+
 describe("engine: 北抜きの嶺上ツモと海底摸月(#396)", () => {
   it("対照: 通常の海底牌(北でない)をツモしたら海底摸月が付く", () => {
     // 回帰確認: 海底摸月の判定そのものは壊していない。
@@ -298,5 +324,31 @@ describe("engine: 北抜きの嶺上ツモと海底摸月(#396)", () => {
     expect(yaku).not.toContain("海底摸月");
     expect(yaku).not.toContain("嶺上開花");
     expect(yaku).toEqual(["役牌(三元牌)"]);
+  });
+
+  it("北抜き後の嶺上牌の打牌には河底撈魚を付けない", () => {
+    // 南がライブ最後の北を引き、嶺上牌をツモ切りする。東はその牌を待つが、
+    // 役無しのため、河底撈魚を誤付与したときだけロンが成立する。
+    const { state, discardTile } = armKitaReplacementDiscard("plain");
+
+    const after = discard(state, discardTile);
+
+    expect(after.lastRound?.kind).toBe("draw");
+  });
+
+  it("北抜き後の嶺上牌へのロンにも河底撈魚を付けない", () => {
+    // 白ポンでロン自体は成立させ、`declareRon` が壁残数だけを見て河底を
+    // 後付けしないことも固定する。
+    const { state, discardTile } = armKitaReplacementDiscard("white");
+
+    const after = discard(state, discardTile);
+
+    expect(after.pending?.kind).toBe("humanReact");
+    if (after.pending?.kind !== "humanReact") return;
+    expect(after.pending.canRon).toBe(true);
+
+    const won = declareRon(after);
+    expect(won.lastRound?.kind).toBe("win");
+    expect(yakuNames(won)).toEqual(["役牌(三元牌)"]);
   });
 });
