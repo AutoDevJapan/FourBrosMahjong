@@ -14,7 +14,7 @@ import type { OnlineSnapshot } from "./types";
 
 interface OnlineGameProviderProps {
   readonly children: React.ReactNode;
-  readonly socket: WebSocket;
+  readonly socket: WebSocket | null;
   readonly snapshot: OnlineSnapshot;
   readonly onSendError?: (message: string) => void;
 }
@@ -40,7 +40,7 @@ export default function OnlineGameProvider({
 }: OnlineGameProviderProps) {
   const sendAction = useCallback(
     (action: GameAction) => {
-      if (socket.readyState !== WebSocket.OPEN) {
+      if (socket?.readyState !== WebSocket.OPEN) {
         onSendError?.(
           "オンラインサーバーとの接続が切れています。再接続を待っています。",
         );
@@ -91,7 +91,7 @@ export default function OnlineGameProvider({
       passRon: () => sendPlayerAction({ type: "passRon" }, snapshot.you),
       nextRound: () => sendPlayerAction({ type: "nextRound" }, snapshot.you),
       newGame: () => {
-        if (socket.readyState !== WebSocket.OPEN) {
+        if (socket?.readyState !== WebSocket.OPEN) {
           onSendError?.(
             "オンラインサーバーとの接続が切れています。再接続を待っています。",
           );
