@@ -6,9 +6,10 @@
  * WAI-ARIA APG の Listbox パターンに準拠したロービングタブインデックスで、
  * 矢印キー移動 + `Enter`/`Space` 選択に対応する(スペック5 5.2.2)。打牌の「選択」までを
  * UI として提供し、選択された牌の扱い(実際の打牌処理)はドメイン層の責務(スペック6 6.8)。
+ * タッチポインターでは誤タップを防ぐため、必要な画面だけ選択と打牌確定を分離する。
  * 各牌の名称は `option` 要素側の `aria-label` が担うため、内側の `Tile` は装飾扱いにする。
  */
-import { useCallback, useLayoutEffect, useRef, useState } from "react";
+import { useCallback, useId, useLayoutEffect, useRef, useState } from "react";
 import Tile from "../common/Tile";
 import { tileLabel } from "../common/tileLabel";
 import type { TileData } from "./types";
@@ -19,6 +20,10 @@ export interface HandProps {
   readOnly?: boolean;
   /** 牌が選択(打牌候補として決定)されたときに呼ぶ。UIイベントのみでドメイン計算は行わない。 */
   onSelect?: (index: number, tile: TileData) => void;
+  /** タッチ操作では1回目を選択状態に留め、確定ボタンを要求する。 */
+  confirmTouchSelection?: boolean;
+  /** タッチ選択の確定対象。リーチ宣言中は通常の打牌と文言を分ける。 */
+  confirmTouchSelectionMode?: "discard" | "riichi";
   /** アクセシブルな一覧名。 */
   label?: string;
   tileStates?: readonly HandTileState[];
@@ -36,15 +41,24 @@ export default function Hand({
   tiles,
   readOnly = false,
   onSelect,
+  confirmTouchSelection = false,
+  confirmTouchSelectionMode = "discard",
   label = "自家の手牌",
   tileStates = [],
   onBlockedSelect,
 }: HandProps) {
   const [activeIndex, setActiveIndex] = useState(0);
   const [selectedIndex, setSelectedIndex] = useState<number | null>(null);
+  const [touchSelectionIndex, setTouchSelectionIndex] = useState<number | null>(
+    null,
+  );
   const [previousTiles, setPreviousTiles] = useState(tiles);
   const optionRefs = useRef<(HTMLLIElement | null)[]>([]);
+  const confirmButtonRef = useRef<HTMLButtonElement | null>(null);
+  const restoreFocusIndexRef = useRef<number | null>(null);
   const handHadFocus = useRef(false);
+  const pointerTypeRef = useRef<"touch" | "other" | null>(null);
+  const touchSelectionStatusId = useId();
 
   // 打牌・鳴き等で手牌が更新されたら、旧 index にあった牌の選択状態を持ち越さない。
   // GameProvider の view は engine 更新時だけ新しい手牌配列を生成するため、参照比較により
@@ -52,6 +66,7 @@ export default function Hand({
   if (previousTiles !== tiles) {
     setPreviousTiles(tiles);
     if (selectedIndex !== null) setSelectedIndex(null);
+    if (touchSelectionIndex !== null) setTouchSelectionIndex(null);
   }
 
   // ポン・カン等で手牌が縮小して activeIndex が範囲外になると、tabIndex=0 の option が
@@ -64,6 +79,17 @@ export default function Hand({
     setActiveIndex(maxIndex);
   }
 
+  // リーチ宣言モードへの切り替えや局面更新で、選択中の牌が操作不可になった場合は
+  // 確定待ちを残さない。古い選択が後から有効になって打牌されることも防ぐ。
+  // activeIndex の補正と同じく、propsから直接判定できる前回値比較のパターンを使う。
+  const touchSelectionInvalid =
+    touchSelectionIndex !== null &&
+    (touchSelectionIndex >= tiles.length ||
+      tileStates[touchSelectionIndex]?.disabled === true);
+  if (touchSelectionInvalid) {
+    setTouchSelectionIndex(null);
+  }
+
   useLayoutEffect(() => {
     // キーボード操作中の option は、打牌・鳴きで key/index が変わると DOM から外れて
     // body へフォーカスが落ちる。更新前に手牌内へ実フォーカスがあった場合だけ、DOM 更新後の
@@ -72,10 +98,54 @@ export default function Hand({
     optionRefs.current[Math.min(activeIndex, tiles.length - 1)]?.focus();
   }, [tiles, activeIndex]);
 
+  // タッチ選択で確認UIが追加された直後は、確認ボタンへフォーカスを移す。
+  // `preventScroll` でフォーカス移動による予期せぬジャンプを抑えたあと、ボタン自身を
+  // viewport中央へ安全にスクロールする。これにより 320/360px の狭幅でも確定操作が
+  // 画面外に残らず、document.activeElement が body に落ちない(#607)。
+  useLayoutEffect(() => {
+    if (!confirmTouchSelection || touchSelectionIndex === null) return;
+    const button = confirmButtonRef.current;
+    if (!button) return;
+    button.focus({ preventScroll: true });
+    button.scrollIntoView?.({
+      block: "center",
+      inline: "nearest",
+      behavior: "auto",
+    });
+  }, [confirmTouchSelection, touchSelectionIndex]);
+
+  // 確定成功時はゲーム側の更新へフォーカスを委ねる。解除操作でのみ復帰先を予約し、
+  // 選択牌が再描画されたあとにその牌へ戻す(#607)。
+  useLayoutEffect(() => {
+    if (touchSelectionIndex !== null) return;
+    const index = restoreFocusIndexRef.current;
+    if (index === null) return;
+    restoreFocusIndexRef.current = null;
+    const option = optionRefs.current[index];
+    if (option?.getAttribute("aria-disabled") !== "true") option?.focus();
+  }, [touchSelectionIndex]);
+
+  const handleCancelTouchSelection = useCallback(() => {
+    if (touchSelectionIndex === null) return;
+    restoreFocusIndexRef.current = touchSelectionIndex;
+    setActiveIndex(touchSelectionIndex);
+    setTouchSelectionIndex(null);
+    setSelectedIndex(null);
+  }, [touchSelectionIndex]);
+
   const focusIndex = useCallback((index: number) => {
     setActiveIndex(index);
     optionRefs.current[index]?.focus();
   }, []);
+
+  const commitSelection = useCallback(
+    (index: number, tile: TileData) => {
+      setSelectedIndex(index);
+      setTouchSelectionIndex(null);
+      onSelect?.(index, tile);
+    },
+    [onSelect],
+  );
 
   const handleKeyDown = useCallback(
     (event: React.KeyboardEvent<HTMLLIElement>, index: number) => {
@@ -109,14 +179,13 @@ export default function Hand({
             );
             break;
           }
-          setSelectedIndex(index);
-          onSelect?.(index, tiles[index]);
+          commitSelection(index, tiles[index]);
           break;
         default:
           break;
       }
     },
-    [tiles, focusIndex, onSelect, tileStates, onBlockedSelect],
+    [tiles, focusIndex, commitSelection, tileStates, onBlockedSelect],
   );
 
   if (readOnly) {
@@ -152,11 +221,34 @@ export default function Hand({
     );
   }
 
-  return (
+  const pendingTouchTile =
+    confirmTouchSelection &&
+    touchSelectionIndex !== null &&
+    !touchSelectionInvalid
+      ? tiles[touchSelectionIndex]
+      : undefined;
+
+  const handleConfirmTouchSelection = () => {
+    if (touchSelectionIndex === null || pendingTouchTile === undefined) return;
+    if (tileStates[touchSelectionIndex]?.disabled) {
+      setTouchSelectionIndex(null);
+      setSelectedIndex(null);
+      return;
+    }
+    commitSelection(touchSelectionIndex, pendingTouchTile);
+  };
+
+  const touchSelectionAction =
+    confirmTouchSelectionMode === "riichi" ? "リーチ宣言" : "打牌";
+
+  const listbox = (
     <ul
       role="listbox"
       aria-label={label}
       aria-orientation="horizontal"
+      aria-describedby={
+        pendingTouchTile !== undefined ? touchSelectionStatusId : undefined
+      }
       onFocusCapture={() => {
         handHadFocus.current = true;
       }}
@@ -172,7 +264,8 @@ export default function Hand({
         const state = tileStates[index];
         const disabled = state?.disabled ?? false;
         // 局面更新後に同じ index が禁止牌へ変わっても、以前の選択リングを残さない。
-        const isSelected = index === selectedIndex && !disabled;
+        const effectiveSelectedIndex = touchSelectionIndex ?? selectedIndex;
+        const isSelected = index === effectiveSelectedIndex && !disabled;
         const accessibleLabel = state?.reason
           ? `${tileLabel(tile)}、${state.reason}`
           : state?.indicator
@@ -192,21 +285,49 @@ export default function Hand({
             aria-label={accessibleLabel}
             aria-disabled={disabled || undefined}
             tabIndex={isActive ? 0 : -1}
+            onPointerDown={(event) => {
+              if (confirmTouchSelection && event.pointerType === "touch") {
+                pointerTypeRef.current = "touch";
+              } else if (pointerTypeRef.current !== "touch") {
+                pointerTypeRef.current = "other";
+              }
+            }}
+            onPointerCancel={() => {
+              pointerTypeRef.current = null;
+            }}
+            onTouchStart={() => {
+              if (confirmTouchSelection) pointerTypeRef.current = "touch";
+            }}
+            onTouchCancel={() => {
+              pointerTypeRef.current = null;
+            }}
             onKeyDown={(event) => handleKeyDown(event, index)}
             onClick={(event) => {
               // dblclickの2回目は1回目と同じ物理activation。React commit後の
               // 新しいhandlerへ配送されても、次巡の操作として再利用しない。
-              if (event.detail > 1) return;
+              if (event.detail > 1) {
+                pointerTypeRef.current = null;
+                return;
+              }
+              const isTouchActivation =
+                confirmTouchSelection && pointerTypeRef.current === "touch";
+              pointerTypeRef.current = null;
               if (disabled) {
                 setActiveIndex(index);
                 onBlockedSelect?.(state?.reason ?? "この牌は選べません。");
                 return;
               }
-              setSelectedIndex(index);
               setActiveIndex(index);
-              onSelect?.(index, tile);
+              if (isTouchActivation) {
+                setSelectedIndex(null);
+                setTouchSelectionIndex(index);
+                return;
+              }
+              commitSelection(index, tile);
             }}
             className={`relative rounded-md transition-transform motion-reduce:transition-none ${
+              confirmTouchSelection ? "hand-touch-option" : ""
+            } ${
               disabled
                 ? "cursor-not-allowed opacity-45 grayscale"
                 : "cursor-pointer hover:-translate-y-0.5"
@@ -232,5 +353,42 @@ export default function Hand({
         );
       })}
     </ul>
+  );
+
+  if (pendingTouchTile === undefined) return listbox;
+
+  return (
+    <div className="flex flex-col gap-2">
+      {listbox}
+      <div className="rounded-md border border-control-border bg-background/70 p-2">
+        <p
+          id={touchSelectionStatusId}
+          role="status"
+          aria-live="polite"
+          className="text-xs text-foreground/75"
+        >
+          {tileLabel(pendingTouchTile)}
+          を選択中です。{touchSelectionAction}
+          を確定するにはボタンを押してください。
+        </p>
+        <div className="mt-2 flex flex-wrap gap-2">
+          <button
+            ref={confirmButtonRef}
+            type="button"
+            onClick={handleConfirmTouchSelection}
+            className="min-h-11 rounded-lg bg-turn-highlight px-3 py-2 text-sm font-semibold text-background hover:opacity-90"
+          >
+            {tileLabel(pendingTouchTile)}で{touchSelectionAction}を確定
+          </button>
+          <button
+            type="button"
+            onClick={handleCancelTouchSelection}
+            className="min-h-11 rounded-lg border border-control-border px-3 py-2 text-sm font-medium hover:bg-foreground/5"
+          >
+            選択を解除
+          </button>
+        </div>
+      </div>
+    </div>
   );
 }

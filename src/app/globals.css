@@ -270,6 +270,22 @@ body {
   font-size: calc(var(--u) * 0.95);
 }
 
+/*
+ * タッチ時の自家手牌(#607)。牌面は狭幅でも縮小して卓に収めるが、操作対象の li は
+ * 44px 以上を確保して隣接牌との誤タップを減らす。空いた幅は牌の周囲に残すため、
+ * 牌面そのものの判読性と既存のキーボード/マウス配置を変えない。
+ */
+@media (pointer: coarse), (any-pointer: coarse) {
+  .hand-touch-option {
+    display: inline-flex;
+    min-width: 2.75rem;
+    min-height: 2.75rem;
+    align-items: center;
+    justify-content: center;
+    touch-action: manipulation;
+  }
+}
+
 .game-tile--river {
   height: calc(var(--u) * 2.2);
   width: calc(var(--u) * var(--tile-river-ratio));

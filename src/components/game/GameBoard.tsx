@@ -32,7 +32,7 @@ import Modal from "../common/Modal";
 import { tileLabel } from "../common/tileLabel";
 import ActionPanel, { type ActionItem } from "./ActionPanel";
 import { useGame } from "./GameProvider";
-import type { HandTileState } from "./Hand";
+import type { HandProps, HandTileState } from "./Hand";
 import LiveRegion from "./LiveRegion";
 import PlayerSlot from "./PlayerSlot";
 import Table from "./Table";
@@ -421,12 +421,16 @@ export default function GameBoard({
       compact: boolean,
       onSelect?: (index: number, tile: TileData) => void,
       handReadOnly = false,
+      confirmTouchSelection = false,
+      confirmTouchSelectionMode: HandProps["confirmTouchSelectionMode"] = "discard",
     ) => (
       <PlayerSlot
         position={position}
         content={slots[position]}
         compact={compact}
         onSelectTile={onSelect}
+        confirmTouchSelection={confirmTouchSelection}
+        confirmTouchSelectionMode={confirmTouchSelectionMode}
         handReadOnly={handReadOnly}
         handTileStates={handTileStates}
         onBlockedTile={announceBlockedTile}
@@ -443,6 +447,8 @@ export default function GameBoard({
       onSelfSelect?: (index: number, tile: TileData) => void,
       withActions = true,
       handReadOnly = false,
+      confirmTouchSelection = false,
+      confirmTouchSelectionMode: HandProps["confirmTouchSelectionMode"] = "discard",
     ) => (
       <div
         className={`board-cross mx-auto w-full max-w-4xl grid-cols-[minmax(0,1fr)_minmax(0,1.5fr)_minmax(0,1fr)] gap-[var(--board-gap)] ${visibilityClass}`}
@@ -460,7 +466,14 @@ export default function GameBoard({
           {renderSlot("right", false)}
         </div>
         <div className="col-span-3 col-start-1 row-start-3">
-          {renderSlot("self", false, onSelfSelect, handReadOnly)}
+          {renderSlot(
+            "self",
+            false,
+            onSelfSelect,
+            handReadOnly,
+            confirmTouchSelection,
+            confirmTouchSelectionMode,
+          )}
         </div>
         {withActions ? (
           <div className="col-span-3 col-start-1 row-start-4">
@@ -518,6 +531,8 @@ export default function GameBoard({
           handleSelectTile,
           true,
           !handInteractive,
+          handInteractive,
+          riichiArmed ? "riichi" : "discard",
         )}
 
         {/* 段階②: 卓幅 < 360px は自家フォーカス表示。他家はコンパクト帯へ縮小。 */}
@@ -542,7 +557,14 @@ export default function GameBoard({
             {renderSlot("across", true)}
             {renderSlot("right", true)}
           </div>
-          {renderSlot("self", false, handleSelectTile, !handInteractive)}
+          {renderSlot(
+            "self",
+            false,
+            handleSelectTile,
+            !handInteractive,
+            handInteractive,
+            riichiArmed ? "riichi" : "discard",
+          )}
           {(phase === "roundEnd" || phase === "gameEnd") && roundSummary ? (
             <WinDetails summary={roundSummary} />
           ) : null}
