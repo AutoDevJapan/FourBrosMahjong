@@ -142,6 +142,40 @@ test.describe("対局画面(/game)", () => {
     ).toBeVisible();
   });
 
+  test("対局中の用語を狭幅でもキーボードで開閉でき、牌操作を邪魔しない(#610)", async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 320, height: 800 });
+    await page.goto("/game?seed=0");
+
+    const opener = page
+      .getByRole("button", { name: "対局中の用語を見る" })
+      .filter({ visible: true });
+    await expect(opener).toBeVisible();
+    await expect(opener).toHaveCSS("min-height", "44px");
+
+    await opener.focus();
+    await page.keyboard.press("Enter");
+
+    const dialog = page.getByRole("dialog", { name: "対局中の用語" });
+    await expect(dialog).toBeVisible();
+    await expect(dialog).toContainText("ガリ（抜き北）");
+    await expect(dialog).toContainText("スルー");
+    await expect(
+      dialog.getByRole("link", { name: "ルール説明を詳しく見る" }),
+    ).toHaveAttribute("href", "/rules");
+    await expect(
+      page.evaluate(() => document.documentElement.scrollWidth <= innerWidth),
+    ).toBeTruthy();
+
+    await page.keyboard.press("Escape");
+    await expect(dialog).not.toBeVisible();
+    await expect(opener).toBeFocused();
+    await expect(
+      page.getByRole("button", { name: "ツモ" }).filter({ visible: true }),
+    ).toBeVisible();
+  });
+
   test("/game から「ロビーへ戻る」導線でロビーに戻れる(スペック6 6.3)", async ({
     page,
   }) => {
