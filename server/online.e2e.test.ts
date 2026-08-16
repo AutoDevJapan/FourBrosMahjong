@@ -19,6 +19,12 @@ const UNAUTHORIZED_ORIGIN = "http://unauthorized-online-e2e.local";
 const TEST_TIMEOUT_MS = 30_000;
 const SERVER_START_TIMEOUT_MS = 10_000;
 const SERVER_STOP_TIMEOUT_MS = 2_000;
+// The full-game fixture intentionally runs much faster than a human. Keep its
+// per-socket action stream below the production abuse window instead of making
+// this regression test fail by design.
+const LOCAL_ACTION_PACING_MS = Math.ceil(
+  ABUSE_LIMITS.actions.windowMs / (ABUSE_LIMITS.actions.limit - 1),
+);
 
 type ProtocolMessage = OnlineServerMessage;
 type RateLimitedScope = Exclude<OnlineRateLimitScope, "connection">;
@@ -201,6 +207,7 @@ type MessagePredicate = (message: ProtocolMessage) => boolean;
 
 class OnlineTestClient {
   private readonly socket: WebSocket;
+  private closeRequested = false;
   private readonly closePromise: Promise<{
     readonly code: number;
     readonly reason: string;
@@ -248,10 +255,15 @@ class OnlineTestClient {
       );
     });
     this.socket.on("close", (code, reason) => {
-      this.resolveClose({ code, reason: reason.toString() });
-      this.rejectAll(
-        new Error("オンラインWebSocketが予期せず切断されました。"),
-      );
+      const details = { code, reason: reason.toString() };
+      this.resolveClose(details);
+      if (!this.closeRequested) {
+        this.rejectAll(
+          new Error(
+            `オンラインWebSocketが予期せず切断されました(code=${code}, reason=${details.reason})。`,
+          ),
+        );
+      }
     });
   }
 
@@ -361,6 +373,7 @@ class OnlineTestClient {
 
   async close(): Promise<void> {
     if (this.socket.readyState === WebSocket.CLOSED) return;
+    this.closeRequested = true;
     this.rejectAll(new Error("オンラインWebSocketを閉じました。"));
     await new Promise<void>((resolve) => {
       let settled = false;
@@ -464,6 +477,7 @@ async function advanceVersion(
   actor: OnlineTestClient,
   action: Record<string, unknown>,
 ): Promise<readonly [OnlineSnapshot, OnlineSnapshot]> {
+  await delay(LOCAL_ACTION_PACING_MS);
   actor.send({ type: "action", version, action });
   const nextVersion = version + 1;
   const [first, second] = await Promise.all(
