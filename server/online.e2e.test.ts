@@ -107,7 +107,9 @@ async function waitForServer(
   );
 }
 
-async function startLocalOnlineServer(): Promise<LocalOnlineServer> {
+async function startLocalOnlineServer(
+  allowedOrigins = TEST_ORIGIN,
+): Promise<LocalOnlineServer> {
   const port = await freePort();
   const output: string[] = [];
   const pnpm = process.platform === "win32" ? "pnpm.cmd" : "pnpm";
@@ -115,7 +117,7 @@ async function startLocalOnlineServer(): Promise<LocalOnlineServer> {
     cwd: process.cwd(),
     env: {
       ...process.env,
-      ALLOWED_ORIGINS: TEST_ORIGIN,
+      ALLOWED_ORIGINS: allowedOrigins,
       PORT: String(port),
     },
     stdio: ["ignore", "pipe", "pipe"],
@@ -150,9 +152,12 @@ class OnlineTestClient {
 
   constructor(
     readonly url: string,
-    origin = TEST_ORIGIN,
+    origin?: string,
   ) {
-    this.socket = new WebSocket(`${url}/ws`, { origin });
+    this.socket =
+      origin === undefined
+        ? new WebSocket(`${url}/ws`)
+        : new WebSocket(`${url}/ws`, { origin });
     this.socket.on("message", (data) => {
       let message: ProtocolMessage;
       try {
@@ -392,8 +397,8 @@ describe("online multiplayer local E2E (#629)", () => {
     async () => {
       if (server === undefined)
         throw new Error("テストサーバーが起動していません。");
-      const host = new OnlineTestClient(server.url);
-      let guest = new OnlineTestClient(server.url);
+      const host = new OnlineTestClient(server.url, TEST_ORIGIN);
+      let guest = new OnlineTestClient(server.url, TEST_ORIGIN);
       clients.push(host, guest);
       await Promise.all([host.open(), guest.open()]);
 
@@ -441,7 +446,7 @@ describe("online multiplayer local E2E (#629)", () => {
           );
           expect(hostSnapshot.phase).toBe("playing");
 
-          const resumedGuest = new OnlineTestClient(server.url);
+          const resumedGuest = new OnlineTestClient(server.url, TEST_ORIGIN);
           clients.push(resumedGuest);
           await resumedGuest.open();
           resumedGuest.send({
@@ -509,10 +514,34 @@ describe("online multiplayer local E2E (#629)", () => {
   );
 
   it(
-    "禁止Originとstale versionをサーバー境界で拒否する",
+    "空のOrigin allowlistではOriginなし接続を開発用に許可する",
+    async () => {
+      let developmentServer: LocalOnlineServer | undefined;
+      let client: OnlineTestClient | undefined;
+      try {
+        developmentServer = await startLocalOnlineServer("");
+        client = new OnlineTestClient(developmentServer.url);
+        await client.open();
+      } finally {
+        if (client !== undefined) await client.close();
+        if (developmentServer !== undefined)
+          await stopLocalOnlineServer(developmentServer);
+      }
+    },
+    TEST_TIMEOUT_MS,
+  );
+
+  it(
+    "Originなし・禁止Originとstale versionをサーバー境界で拒否する",
     async () => {
       if (server === undefined)
         throw new Error("テストサーバーが起動していません。");
+
+      const missingOrigin = new OnlineTestClient(server.url, undefined);
+      await expect(missingOrigin.open()).rejects.toThrow(
+        "Unexpected server response: 403",
+      );
+      await missingOrigin.close();
 
       const unauthorized = new OnlineTestClient(
         server.url,
@@ -523,7 +552,7 @@ describe("online multiplayer local E2E (#629)", () => {
       );
       await unauthorized.close();
 
-      const client = new OnlineTestClient(server.url);
+      const client = new OnlineTestClient(server.url, TEST_ORIGIN);
       clients.push(client);
       await client.open();
       client.send({ type: "create", name: "stale検証" });
