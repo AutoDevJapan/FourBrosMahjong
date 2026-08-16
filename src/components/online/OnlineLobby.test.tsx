@@ -190,6 +190,115 @@ describe("OnlineLobby (#605)", () => {
     act(() => sockets[0]?.close());
     await waitFor(() => expect(sockets).toHaveLength(2), { timeout: 1_500 });
   });
+
+  it("prefers a different shared room over an old restored session", async () => {
+    window.sessionStorage.setItem(
+      "four-bros-mahjong.online.session.v1",
+      JSON.stringify({ code: "OLD234", token: "o".repeat(24) }),
+    );
+    window.history.replaceState({}, "", "/online?room=ABC234");
+
+    render(
+      <StrictMode>
+        <OnlineLobby />
+      </StrictMode>,
+    );
+
+    await waitFor(() =>
+      expect(screen.getByLabelText("ルームコード")).toHaveValue("ABC234"),
+    );
+    expect(sockets).toHaveLength(0);
+  });
+});
+
+describe("OnlineLobby のキーボード送信", () => {
+  it("表示名入力でEnterを押すと新しいルームを作る", async () => {
+    const user = userEvent.setup();
+    render(<OnlineLobby />);
+
+    const nameInput = screen.getByLabelText("表示名");
+    await user.type(nameInput, "たろう");
+    await user.keyboard("{Enter}");
+
+    expect(sockets).toHaveLength(1);
+    act(() => sockets[0]?.open());
+    expect(JSON.parse(sockets[0]?.sent[0] ?? "{}")).toEqual({
+      type: "create",
+      name: "たろう",
+    });
+  });
+
+  it("ルームコード入力でEnterを押すと参加する", async () => {
+    const user = userEvent.setup();
+    render(<OnlineLobby />);
+
+    await user.type(screen.getByLabelText("表示名"), "たろう");
+    const roomCodeInput = screen.getByLabelText("ルームコード");
+    await user.type(roomCodeInput, "ABC234");
+    await user.keyboard("{Enter}");
+
+    expect(sockets).toHaveLength(1);
+    act(() => sockets[0]?.open());
+    expect(JSON.parse(sockets[0]?.sent[0] ?? "{}")).toEqual({
+      type: "join",
+      code: "ABC234",
+      name: "たろう",
+    });
+  });
+
+  it("フォームsubmitは作成要求を1回だけ送る", () => {
+    render(<OnlineLobby />);
+
+    fireEvent.change(screen.getByLabelText("表示名"), {
+      target: { value: "たろう" },
+    });
+    fireEvent.submit(
+      screen.getByRole("form", { name: "オンラインルーム接続" }),
+    );
+
+    expect(sockets).toHaveLength(1);
+    act(() => sockets[0]?.open());
+    expect(JSON.parse(sockets[0]?.sent[0] ?? "{}")).toEqual({
+      type: "create",
+      name: "たろう",
+    });
+  });
+
+  it("submitterなしでルームコードにフォーカスしてsubmitすると参加する", () => {
+    render(<OnlineLobby />);
+
+    fireEvent.change(screen.getByLabelText("表示名"), {
+      target: { value: "たろう" },
+    });
+    const roomCodeInput = screen.getByLabelText("ルームコード");
+    fireEvent.change(roomCodeInput, { target: { value: "ABC234" } });
+    roomCodeInput.focus();
+    fireEvent.submit(
+      screen.getByRole("form", { name: "オンラインルーム接続" }),
+    );
+
+    expect(sockets).toHaveLength(1);
+    act(() => sockets[0]?.open());
+    expect(JSON.parse(sockets[0]?.sent[0] ?? "{}")).toEqual({
+      type: "join",
+      code: "ABC234",
+      name: "たろう",
+    });
+  });
+
+  it("IME変換中のEnterでは候補確定を妨げず送信しない", () => {
+    const preventDefault = vi.spyOn(Event.prototype, "preventDefault");
+    render(<OnlineLobby />);
+
+    const nameInput = screen.getByLabelText("表示名");
+    fireEvent.change(nameInput, { target: { value: "たろう" } });
+    fireEvent.keyDown(nameInput, { key: "Enter", isComposing: true });
+    const roomCodeInput = screen.getByLabelText("ルームコード");
+    fireEvent.keyDown(roomCodeInput, { key: "Enter", keyCode: 229 });
+
+    expect(sockets).toHaveLength(0);
+    expect(preventDefault).not.toHaveBeenCalled();
+  });
 });
 
 describe("OnlineLobby の参加条件", () => {
@@ -622,6 +731,15 @@ describe("OnlineLobby connection recovery", () => {
     expect(
       document.querySelector('[data-connection-status="connected"]'),
     ).toHaveFocus();
+    expect(
+      screen.getAllByRole("heading", {
+        level: 1,
+        name: "オンライン対戦",
+      }),
+    ).toHaveLength(1);
+    expect(
+      screen.getByRole("region", { name: "オンライン対局" }),
+    ).toBeInTheDocument();
     expect(screen.getByTestId("game-board")).toHaveAttribute(
       "data-interaction-disabled",
       "false",
