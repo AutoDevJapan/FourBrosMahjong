@@ -8,6 +8,14 @@ Accepted
 
 2026-07-17
 
+## Current status
+
+この ADR は 2026-07-17 時点の配置先決定を記録する。以後、オンライン対戦の実装として
+`server/index.ts`・`railway.json`・[ADR-0005](./0005-online-multiplayer-transport.md) が追加されたため、
+「バックエンドがまだ存在しない」「Railway の疎通がない」という記述は当時の確認結果として読む。
+現在の Railway への反映状態、`ALLOWED_ORIGINS`、デプロイ commit の証跡は本 ADR の決定事項ではなく、
+運用 issue [#653](https://github.com/AutoDevJapan/FourBrosMahjong/issues/653) で追跡する。
+
 ## Context
 
 [issue #69](https://github.com/AutoDevJapan/FourBrosMahjong/issues/69) で、デプロイ運用ドキュメントとインフラ実態・意図の間に複数の乖離が指摘された。
@@ -16,7 +24,7 @@ Accepted
 - 本番公開先の構成(カスタムドメイン・DNS)が未文書化。
 - PR ごとの Vercel Preview を用いる前提で運用しているが、その方針が意思決定として明文化されていない。
 
-現時点のアプリは **Next.js(App Router)フロントエンドのみ**で、サーバーサイドの永続状態を持つバックエンド(API/DB)はまだ存在しない。ゲームロジックはクライアント内で完結している。一方でプロジェクト方針として「フロントは Vercel、バックエンドは Railway、決済は Stripe」を掲げており、将来的にバックエンドが必要になった時点の配置先を先に確定させておく必要がある。
+2026-07-17 時点のアプリは **Next.js(App Router)フロントエンドのみ**で、サーバーサイドの永続状態を持つバックエンド(API/DB)はまだ存在しなかった。ゲームロジックはクライアント内で完結していた。一方でプロジェクト方針として「フロントは Vercel、バックエンドは Railway、決済は Stripe」を掲げており、将来バックエンドが必要になった時点の配置先を先に確定させる必要があった。
 
 判断を先送りにすると、バックエンド着手時に配置先・環境変数境界・CORS/接続方針をゼロから設計し直すことになり、`config.godd` のスタック定義とドキュメントの乖離も温存される。
 
@@ -34,7 +42,7 @@ Vercel CLI(`vercel project ls` / `project inspect` / `domains ls` / `alias ls`)�
 以下を決定する。
 
 1. **フロントエンド(現行アプリ全体)の prd は Vercel を継続利用する。** `main` ブランチへのマージで Production へ自動デプロイする既存構成を正式な prd とする。
-2. **バックエンドが必要になった時点で、その prd 配置先は Railway とする。** 現時点ではバックエンドが存在しないため Railway 上のリソースは作成せず、「将来配置先 = Railway」を確定事項として記録するに留める(新たな課金要因を今は増やさない)。バックエンド着手時に別 issue で Railway プロジェクト作成・環境変数・接続方針を具体化する。
+2. **バックエンドの prd 配置先は Railway とする。** 決定時点ではバックエンドが存在しなかったため、Railway 上のリソースを作成せず、「将来配置先 = Railway」を確定事項として記録するに留めた(新たな課金要因を増やさない判断)。その後のオンライン対戦実装と Railway への反映確認は [ADR-0005](./0005-online-multiplayer-transport.md) および [#653](https://github.com/AutoDevJapan/FourBrosMahjong/issues/653) を参照する。
 3. **Vercel Preview(PR ごとの Preview デプロイ + PR コメント)を正式に有効とする。** レビュー時に実際にデプロイされた URL で動作確認できる利点を採用し、`dev` / `stg` / `main` の 3 環境モデルと併用する。
 4. **カスタムドメインの公開手順を `documents/guides/` に整備する**(具体的なドメイン名の確定と DNS 設定は本 ADR のスコープ外。手順の準備のみ)。
 
@@ -44,7 +52,7 @@ Vercel CLI(`vercel project ls` / `project inspect` / `domains ls` / `alias ls`)�
 
 ### Option A: フロント=Vercel / バックエンド=Railway(将来)、Preview 有効(採用)
 
-- **Approach**: 現行の Vercel フロント構成を prd として固定。バックエンドは発生時に Railway へ。Preview は継続有効。
+- **Approach**: 決定当時の Vercel フロント構成を prd として固定し、バックエンドの配置先を Railway にする。Preview は継続有効。
 - **Pros**: 既存の稼働実態・`config.godd` のスタック定義の双方と一致する。今すぐの追加コストなし。バックエンド配置先を先に確定でき、着手時の手戻りがない。
 - **Cons**: Railway の具体手順は将来 issue に依存し、本 ADR だけでは prd バックエンドの疎通は完結しない。
 - **Risk**: 低。将来の Railway 具体化時に接続方針(CORS・環境変数境界)の追加設計が必要。
@@ -74,7 +82,7 @@ Option A を採用する。理由は次の通り。
 ## Consequences
 
 - **Positive**: デプロイ構成の意思決定が `documents/` 配下に残り、`config.godd` の `infra` 定義と整合する。バックエンド着手時に配置先の再検討が不要。
-- **Negative**: prd バックエンド(Railway)の**実疎通は将来 issue に残る**。本 ADR 単体では「Railway で prd が動く」状態は達成しない(意図的な範囲設定)。
+- **Negative**: 決定時点では prd バックエンド(Railway)の**実疎通は将来 issue に残った**。現在の実装・デプロイ状態は本 ADR の決定からは導出せず、[ADR-0005](./0005-online-multiplayer-transport.md) と [#653](https://github.com/AutoDevJapan/FourBrosMahjong/issues/653) で確認する。
 - **Neutral**: カスタムドメインは手順のみ整備し、実際のドメイン確定・DNS 設定・SSL 発行は運用担当の手作業として残る([`documents/guides/custom-domain-setup.md`](../guides/custom-domain-setup.md) 参照)。
 
 ## Rollback Plan
