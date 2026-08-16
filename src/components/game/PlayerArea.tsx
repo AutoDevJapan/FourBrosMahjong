@@ -30,6 +30,8 @@ export interface PlayerAreaProps {
   compact?: boolean;
   /** 自家の打牌選択ハンドラ(UIイベントのみ)。 */
   onSelectTile?: (index: number, tile: TileData) => void;
+  /** タッチ端末では牌の選択と打牌確定を分離する。 */
+  confirmTouchSelection?: boolean;
   /** 自家手牌を閲覧専用の静的リストとして表示する。 */
   handReadOnly?: boolean;
   handTileStates?: readonly HandTileState[];
@@ -47,6 +49,7 @@ export default function PlayerArea({
   isSelf,
   compact = false,
   onSelectTile,
+  confirmTouchSelection = false,
   handReadOnly = false,
   handTileStates,
   onBlockedTile,
@@ -104,6 +107,7 @@ export default function PlayerArea({
               tiles={hand}
               readOnly={handReadOnly}
               onSelect={onSelectTile}
+              confirmTouchSelection={confirmTouchSelection}
               tileStates={handTileStates}
               onBlockedSelect={onBlockedTile}
             />

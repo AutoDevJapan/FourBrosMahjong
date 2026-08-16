@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import Hand from "./Hand";
@@ -54,6 +54,54 @@ describe("Hand (roving tabindex listbox, spec 5.2.2)", () => {
 
     expect(onSelect).toHaveBeenCalledWith(0, tiles[0]);
     expect(options[0]).toHaveAttribute("aria-selected", "true");
+  });
+
+  it("タッチ操作では選択と打牌確定を分け、確定前に取り消せる", async () => {
+    const onSelect = vi.fn();
+    const user = userEvent.setup();
+    render(<Hand tiles={tiles} onSelect={onSelect} confirmTouchSelection />);
+    const first = () => screen.getAllByRole("option")[0];
+
+    fireEvent.touchStart(first());
+    fireEvent.touchEnd(first());
+    fireEvent.click(first());
+
+    expect(onSelect).not.toHaveBeenCalled();
+    expect(first()).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByRole("status")).toHaveTextContent(
+      "一萬を選択中です。打牌するには確定してください。",
+    );
+    expect(
+      screen.getByRole("button", { name: "一萬で打牌を確定" }),
+    ).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "選択を解除" }));
+    expect(onSelect).not.toHaveBeenCalled();
+    expect(first()).toHaveAttribute("aria-selected", "false");
+    expect(
+      screen.queryByRole("button", { name: "一萬で打牌を確定" }),
+    ).not.toBeInTheDocument();
+
+    fireEvent.touchStart(first());
+    fireEvent.touchEnd(first());
+    fireEvent.click(first());
+    await user.click(screen.getByRole("button", { name: "一萬で打牌を確定" }));
+    expect(onSelect).toHaveBeenCalledWith(0, tiles[0]);
+  });
+
+  it("タッチ確定モードでもキーボードEnterは従来どおり即時に打牌する", async () => {
+    const onSelect = vi.fn();
+    const user = userEvent.setup();
+    render(<Hand tiles={tiles} onSelect={onSelect} confirmTouchSelection />);
+    const first = screen.getAllByRole("option")[0];
+    first.focus();
+
+    await user.keyboard("{Enter}");
+
+    expect(onSelect).toHaveBeenCalledWith(0, tiles[0]);
+    expect(
+      screen.queryByRole("button", { name: "一萬で打牌を確定" }),
+    ).not.toBeInTheDocument();
   });
 
   it("操作不可牌はマウス・キーボードで選択せず、理由を通知する", async () => {

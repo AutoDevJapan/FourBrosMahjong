@@ -677,6 +677,78 @@ test.describe("対局画面(/game)", () => {
     await expect(openButton).toBeFocused();
   });
 
+  test.describe("狭幅タッチの手牌確定(#607)", () => {
+    test.use({
+      viewport: { width: 320, height: 800 },
+      isMobile: true,
+      hasTouch: true,
+    });
+
+    test("320px/360pxの1回目のタップでは打牌せず、確定操作でのみ対局を進める", async ({
+      page,
+    }) => {
+      for (const width of [320, 360] as const) {
+        await page.setViewportSize({ width, height: 800 });
+        await page.goto("/game?seed=0");
+        await expect(page.locator('[data-pending="humanDiscard"]')).toHaveCount(
+          1,
+        );
+        await page.evaluate(
+          () =>
+            new Promise<void>((resolve) => {
+              requestAnimationFrame(() =>
+                requestAnimationFrame(() => resolve()),
+              );
+            }),
+        );
+
+        const hand = visibleHand(page);
+        const firstTile = hand.getByRole("option").first();
+        await expect(firstTile).toBeVisible();
+        const box = await firstTile.boundingBox();
+        expect(box).not.toBeNull();
+        expect(box?.width).toBeGreaterThanOrEqual(44);
+        expect(box?.height).toBeGreaterThanOrEqual(44);
+
+        const self = page
+          .getByRole("region", { name: /^あなた/ })
+          .filter({ visible: true })
+          .first();
+        const discards = self
+          .getByRole("list", { name: "捨て牌" })
+          .getByRole("listitem");
+        const initialDiscards = await discards.count();
+
+        await page.touchscreen.tap(
+          (box?.x ?? 0) + (box?.width ?? 0) / 2,
+          (box?.y ?? 0) + (box?.height ?? 0) / 2,
+        );
+
+        await expect(hand.getByRole("option")).toHaveCount(14);
+        await expect(discards).toHaveCount(initialDiscards);
+        await expect(
+          page.getByRole("status").filter({ visible: true }).first(),
+        ).toContainText("を選択中です");
+
+        const confirm = page
+          .getByRole("button", { name: /で打牌を確定$/ })
+          .filter({ visible: true })
+          .first();
+        await expect(confirm).toBeVisible();
+        await confirm.click();
+
+        await expect
+          .poll(async () => discards.count(), { timeout: 5_000 })
+          .toBeGreaterThan(initialDiscards);
+        await expect(
+          page.getByRole("button", { name: /で打牌を確定$/ }).filter({
+            visible: true,
+          }),
+        ).toHaveCount(0);
+      }
+    });
+  });
+
   test("ダークモード設定でも主要要素が見える(スペック5 5.4)", async ({
     page,
   }) => {
