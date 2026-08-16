@@ -907,23 +907,38 @@ describe("online abuse boundary and four-client regression (#651)", () => {
       let server: LocalOnlineServer | undefined;
       const clients: OnlineTestClient[] = [];
       try {
-        server = await startLocalOnlineServer();
-        const idle = new OnlineTestClient(server.url, TEST_ORIGIN);
-        clients.push(idle);
-        await idle.open();
+        const onlineServer = await startLocalOnlineServer();
+        server = onlineServer;
+        const idleClients = Array.from(
+          { length: ABUSE_LIMITS.maxConnectionsPerSource },
+          () => new OnlineTestClient(onlineServer.url, TEST_ORIGIN),
+        );
+        clients.push(...idleClients);
+        await Promise.all(idleClients.map((client) => client.open()));
 
-        const close = await idle.waitForClose(
+        const rejected = await requestUpgrade(onlineServer.url, TEST_ORIGIN);
+        expect(rejected.statusCode).toBe(503);
+        expect(JSON.parse(rejected.body)).toMatchObject({
+          ok: false,
+          code: "connection_limit",
+        });
+
+        const close = await idleClients[0].waitForClose(
           ONLINE_HANDSHAKE_TIMEOUT_MS + 5_000,
         );
         expect(close.code).not.toBe(1000);
 
-        const recovered = new OnlineTestClient(server.url, TEST_ORIGIN);
+        const recovered = new OnlineTestClient(onlineServer.url, TEST_ORIGIN);
         clients.push(recovered);
         await recovered.open();
         recovered.send({ type: "create", name: "タイムアウト後ホスト" });
         await expect(recovered.waitForSession()).resolves.toMatchObject({
           type: "session",
         });
+
+        await delay(ONLINE_HANDSHAKE_TIMEOUT_MS + 250);
+        recovered.send({ type: "ping" });
+        await recovered.waitForPong();
       } finally {
         await closeTestClients(clients);
         if (server !== undefined) await stopLocalOnlineServer(server);
