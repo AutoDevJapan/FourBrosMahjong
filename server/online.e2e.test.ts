@@ -9,6 +9,7 @@ import type {
   OnlineSnapshot,
 } from "../src/components/online/types";
 import { ABUSE_LIMITS } from "./abuseControl";
+import { ONLINE_HANDSHAKE_TIMEOUT_MS } from "./handshake";
 
 /**
  * server配下の test/spec ファイルは既存の Vitest unit project が収集する。
@@ -892,6 +893,52 @@ describe("online abuse boundary and four-client regression (#651)", () => {
           code: "connection_limit",
           retryAfterMs: ABUSE_LIMITS.connectionRetryAfterMs,
         });
+      } finally {
+        await closeTestClients(clients);
+        if (server !== undefined) await stopLocalOnlineServer(server);
+      }
+    },
+    TEST_TIMEOUT_MS,
+  );
+
+  it(
+    "handshake未完了の接続を解放し、後続ユーザーの接続枠を回復する",
+    async () => {
+      let server: LocalOnlineServer | undefined;
+      const clients: OnlineTestClient[] = [];
+      try {
+        const onlineServer = await startLocalOnlineServer();
+        server = onlineServer;
+        const idleClients = Array.from(
+          { length: ABUSE_LIMITS.maxConnectionsPerSource },
+          () => new OnlineTestClient(onlineServer.url, TEST_ORIGIN),
+        );
+        clients.push(...idleClients);
+        await Promise.all(idleClients.map((client) => client.open()));
+
+        const rejected = await requestUpgrade(onlineServer.url, TEST_ORIGIN);
+        expect(rejected.statusCode).toBe(503);
+        expect(JSON.parse(rejected.body)).toMatchObject({
+          ok: false,
+          code: "connection_limit",
+        });
+
+        const close = await idleClients[0].waitForClose(
+          ONLINE_HANDSHAKE_TIMEOUT_MS + 5_000,
+        );
+        expect(close.code).not.toBe(1000);
+
+        const recovered = new OnlineTestClient(onlineServer.url, TEST_ORIGIN);
+        clients.push(recovered);
+        await recovered.open();
+        recovered.send({ type: "create", name: "タイムアウト後ホスト" });
+        await expect(recovered.waitForSession()).resolves.toMatchObject({
+          type: "session",
+        });
+
+        await delay(ONLINE_HANDSHAKE_TIMEOUT_MS + 250);
+        recovered.send({ type: "ping" });
+        await recovered.waitForPong();
       } finally {
         await closeTestClients(clients);
         if (server !== undefined) await stopLocalOnlineServer(server);

@@ -16,6 +16,7 @@ import {
   hasOpenPeer as hasOpenPeerConnection,
   registerReplacementBeforeClose,
 } from "./connectionState";
+import { startHandshakeTimeout } from "./handshake";
 import { runHeartbeat, SERVER_HEARTBEAT_INTERVAL_MS } from "./heartbeat";
 import {
   normalizePlayerName,
@@ -315,6 +316,12 @@ function onConnection(socket: WebSocket, source: string): void {
     player: null,
   };
   clients.add(client);
+  const handshakeTimeout = startHandshakeTimeout(() => {
+    // There is no room seat to preserve yet. Terminate instead of waiting for
+    // a close handshake from an unauthenticated peer so the connection slot is
+    // released even when the peer is deliberately uncooperative.
+    socket.terminate();
+  });
   socket.on("pong", () => {
     client.isAlive = true;
     if (client.room && client.player) {
@@ -342,11 +349,13 @@ function onConnection(socket: WebSocket, source: string): void {
     }
     try {
       handleMessage(client, JSON.parse(data.toString()));
+      if (client.room && client.player) handshakeTimeout.complete();
     } catch {
       sendError(client, "メッセージを読み取れませんでした。");
     }
   });
   socket.on("close", () => {
+    handshakeTimeout.clear();
     clients.delete(client);
     abuseControls.releaseConnection(client.source);
     // 再接続時は旧ソケットのcloseが新ソケットの接続状態を上書きし得る。
