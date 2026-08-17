@@ -2386,6 +2386,46 @@ function endGame(state: EngineState): EngineState {
   };
 }
 
+/**
+ * 切断した人間席を現局だけAIへ戻し、切断席の入力待ちを残さず進行させる。
+ *
+ * 通常の `setHumanPlayerIds` は、再接続まで人間入力を保持するためのAPIである。host
+ * 引継ぎではそのまま残すと切断したhostの手番がguestを永久に止めるため、RoomManager
+ * がこの明示的な解放APIを使う。humanReact は安全側にスルーし、humanDiscard は pending
+ * を解除して `pump` にAIの通常判断をさせる。呼び出し側がresume用の席集合を別途保持
+ * できるよう、ここでは現局の `humanPlayerIds` だけを変更する。
+ */
+export function removeHumanPlayerIds(
+  state: EngineState,
+  playerIds: readonly PlayerId[],
+): EngineState {
+  const removed = new Set(playerIds);
+  let next = state;
+
+  // 切断席が応答待ちなら、ロン/鳴きを自動選択せずスルーして保留中の打牌解決へ戻す。
+  // スルー後に同じ席の別の入力待ちが生じるケース(槍槓など)も上限内で解消する。
+  for (let guard = 0; guard < 16; guard += 1) {
+    const pending = next.pending;
+    if (pending === null) break;
+    const pendingPlayerId = pending.playerId ?? "p0";
+    if (!removed.has(pendingPlayerId)) break;
+
+    if (pending.kind === "humanReact") {
+      const passed = passRon(next, pendingPlayerId);
+      next = passed === next ? { ...next, pending: null } : passed;
+    } else {
+      next = { ...next, pending: null };
+    }
+  }
+
+  const current = humanPlayerIdsOf(next);
+  const humanPlayerIds = ALL_IDS.filter(
+    (id) => current.includes(id) && !removed.has(id),
+  );
+  next = { ...next, humanPlayerIds };
+  return next.phase === "playing" && next.pending === null ? pump(next) : next;
+}
+
 // ---------------------------------------------------------------------------
 // 公開アクション(UI から呼ぶ操作)
 // ---------------------------------------------------------------------------
@@ -2952,46 +2992,6 @@ function passRonImpl(
   // AIが鳴いた直後の打牌に対して新たな自家応答が生じた場合は、その入力待ちを保持する。
   if (after.pending !== null) return after;
   return pump(after);
-}
-
-/**
- * 切断した人間席を現局だけAIへ戻し、切断席の入力待ちを残さず進行させる。
- *
- * 通常の `setHumanPlayerIds` は、再接続まで人間入力を保持するためのAPIである。host
- * 引継ぎではそのまま残すと切断したhostの手番がguestを永久に止めるため、RoomManager
- * がこの明示的な解放APIを使う。humanReact は安全側にスルーし、humanDiscard は pending
- * を解除して `pump` にAIの通常判断をさせる。呼び出し側がresume用の席集合を別途保持
- * できるよう、ここでは現局の `humanPlayerIds` だけを変更する。
- */
-export function removeHumanPlayerIds(
-  state: EngineState,
-  playerIds: readonly PlayerId[],
-): EngineState {
-  const removed = new Set(playerIds);
-  let next = state;
-
-  // 切断席が応答待ちなら、ロン/鳴きを自動選択せずスルーして保留中の打牌解決へ戻す。
-  // スルー後に同じ席の別の入力待ちが生じるケース(槍槓など)も上限内で解消する。
-  for (let guard = 0; guard < 16; guard += 1) {
-    const pending = next.pending;
-    if (pending === null) break;
-    const pendingPlayerId = pending.playerId ?? "p0";
-    if (!removed.has(pendingPlayerId)) break;
-
-    if (pending.kind === "humanReact") {
-      const passed = passRon(next, pendingPlayerId);
-      next = passed === next ? { ...next, pending: null } : passed;
-    } else {
-      next = { ...next, pending: null };
-    }
-  }
-
-  const current = humanPlayerIdsOf(next);
-  const humanPlayerIds = ALL_IDS.filter(
-    (id) => current.includes(id) && !removed.has(id),
-  );
-  next = { ...next, humanPlayerIds };
-  return next.phase === "playing" && next.pending === null ? pump(next) : next;
 }
 
 /** 局終了後、次局を開始する(半荘終了時は何もしない)。 */
