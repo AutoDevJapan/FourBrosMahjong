@@ -164,6 +164,15 @@ describe("online room manager", () => {
     const guest = manager.join(host.room.code, "ゲスト");
     if (!guest) throw new Error("guest should join");
 
+    // `RoomManager.create` uses a crypto seed. Pin this fixture so the
+    // promoted guest starts at a discard decision instead of occasionally
+    // stopping at a random ron/call response with no drawn tile.
+    host.room.state = createGame({
+      seed: 0,
+      names: ["ホスト", "ゲスト", "ゲスト2", "ゲスト3"],
+      humanPlayerIds: ["p0", "p1"],
+    });
+
     manager.disconnect(host.room, host.player);
 
     const snapshot = manager.snapshot(guest.room, guest.player);
