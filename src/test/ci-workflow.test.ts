@@ -78,6 +78,7 @@ const PRODUCTION_E2E_EXCLUDED_SPECS = [
   "e2e/mobile-touch-targets.spec.ts",
   "e2e/non-text-contrast.spec.ts",
   "e2e/online-host-controls.spec.ts",
+  "e2e/online-host-handoff.spec.ts",
   "e2e/online-room-sharing.spec.ts",
   "e2e/online-lobby.spec.ts",
   "e2e/player-names.spec.ts",

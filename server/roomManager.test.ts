@@ -47,6 +47,7 @@ function reachRoundEnd(manager: RoomManager, host: RoomSession): void {
   }
 }
 
+function stayAtPlaying(): void {}
 describe("online room manager", () => {
   it("normalizes names by grapheme and repairs malformed UTF-16 at the server boundary", () => {
     const withinLimit = `${"あ".repeat(MAX_PLAYER_NAME_LENGTH - 1)}😀`;
@@ -90,6 +91,151 @@ describe("online room manager", () => {
     );
     expect(stale.ok).toBe(false);
   });
+
+  it("hands playing host authority to a connected guest and releases the disconnected host turn", () => {
+    const manager = new RoomManager();
+    const host = manager.create("ホスト");
+    const guest = manager.join(host.room.code, "ゲスト");
+    if (!guest) throw new Error("guest should join");
+
+    manager.disconnect(host.room, host.player);
+
+    const snapshot = manager.snapshot(guest.room, guest.player);
+    expect(snapshot.hostId).toBe("p1");
+    expect(snapshot.players).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: "p0", connected: false, isHost: false }),
+        expect.objectContaining({ id: "p1", connected: true, isHost: true }),
+      ]),
+    );
+    expect(snapshot.hostNotice).toMatchObject({ reason: "disconnected" });
+    expect(snapshot.hostNotice?.nextAction).toContain("手番");
+    expect(snapshot.pending?.playerId).toBe("p1");
+
+    const drawn = guest.room.state.hand?.drawn?.tile;
+    if (!drawn) throw new Error("guest should receive a drawn tile");
+    expect(
+      manager.apply(
+        guest.room,
+        guest.player,
+        { type: "discard", tile: drawn },
+        snapshot.version,
+      ),
+    ).toMatchObject({ ok: true, stateChanged: true });
+  });
+
+  it("keeps an unexpected host disconnect resumable without restoring transferred authority", () => {
+    const manager = new RoomManager();
+    const host = manager.create("ホスト");
+    const guest = manager.join(host.room.code, "ゲスト");
+    if (!guest) throw new Error("guest should join");
+
+    manager.disconnect(host.room, host.player);
+    const resumed = manager.resume(host.room.code, host.player.token);
+
+    expect(resumed?.player.id).toBe("p0");
+    expect(manager.snapshot(guest.room, guest.player).hostId).toBe("p1");
+    expect(manager.snapshot(resumed!.room, resumed!.player).players).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: "p0", connected: true, isHost: false }),
+        expect.objectContaining({ id: "p1", connected: true, isHost: true }),
+      ]),
+    );
+  });
+
+  it.each([
+    ["playing", stayAtPlaying],
+    ["roundEnd", reachRoundEnd],
+    ["gameEnd", reachGameEnd],
+  ] as const)(
+    "transfers host authority after a host disconnect at %s",
+    (_phase, prepare) => {
+      const manager = new RoomManager();
+      const host = manager.create("ホスト");
+      prepare(manager, host);
+      const guest = manager.join(host.room.code, "ゲスト");
+      if (!guest) throw new Error("guest should join");
+
+      manager.disconnect(host.room, host.player);
+
+      const snapshot = manager.snapshot(guest.room, guest.player);
+      expect(snapshot.hostId).toBe("p1");
+      expect(
+        snapshot.players.find((player) => player.id === "p1")?.isHost,
+      ).toBe(true);
+      if (_phase === "roundEnd") {
+        expect(
+          manager.apply(
+            guest.room,
+            guest.player,
+            { type: "nextRound" },
+            snapshot.version,
+          ),
+        ).toMatchObject({
+          ok: true,
+        });
+      }
+      if (_phase === "gameEnd") {
+        expect(manager.newGame(guest.room, guest.player)).toMatchObject({
+          ok: true,
+          stateChanged: true,
+        });
+        expect(guest.room.state.humanPlayerIds).toEqual(["p1"]);
+      }
+    },
+  );
+
+  it("treats an explicit host exit as a handoff and rejects the old token while allowing a new join", () => {
+    const manager = new RoomManager();
+    const host = manager.create("ホスト");
+    const guest = manager.join(host.room.code, "ゲスト");
+    if (!guest) throw new Error("guest should join");
+
+    manager.leave(host.room, host.player);
+
+    const afterLeave = manager.snapshot(guest.room, guest.player);
+    expect(afterLeave.hostId).toBe("p1");
+    expect(afterLeave.hostNotice).toMatchObject({ reason: "left" });
+    expect(manager.resume(host.room.code, host.player.token)).toBeNull();
+    expect(manager.join(host.room.code, "再参加")?.player.id).toBe("p2");
+    expect(manager.snapshot(guest.room, guest.player).hostId).toBe("p1");
+  });
+
+  it.each([
+    ["roundEnd", reachRoundEnd],
+    ["gameEnd", reachGameEnd],
+  ] as const)(
+    "allows the inherited host to continue after explicit exit at %s",
+    (_phase, prepare) => {
+      const manager = new RoomManager();
+      const host = manager.create("ホスト");
+      prepare(manager, host);
+      const guest = manager.join(host.room.code, "ゲスト");
+      if (!guest) throw new Error("guest should join");
+
+      manager.leave(host.room, host.player);
+      const snapshot = manager.snapshot(guest.room, guest.player);
+      expect(snapshot.hostId).toBe("p1");
+      expect(snapshot.hostNotice?.reason).toBe("left");
+      expect(manager.resume(host.room.code, host.player.token)).toBeNull();
+
+      if (_phase === "roundEnd") {
+        expect(
+          manager.apply(
+            guest.room,
+            guest.player,
+            { type: "nextRound" },
+            snapshot.version,
+          ),
+        ).toMatchObject({ ok: true });
+      } else {
+        expect(manager.newGame(guest.room, guest.player)).toMatchObject({
+          ok: true,
+          stateChanged: true,
+        });
+      }
+    },
+  );
 
   it("keeps nextRound host-only at roundEnd", () => {
     const manager = new RoomManager();

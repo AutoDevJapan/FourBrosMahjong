@@ -60,11 +60,16 @@ function firstRoundEndGame(seed = 2024): EngineState {
   });
 }
 
-function onlineSnapshot(state: EngineState, you: "p0" | "p1"): OnlineSnapshot {
+function onlineSnapshot(
+  state: EngineState,
+  you: "p0" | "p1",
+  hostId: "p0" | "p1" = "p0",
+): OnlineSnapshot {
   return {
     code: "ABC234",
     version: 0,
     you,
+    hostId,
     phase: state.phase,
     view: selectView(state, you),
     pending:
@@ -72,20 +77,39 @@ function onlineSnapshot(state: EngineState, you: "p0" | "p1"): OnlineSnapshot {
         ? state.pending
         : null,
     roundSummary: state.lastRound,
-    players: state.players.map((player) => ({
-      id: player.id,
-      name: player.name,
-      connected: true,
-      isHost: player.id === "p0",
-    })),
+    players: [
+      { id: "p0", name: "ホスト", connected: true, isHost: hostId === "p0" },
+      { id: "p1", name: "ゲスト", connected: true, isHost: hostId === "p1" },
+    ],
     currentTurn: state.hand ? state.hand.seating[state.hand.turn] : null,
+    hostNotice:
+      hostId === "p1"
+        ? {
+            reason: "disconnected",
+            message:
+              "「ホスト」さん（ホスト）が切断したため、ゲストさんへホスト権限を引き継ぎました。",
+            nextAction:
+              state.phase === "roundEnd"
+                ? "「次の局へ」を押して対局を続けてください。"
+                : state.phase === "gameEnd"
+                  ? "「新しい半荘を開始」を押して次の半荘へ進めてください。"
+                  : "現在の手番に従って操作してください。",
+          }
+        : null,
   };
 }
 
-function renderOnlineBoard(state: EngineState, you: "p0" | "p1") {
+function renderOnlineBoard(
+  state: EngineState,
+  you: "p0" | "p1",
+  hostId: "p0" | "p1" = "p0",
+) {
   const socket = { readyState: 1, send: vi.fn() } as unknown as WebSocket;
   return render(
-    <OnlineGameProvider socket={socket} snapshot={onlineSnapshot(state, you)}>
+    <OnlineGameProvider
+      socket={socket}
+      snapshot={onlineSnapshot(state, you, hostId)}
+    >
       <GameBoard />
     </OnlineGameProvider>,
   );
@@ -517,8 +541,8 @@ describe("GameBoard 終局後の出口(#206 / #207 / #277)", () => {
   });
 });
 
-describe("GameBoard オンライン host-only 操作(#678)", () => {
-  it("roundEnd のguestには次の局へを表示せず、ホスト待ちを案内する", () => {
+describe("GameBoard online host handoff controls(#681 / #678)", () => {
+  it("guestはroundEndでhost-only操作を隠し、ホスト待ちを表示する", () => {
     renderOnlineBoard(firstRoundEndGame(), "p1");
 
     expect(screen.queryAllByRole("button", { name: "次の局へ" })).toHaveLength(
@@ -526,6 +550,14 @@ describe("GameBoard オンライン host-only 操作(#678)", () => {
     );
     expect(
       screen.getAllByText(/ホストの操作を待っています。/).length,
+    ).toBeGreaterThan(0);
+  });
+
+  it("引継ぎ後のguestは動的hostIdに従ってroundEndを進められる", () => {
+    renderOnlineBoard(firstRoundEndGame(), "p1", "p1");
+
+    expect(
+      screen.getAllByRole("button", { name: "次の局へ" }).length,
     ).toBeGreaterThan(0);
   });
 
@@ -537,6 +569,28 @@ describe("GameBoard オンライン host-only 操作(#678)", () => {
         .getAllByRole("button", { name: "次の局へ" })
         .some((button) => !button.hasAttribute("disabled")),
     ).toBe(true);
+  });
+
+  it("guestはgameEndで新半荘ボタンを隠し、host-only待ちを案内する", () => {
+    renderOnlineBoard(finishedGame(), "p1");
+
+    expect(
+      screen.getAllByRole("button", { name: "結果を見る" }).length,
+    ).toBeGreaterThan(0);
+    expect(
+      screen.queryAllByRole("button", { name: "新しい半荘を開始" }),
+    ).toHaveLength(0);
+    expect(
+      screen.getAllByText(/ホストの操作を待っています。/).length,
+    ).toBeGreaterThan(0);
+  });
+
+  it("引継ぎ後のhostにはgameEndの新半荘操作を表示する", () => {
+    renderOnlineBoard(finishedGame(), "p1", "p1");
+
+    expect(
+      screen.getAllByRole("button", { name: "新しい半荘を開始" }).length,
+    ).toBeGreaterThan(0);
   });
 
   it("gameEnd のguestには結果を見るだけを表示し、新しい半荘を操作させない", () => {

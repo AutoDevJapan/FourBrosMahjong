@@ -1109,3 +1109,102 @@ describe("online abuse boundary and four-client regression (#651)", () => {
     TEST_TIMEOUT_MS,
   );
 });
+
+describe("online host handoff (#681)", () => {
+  it(
+    "network disconnect transfers host authority and lets the guest continue the current turn",
+    async () => {
+      let server: LocalOnlineServer | undefined;
+      const clients: OnlineTestClient[] = [];
+      try {
+        server = await startLocalOnlineServer();
+        const host = new OnlineTestClient(server.url, TEST_ORIGIN);
+        const guest = new OnlineTestClient(server.url, TEST_ORIGIN);
+        clients.push(host, guest);
+        await Promise.all([host.open(), guest.open()]);
+
+        host.send({ type: "create", name: "ホスト" });
+        const hostSession = await host.waitForSession();
+        const code = hostSession.snapshot.code;
+        guest.send({ type: "join", code, name: "ゲスト" });
+        await guest.waitForSession();
+        await host.waitForSnapshot((snapshot) => snapshot.players.length === 2);
+
+        await host.close();
+        const handoff = await guest.waitForSnapshot(
+          (snapshot) =>
+            snapshot.hostId === "p1" &&
+            snapshot.players.find((player) => player.id === "p0")?.connected ===
+              false,
+        );
+        expect(
+          handoff.players.find((player) => player.id === "p1")?.isHost,
+        ).toBe(true);
+        expect(handoff.hostNotice).toMatchObject({ reason: "disconnected" });
+        expect(handoff.pending?.playerId).toBe("p1");
+
+        guest.send({
+          type: "action",
+          version: handoff.version,
+          action: actionFor(handoff),
+        });
+        await expect(
+          guest.waitForSnapshot(
+            (snapshot) => snapshot.version === handoff.version + 1,
+          ),
+        ).resolves.toMatchObject({ hostId: "p1" });
+      } finally {
+        await closeTestClients(clients);
+        if (server !== undefined) await stopLocalOnlineServer(server);
+      }
+    },
+    TEST_TIMEOUT_MS,
+  );
+
+  it(
+    "explicit host leave transfers authority and invalidates the old resume token",
+    async () => {
+      let server: LocalOnlineServer | undefined;
+      const clients: OnlineTestClient[] = [];
+      try {
+        server = await startLocalOnlineServer();
+        const host = new OnlineTestClient(server.url, TEST_ORIGIN);
+        const guest = new OnlineTestClient(server.url, TEST_ORIGIN);
+        clients.push(host, guest);
+        await Promise.all([host.open(), guest.open()]);
+
+        host.send({ type: "create", name: "退出ホスト" });
+        const session = await host.waitForSession();
+        const code = session.snapshot.code;
+        const token = session.token;
+        guest.send({ type: "join", code, name: "引継ぎゲスト" });
+        await guest.waitForSession();
+        await host.waitForSnapshot((snapshot) => snapshot.players.length === 2);
+
+        host.send({ type: "leave" });
+        const handoff = await guest.waitForSnapshot(
+          (snapshot) =>
+            snapshot.hostId === "p1" && snapshot.hostNotice?.reason === "left",
+        );
+        expect(
+          handoff.players.find((player) => player.id === "p0"),
+        ).toMatchObject({
+          connected: false,
+          isHost: false,
+        });
+
+        const stale = new OnlineTestClient(server.url, TEST_ORIGIN);
+        clients.push(stale);
+        await stale.open();
+        stale.send({ type: "resume", code, token });
+        await expect(stale.waitForError()).resolves.toMatchObject({
+          message: "再接続情報が無効か、ルームの有効期限が切れています。",
+        });
+      } finally {
+        await closeTestClients(clients);
+        if (server !== undefined) await stopLocalOnlineServer(server);
+      }
+    },
+    TEST_TIMEOUT_MS,
+  );
+});

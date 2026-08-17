@@ -27,6 +27,7 @@ function onlineSnapshot(state: EngineState, you: PlayerId): OnlineSnapshot {
     code: "ABC234",
     version: 0,
     you,
+    hostId: "p0",
     phase: state.phase,
     view: selectView(state, you),
     pending:
@@ -41,6 +42,7 @@ function onlineSnapshot(state: EngineState, you: PlayerId): OnlineSnapshot {
       isHost: player.id === "p0",
     })),
     currentTurn: state.hand ? state.hand.seating[state.hand.turn] : null,
+    hostNotice: null,
   };
 }
 

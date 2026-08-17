@@ -3,6 +3,7 @@ import {
   createGame,
   discard,
   type EngineState,
+  removeHumanPlayerIds,
   setHumanPlayerIds,
 } from "./engine";
 
@@ -36,5 +37,14 @@ describe("engine: multiple human players", () => {
 
     const afterP0 = discard(state, drawnTile(state), "p0");
     expect(afterP0.pending?.playerId).toBe("p1");
+  });
+
+  it("releases a disconnected human turn to AI and leaves the next connected seat actionable", () => {
+    let state = createGame({ seed: 17, humanPlayerIds: ["p0", "p1"] });
+    state = removeHumanPlayerIds(state, ["p0"]);
+
+    expect(state.humanPlayerIds).toEqual(["p1"]);
+    expect(state.pending?.playerId).toBe("p1");
+    expect(state.hand?.turn).toBe("south");
   });
 });

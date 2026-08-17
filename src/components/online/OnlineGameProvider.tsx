@@ -18,19 +18,19 @@ export interface OnlinePermissions {
 }
 
 /**
- * UI 用のオンライン権限を snapshot から導出する。
- *
- * `you` だけでは host か判定できないため、同じ seat の player だけを参照する。
- * server の不整合や再接続途中の不完全な snapshot は host として扱わず、UI 側から
- * host-only 操作を送信しない(fail closed)。実際の認可は引き続き server が担う。
+ * snapshotからUI権限を導出する。hostは固定p0ではなく、serverが返すhostIdと自席の
+ * isHostが一致したときだけ表示する。不完全なsnapshotはguestとしてfail closedにする。
  */
 export function onlinePermissions(
-  snapshot: Pick<OnlineSnapshot, "you" | "players">,
+  snapshot: Pick<OnlineSnapshot, "you" | "hostId" | "players">,
 ): OnlinePermissions {
   const self = snapshot.players.find((player) => player.id === snapshot.you);
   return {
     playerId: snapshot.you,
-    isHost: self?.id === "p0" && self.isHost === true,
+    isHost:
+      self?.id === snapshot.hostId &&
+      self.isHost === true &&
+      snapshot.hostId !== null,
   };
 }
 
@@ -91,7 +91,7 @@ export default function OnlineGameProvider({
       if (requestedPlayerId !== playerId) return;
       sendAction(action);
     },
-    [sendAction, playerId],
+    [playerId, sendAction],
   );
 
   const controls = useMemo<GameContextValue["controls"]>(

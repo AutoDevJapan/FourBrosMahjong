@@ -13,16 +13,28 @@ interface OnlinePlayerSnapshot {
   readonly isHost: boolean;
 }
 
+export type OnlineHostTransitionReason = "disconnected" | "left";
+
+export interface OnlineHostNotice {
+  readonly reason: OnlineHostTransitionReason;
+  readonly message: string;
+  readonly nextAction: string;
+}
+
 export interface OnlineSnapshot {
   readonly code: string;
   readonly version: number;
   readonly you: PlayerId;
+  /** 現在のhost席。host退出直後など、従来の固定p0から変わり得る。 */
+  readonly hostId: PlayerId | null;
   readonly phase: GamePhase;
   readonly view: GameViewState;
   readonly pending: Pending;
   readonly roundSummary: RoundSummary | null;
   readonly players: readonly OnlinePlayerSnapshot[];
   readonly currentTurn: PlayerId | null;
+  /** host切断/退出後の権限引継ぎ理由と、現在の次操作。 */
+  readonly hostNotice: OnlineHostNotice | null;
 }
 
 export interface OnlineCredentials {

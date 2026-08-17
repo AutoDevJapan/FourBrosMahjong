@@ -21,12 +21,14 @@ export function onlineSnapshotFixture(): OnlineSnapshot {
     code: "ABC234",
     version: 0,
     you: "p0",
+    hostId: "p0",
     phase: engine.phase,
     view: selectView(engine, "p0"),
     pending: engine.pending,
     roundSummary: engine.lastRound,
     players: [{ id: "p0", name: "たろう", connected: true, isHost: true }],
     currentTurn: "p0",
+    hostNotice: null,
   };
 }
 
@@ -38,6 +40,7 @@ export function onlineFinishedSnapshotFixture(
     code: "ABC234",
     version: 1,
     you,
+    hostId: "p0",
     phase: finished.phase,
     view: selectView(finished, you),
     pending: finished.pending,
@@ -49,6 +52,7 @@ export function onlineFinishedSnapshotFixture(
       isHost: player.id === "p0",
     })),
     currentTurn: null,
+    hostNotice: null,
   };
 }
 

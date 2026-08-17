@@ -248,6 +248,17 @@ function handleMessage(client: Client, value: unknown): void {
       attach(client, session);
       return;
     }
+    case "leave": {
+      if (!client.room || !client.player) {
+        sendError(client, "先にルームへ入室してください。", {}, false);
+        return;
+      }
+      const room = client.room;
+      manager.leave(room, client.player);
+      broadcast(room);
+      client.socket.close(1000, "left");
+      return;
+    }
     case "newGame": {
       if (consumeAction(client)) return;
       if (!client.room || !client.player) {
