@@ -244,6 +244,13 @@ export class RoomManager {
     if (!player) return null;
     player.connected = true;
     player.lastSeenAt = now();
+    // A disconnected seat is treated as AI only when a fresh half-game starts.
+    // Re-adding it here lets a player who returns during that half-game reclaim
+    // human input without changing the current hand or its version.
+    room.state = setHumanPlayerIds(room.state, [
+      ...(room.state.humanPlayerIds ?? []),
+      player.id,
+    ]);
     room.lastActivityAt = now();
     return { room, player };
   }
@@ -318,7 +325,12 @@ export class RoomManager {
     room.state = createGame({
       seed: randomSeed(),
       names: namesOf(room),
-      humanPlayerIds: [...room.players.keys()],
+      // Preserve the current-hand reconnect guard, but do not carry a seat
+      // that is still disconnected into a fresh half-game. Otherwise the new
+      // game stops at that seat's pending input with no connected actor.
+      humanPlayerIds: [...room.players.values()]
+        .filter((roomPlayer) => roomPlayer.connected)
+        .map((roomPlayer) => roomPlayer.id),
     });
     room.version += 1;
     room.lastActivityAt = now();

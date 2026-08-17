@@ -144,6 +144,39 @@ describe("online room manager", () => {
     expect(after.players).toEqual(before.players);
   });
 
+  it("does not carry a disconnected seat into a new game, but restores it on resume", () => {
+    const manager = new RoomManager();
+    const host = manager.create("ホスト");
+    const guest = manager.join(host.room.code, "ゲスト");
+    if (!guest) throw new Error("guest should join");
+    reachGameEnd(manager, host);
+
+    manager.disconnect(guest.room, guest.player);
+    const started = manager.newGame(host.room, host.player);
+    expect(started.ok).toBe(true);
+    expect(host.room.state.humanPlayerIds).toEqual(["p0"]);
+
+    const firstDraw = host.room.state.hand?.drawn?.tile;
+    if (!firstDraw) throw new Error("host should start on a draw decision");
+    const afterHost = manager.apply(
+      host.room,
+      host.player,
+      { type: "discard", tile: firstDraw },
+      host.room.version,
+    );
+    expect(afterHost.ok).toBe(true);
+    expect(manager.snapshot(host.room, host.player).pending?.playerId).toBe(
+      "p0",
+    );
+
+    const resumed = manager.resume(host.room.code, guest.player.token);
+    expect(resumed?.player.id).toBe("p1");
+    expect(host.room.state.humanPlayerIds).toEqual(["p0", "p1"]);
+    expect(manager.snapshot(host.room, host.player).pending?.playerId).toBe(
+      "p0",
+    );
+  });
+
   it("validates action tiles before the engine sees them", () => {
     for (const rank of [1, 2, 3, 4, 5, 6, 7, 8, 9]) {
       expect(
