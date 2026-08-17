@@ -634,16 +634,28 @@ describe("online multiplayer local E2E (#629)", () => {
   );
 
   it(
-    "空のOrigin allowlistではOriginなし接続を開発用に許可する",
+    "空のOrigin allowlistではOriginなし・明示Originをfail-closedで拒否する",
     async () => {
       let developmentServer: LocalOnlineServer | undefined;
-      let client: OnlineTestClient | undefined;
+      let missingOrigin: OnlineTestClient | undefined;
+      let explicitOrigin: OnlineTestClient | undefined;
       try {
         developmentServer = await startLocalOnlineServer("");
-        client = new OnlineTestClient(developmentServer.url);
-        await client.open();
+        missingOrigin = new OnlineTestClient(developmentServer.url);
+        await expect(missingOrigin.open()).rejects.toThrow(
+          "Unexpected server response: 403",
+        );
+
+        explicitOrigin = new OnlineTestClient(
+          developmentServer.url,
+          TEST_ORIGIN,
+        );
+        await expect(explicitOrigin.open()).rejects.toThrow(
+          "Unexpected server response: 403",
+        );
       } finally {
-        if (client !== undefined) await client.close();
+        if (missingOrigin !== undefined) await missingOrigin.close();
+        if (explicitOrigin !== undefined) await explicitOrigin.close();
         if (developmentServer !== undefined)
           await stopLocalOnlineServer(developmentServer);
       }

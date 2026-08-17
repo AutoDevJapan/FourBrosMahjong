@@ -55,9 +55,9 @@ function allowedOrigins(): readonly string[] {
 
 function originAllowed(origin: string | undefined): boolean {
   const allowed = allowedOrigins();
-  return (
-    allowed.length === 0 || (origin !== undefined && allowed.includes(origin))
-  );
+  // An absent or empty allowlist must never widen the WebSocket boundary.
+  // Local and deployed environments must opt in with an explicit Origin.
+  return allowed.length > 0 && origin !== undefined && allowed.includes(origin);
 }
 
 function send(client: Client, value: unknown): void {
