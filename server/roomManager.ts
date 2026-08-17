@@ -76,7 +76,7 @@ interface Room {
   state: EngineState;
   version: number;
   readonly players: Map<PlayerId, RoomPlayer>;
-  /** 明示退出したguestのseat。次のjoinで同じIDを安全に置換する。 */
+  /** 明示退出したseat。次のjoinで同じIDを安全に置換する。 */
   readonly reusableSeatIds: Set<PlayerId>;
   /** 現在のhost席。host切断後は接続中のguestへ即時に移る。 */
   hostId: PlayerId | null;
@@ -440,9 +440,11 @@ export class RoomManager {
     if (room.hostId !== player.id) rememberDeparture(room, player);
     if (room.hostId === player.id) {
       transferHost(room, player, "left");
-    } else {
-      room.reusableSeatIds.add(player.id);
     }
+    // An explicit leave invalidates the session and releases the departed
+    // seat for reuse regardless of whether the player was host. This is
+    // important when a guest inherited host authority after a handoff.
+    room.reusableSeatIds.add(player.id);
     room.lastActivityAt = now();
   }
 
