@@ -17,6 +17,8 @@ import {
 import type { Tile } from "@/domain/tiles/tile";
 import { bannerLandmarks, describeElement } from "@/test/bannerLandmarks";
 import { tileLabel } from "../common/tileLabel";
+import OnlineGameProvider from "../online/OnlineGameProvider";
+import type { OnlineSnapshot } from "../online/types";
 import { walkToGameEnd } from "./finishedGameFixture";
 import GameBoard, {
   type GameBoardProps,
@@ -25,6 +27,7 @@ import GameBoard, {
 } from "./GameBoard";
 import { GameProvider } from "./GameProvider";
 import { type GameAction, replayJournal } from "./gamePersistence";
+import { selectView } from "./gameView";
 
 // App Router の useRouter を jsdom 用にスタブ(push/replace の呼び分けを検証する)。
 const routerMock = vi.hoisted(() => ({ push: vi.fn(), replace: vi.fn() }));
@@ -43,6 +46,49 @@ beforeEach(() => {
 /** 半荘を完走した終局(gameEnd)状態(seed 固定で決定的)。 */
 function finishedGame(seed = 2024): EngineState {
   return walkToGameEnd(seed).state;
+}
+
+function firstRoundEndGame(seed = 2024): EngineState {
+  const { journal } = walkToGameEnd(seed);
+  const firstNextRound = journal.actions.findIndex(
+    (action) => action.type === "nextRound",
+  );
+  if (firstNextRound === -1) throw new Error("roundEnd を通過しない journal");
+  return replayJournal({
+    ...journal,
+    actions: journal.actions.slice(0, firstNextRound),
+  });
+}
+
+function onlineSnapshot(state: EngineState, you: "p0" | "p1"): OnlineSnapshot {
+  return {
+    code: "ABC234",
+    version: 0,
+    you,
+    phase: state.phase,
+    view: selectView(state, you),
+    pending:
+      state.pending && (state.pending.playerId ?? "p0") === you
+        ? state.pending
+        : null,
+    roundSummary: state.lastRound,
+    players: state.players.map((player) => ({
+      id: player.id,
+      name: player.name,
+      connected: true,
+      isHost: player.id === "p0",
+    })),
+    currentTurn: state.hand ? state.hand.seating[state.hand.turn] : null,
+  };
+}
+
+function renderOnlineBoard(state: EngineState, you: "p0" | "p1") {
+  const socket = { readyState: 1, send: vi.fn() } as unknown as WebSocket;
+  return render(
+    <OnlineGameProvider socket={socket} snapshot={onlineSnapshot(state, you)}>
+      <GameBoard />
+    </OnlineGameProvider>,
+  );
 }
 
 /** 終局の1手前の局面と、gameEnd へ遷移させる最終操作を返す。 */
@@ -468,6 +514,56 @@ describe("GameBoard 終局後の出口(#206 / #207 / #277)", () => {
     ).toBeGreaterThan(0);
     // 新規半荘の開始(gameEnd → playing)でも自動遷移は発火しない。
     expect(routerMock.replace).not.toHaveBeenCalled();
+  });
+});
+
+describe("GameBoard オンライン host-only 操作(#678)", () => {
+  it("roundEnd のguestには次の局へを表示せず、ホスト待ちを案内する", () => {
+    renderOnlineBoard(firstRoundEndGame(), "p1");
+
+    expect(screen.queryAllByRole("button", { name: "次の局へ" })).toHaveLength(
+      0,
+    );
+    expect(
+      screen.getAllByText(/ホストの操作を待っています。/).length,
+    ).toBeGreaterThan(0);
+  });
+
+  it("roundEnd のhostには次の局へを有効表示する", () => {
+    renderOnlineBoard(firstRoundEndGame(), "p0");
+
+    expect(
+      screen
+        .getAllByRole("button", { name: "次の局へ" })
+        .some((button) => !button.hasAttribute("disabled")),
+    ).toBe(true);
+  });
+
+  it("gameEnd のguestには結果を見るだけを表示し、新しい半荘を操作させない", () => {
+    renderOnlineBoard(finishedGame(), "p1");
+
+    expect(
+      screen.getAllByRole("button", { name: "結果を見る" }).length,
+    ).toBeGreaterThan(0);
+    expect(
+      screen.queryAllByRole("button", { name: "新しい半荘を開始" }),
+    ).toHaveLength(0);
+    expect(
+      screen.getAllByText(/ホストの操作を待っています。/).length,
+    ).toBeGreaterThan(0);
+  });
+
+  it("gameEnd のhostには結果を見ると新しい半荘を表示する", () => {
+    renderOnlineBoard(finishedGame(), "p0");
+
+    expect(
+      screen.getAllByRole("button", { name: "結果を見る" }).length,
+    ).toBeGreaterThan(0);
+    expect(
+      screen
+        .getAllByRole("button", { name: "新しい半荘を開始" })
+        .some((button) => !button.hasAttribute("disabled")),
+    ).toBe(true);
   });
 });
 

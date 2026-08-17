@@ -12,6 +12,28 @@ import { isRedDora } from "@/domain/tiles/tile";
 import { normalizeOnlineWebSocketUrl } from "@/lib/onlineWebSocket";
 import type { OnlineSnapshot } from "./types";
 
+export interface OnlinePermissions {
+  readonly playerId: PlayerId;
+  readonly isHost: boolean;
+}
+
+/**
+ * UI 用のオンライン権限を snapshot から導出する。
+ *
+ * `you` だけでは host か判定できないため、同じ seat の player だけを参照する。
+ * server の不整合や再接続途中の不完全な snapshot は host として扱わず、UI 側から
+ * host-only 操作を送信しない(fail closed)。実際の認可は引き続き server が担う。
+ */
+export function onlinePermissions(
+  snapshot: Pick<OnlineSnapshot, "you" | "players">,
+): OnlinePermissions {
+  const self = snapshot.players.find((player) => player.id === snapshot.you);
+  return {
+    playerId: snapshot.you,
+    isHost: self?.id === "p0" && self.isHost === true,
+  };
+}
+
 interface OnlineGameProviderProps {
   readonly children: React.ReactNode;
   readonly socket: WebSocket | null;
@@ -38,6 +60,11 @@ export default function OnlineGameProvider({
   snapshot,
   onSendError,
 }: OnlineGameProviderProps) {
+  const { playerId, isHost } = useMemo(
+    () => onlinePermissions(snapshot),
+    [snapshot],
+  );
+
   const sendAction = useCallback(
     (action: GameAction) => {
       if (socket?.readyState !== WebSocket.OPEN) {
@@ -58,39 +85,37 @@ export default function OnlineGameProvider({
   );
 
   const sendPlayerAction = useCallback(
-    (action: GameAction, playerId: PlayerId) => {
+    (action: GameAction, requestedPlayerId: PlayerId) => {
       // playerId は表示上の自席とサーバーが割り当てた席を一致させるために保持する。
       // 実際の認可はルームの再接続トークンを持つRailway側が行う。
-      if (playerId !== snapshot.you) return;
+      if (requestedPlayerId !== playerId) return;
       sendAction(action);
     },
-    [sendAction, snapshot.you],
+    [sendAction, playerId],
   );
 
   const controls = useMemo<GameContextValue["controls"]>(
     () => ({
       discard: (tile) =>
-        sendPlayerAction(
-          { type: "discard", tile: wireTile(tile) },
-          snapshot.you,
-        ),
-      tsumogiri: () => sendPlayerAction({ type: "tsumogiri" }, snapshot.you),
+        sendPlayerAction({ type: "discard", tile: wireTile(tile) }, playerId),
+      tsumogiri: () => sendPlayerAction({ type: "tsumogiri" }, playerId),
       riichi: (tile) =>
-        sendPlayerAction(
-          { type: "riichi", tile: wireTile(tile) },
-          snapshot.you,
-        ),
-      tsumo: () => sendPlayerAction({ type: "tsumo" }, snapshot.you),
-      ron: () => sendPlayerAction({ type: "ron" }, snapshot.you),
-      pon: () => sendPlayerAction({ type: "pon" }, snapshot.you),
-      kan: () => sendPlayerAction({ type: "kan" }, snapshot.you),
+        sendPlayerAction({ type: "riichi", tile: wireTile(tile) }, playerId),
+      tsumo: () => sendPlayerAction({ type: "tsumo" }, playerId),
+      ron: () => sendPlayerAction({ type: "ron" }, playerId),
+      pon: () => sendPlayerAction({ type: "pon" }, playerId),
+      kan: () => sendPlayerAction({ type: "kan" }, playerId),
       ankan: (tile) =>
-        sendPlayerAction({ type: "ankan", tile: wireTile(tile) }, snapshot.you),
+        sendPlayerAction({ type: "ankan", tile: wireTile(tile) }, playerId),
       kakan: (tile) =>
-        sendPlayerAction({ type: "kakan", tile: wireTile(tile) }, snapshot.you),
-      passRon: () => sendPlayerAction({ type: "passRon" }, snapshot.you),
-      nextRound: () => sendPlayerAction({ type: "nextRound" }, snapshot.you),
+        sendPlayerAction({ type: "kakan", tile: wireTile(tile) }, playerId),
+      passRon: () => sendPlayerAction({ type: "passRon" }, playerId),
+      nextRound: () => {
+        if (!isHost) return;
+        sendPlayerAction({ type: "nextRound" }, playerId);
+      },
       newGame: () => {
+        if (!isHost) return;
         if (socket?.readyState !== WebSocket.OPEN) {
           onSendError?.(
             "オンラインサーバーとの接続が切れています。再接続を待っています。",
@@ -100,11 +125,13 @@ export default function OnlineGameProvider({
         socket.send(JSON.stringify({ type: "newGame" }));
       },
     }),
-    [onSendError, sendPlayerAction, snapshot.you, socket],
+    [isHost, onSendError, playerId, sendPlayerAction, socket],
   );
 
   const value = useMemo<GameContextValue>(
     () => ({
+      playerId,
+      isHost,
       view: snapshot.view,
       phase: snapshot.phase,
       pending: snapshot.pending,
@@ -112,7 +139,7 @@ export default function OnlineGameProvider({
       historySaveStatus: "idle",
       controls,
     }),
-    [controls, snapshot],
+    [controls, isHost, playerId, snapshot],
   );
 
   return <GameContext.Provider value={value}>{children}</GameContext.Provider>;

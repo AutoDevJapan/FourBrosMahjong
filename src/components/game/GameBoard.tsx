@@ -42,6 +42,7 @@ import WinDetails from "./WinDetails";
 
 /** 外部ストア購読なしのダミー(クライアント判定にのみ使う)。 */
 const noopSubscribe = () => () => {};
+const HOST_CONTROL_WAITING_MESSAGE = "ホストの操作を待っています。";
 
 interface KitaObservation {
   readonly roundKey: string;
@@ -84,7 +85,7 @@ export default function GameBoard({
   interactionDisabled = false,
   interactionDisabledReason = "reconnecting",
 }: GameBoardProps) {
-  const { view, phase, pending, roundSummary, controls } = useGame();
+  const { view, phase, pending, roundSummary, controls, isHost } = useGame();
   const { slots, tableInfo, dora } = view;
   const router = useRouter();
   const narrowBoardDescriptionId = useId();
@@ -245,6 +246,7 @@ export default function GameBoard({
 
   const actions = useMemo<ActionItem[]>(() => {
     if (phase === "roundEnd") {
+      if (!isHost) return [];
       return [
         {
           key: "next",
@@ -258,7 +260,7 @@ export default function GameBoard({
     if (phase === "gameEnd") {
       // 終局後の /game の出口(#207): 結果確認に加えて、その場で新規半荘を開始できる。
       // `newGame` は journal を新規半荘で上書きするため、以後の /game 再訪は新しい対局になる。
-      return [
+      const items: ActionItem[] = [
         {
           key: "result",
           label: "結果を見る",
@@ -267,13 +269,16 @@ export default function GameBoard({
           requiresConnection: false,
           primary: true,
         },
-        {
+      ];
+      if (isHost) {
+        items.push({
           key: "newGame",
           label: "新しい半荘を開始",
           icon: "新",
           onClick: controls.newGame,
-        },
-      ];
+        });
+      }
+      return items;
     }
     // 他家打牌への反応(ロン / ポン / 明槓 / スルー)。
     if (pending?.kind === "humanReact") {
@@ -363,7 +368,7 @@ export default function GameBoard({
       return items;
     }
     return [];
-  }, [phase, pending, controls, router, resultHref, riichiArmed]);
+  }, [phase, pending, controls, isHost, router, resultHref, riichiArmed]);
 
   const hint = useMemo(() => {
     if (interactionDisabled) {
@@ -372,13 +377,21 @@ export default function GameBoard({
       }
       return "オンラインサーバーとの接続を待っています。再接続後に操作を再開できます。";
     }
-    if (phase === "roundEnd") return roundSummary?.label ?? "";
+    if (phase === "roundEnd") {
+      const label = roundSummary?.label ?? "";
+      return isHost
+        ? label
+        : `${label ? `${label}。` : ""}${HOST_CONTROL_WAITING_MESSAGE}`;
+    }
     if (phase === "gameEnd") {
       // 最終局の決着ラベル(流局サマリ含む)も併記する。和了決着の詳細は WinDetails が描く
       // が、流局で終わる半荘(南4流局完了・トビ流局)はこのラベルが唯一の可視サマリになる(#277)。
       // 残存供託の帰属(#282)も併記し、供託カウント0・持ち点・デルタの整合を検算可能にする。
       const label = roundSummary ? `${roundSummary.label}。` : "";
-      return `${label}${residualSticksNote(roundSummary)}半荘終了。結果を確認するか、新しい半荘を開始できます。`;
+      const nextStep = isHost
+        ? "結果を確認するか、新しい半荘を開始できます。"
+        : `結果を確認できます。${HOST_CONTROL_WAITING_MESSAGE}`;
+      return `${label}${residualSticksNote(roundSummary)}半荘終了。${nextStep}`;
     }
     if (pending?.kind === "humanReact") {
       // 槍槓応答(#208): 他家の槓宣言への横取りロン機会であることを明示する。
@@ -407,6 +420,7 @@ export default function GameBoard({
   }, [
     interactionDisabled,
     interactionDisabledReason,
+    isHost,
     phase,
     pending,
     roundSummary,
@@ -424,16 +438,21 @@ export default function GameBoard({
   }, [pending, tileFeedback.message]);
 
   const assertive = useMemo(() => {
-    if (phase === "roundEnd") return roundSummary?.label ?? "";
+    if (phase === "roundEnd") {
+      const label = roundSummary?.label ?? "";
+      return isHost
+        ? label
+        : `${label ? `${label}。` : ""}${HOST_CONTROL_WAITING_MESSAGE}`;
+    }
     if (phase === "gameEnd") {
       // 自動遷移を廃止した(#277)後は /game に留まるため、通常の局終了(「次の局へ」)と
       // 半荘終了(「結果を見る」)を読み上げで区別できるよう「半荘終了」を明示する。
       // 残存供託の帰属(#282)も読み上げに含める(視覚の hint と同一情報)。
       const label = roundSummary ? `${roundSummary.label}。` : "";
-      return `${label}${residualSticksNote(roundSummary)}半荘終了。`;
+      return `${label}${residualSticksNote(roundSummary)}半荘終了。${isHost ? "" : HOST_CONTROL_WAITING_MESSAGE}`;
     }
     return "";
-  }, [phase, roundSummary]);
+  }, [isHost, phase, roundSummary]);
 
   // `onSelect` を明示的に受け取り、全体盤面モーダル(閲覧専用)や打牌フェーズ外(#257)では
   // `handReadOnly` で自家手牌を静的 list 表示に切り替える。

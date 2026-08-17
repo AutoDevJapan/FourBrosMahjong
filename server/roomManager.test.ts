@@ -26,6 +26,27 @@ function reachGameEnd(manager: RoomManager, host: RoomSession): void {
   }
 }
 
+function reachRoundEnd(manager: RoomManager, host: RoomSession): void {
+  const { journal } = walkToGameEnd(2024);
+  const firstNextRound = journal.actions.findIndex(
+    (action) => action.type === "nextRound",
+  );
+  if (firstNextRound === -1) throw new Error("fixture should reach roundEnd");
+  host.room.state = createGame({ seed: journal.seed });
+  for (const action of journal.actions.slice(0, firstNextRound)) {
+    const result = manager.apply(
+      host.room,
+      host.player,
+      action,
+      host.room.version,
+    );
+    if (!result.ok) throw new Error(result.error);
+  }
+  if (host.room.state.phase !== "roundEnd") {
+    throw new Error("fixture should stop at roundEnd");
+  }
+}
+
 describe("online room manager", () => {
   it("normalizes names by grapheme and repairs malformed UTF-16 at the server boundary", () => {
     const withinLimit = `${"あ".repeat(MAX_PLAYER_NAME_LENGTH - 1)}😀`;
@@ -68,6 +89,29 @@ describe("online room manager", () => {
       0,
     );
     expect(stale.ok).toBe(false);
+  });
+
+  it("keeps nextRound host-only at roundEnd", () => {
+    const manager = new RoomManager();
+    const host = manager.create("ホスト");
+    reachRoundEnd(manager, host);
+    const guest = manager.join(host.room.code, "ゲスト");
+    if (!guest) throw new Error("guest should join at roundEnd");
+
+    const before = manager.snapshot(guest.room, guest.player);
+    expect(before.phase).toBe("roundEnd");
+    const result = manager.apply(
+      guest.room,
+      guest.player,
+      { type: "nextRound" },
+      before.version,
+    );
+
+    expect(result).toMatchObject({
+      ok: false,
+      error: "次の局へ進められるのはホストだけです。",
+    });
+    expect(manager.snapshot(guest.room, guest.player)).toEqual(before);
   });
 
   it("keeps reconnect tokens private and limits a room to four seats", () => {

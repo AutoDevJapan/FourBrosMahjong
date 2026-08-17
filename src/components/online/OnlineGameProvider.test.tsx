@@ -4,7 +4,10 @@ import { describe, expect, it, vi } from "vitest";
 import { useGame } from "@/components/game/GameProvider";
 import { selectView } from "@/components/game/gameView";
 import { createGame } from "@/domain/game/engine";
-import OnlineGameProvider, { onlineSocketUrl } from "./OnlineGameProvider";
+import OnlineGameProvider, {
+  onlinePermissions,
+  onlineSocketUrl,
+} from "./OnlineGameProvider";
 import type { OnlineSnapshot } from "./types";
 
 function ActionProbe() {
@@ -16,6 +19,22 @@ function ActionProbe() {
     >
       打牌
     </button>
+  );
+}
+
+function PermissionProbe() {
+  const { controls, isHost, playerId } = useGame();
+  return (
+    <>
+      <output data-testid="player-id">{playerId}</output>
+      <output data-testid="is-host">{String(isHost)}</output>
+      <button type="button" onClick={controls.nextRound}>
+        次の局へ
+      </button>
+      <button type="button" onClick={controls.newGame}>
+        新しい半荘を開始
+      </button>
+    </>
   );
 }
 
@@ -38,6 +57,47 @@ function snapshotFixture(): OnlineSnapshot {
 }
 
 describe("OnlineGameProvider", () => {
+  it("同じseatのhost flagだけを信頼し、不完全なsnapshotはguestとして扱う", () => {
+    expect(
+      onlinePermissions({
+        you: "p0",
+        players: [{ id: "p0", name: "ホスト", connected: true, isHost: true }],
+      }),
+    ).toEqual({ playerId: "p0", isHost: true });
+    expect(
+      onlinePermissions({
+        you: "p1",
+        players: [{ id: "p1", name: "ゲスト", connected: true, isHost: true }],
+      }),
+    ).toEqual({ playerId: "p1", isHost: false });
+    expect(
+      onlinePermissions({
+        you: "p1",
+        players: [{ id: "p0", name: "ホスト", connected: true, isHost: true }],
+      }),
+    ).toEqual({ playerId: "p1", isHost: false });
+  });
+
+  it("公開したyou/isHostをcontextへ渡し、guestのhost-only actionを送信しない", async () => {
+    const send = vi.fn();
+    const socket = { readyState: 1, send } as unknown as WebSocket;
+    const snapshot = { ...snapshotFixture(), you: "p1" as const };
+    render(
+      <OnlineGameProvider socket={socket} snapshot={snapshot}>
+        <PermissionProbe />
+      </OnlineGameProvider>,
+    );
+
+    expect(screen.getByTestId("player-id")).toHaveTextContent("p1");
+    expect(screen.getByTestId("is-host")).toHaveTextContent("false");
+
+    await userEvent.click(screen.getByRole("button", { name: "次の局へ" }));
+    await userEvent.click(
+      screen.getByRole("button", { name: "新しい半荘を開始" }),
+    );
+    expect(send).not.toHaveBeenCalled();
+  });
+
   it("uses the shared safe normalizer for configured WebSocket URLs", () => {
     vi.stubEnv(
       "NEXT_PUBLIC_ONLINE_WS_URL",
