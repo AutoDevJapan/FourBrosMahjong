@@ -5,6 +5,7 @@ import {
   type RefObject,
   useCallback,
   useEffect,
+  useLayoutEffect,
   useRef,
   useState,
 } from "react";
@@ -231,6 +232,16 @@ interface ConnectionFeedbackProps {
   readonly onRetry: (restoreFocus: boolean) => void;
 }
 
+type TransitionFocusTarget =
+  | "connection-feedback"
+  | "game-heading"
+  | "lobby-heading";
+
+interface PendingTransitionFocus {
+  readonly origin: Element | null;
+  readonly target: TransitionFocusTarget;
+}
+
 function ConnectionFeedback({
   status,
   error,
@@ -394,6 +405,8 @@ export default function OnlineLobby() {
   const restoreOnlineGameFocusRef = useRef(false);
   const onlineResultOpenRef = useRef(false);
   const socketRef = useRef<WebSocket | null>(null);
+  const snapshotRef = useRef<OnlineSnapshot | null>(null);
+  const statusRef = useRef<ConnectionStatus>("idle");
   const credentialsRef = useRef<OnlineCredentials | null>(null);
   const reconnectAttemptRef = useRef(0);
   const composingNameRef = useRef(false);
@@ -404,6 +417,9 @@ export default function OnlineLobby() {
   const [activeRequest, setActiveRequest] = useState<JoinRequest | null>(null);
   const pendingSessionSocketRef = useRef<WebSocket | null>(null);
   const feedbackRef = useRef<HTMLDivElement>(null);
+  const gameHeadingRef = useRef<HTMLHeadingElement>(null);
+  const lobbyHeadingRef = useRef<HTMLHeadingElement>(null);
+  const pendingTransitionFocusRef = useRef<PendingTransitionFocus | null>(null);
   const focusAfterRetryRef = useRef(false);
   const retryAfterUntilRef = useRef(0);
   const retryAfterTimerRef = useRef<number | null>(null);
@@ -422,6 +438,7 @@ export default function OnlineLobby() {
 
   const applyOnlineSnapshot = useCallback(
     (nextSnapshot: OnlineSnapshot) => {
+      snapshotRef.current = nextSnapshot;
       setSnapshot(nextSnapshot);
       setRoomCode(nextSnapshot.code);
       if (
@@ -437,12 +454,36 @@ export default function OnlineLobby() {
     [setOnlineResultOpenState],
   );
 
-  useEffect(() => {
-    if (!focusAfterRetryRef.current) return;
-    feedbackRef.current?.focus({ preventScroll: true });
-    if (status === "connected" || status === "failed") {
-      focusAfterRetryRef.current = false;
-    }
+  useLayoutEffect(() => {
+    statusRef.current = status;
+  }, [status]);
+
+  const requestTransitionFocus = useCallback(
+    (target: TransitionFocusTarget) => {
+      // Read the focused node before the state update can unmount its subtree.
+      // The node is compared after commit so an already-focused, persistent
+      // feedback element is not focused again on every connection update.
+      pendingTransitionFocusRef.current = {
+        origin: document.activeElement,
+        target,
+      };
+    },
+    [],
+  );
+
+  useLayoutEffect(() => {
+    const pending = pendingTransitionFocusRef.current;
+    if (!pending) return;
+    pendingTransitionFocusRef.current = null;
+
+    const target =
+      pending.target === "connection-feedback"
+        ? feedbackRef.current
+        : pending.target === "game-heading"
+          ? gameHeadingRef.current
+          : lobbyHeadingRef.current;
+    if (!target || target === pending.origin) return;
+    target.focus({ preventScroll: true });
   }, [snapshot, status]);
 
   useEffect(() => {
@@ -671,6 +712,19 @@ export default function OnlineLobby() {
           const message = messageOf(raw);
           if (!message) return;
           if (message.type === "session") {
+            const wasInGame = snapshotRef.current !== null;
+            if (wasInGame) {
+              if (statusRef.current === "reconnecting") {
+                requestTransitionFocus("connection-feedback");
+              }
+            } else {
+              requestTransitionFocus(
+                focusAfterRetryRef.current
+                  ? "connection-feedback"
+                  : "game-heading",
+              );
+            }
+            focusAfterRetryRef.current = false;
             pendingSessionSocketRef.current = null;
             reconnectAttemptRef.current = 0;
             const nextCredentials = {
@@ -758,6 +812,7 @@ export default function OnlineLobby() {
       applyOnlineSnapshot,
       failHandshake,
       handleTransportFailure,
+      requestTransitionFocus,
       scheduleReconnect,
     ],
   );
@@ -824,6 +879,7 @@ export default function OnlineLobby() {
     focusAfterRetryRef.current = false;
     clearRetryCooldown();
     serverFailureRef.current = null;
+    pendingTransitionFocusRef.current = null;
     if (request.type !== "resume") {
       credentialsRef.current = null;
       setCredentials(null);
@@ -837,14 +893,18 @@ export default function OnlineLobby() {
     if (retryAfterMs > 0) return;
     manualCloseRef.current = false;
     reconnectAttemptRef.current = 0;
-    focusAfterRetryRef.current = restoreFocus;
     clearRetryCooldown();
     serverFailureRef.current = null;
     const current = credentialsRef.current;
     const request = current
       ? ({ type: "resume", ...current } satisfies JoinRequest)
       : activeRequest;
-    if (!request) return;
+    if (!request) {
+      focusAfterRetryRef.current = false;
+      return;
+    }
+    focusAfterRetryRef.current = restoreFocus;
+    if (restoreFocus) requestTransitionFocus("connection-feedback");
     connect(request, true);
   };
 
@@ -864,10 +924,12 @@ export default function OnlineLobby() {
     pendingSessionSocketRef.current = null;
     setCredentials(null);
     saveCredentials(null);
+    requestTransitionFocus("lobby-heading");
     const current = socketRef.current;
     socketRef.current = null;
     current?.close();
     setSocket(null);
+    snapshotRef.current = null;
     setSnapshot(null);
     restoreOnlineResultFocusRef.current = false;
     restoreOnlineGameFocusRef.current = false;
@@ -907,7 +969,12 @@ export default function OnlineLobby() {
           className="flex flex-col gap-4"
           aria-label="オンライン対局"
         >
-          <h1 id="online-game-heading" className="text-2xl font-bold">
+          <h1
+            id="online-game-heading"
+            ref={gameHeadingRef}
+            tabIndex={-1}
+            className="text-2xl font-bold"
+          >
             オンライン対戦
           </h1>
           <header className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-control-border p-4">
@@ -1038,7 +1105,13 @@ export default function OnlineLobby() {
             <p className="text-xs tracking-widest text-foreground/60 uppercase">
               FourBrosMahjong
             </p>
-            <h1 className="mt-2 text-2xl font-bold">オンライン対戦</h1>
+            <h1
+              ref={lobbyHeadingRef}
+              tabIndex={-1}
+              className="mt-2 text-2xl font-bold"
+            >
+              オンライン対戦
+            </h1>
             <p className="mt-2 text-sm/6 text-foreground/70">
               ルームコードを共有して、同じ半荘を別端末からプレイできます。空席はAIが担当します。
             </p>

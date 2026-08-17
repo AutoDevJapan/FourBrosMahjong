@@ -241,6 +241,99 @@ describe("OnlineLobby (#605)", () => {
   });
 });
 
+describe("OnlineLobby focus lifecycle (#682)", () => {
+  function startRoom(): void {
+    fireEvent.change(screen.getByLabelText("表示名"), {
+      target: { value: "たろう" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "新しいルームを作る" }));
+  }
+
+  function completeSession(): void {
+    act(() => {
+      sockets[0]?.open();
+      sockets[0]?.message({
+        type: "session",
+        token: "t".repeat(24),
+        snapshot: snapshotFixture(),
+      });
+    });
+  }
+
+  it("moves focus to the online game heading once after session success", () => {
+    const focus = vi.spyOn(HTMLElement.prototype, "focus");
+    render(<OnlineLobby />);
+    startRoom();
+
+    const focusCallsBeforeSession = focus.mock.calls.length;
+    completeSession();
+
+    expect(
+      screen.getByRole("heading", { level: 1, name: "オンライン対戦" }),
+    ).toHaveFocus();
+    expect(
+      focus.mock.calls
+        .slice(focusCallsBeforeSession)
+        .filter(([options]) => options?.preventScroll === true),
+    ).toHaveLength(1);
+  });
+
+  it("moves focus to the lobby heading once after leaving the online game", () => {
+    const focus = vi.spyOn(HTMLElement.prototype, "focus");
+    render(<OnlineLobby />);
+    startRoom();
+    completeSession();
+
+    const leaveButton = screen.getByRole("button", { name: "退出" });
+    leaveButton.focus();
+    const focusCallsBeforeLeave = focus.mock.calls.length;
+    fireEvent.click(leaveButton);
+
+    expect(
+      screen.getByRole("heading", { level: 1, name: "オンライン対戦" }),
+    ).toHaveFocus();
+    expect(
+      focus.mock.calls
+        .slice(focusCallsBeforeLeave)
+        .filter(([options]) => options?.preventScroll === true),
+    ).toHaveLength(1);
+  });
+
+  it("moves focus to connection feedback once after automatic reconnect succeeds", () => {
+    vi.useFakeTimers();
+    const focus = vi.spyOn(HTMLElement.prototype, "focus");
+    render(<OnlineLobby />);
+    startRoom();
+    completeSession();
+
+    act(() => sockets[0]?.close());
+    expect(
+      document.querySelector('[data-connection-status="reconnecting"]'),
+    ).not.toBeNull();
+    act(() => vi.advanceTimersByTime(500));
+    expect(sockets).toHaveLength(2);
+
+    const focusCallsBeforeReconnect = focus.mock.calls.length;
+    act(() => {
+      sockets[1]?.open();
+      sockets[1]?.message({
+        type: "session",
+        token: "t".repeat(24),
+        snapshot: snapshotFixture(),
+      });
+    });
+
+    expect(
+      document.querySelector('[data-connection-status="connected"]'),
+    ).toHaveFocus();
+    expect(
+      focus.mock.calls
+        .slice(focusCallsBeforeReconnect)
+        .filter(([options]) => options?.preventScroll === true),
+    ).toHaveLength(1);
+  });
+});
+
 describe("OnlineLobby のキーボード送信", () => {
   it("表示名入力でEnterを押すと新しいルームを作る", async () => {
     const user = userEvent.setup();
@@ -697,6 +790,7 @@ describe("OnlineLobby connection recovery", () => {
 
   it("shows a retry action after a failed connection and keeps the form values", async () => {
     const user = userEvent.setup();
+    const focus = vi.spyOn(HTMLElement.prototype, "focus");
     render(<OnlineLobby />);
 
     await user.type(screen.getByLabelText("表示名"), "たろう");
@@ -725,6 +819,7 @@ describe("OnlineLobby connection recovery", () => {
     expect(screen.getByLabelText("表示名")).toHaveValue("たろう");
     expect(screen.getByLabelText("ルームコード")).toHaveValue("ABC234");
 
+    const focusCallsBeforeRetry = focus.mock.calls.length;
     await user.click(screen.getByRole("button", { name: "再試行" }));
 
     expect(
@@ -734,6 +829,11 @@ describe("OnlineLobby connection recovery", () => {
       document.querySelector('[data-connection-status="reconnecting"]'),
     ).toHaveFocus();
     expect(sockets).toHaveLength(2);
+    expect(
+      focus.mock.calls
+        .slice(focusCallsBeforeRetry)
+        .filter(([options]) => options?.preventScroll === true),
+    ).toHaveLength(1);
 
     act(() => sockets[1]?.open());
     expect(JSON.parse(sockets[1]?.sent[0] ?? "{}")).toEqual({
@@ -742,6 +842,7 @@ describe("OnlineLobby connection recovery", () => {
       name: "たろう",
     });
 
+    const focusCallsBeforeSession = focus.mock.calls.length;
     act(() =>
       sockets[1]?.message({
         type: "session",
@@ -761,6 +862,11 @@ describe("OnlineLobby connection recovery", () => {
     expect(
       document.querySelector('[data-connection-status="connected"]'),
     ).toHaveFocus();
+    expect(
+      focus.mock.calls
+        .slice(focusCallsBeforeSession)
+        .filter(([options]) => options?.preventScroll === true),
+    ).toHaveLength(1);
     expect(
       screen.getAllByRole("heading", {
         level: 1,
