@@ -96,6 +96,10 @@ export interface RoomSession {
   readonly player: RoomPlayer;
 }
 
+function isCurrentPlayer(room: Room, player: RoomPlayer): boolean {
+  return room.players.get(player.id) === player && player.connected;
+}
+
 function now(): number {
   return Date.now();
 }
@@ -404,12 +408,14 @@ export class RoomManager {
   }
 
   touch(room: Room, player: RoomPlayer): void {
+    if (!isCurrentPlayer(room, player)) return;
     player.connected = true;
     player.lastSeenAt = now();
     room.lastActivityAt = now();
   }
 
   disconnect(room: Room, player: RoomPlayer): void {
+    if (!isCurrentPlayer(room, player)) return;
     player.connected = false;
     player.lastSeenAt = now();
     if (room.hostId === player.id) {
@@ -423,6 +429,7 @@ export class RoomManager {
 
   /** 明示退出。旧tokenを失効させ、退出席を現局のhuman rosterから解放する。 */
   leave(room: Room, player: RoomPlayer): void {
+    if (!isCurrentPlayer(room, player)) return;
     player.connected = false;
     player.resumable = false;
     player.lastSeenAt = now();
@@ -445,6 +452,9 @@ export class RoomManager {
     action: GameAction,
     expectedVersion: number,
   ): RoomMutation {
+    if (!isCurrentPlayer(room, player)) {
+      return { ok: false, error: "ルーム接続が無効です。", room };
+    }
     room.lastActivityAt = now();
     if (expectedVersion !== room.version) {
       return {
@@ -482,6 +492,9 @@ export class RoomManager {
   }
 
   newGame(room: Room, player: RoomPlayer): RoomMutation {
+    if (!isCurrentPlayer(room, player)) {
+      return { ok: false, error: "ルーム接続が無効です。", room };
+    }
     if (player.id !== room.hostId)
       return {
         ok: false,

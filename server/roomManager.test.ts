@@ -140,6 +140,14 @@ describe("online room manager", () => {
     expect(rejoined?.player.id).toBe("p1");
     expect(manager.resume(host.room.code, guest.player.token)).toBeNull();
     expect(manager.snapshot(host.room, host.player).hostId).toBe("p0");
+    expect(
+      manager.apply(
+        host.room,
+        guest.player,
+        { type: "passRon" },
+        host.room.version,
+      ),
+    ).toMatchObject({ ok: false, error: "ルーム接続が無効です。" });
 
     // A repeated explicit leave/join cycle reuses the released seat instead
     // of consuming p2 and p3 until the room becomes falsely full.
