@@ -77,6 +77,27 @@ test.describe("オンラインロビーの参加条件", () => {
     await expect(joinButton).toBeFocused();
   });
 
+  test("生成されないI/O/0/1を参加前に具体的に拒否する", async ({ page }) => {
+    await installWebSocketStub(page);
+    const nameInput = page.getByRole("textbox", { name: "表示名" });
+    const roomCodeInput = page.getByRole("textbox", { name: "ルームコード" });
+    const joinButton = page.getByRole("button", { name: "参加する" });
+
+    await nameInput.fill("たろう");
+    await roomCodeInput.fill("abci01");
+    await expect(roomCodeInput).toHaveValue("ABCI01");
+    await expect(joinButton).toBeDisabled();
+    await expect(roomCodeInput).toHaveAccessibleDescription(/I\/O\/0\/1/);
+    await roomCodeInput.press("Enter");
+    expect(
+      await page.evaluate(
+        () =>
+          (window as unknown as OnlineTestWindow).__fourBrosOnlineSockets
+            .length,
+      ),
+    ).toBe(0);
+  });
+
   test("初期ロビーの入力条件にaxe違反がない", async ({ page }) => {
     const results = await new AxeBuilder({ page }).include("main").analyze();
     expect(results.violations).toEqual([]);

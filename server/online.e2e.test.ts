@@ -8,6 +8,10 @@ import type {
   OnlineServerMessage,
   OnlineSnapshot,
 } from "../src/components/online/types";
+import {
+  ROOM_CODE_FORMAT_MESSAGE,
+  ROOM_CODE_PATTERN,
+} from "../src/lib/roomCode";
 import { ABUSE_LIMITS } from "./abuseControl";
 import { ONLINE_HANDSHAKE_TIMEOUT_MS } from "./handshake";
 
@@ -512,6 +516,20 @@ describe("online multiplayer local E2E (#629)", () => {
     if (server !== undefined) await stopLocalOnlineServer(server);
   });
 
+  it("rejects omitted room-code characters before room lookup", async () => {
+    if (server === undefined)
+      throw new Error("テストサーバーが起動していません。");
+    const client = new OnlineTestClient(server.url, TEST_ORIGIN);
+    clients.push(client);
+    await client.open();
+
+    client.send({ type: "join", code: "abci01", name: "ゲスト" });
+    await expect(client.waitForError()).resolves.toMatchObject({
+      message: ROOM_CODE_FORMAT_MESSAGE,
+    });
+    await client.close();
+  });
+
   it(
     "2クライアントで作成・参加・開始・同期操作・結果・resume/reconnectを完走する",
     async () => {
@@ -525,7 +543,7 @@ describe("online multiplayer local E2E (#629)", () => {
       host.send({ type: "create", name: "ホスト" });
       const hostSession = await host.waitForSession();
       const code = hostSession.snapshot.code;
-      expect(code).toMatch(/^[A-Z2-9]{6}$/);
+      expect(ROOM_CODE_PATTERN.test(code)).toBe(true);
       expect(hostSession.snapshot.phase).toBe("playing");
       expect(hostSession.snapshot.you).toBe("p0");
 

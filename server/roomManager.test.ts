@@ -1,4 +1,5 @@
-import { describe, expect, it } from "vitest";
+import { randomBytes } from "node:crypto";
+import { describe, expect, it, vi } from "vitest";
 import { walkToGameEnd } from "../src/components/game/finishedGameFixture";
 import { createGame } from "../src/domain/game/engine";
 import { MAX_PLAYER_NAME_LENGTH } from "../src/lib/playerName";
@@ -8,6 +9,11 @@ import {
   RoomManager,
   type RoomSession,
 } from "./roomManager";
+
+vi.mock("node:crypto", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("node:crypto")>();
+  return { ...actual, randomBytes: vi.fn(actual.randomBytes) };
+});
 
 function reachGameEnd(manager: RoomManager, host: RoomSession): void {
   const { journal } = walkToGameEnd(2024);
@@ -342,6 +348,12 @@ describe("online room manager", () => {
     reachGameEnd(manager, host);
 
     manager.disconnect(guest.room, guest.player);
+    // `newGame` uses a crypto seed in production. Fix only that next seed so
+    // this fixture always starts the host at a discard decision; the test
+    // still exercises the real RoomManager path and never hides a bad state.
+    const seed = Buffer.alloc(4);
+    seed.writeUInt32BE(0);
+    vi.mocked(randomBytes).mockImplementationOnce(() => seed);
     const started = manager.newGame(host.room, host.player);
     expect(started.ok).toBe(true);
     expect(host.room.state.humanPlayerIds).toEqual(["p0"]);

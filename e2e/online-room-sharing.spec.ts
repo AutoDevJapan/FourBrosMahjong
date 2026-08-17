@@ -26,4 +26,14 @@ test.describe("オンラインルーム共有リンク (#605)", () => {
       .analyze();
     expect(results.violations).toEqual([]);
   });
+
+  test("生成されないI/O/0/1を共有URLから有効なコードとして引き継がない", async ({
+    page,
+  }) => {
+    await page.goto("/online?room=abci01");
+
+    const roomCodeInput = page.getByLabel("ルームコード");
+    await expect(roomCodeInput).toHaveValue("");
+    await expect(page.getByRole("button", { name: "参加する" })).toBeDisabled();
+  });
 });

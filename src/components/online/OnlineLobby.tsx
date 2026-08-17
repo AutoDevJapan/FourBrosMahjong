@@ -20,6 +20,12 @@ import {
   MAX_PLAYER_NAME_LENGTH,
   sanitizePlayerName,
 } from "@/lib/playerName";
+import {
+  normalizeRoomCode,
+  ROOM_CODE_CHARACTER_PATTERN,
+  ROOM_CODE_FORMAT_MESSAGE,
+  ROOM_CODE_LENGTH,
+} from "@/lib/roomCode";
 import OnlineGameProvider, { onlineSocketUrl } from "./OnlineGameProvider";
 import RoomShareControls from "./RoomShareControls";
 import { readSharedRoomCode, roomShareUrl } from "./roomSharing";
@@ -34,11 +40,6 @@ import type {
 } from "./types";
 
 const ONLINE_SESSION_KEY = "four-bros-mahjong.online.session.v1";
-const ROOM_CODE_LENGTH = 6;
-const ROOM_CODE_PATTERN = /^[A-Z2-9]{6}$/;
-const ROOM_CODE_CHARACTER_PATTERN = /^[A-Z2-9]*$/;
-const ROOM_CODE_FORMAT_MESSAGE =
-  "ルームコードは英大文字と2〜9の数字を使った6文字で入力してください。";
 const NAME_INPUT_ID = "online-lobby-name";
 const ROOM_CODE_INPUT_ID = "online-lobby-room-code";
 const NAME_REQUIREMENT_ID = "online-lobby-name-requirement";
@@ -71,15 +72,15 @@ function readCredentials(): OnlineCredentials | null {
     const raw = window.sessionStorage.getItem(ONLINE_SESSION_KEY);
     if (!raw) return null;
     const parsed = JSON.parse(raw) as Partial<OnlineCredentials>;
+    const code = normalizeRoomCode(parsed.code);
     if (
-      typeof parsed.code !== "string" ||
+      code === null ||
       typeof parsed.token !== "string" ||
-      parsed.code.length !== 6 ||
       parsed.token.length < 16
     ) {
       return null;
     }
-    return { code: parsed.code, token: parsed.token };
+    return { code, token: parsed.token };
   } catch {
     return null;
   }
@@ -156,7 +157,7 @@ function nameRequirementMessage(name: string): string {
 }
 
 function roomCodeRequirementMessage(roomCode: string): string {
-  const normalized = roomCode.trim();
+  const normalized = roomCode.trim().toUpperCase();
   if (normalized.length === 0) {
     return "参加には6文字のルームコードが必要です。ルームコードを入力してください。";
   }
@@ -172,7 +173,7 @@ function roomCodeRequirementMessage(roomCode: string): string {
       : ROOM_CODE_FORMAT_MESSAGE;
   }
   if (lengthMessage) return lengthMessage;
-  if (!ROOM_CODE_PATTERN.test(normalized)) {
+  if (normalizeRoomCode(roomCode) === null) {
     return ROOM_CODE_FORMAT_MESSAGE;
   }
   return "ルームコードは6文字入力されています。";
@@ -188,10 +189,7 @@ function joinRequirementMessage(
     requirements.push("表示名を入力してください。");
   }
 
-  const normalizedRoomCode = roomCode.trim();
-  if (normalizedRoomCode.length < ROOM_CODE_LENGTH) {
-    requirements.push(roomCodeRequirementMessage(roomCode));
-  } else if (!ROOM_CODE_PATTERN.test(normalizedRoomCode)) {
+  if (normalizeRoomCode(roomCode) === null) {
     requirements.push(roomCodeRequirementMessage(roomCode));
   }
 
@@ -1120,9 +1118,8 @@ export default function OnlineLobby() {
     normalizedName !== null &&
     status !== "connecting" &&
     status !== "reconnecting";
-  const normalizedRoomCode = roomCode.trim();
-  const joinDisabled =
-    !canSubmit || !ROOM_CODE_PATTERN.test(normalizedRoomCode);
+  const normalizedRoomCode = normalizeRoomCode(roomCode);
+  const joinDisabled = !canSubmit || normalizedRoomCode === null;
   const nameRequirement = nameRequirementMessage(name);
   const roomCodeRequirement = roomCodeRequirementMessage(roomCode);
   const joinRequirement = joinRequirementMessage(name, roomCode, status);
@@ -1131,7 +1128,7 @@ export default function OnlineLobby() {
     start({ type: "create", name: normalizedName ?? "" });
   };
   const joinRoom = () => {
-    if (joinDisabled) return;
+    if (joinDisabled || normalizedRoomCode === null) return;
     start({
       type: "join",
       code: normalizedRoomCode,
@@ -1270,10 +1267,7 @@ export default function OnlineLobby() {
                   autoCapitalize="characters"
                   placeholder="ABC234"
                   required
-                  aria-invalid={
-                    normalizedRoomCode.length !== ROOM_CODE_LENGTH ||
-                    !ROOM_CODE_PATTERN.test(normalizedRoomCode)
-                  }
+                  aria-invalid={normalizedRoomCode === null}
                   aria-describedby={ROOM_CODE_REQUIREMENT_ID}
                   className="min-h-11 rounded-lg border border-control-border bg-transparent px-3 py-2 font-mono font-normal tracking-widest"
                 />
