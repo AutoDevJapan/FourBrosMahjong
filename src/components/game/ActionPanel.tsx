@@ -8,6 +8,8 @@
  * 応じて呼び出し側が構築し、本コンポーネントは受け取ったアクション定義を描画するだけの純表示に徹する
  * (スペック6 6.8: 判定は engine 側)。
  */
+import type { RefObject } from "react";
+
 export interface ActionItem {
   /** 一意キー。 */
   readonly key: string;
@@ -19,6 +21,8 @@ export interface ActionItem {
   readonly onClick: () => void;
   /** 選択不能(局面上まだ確定できない)。 */
   readonly disabled?: boolean;
+  /** この操作を結果画面など別ビューから開いたときのフォーカス復帰先。 */
+  readonly buttonRef?: RefObject<HTMLButtonElement | null>;
   /** 接続待ちでも実行できるローカル操作(例: 結果画面への遷移)。 */
   readonly requiresConnection?: boolean;
   /** 強調(主要操作)。 */
@@ -55,13 +59,16 @@ export default function ActionPanel({
               icon,
               onClick,
               disabled: actionDisabled,
+              buttonRef,
               requiresConnection = true,
               primary,
             }) => (
               <button
                 key={key}
                 type="button"
+                data-action-key={key}
                 disabled={actionDisabled || (disabled && requiresConnection)}
+                ref={buttonRef}
                 onClick={(event) => {
                   if (event.detail > 1) return;
                   onClick();

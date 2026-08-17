@@ -9,6 +9,7 @@ import {
   useState,
 } from "react";
 import GameBoard from "@/components/game/GameBoard";
+import { useGame } from "@/components/game/GameProvider";
 import type { GameResultView } from "@/components/game/types";
 import ScreenNavigation from "@/components/layout/ScreenNavigation";
 import RankingTable from "@/components/result/RankingTable";
@@ -285,15 +286,29 @@ function ConnectionFeedback({
 interface OnlineResultViewProps {
   readonly result: GameResultView;
   readonly onBack: () => void;
+  readonly canStartNewGame: boolean;
+  readonly newGameDisabled: boolean;
 }
 
-function OnlineResultView({ result, onBack }: OnlineResultViewProps) {
+function OnlineResultView({
+  result,
+  onBack,
+  canStartNewGame,
+  newGameDisabled,
+}: OnlineResultViewProps) {
+  const { controls } = useGame();
   const headingRef = useRef<HTMLHeadingElement>(null);
   const orderedPlayers = [...result.players].sort((a, b) => a.rank - b.rank);
 
   useEffect(() => {
     headingRef.current?.focus({ preventScroll: true });
   }, []);
+
+  const newGameUnavailableMessage = !canStartNewGame
+    ? "新しい半荘を開始できるのはホストだけです。"
+    : newGameDisabled
+      ? "接続が復旧すると新しい半荘を開始できます。"
+      : null;
 
   return (
     <section
@@ -327,13 +342,38 @@ function OnlineResultView({ result, onBack }: OnlineResultViewProps) {
           ))}
         </div>
       </section>
-      <button
-        type="button"
-        onClick={onBack}
-        className="inline-flex min-h-11 self-start items-center rounded-full border border-control-border px-4 py-2 text-sm hover:bg-foreground/5"
-      >
-        対局画面へ戻る
-      </button>
+      <div className="flex flex-wrap items-start gap-3">
+        <button
+          type="button"
+          onClick={onBack}
+          className="inline-flex min-h-11 items-center rounded-full border border-control-border px-4 py-2 text-sm hover:bg-foreground/5"
+        >
+          対局画面へ戻る
+        </button>
+        <div className="flex flex-col items-start gap-1">
+          <button
+            type="button"
+            disabled={!canStartNewGame || newGameDisabled}
+            onClick={controls.newGame}
+            aria-describedby={
+              newGameUnavailableMessage
+                ? "online-result-new-game-requirement"
+                : undefined
+            }
+            className="inline-flex min-h-11 items-center rounded-lg border border-control-border px-4 py-2 text-sm font-medium hover:bg-foreground/5 disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            新しい半荘を開始
+          </button>
+          {newGameUnavailableMessage ? (
+            <p
+              id="online-result-new-game-requirement"
+              className="max-w-sm text-xs text-foreground/70"
+            >
+              {newGameUnavailableMessage}
+            </p>
+          ) : null}
+        </div>
+      </div>
     </section>
   );
 }
@@ -350,6 +390,9 @@ export default function OnlineLobby() {
   const [error, setError] = useState("");
   const [retryAfterMs, setRetryAfterMs] = useState(0);
   const [onlineResultOpen, setOnlineResultOpen] = useState(false);
+  const onlineResultButtonRef = useRef<HTMLButtonElement>(null);
+  const onlineGameFallbackRef = useRef<HTMLElement>(null);
+  const restoreOnlineResultFocusRef = useRef(false);
   const socketRef = useRef<WebSocket | null>(null);
   const credentialsRef = useRef<OnlineCredentials | null>(null);
   const reconnectAttemptRef = useRef(0);
@@ -372,6 +415,15 @@ export default function OnlineLobby() {
     (request: JoinRequest, reconnecting?: boolean) => void
   >(() => undefined);
 
+  const applyOnlineSnapshot = useCallback((nextSnapshot: OnlineSnapshot) => {
+    setSnapshot(nextSnapshot);
+    setRoomCode(nextSnapshot.code);
+    if (nextSnapshot.phase !== "gameEnd" || nextSnapshot.view.result === null) {
+      restoreOnlineResultFocusRef.current = false;
+      setOnlineResultOpen(false);
+    }
+  }, []);
+
   useEffect(() => {
     if (!focusAfterRetryRef.current) return;
     feedbackRef.current?.focus({ preventScroll: true });
@@ -379,6 +431,20 @@ export default function OnlineLobby() {
       focusAfterRetryRef.current = false;
     }
   }, [snapshot, status]);
+
+  useEffect(() => {
+    if (onlineResultOpen || !restoreOnlineResultFocusRef.current) return;
+
+    const resultButton = onlineResultButtonRef.current;
+    resultButton?.focus({ preventScroll: true });
+    if (resultButton !== null && document.activeElement === resultButton) {
+      restoreOnlineResultFocusRef.current = false;
+      return;
+    }
+
+    onlineGameFallbackRef.current?.focus({ preventScroll: true });
+    restoreOnlineResultFocusRef.current = false;
+  }, [onlineResultOpen]);
 
   const clearReconnectTimer = useCallback(() => {
     if (reconnectTimerRef.current !== null) {
@@ -593,14 +659,12 @@ export default function OnlineLobby() {
             credentialsRef.current = nextCredentials;
             setCredentials(nextCredentials);
             saveCredentials(nextCredentials);
-            setRoomCode(message.snapshot.code);
-            setSnapshot(message.snapshot);
+            applyOnlineSnapshot(message.snapshot);
             setStatus("connected");
             return;
           }
           if (message.type === "snapshot") {
-            setSnapshot(message.snapshot);
-            setRoomCode(message.snapshot.code);
+            applyOnlineSnapshot(message.snapshot);
             return;
           }
           if (message.type === "error") {
@@ -670,6 +734,7 @@ export default function OnlineLobby() {
       clearReconnectTimer,
       clearRetryCooldown,
       applyRetryCooldown,
+      applyOnlineSnapshot,
       failHandshake,
       handleTransportFailure,
       scheduleReconnect,
@@ -789,6 +854,14 @@ export default function OnlineLobby() {
   };
 
   const onSendError = useCallback((message: string) => setError(message), []);
+  const openOnlineResult = useCallback(() => {
+    restoreOnlineResultFocusRef.current = false;
+    setOnlineResultOpen(true);
+  }, []);
+  const returnToOnlineGame = useCallback(() => {
+    restoreOnlineResultFocusRef.current = true;
+    setOnlineResultOpen(false);
+  }, []);
   const canRetry = Boolean(credentials || activeRequest);
   const currentTurnName = snapshot?.currentTurn
     ? snapshot.players.find((player) => player.id === snapshot.currentTurn)
@@ -797,13 +870,21 @@ export default function OnlineLobby() {
 
   if (snapshot) {
     const onlineResult = snapshot.view.result;
+    const canStartNewGame =
+      snapshot.players.find((player) => player.id === snapshot.you)?.isHost ??
+      false;
     return (
       <OnlineGameProvider
         socket={status === "connected" ? socket : null}
         snapshot={snapshot}
         onSendError={onSendError}
       >
-        <section className="flex flex-col gap-4" aria-label="オンライン対局">
+        <section
+          ref={onlineGameFallbackRef}
+          tabIndex={-1}
+          className="flex flex-col gap-4"
+          aria-label="オンライン対局"
+        >
           <h1 id="online-game-heading" className="text-2xl font-bold">
             オンライン対戦
           </h1>
@@ -864,11 +945,14 @@ export default function OnlineLobby() {
           {onlineResultOpen && onlineResult !== null ? (
             <OnlineResultView
               result={onlineResult}
-              onBack={() => setOnlineResultOpen(false)}
+              onBack={returnToOnlineGame}
+              canStartNewGame={canStartNewGame}
+              newGameDisabled={status !== "connected"}
             />
           ) : (
             <GameBoard
-              onResult={() => setOnlineResultOpen(true)}
+              onResult={openOnlineResult}
+              resultButtonRef={onlineResultButtonRef}
               interactionDisabled={status !== "connected"}
               interactionDisabledReason={
                 status === "failed"

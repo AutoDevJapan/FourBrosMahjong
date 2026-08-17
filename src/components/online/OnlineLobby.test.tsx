@@ -6,7 +6,7 @@ import {
   waitFor,
 } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { StrictMode } from "react";
+import { type RefObject, StrictMode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { walkToGameEnd } from "@/components/game/finishedGameFixture";
 import { selectView } from "@/components/game/gameView";
@@ -19,10 +19,12 @@ vi.mock("@/components/game/GameBoard", () => ({
     interactionDisabled,
     interactionDisabledReason,
     onResult,
+    resultButtonRef,
   }: {
     interactionDisabled?: boolean;
     interactionDisabledReason?: "reconnecting" | "failed";
     onResult?: () => void;
+    resultButtonRef?: RefObject<HTMLButtonElement | null>;
   }) => (
     <div
       data-testid="game-board"
@@ -31,7 +33,7 @@ vi.mock("@/components/game/GameBoard", () => ({
     >
       対局盤
       {onResult ? (
-        <button type="button" onClick={onResult}>
+        <button ref={resultButtonRef} type="button" onClick={onResult}>
           結果を見る
         </button>
       ) : null}
@@ -895,12 +897,65 @@ describe("OnlineLobby の終局結果導線", () => {
     expect(
       screen.getByRole("button", { name: "対局画面へ戻る" }),
     ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "新しい半荘を開始" }),
+    ).toBeEnabled();
     expect(screen.queryByTestId("game-board")).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "対局画面へ戻る" }));
     expect(screen.getByTestId("game-board")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "結果を見る" })).toHaveFocus();
+
+    fireEvent.click(screen.getByRole("button", { name: "結果を見る" }));
+    fireEvent.click(screen.getByRole("button", { name: "新しい半荘を開始" }));
+    expect(JSON.parse(sockets[0]?.sent.at(-1) ?? "{}")).toEqual({
+      type: "newGame",
+    });
+  });
+
+  it("新局snapshot後は結果を見るまで結果を自動表示しない", () => {
+    render(<OnlineLobby />);
+
+    fireEvent.change(screen.getByLabelText("表示名"), {
+      target: { value: "たろう" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "新しいルームを作る" }));
+
+    act(() => {
+      sockets[0]?.open();
+      sockets[0]?.message({
+        type: "session",
+        token: "t".repeat(24),
+        snapshot: finishedSnapshotFixture(),
+      });
+    });
+    fireEvent.click(screen.getByRole("button", { name: "結果を見る" }));
+
+    act(() => {
+      sockets[0]?.message({
+        type: "snapshot",
+        snapshot: snapshotFixture(),
+      });
+    });
     expect(
-      screen.getByRole("button", { name: "結果を見る" }),
+      screen.queryByRole("heading", { level: 2, name: "対局結果" }),
+    ).not.toBeInTheDocument();
+    expect(screen.getByTestId("game-board")).toBeInTheDocument();
+
+    // 新局から終局snapshotを受けても、ユーザーが「結果を見る」を押すまでは開かない。
+    act(() => {
+      sockets[0]?.message({
+        type: "snapshot",
+        snapshot: finishedSnapshotFixture(),
+      });
+    });
+    expect(
+      screen.queryByRole("heading", { level: 2, name: "対局結果" }),
+    ).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "結果を見る" }));
+    expect(
+      screen.getByRole("heading", { level: 2, name: "対局結果" }),
     ).toBeInTheDocument();
   });
 });

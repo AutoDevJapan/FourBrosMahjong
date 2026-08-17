@@ -209,14 +209,53 @@ test.describe("オンラインロビーの接続失敗復帰", () => {
     const resultA11y = await new AxeBuilder({ page }).include("main").analyze();
     expect(resultA11y.violations).toEqual([]);
     await expect(
+      page.getByRole("button", { name: "新しい半荘を開始" }),
+    ).toBeEnabled();
+    await expect(
       page.getByRole("button", { name: "対局画面へ戻る" }),
     ).toBeVisible();
     await expect(page.locator('[data-phase="gameEnd"]')).toHaveCount(0);
 
     await page.getByRole("button", { name: "対局画面へ戻る" }).click();
     await expect(page.locator('[data-phase="gameEnd"]')).toBeVisible();
+    const resultButton = page.getByRole("button", { name: "結果を見る" });
+    await expect(resultButton).toBeFocused();
+    const boardA11y = await new AxeBuilder({ page }).include("main").analyze();
+    expect(boardA11y.violations).toEqual([]);
+
+    await resultButton.click();
+    await page.getByRole("button", { name: "新しい半荘を開始" }).click();
+    const newGameRequest = await page.evaluate(() => {
+      const socket = (window as unknown as OnlineTestWindow)
+        .__fourBrosOnlineSockets[0];
+      return JSON.parse(socket?.sent.at(-1) ?? "{}");
+    });
+    expect(newGameRequest).toEqual({ type: "newGame" });
+
+    await page.evaluate((snapshot) => {
+      const socket = (window as unknown as OnlineTestWindow)
+        .__fourBrosOnlineSockets[0];
+      socket?.message({ type: "snapshot", snapshot });
+    }, onlineSnapshotFixture());
+    await expect(page.locator('[data-phase="playing"]')).toBeVisible();
     await expect(
-      page.getByRole("button", { name: "結果を見る" }),
+      page.getByRole("heading", { level: 2, name: "対局結果" }),
+    ).toHaveCount(0);
+
+    // 終局snapshotを受けても、結果ビューは「結果を見る」まで再表示しない。
+    await page.evaluate((snapshot) => {
+      const socket = (window as unknown as OnlineTestWindow)
+        .__fourBrosOnlineSockets[0];
+      socket?.message({ type: "snapshot", snapshot });
+    }, onlineFinishedSnapshotFixture());
+    await expect(
+      page.getByRole("heading", { level: 2, name: "対局結果" }),
+    ).toHaveCount(0);
+    await page.getByRole("button", { name: "結果を見る" }).click();
+    await expect(
+      page.getByRole("heading", { level: 2, name: "対局結果" }),
     ).toBeVisible();
+    await page.getByRole("button", { name: "対局画面へ戻る" }).click();
+    await expect(resultButton).toBeFocused();
   });
 });
