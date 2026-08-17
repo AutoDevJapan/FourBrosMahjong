@@ -6,6 +6,7 @@ import {
 import { selectView } from "../src/components/game/gameView";
 import type { GameViewState } from "../src/components/game/types";
 import type {
+  OnlineDepartureNotice,
   OnlineHostNotice,
   OnlineHostTransitionReason,
 } from "../src/components/online/types";
@@ -53,6 +54,7 @@ export interface RoomSnapshot {
   readonly players: readonly RoomPlayerSnapshot[];
   readonly currentTurn: PlayerId | null;
   readonly hostNotice: OnlineHostNotice | null;
+  readonly departureNotice: OnlineDepartureNotice | null;
 }
 
 interface RoomPlayer {
@@ -74,11 +76,14 @@ interface Room {
   state: EngineState;
   version: number;
   readonly players: Map<PlayerId, RoomPlayer>;
+  /** 明示退出したseat。次のjoinで同じIDを安全に置換する。 */
+  readonly reusableSeatIds: Set<PlayerId>;
   /** 現在のhost席。host切断後は接続中のguestへ即時に移る。 */
   hostId: PlayerId | null;
   /** 現局で人間席だったか。切断時にAIへ解放してもresumeで復元する。 */
   readonly humanPlayerIds: Set<PlayerId>;
   hostTransition: HostTransition | null;
+  departureNotice: OnlineDepartureNotice | null;
   lastActivityAt: number;
 }
 
@@ -89,6 +94,10 @@ export type RoomMutation =
 export interface RoomSession {
   readonly room: Room;
   readonly player: RoomPlayer;
+}
+
+function isCurrentPlayer(room: Room, player: RoomPlayer): boolean {
+  return room.players.get(player.id) === player && player.connected;
 }
 
 function now(): number {
@@ -174,6 +183,26 @@ function hostNoticeFor(room: Room): OnlineHostNotice | null {
       room.hostId === null
         ? "ホストが再接続するか、参加者が接続すると次のホストが決まります。"
         : nextHostAction(room.state.phase),
+  };
+}
+
+function departureNextAction(room: Room): string {
+  switch (room.state.phase) {
+    case "playing":
+      return "表示された現在の手番に従って操作してください。";
+    case "roundEnd":
+      return "ホストは「次の局へ」を押して対局を続けてください。";
+    case "gameEnd":
+      return "ホストは「新しい半荘を開始」を押して次の半荘へ進めてください。";
+  }
+}
+
+function rememberDeparture(room: Room, player: RoomPlayer): void {
+  room.departureNotice = {
+    playerId: player.id,
+    playerName: player.name,
+    message: `「${player.name}」さんが退出したため、その席をAIに戻しました。`,
+    nextAction: departureNextAction(room),
   };
 }
 
@@ -295,9 +324,11 @@ export class RoomManager {
       }),
       version: 0,
       players: new Map([[player.id, player]]),
+      reusableSeatIds: new Set(),
       hostId: "p0",
       humanPlayerIds: new Set(["p0"]),
       hostTransition: null,
+      departureNotice: null,
       lastActivityAt: now(),
     };
     this.rooms.set(code, room);
@@ -309,8 +340,11 @@ export class RoomManager {
     if (code === null) return null;
     const room = this.rooms.get(code);
     if (!room) return null;
-    const id = PLAYER_IDS.find((candidate) => !room.players.has(candidate));
+    const id =
+      PLAYER_IDS.find((candidate) => room.reusableSeatIds.has(candidate)) ??
+      PLAYER_IDS.find((candidate) => !room.players.has(candidate));
     if (!id) return null;
+    if (room.reusableSeatIds.delete(id)) room.players.delete(id);
     const player: RoomPlayer = {
       id,
       token: randomToken(),
@@ -321,6 +355,7 @@ export class RoomManager {
     };
     room.players.set(id, player);
     room.state = playerNameChanged(room.state, id, player.name);
+    room.departureNotice = null;
     // `room.players` also retains disconnected seats for resume. Only the
     // newly assigned seat joins this half-game's human-input roster.
     addHumanPlayer(room, id);
@@ -373,12 +408,14 @@ export class RoomManager {
   }
 
   touch(room: Room, player: RoomPlayer): void {
+    if (!isCurrentPlayer(room, player)) return;
     player.connected = true;
     player.lastSeenAt = now();
     room.lastActivityAt = now();
   }
 
   disconnect(room: Room, player: RoomPlayer): void {
+    if (!isCurrentPlayer(room, player)) return;
     player.connected = false;
     player.lastSeenAt = now();
     if (room.hostId === player.id) {
@@ -390,18 +427,24 @@ export class RoomManager {
     room.lastActivityAt = now();
   }
 
-  /** 明示退出。hostは権限を引き継ぎ、旧tokenではresumeできない。 */
+  /** 明示退出。旧tokenを失効させ、退出席を現局のhuman rosterから解放する。 */
   leave(room: Room, player: RoomPlayer): void {
+    if (!isCurrentPlayer(room, player)) return;
     player.connected = false;
+    player.resumable = false;
     player.lastSeenAt = now();
+    room.humanPlayerIds.delete(player.id);
+    const before = room.state;
+    room.state = removeHumanPlayerIds(room.state, [player.id]);
+    if (room.state !== before) room.version += 1;
+    if (room.hostId !== player.id) rememberDeparture(room, player);
     if (room.hostId === player.id) {
-      player.resumable = false;
-      room.humanPlayerIds.delete(player.id);
       transferHost(room, player, "left");
-      const before = room.state;
-      room.state = removeHumanPlayerIds(room.state, [player.id]);
-      if (room.state !== before) room.version += 1;
     }
+    // An explicit leave invalidates the session and releases the departed
+    // seat for reuse regardless of whether the player was host. This is
+    // important when a guest inherited host authority after a handoff.
+    room.reusableSeatIds.add(player.id);
     room.lastActivityAt = now();
   }
 
@@ -411,6 +454,9 @@ export class RoomManager {
     action: GameAction,
     expectedVersion: number,
   ): RoomMutation {
+    if (!isCurrentPlayer(room, player)) {
+      return { ok: false, error: "ルーム接続が無効です。", room };
+    }
     room.lastActivityAt = now();
     if (expectedVersion !== room.version) {
       return {
@@ -448,6 +494,9 @@ export class RoomManager {
   }
 
   newGame(room: Room, player: RoomPlayer): RoomMutation {
+    if (!isCurrentPlayer(room, player)) {
+      return { ok: false, error: "ルーム接続が無効です。", room };
+    }
     if (player.id !== room.hostId)
       return {
         ok: false,
@@ -475,6 +524,7 @@ export class RoomManager {
       // game stops at that seat's pending input with no connected actor.
       humanPlayerIds: connectedPlayerIds,
     });
+    room.departureNotice = null;
     room.version += 1;
     room.lastActivityAt = now();
     return { ok: true, stateChanged: true, room };
@@ -509,6 +559,7 @@ export class RoomManager {
         ? room.state.hand.seating[room.state.hand.turn]
         : null,
       hostNotice: hostNoticeFor(room),
+      departureNotice: room.departureNotice,
     };
   }
 

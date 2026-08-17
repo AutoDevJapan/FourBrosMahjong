@@ -21,6 +21,13 @@ export interface OnlineHostNotice {
   readonly nextAction: string;
 }
 
+export interface OnlineDepartureNotice {
+  readonly playerId: PlayerId;
+  readonly playerName: string;
+  readonly message: string;
+  readonly nextAction: string;
+}
+
 export interface OnlineSnapshot {
   readonly code: string;
   readonly version: number;
@@ -35,6 +42,8 @@ export interface OnlineSnapshot {
   readonly currentTurn: PlayerId | null;
   /** host切断/退出後の権限引継ぎ理由と、現在の次操作。 */
   readonly hostNotice: OnlineHostNotice | null;
+  /** guestの明示退出後に、残った参加者へ伝える席解放と次操作。 */
+  readonly departureNotice?: OnlineDepartureNotice | null;
 }
 
 export interface OnlineCredentials {

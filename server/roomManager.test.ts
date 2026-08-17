@@ -98,6 +98,66 @@ describe("online room manager", () => {
     expect(stale.ok).toBe(false);
   });
 
+  it("releases an explicitly departed guest before its pending turn can block the room", () => {
+    const manager = new RoomManager();
+    const host = manager.create("ホスト");
+    const guest = manager.join(host.room.code, "ゲスト");
+    if (!guest) throw new Error("guest should join");
+
+    const drawn = host.room.state.hand?.drawn?.tile;
+    if (!drawn) throw new Error("host should start on a draw decision");
+    expect(
+      manager.apply(
+        host.room,
+        host.player,
+        { type: "discard", tile: drawn },
+        host.room.version,
+      ),
+    ).toMatchObject({ ok: true });
+    expect(manager.snapshot(host.room, guest.player).pending?.playerId).toBe(
+      "p1",
+    );
+
+    manager.leave(guest.room, guest.player);
+
+    const snapshot = manager.snapshot(host.room, host.player);
+    expect(host.room.state.humanPlayerIds).toEqual(["p0"]);
+    expect(snapshot.players).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: "p1", connected: false, isHost: false }),
+      ]),
+    );
+    expect(snapshot.pending?.playerId).not.toBe("p1");
+    expect(snapshot.departureNotice).toMatchObject({
+      playerId: "p1",
+      playerName: "ゲスト",
+      nextAction: "表示された現在の手番に従って操作してください。",
+    });
+    expect(manager.resume(host.room.code, guest.player.token)).toBeNull();
+    expect(manager.snapshot(host.room, host.player).hostId).toBe("p0");
+
+    const rejoined = manager.join(host.room.code, "再参加");
+    expect(rejoined?.player.id).toBe("p1");
+    expect(manager.resume(host.room.code, guest.player.token)).toBeNull();
+    expect(manager.snapshot(host.room, host.player).hostId).toBe("p0");
+    expect(
+      manager.apply(
+        host.room,
+        guest.player,
+        { type: "passRon" },
+        host.room.version,
+      ),
+    ).toMatchObject({ ok: false, error: "ルーム接続が無効です。" });
+
+    // A repeated explicit leave/join cycle reuses the released seat instead
+    // of consuming p2 and p3 until the room becomes falsely full.
+    if (!rejoined) throw new Error("guest should rejoin");
+    manager.leave(rejoined.room, rejoined.player);
+    const rejoinedAgain = manager.join(host.room.code, "再参加2");
+    expect(rejoinedAgain?.player.id).toBe("p1");
+    expect(manager.join(host.room.code, "別ゲスト")?.player.id).toBe("p2");
+  });
+
   it("hands playing host authority to a connected guest and releases the disconnected host turn", () => {
     const manager = new RoomManager();
     const host = manager.create("ホスト");
@@ -203,8 +263,38 @@ describe("online room manager", () => {
     expect(afterLeave.hostId).toBe("p1");
     expect(afterLeave.hostNotice).toMatchObject({ reason: "left" });
     expect(manager.resume(host.room.code, host.player.token)).toBeNull();
-    expect(manager.join(host.room.code, "再参加")?.player.id).toBe("p2");
+    expect(manager.join(host.room.code, "再参加")?.player.id).toBe("p0");
     expect(manager.snapshot(guest.room, guest.player).hostId).toBe("p1");
+  });
+
+  it("reuses a promoted guest host seat after explicit leave without losing capacity", () => {
+    const manager = new RoomManager();
+    const host = manager.create("ホスト");
+    const promoted = manager.join(host.room.code, "引継ぎゲスト");
+    if (!promoted) throw new Error("promoted guest should join");
+
+    manager.leave(host.room, host.player);
+    expect(manager.snapshot(promoted.room, promoted.player).hostId).toBe("p1");
+
+    // Reuse the original host seat so p1 remains the active promoted host
+    // when the explicit-leave regression is exercised.
+    const replacement = manager.join(host.room.code, "再参加ホスト席");
+    expect(replacement?.player.id).toBe("p0");
+    expect(manager.snapshot(promoted.room, promoted.player).hostId).toBe("p1");
+
+    manager.leave(promoted.room, promoted.player);
+    expect(manager.resume(host.room.code, promoted.player.token)).toBeNull();
+    expect(
+      manager.snapshot(replacement!.room, replacement!.player).hostId,
+    ).toBe("p0");
+
+    // The promoted host's p1 seat must be reusable, otherwise repeated joins
+    // would consume p2/p3 and falsely report a full room.
+    const rejoined = manager.join(host.room.code, "再参加ゲスト");
+    expect(rejoined?.player.id).toBe("p1");
+    expect(manager.join(host.room.code, "三人目")?.player.id).toBe("p2");
+    expect(manager.join(host.room.code, "四人目")?.player.id).toBe("p3");
+    expect(manager.join(host.room.code, "満席")).toBeNull();
   });
 
   it.each([

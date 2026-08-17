@@ -1121,6 +1121,18 @@ export default function OnlineLobby() {
               </p>
             </div>
           ) : null}
+          {snapshot.departureNotice ? (
+            <div
+              className="rounded-lg border border-control-border bg-foreground/5 px-4 py-3 text-sm"
+              role="status"
+              aria-live="polite"
+            >
+              <p>{snapshot.departureNotice.message}</p>
+              <p className="mt-1 text-foreground/70">
+                次の操作: {snapshot.departureNotice.nextAction}
+              </p>
+            </div>
+          ) : null}
 
           <ConnectionFeedback
             status={status}
