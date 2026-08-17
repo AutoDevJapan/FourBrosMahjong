@@ -229,11 +229,13 @@ interface ConnectionFeedbackProps {
   readonly canRetry: boolean;
   readonly retryAfterMs: number;
   readonly feedbackRef: RefObject<HTMLDivElement | null>;
+  readonly retryButtonRef: RefObject<HTMLButtonElement | null>;
   readonly onRetry: (restoreFocus: boolean) => void;
 }
 
 type TransitionFocusTarget =
   | "connection-feedback"
+  | "connection-retry"
   | "game-heading"
   | "lobby-heading";
 
@@ -248,10 +250,9 @@ function ConnectionFeedback({
   canRetry,
   retryAfterMs,
   feedbackRef,
+  retryButtonRef,
   onRetry,
 }: ConnectionFeedbackProps) {
-  const retryButtonRef = useRef<HTMLButtonElement>(null);
-
   return (
     <div
       aria-atomic="true"
@@ -404,6 +405,7 @@ export default function OnlineLobby() {
   const restoreOnlineResultFocusRef = useRef(false);
   const restoreOnlineGameFocusRef = useRef(false);
   const onlineResultOpenRef = useRef(false);
+  const suppressOnlineResultRestoreRef = useRef(false);
   const socketRef = useRef<WebSocket | null>(null);
   const snapshotRef = useRef<OnlineSnapshot | null>(null);
   const statusRef = useRef<ConnectionStatus>("idle");
@@ -417,6 +419,7 @@ export default function OnlineLobby() {
   const [activeRequest, setActiveRequest] = useState<JoinRequest | null>(null);
   const pendingSessionSocketRef = useRef<WebSocket | null>(null);
   const feedbackRef = useRef<HTMLDivElement>(null);
+  const retryButtonRef = useRef<HTMLButtonElement>(null);
   const gameHeadingRef = useRef<HTMLHeadingElement>(null);
   const lobbyHeadingRef = useRef<HTMLHeadingElement>(null);
   const pendingTransitionFocusRef = useRef<PendingTransitionFocus | null>(null);
@@ -446,7 +449,13 @@ export default function OnlineLobby() {
         nextSnapshot.view.result === null
       ) {
         if (onlineResultOpenRef.current) {
-          restoreOnlineGameFocusRef.current = true;
+          if (pendingTransitionFocusRef.current !== null) {
+            suppressOnlineResultRestoreRef.current = true;
+            restoreOnlineResultFocusRef.current = false;
+            restoreOnlineGameFocusRef.current = false;
+          } else {
+            restoreOnlineGameFocusRef.current = true;
+          }
         }
         setOnlineResultOpenState(false);
       }
@@ -479,9 +488,20 @@ export default function OnlineLobby() {
     const target =
       pending.target === "connection-feedback"
         ? feedbackRef.current
-        : pending.target === "game-heading"
-          ? gameHeadingRef.current
-          : lobbyHeadingRef.current;
+        : pending.target === "connection-retry"
+          ? (() => {
+              const retryButton =
+                retryButtonRef.current ??
+                feedbackRef.current?.querySelector<HTMLButtonElement>(
+                  'button[type="button"]',
+                );
+              return retryButton?.disabled
+                ? feedbackRef.current
+                : (retryButton ?? feedbackRef.current);
+            })()
+          : pending.target === "game-heading"
+            ? gameHeadingRef.current
+            : lobbyHeadingRef.current;
     if (!target || target === pending.origin) return;
     target.focus({ preventScroll: true });
   }, [snapshot, status]);
@@ -492,6 +512,13 @@ export default function OnlineLobby() {
       (!restoreOnlineResultFocusRef.current &&
         !restoreOnlineGameFocusRef.current)
     ) {
+      return;
+    }
+
+    if (suppressOnlineResultRestoreRef.current) {
+      suppressOnlineResultRestoreRef.current = false;
+      restoreOnlineResultFocusRef.current = false;
+      restoreOnlineGameFocusRef.current = false;
       return;
     }
 
@@ -556,6 +583,7 @@ export default function OnlineLobby() {
       const retryAfter = normalizeRetryAfterMs(serverRetryAfterMs);
       const attempt = reconnectAttemptRef.current;
       if (attempt >= MAX_AUTOMATIC_RECONNECT_ATTEMPTS) {
+        requestTransitionFocus("connection-retry");
         setStatus("failed");
         setError(message);
         applyRetryCooldown(retryAfter);
@@ -576,12 +604,13 @@ export default function OnlineLobby() {
         }
       }, delay);
     },
-    [applyRetryCooldown, clearReconnectTimer],
+    [applyRetryCooldown, clearReconnectTimer, requestTransitionFocus],
   );
 
   const failHandshake = useCallback(
     (failedSocket: WebSocket, failure: ConnectionFailure) => {
       if (socketRef.current !== failedSocket) return;
+      requestTransitionFocus("connection-retry");
       pendingSessionSocketRef.current = null;
       serverFailureRef.current = null;
       socketRef.current = null;
@@ -591,7 +620,7 @@ export default function OnlineLobby() {
       applyRetryCooldown(failure.retryAfterMs);
       failedSocket.close();
     },
-    [applyRetryCooldown],
+    [applyRetryCooldown, requestTransitionFocus],
   );
 
   const handleTransportFailure = useCallback(
@@ -617,18 +646,20 @@ export default function OnlineLobby() {
       if (credentialsRef.current) {
         scheduleReconnect(failure.message, failure.retryAfterMs);
       } else {
+        requestTransitionFocus("connection-retry");
         setStatus("failed");
         setError(failure.message);
         applyRetryCooldown(failure.retryAfterMs);
       }
     },
-    [applyRetryCooldown, scheduleReconnect],
+    [applyRetryCooldown, requestTransitionFocus, scheduleReconnect],
   );
 
   const connect = useCallback(
     (request: JoinRequest, reconnecting = request.type === "resume") => {
       const url = onlineSocketUrl();
       if (!url) {
+        requestTransitionFocus("connection-retry");
         setError(
           "オンラインサーバーURLが未設定です。NEXT_PUBLIC_ONLINE_WS_URLをVercelに設定してください。",
         );
@@ -650,6 +681,7 @@ export default function OnlineLobby() {
       try {
         next = new WebSocket(url);
       } catch {
+        requestTransitionFocus("connection-retry");
         setStatus("failed");
         setError(CONNECTION_ERROR_MESSAGE);
         return;
@@ -787,6 +819,9 @@ export default function OnlineLobby() {
         socketRef.current = null;
         setSocket(null);
         if (manualCloseRef.current || !credentialsRef.current) {
+          if (!manualCloseRef.current) {
+            requestTransitionFocus("connection-retry");
+          }
           setStatus(manualCloseRef.current ? "idle" : "failed");
           if (!manualCloseRef.current) {
             setError(serverFailure?.message ?? CONNECTION_ERROR_MESSAGE);
@@ -933,6 +968,7 @@ export default function OnlineLobby() {
     setSnapshot(null);
     restoreOnlineResultFocusRef.current = false;
     restoreOnlineGameFocusRef.current = false;
+    suppressOnlineResultRestoreRef.current = true;
     setOnlineResultOpenState(false);
     setStatus("idle");
     setError("");
@@ -940,11 +976,13 @@ export default function OnlineLobby() {
 
   const onSendError = useCallback((message: string) => setError(message), []);
   const openOnlineResult = useCallback(() => {
+    suppressOnlineResultRestoreRef.current = false;
     restoreOnlineResultFocusRef.current = false;
     restoreOnlineGameFocusRef.current = false;
     setOnlineResultOpenState(true);
   }, [setOnlineResultOpenState]);
   const returnToOnlineGame = useCallback(() => {
+    suppressOnlineResultRestoreRef.current = false;
     restoreOnlineResultFocusRef.current = true;
     restoreOnlineGameFocusRef.current = false;
     setOnlineResultOpenState(false);
@@ -1029,6 +1067,7 @@ export default function OnlineLobby() {
             canRetry={canRetry}
             retryAfterMs={retryAfterMs}
             feedbackRef={feedbackRef}
+            retryButtonRef={retryButtonRef}
             onRetry={retry}
           />
           {onlineResultOpen && onlineResult !== null ? (
@@ -1258,6 +1297,7 @@ export default function OnlineLobby() {
           canRetry={canRetry}
           retryAfterMs={retryAfterMs}
           feedbackRef={feedbackRef}
+          retryButtonRef={retryButtonRef}
           onRetry={retry}
         />
         {credentials && !snapshot ? (

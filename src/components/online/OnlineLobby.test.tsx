@@ -815,12 +815,15 @@ describe("OnlineLobby connection recovery", () => {
     expect(
       screen.queryByText("オンラインサーバーへ接続しています…"),
     ).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "再試行" })).toBeEnabled();
+    const retryButton = screen.getByRole("button", { name: "再試行" });
+    expect(retryButton).toBeEnabled();
+    expect(retryButton).toHaveFocus();
+    expect(document.activeElement).toBe(retryButton);
     expect(screen.getByLabelText("表示名")).toHaveValue("たろう");
     expect(screen.getByLabelText("ルームコード")).toHaveValue("ABC234");
 
     const focusCallsBeforeRetry = focus.mock.calls.length;
-    await user.click(screen.getByRole("button", { name: "再試行" }));
+    await user.keyboard("{Enter}");
 
     expect(
       document.querySelector('[data-connection-status="reconnecting"]'),
@@ -917,6 +920,9 @@ describe("OnlineLobby connection recovery", () => {
     expect(
       document.querySelector('[data-connection-status="failed"]'),
     ).not.toBeNull();
+    const retryButton = screen.getByRole("button", { name: "再試行" });
+    expect(retryButton).toHaveFocus();
+    expect(document.activeElement).toBe(retryButton);
     expect(screen.getByTestId("game-board")).toHaveAttribute(
       "data-interaction-disabled",
       "true",

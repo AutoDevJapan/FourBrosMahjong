@@ -245,11 +245,22 @@ test.describe("オンラインロビーの接続失敗復帰", () => {
     await expect(
       page.getByText("オンラインサーバーへ接続しています…"),
     ).toHaveCount(0);
-    await expect(page.getByRole("button", { name: "再試行" })).toBeEnabled();
+    const retryButton = page.getByRole("button", { name: "再試行" });
+    await expect(retryButton).toBeEnabled();
+    await expect(retryButton).toBeFocused();
+    expect(
+      await page.evaluate(() => ({
+        tagName: document.activeElement?.tagName,
+        text: document.activeElement?.textContent?.trim(),
+      })),
+    ).toEqual({ tagName: "BUTTON", text: "再試行" });
+    expect(
+      (await new AxeBuilder({ page }).include("main").analyze()).violations,
+    ).toEqual([]);
     await expect(page.getByLabel("表示名")).toHaveValue("たろう");
     await expect(page.getByLabel("ルームコード")).toHaveValue("ABC234");
 
-    await page.getByRole("button", { name: "再試行" }).click();
+    await page.keyboard.press("Enter");
     await expect(
       page.locator('[data-connection-status="reconnecting"]'),
     ).toBeVisible();
@@ -295,6 +306,16 @@ test.describe("オンラインロビーの接続失敗復帰", () => {
     await expect(
       page.locator('[data-connection-status="connected"]'),
     ).toBeFocused();
+    expect(
+      await page.evaluate(
+        () =>
+          (document.activeElement as HTMLElement | null)?.dataset
+            .connectionStatus,
+      ),
+    ).toBe("connected");
+    expect(
+      (await new AxeBuilder({ page }).include("main").analyze()).violations,
+    ).toEqual([]);
   });
 
   test("終局snapshotの結果を見るで最終結果を表示し、オンライン対局へ戻れる", async ({
