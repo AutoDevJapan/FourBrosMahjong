@@ -66,6 +66,13 @@ type JoinRequest =
   | { readonly type: "resume"; readonly code: string; readonly token: string };
 type ConnectionFailure = Pick<OnlineServerError, "message" | "retryAfterMs">;
 
+type ErrorFeedbackKind = "connection" | "operation";
+
+interface ErrorFeedback {
+  readonly kind: ErrorFeedbackKind;
+  readonly message: string;
+}
+
 function readCredentials(): OnlineCredentials | null {
   if (typeof window === "undefined") return null;
   try {
@@ -253,17 +260,19 @@ function ConnectionFeedback({
 }: ConnectionFeedbackProps) {
   return (
     <div
-      aria-atomic="true"
-      aria-live="polite"
       className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-foreground/20 px-3 py-2 text-sm"
       data-connection-status={status}
       ref={feedbackRef}
       tabIndex={-1}
     >
       <div className="min-w-0">
-        <p>{connectionStatusMessage(status)}</p>
+        <p aria-atomic="true" aria-live="polite">
+          {connectionStatusMessage(status)}
+        </p>
         {error ? (
           <p
+            aria-atomic="true"
+            aria-live={status === "failed" ? "assertive" : "polite"}
             className="mt-1 text-foreground/70"
             role={status === "failed" ? "alert" : "status"}
           >
@@ -395,7 +404,7 @@ export default function OnlineLobby() {
   );
   const [socket, setSocket] = useState<WebSocket | null>(null);
   const [status, setStatus] = useState<ConnectionStatus>("idle");
-  const [error, setError] = useState("");
+  const [error, setError] = useState<ErrorFeedback | null>(null);
   const [retryAfterMs, setRetryAfterMs] = useState(0);
   const [onlineResultOpen, setOnlineResultOpen] = useState(false);
   const onlineResultButtonRef = useRef<HTMLButtonElement>(null);
@@ -432,6 +441,14 @@ export default function OnlineLobby() {
     (request: JoinRequest, reconnecting?: boolean) => void
   >(() => undefined);
 
+  const setConnectionError = useCallback((message: string) => {
+    setError({ kind: "connection", message });
+  }, []);
+
+  const setOperationError = useCallback((message: string) => {
+    setError({ kind: "operation", message });
+  }, []);
+
   const setOnlineResultOpenState = useCallback((open: boolean) => {
     onlineResultOpenRef.current = open;
     setOnlineResultOpen(open);
@@ -442,6 +459,10 @@ export default function OnlineLobby() {
       snapshotRef.current = nextSnapshot;
       setSnapshot(nextSnapshot);
       setRoomCode(nextSnapshot.code);
+      // An operation rejection is paired with this authoritative snapshot by
+      // the server. It is no longer relevant once the client has synchronized;
+      // connection/transport guidance intentionally survives this update.
+      setError((current) => (current?.kind === "operation" ? null : current));
       if (
         nextSnapshot.phase !== "gameEnd" ||
         nextSnapshot.view.result === null
@@ -583,14 +604,14 @@ export default function OnlineLobby() {
       if (attempt >= MAX_AUTOMATIC_RECONNECT_ATTEMPTS) {
         requestTransitionFocus("connection-retry");
         setStatus("failed");
-        setError(message);
+        setConnectionError(message);
         applyRetryCooldown(retryAfter);
         return;
       }
 
       reconnectAttemptRef.current = attempt + 1;
       setStatus("reconnecting");
-      setError(message);
+      setConnectionError(message);
       applyRetryCooldown(retryAfter);
       const backoffDelay = Math.min(10_000, 500 * 2 ** Math.min(attempt, 4));
       const delay = Math.max(backoffDelay, retryAfter ?? 0);
@@ -602,7 +623,12 @@ export default function OnlineLobby() {
         }
       }, delay);
     },
-    [applyRetryCooldown, clearReconnectTimer, requestTransitionFocus],
+    [
+      applyRetryCooldown,
+      clearReconnectTimer,
+      requestTransitionFocus,
+      setConnectionError,
+    ],
   );
 
   const failHandshake = useCallback(
@@ -614,11 +640,11 @@ export default function OnlineLobby() {
       socketRef.current = null;
       setSocket(null);
       setStatus("failed");
-      setError(failure.message);
+      setConnectionError(failure.message);
       applyRetryCooldown(failure.retryAfterMs);
       failedSocket.close();
     },
-    [applyRetryCooldown, requestTransitionFocus],
+    [applyRetryCooldown, requestTransitionFocus, setConnectionError],
   );
 
   const handleTransportFailure = useCallback(
@@ -646,11 +672,16 @@ export default function OnlineLobby() {
       } else {
         requestTransitionFocus("connection-retry");
         setStatus("failed");
-        setError(failure.message);
+        setConnectionError(failure.message);
         applyRetryCooldown(failure.retryAfterMs);
       }
     },
-    [applyRetryCooldown, requestTransitionFocus, scheduleReconnect],
+    [
+      applyRetryCooldown,
+      requestTransitionFocus,
+      scheduleReconnect,
+      setConnectionError,
+    ],
   );
 
   const connect = useCallback(
@@ -658,7 +689,7 @@ export default function OnlineLobby() {
       const url = onlineSocketUrl();
       if (!url) {
         requestTransitionFocus("connection-retry");
-        setError(
+        setConnectionError(
           "オンラインサーバーURLが未設定です。NEXT_PUBLIC_ONLINE_WS_URLをVercelに設定してください。",
         );
         setStatus("failed");
@@ -673,7 +704,7 @@ export default function OnlineLobby() {
       setSocket(null);
       if (previous && previous.readyState !== WebSocket.CLOSED)
         previous.close();
-      setError("");
+      setError(null);
       setStatus(reconnecting ? "reconnecting" : "connecting");
       let next: WebSocket;
       try {
@@ -681,7 +712,7 @@ export default function OnlineLobby() {
       } catch {
         requestTransitionFocus("connection-retry");
         setStatus("failed");
-        setError(CONNECTION_ERROR_MESSAGE);
+        setConnectionError(CONNECTION_ERROR_MESSAGE);
         return;
       }
       socketRef.current = next;
@@ -765,6 +796,9 @@ export default function OnlineLobby() {
             setCredentials(nextCredentials);
             saveCredentials(nextCredentials);
             applyOnlineSnapshot(message.snapshot);
+            // A successful handshake ends any reconnect/handshake guidance;
+            // operation errors have already been handled by the snapshot.
+            setError(null);
             setStatus("connected");
             return;
           }
@@ -790,8 +824,10 @@ export default function OnlineLobby() {
             ) {
               serverFailureRef.current = { socket: next, failure };
               applyRetryCooldown(failure.retryAfterMs);
+              setConnectionError(message.message);
+            } else {
+              setOperationError(message.message);
             }
-            setError(message.message);
             return;
           }
         } catch {
@@ -801,7 +837,7 @@ export default function OnlineLobby() {
           if (pendingSessionSocketRef.current === next) {
             failHandshake(next, failure);
           } else {
-            setError(failure.message);
+            setConnectionError(failure.message);
           }
         }
       });
@@ -822,7 +858,9 @@ export default function OnlineLobby() {
           }
           setStatus(manualCloseRef.current ? "idle" : "failed");
           if (!manualCloseRef.current) {
-            setError(serverFailure?.message ?? CONNECTION_ERROR_MESSAGE);
+            setConnectionError(
+              serverFailure?.message ?? CONNECTION_ERROR_MESSAGE,
+            );
             applyRetryCooldown(serverFailure?.retryAfterMs);
           }
           return;
@@ -847,6 +885,8 @@ export default function OnlineLobby() {
       handleTransportFailure,
       requestTransitionFocus,
       scheduleReconnect,
+      setConnectionError,
+      setOperationError,
     ],
   );
   useEffect(() => {
@@ -976,10 +1016,13 @@ export default function OnlineLobby() {
     suppressOnlineResultRestoreRef.current = true;
     setOnlineResultOpenState(false);
     setStatus("idle");
-    setError("");
+    setError(null);
   };
 
-  const onSendError = useCallback((message: string) => setError(message), []);
+  const onSendError = useCallback(
+    (message: string) => setConnectionError(message),
+    [setConnectionError],
+  );
   const openOnlineResult = useCallback(() => {
     suppressOnlineResultRestoreRef.current = false;
     restoreOnlineResultFocusRef.current = false;
@@ -1081,7 +1124,7 @@ export default function OnlineLobby() {
 
           <ConnectionFeedback
             status={status}
-            error={error}
+            error={error?.message ?? ""}
             canRetry={canRetry}
             retryAfterMs={retryAfterMs}
             feedbackRef={feedbackRef}
@@ -1307,7 +1350,7 @@ export default function OnlineLobby() {
 
         <ConnectionFeedback
           status={status}
-          error={error}
+          error={error?.message ?? ""}
           canRetry={canRetry}
           retryAfterMs={retryAfterMs}
           feedbackRef={feedbackRef}
