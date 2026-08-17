@@ -911,6 +911,15 @@ describe("OnlineLobby の終局結果導線", () => {
     expect(JSON.parse(sockets[0]?.sent.at(-1) ?? "{}")).toEqual({
       type: "newGame",
     });
+
+    act(() => {
+      sockets[0]?.message({
+        type: "snapshot",
+        snapshot: snapshotFixture(),
+      });
+    });
+    expect(screen.getByTestId("game-board")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "結果を見る" })).toHaveFocus();
   });
 
   it("新局snapshot後は結果を見るまで結果を自動表示しない", () => {

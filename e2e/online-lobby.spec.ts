@@ -241,6 +241,9 @@ test.describe("オンラインロビーの接続失敗復帰", () => {
     await expect(
       page.getByRole("heading", { level: 2, name: "対局結果" }),
     ).toHaveCount(0);
+    await expect(
+      page.locator('section[aria-label="オンライン対局"]'),
+    ).toBeFocused();
 
     // 終局snapshotを受けても、結果ビューは「結果を見る」まで再表示しない。
     await page.evaluate((snapshot) => {

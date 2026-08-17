@@ -393,6 +393,8 @@ export default function OnlineLobby() {
   const onlineResultButtonRef = useRef<HTMLButtonElement>(null);
   const onlineGameFallbackRef = useRef<HTMLElement>(null);
   const restoreOnlineResultFocusRef = useRef(false);
+  const restoreOnlineGameFocusRef = useRef(false);
+  const onlineResultOpenRef = useRef(false);
   const socketRef = useRef<WebSocket | null>(null);
   const credentialsRef = useRef<OnlineCredentials | null>(null);
   const reconnectAttemptRef = useRef(0);
@@ -415,14 +417,27 @@ export default function OnlineLobby() {
     (request: JoinRequest, reconnecting?: boolean) => void
   >(() => undefined);
 
-  const applyOnlineSnapshot = useCallback((nextSnapshot: OnlineSnapshot) => {
-    setSnapshot(nextSnapshot);
-    setRoomCode(nextSnapshot.code);
-    if (nextSnapshot.phase !== "gameEnd" || nextSnapshot.view.result === null) {
-      restoreOnlineResultFocusRef.current = false;
-      setOnlineResultOpen(false);
-    }
+  const setOnlineResultOpenState = useCallback((open: boolean) => {
+    onlineResultOpenRef.current = open;
+    setOnlineResultOpen(open);
   }, []);
+
+  const applyOnlineSnapshot = useCallback(
+    (nextSnapshot: OnlineSnapshot) => {
+      setSnapshot(nextSnapshot);
+      setRoomCode(nextSnapshot.code);
+      if (
+        nextSnapshot.phase !== "gameEnd" ||
+        nextSnapshot.view.result === null
+      ) {
+        if (onlineResultOpenRef.current) {
+          restoreOnlineGameFocusRef.current = true;
+        }
+        setOnlineResultOpenState(false);
+      }
+    },
+    [setOnlineResultOpenState],
+  );
 
   useEffect(() => {
     if (!focusAfterRetryRef.current) return;
@@ -433,17 +448,25 @@ export default function OnlineLobby() {
   }, [snapshot, status]);
 
   useEffect(() => {
-    if (onlineResultOpen || !restoreOnlineResultFocusRef.current) return;
+    if (
+      onlineResultOpen ||
+      (!restoreOnlineResultFocusRef.current &&
+        !restoreOnlineGameFocusRef.current)
+    ) {
+      return;
+    }
 
     const resultButton = onlineResultButtonRef.current;
     resultButton?.focus({ preventScroll: true });
     if (resultButton !== null && document.activeElement === resultButton) {
       restoreOnlineResultFocusRef.current = false;
+      restoreOnlineGameFocusRef.current = false;
       return;
     }
 
     onlineGameFallbackRef.current?.focus({ preventScroll: true });
     restoreOnlineResultFocusRef.current = false;
+    restoreOnlineGameFocusRef.current = false;
   }, [onlineResultOpen]);
 
   const clearReconnectTimer = useCallback(() => {
@@ -848,7 +871,9 @@ export default function OnlineLobby() {
     current?.close();
     setSocket(null);
     setSnapshot(null);
-    setOnlineResultOpen(false);
+    restoreOnlineResultFocusRef.current = false;
+    restoreOnlineGameFocusRef.current = false;
+    setOnlineResultOpenState(false);
     setStatus("idle");
     setError("");
   };
@@ -856,12 +881,14 @@ export default function OnlineLobby() {
   const onSendError = useCallback((message: string) => setError(message), []);
   const openOnlineResult = useCallback(() => {
     restoreOnlineResultFocusRef.current = false;
-    setOnlineResultOpen(true);
-  }, []);
+    restoreOnlineGameFocusRef.current = false;
+    setOnlineResultOpenState(true);
+  }, [setOnlineResultOpenState]);
   const returnToOnlineGame = useCallback(() => {
     restoreOnlineResultFocusRef.current = true;
-    setOnlineResultOpen(false);
-  }, []);
+    restoreOnlineGameFocusRef.current = false;
+    setOnlineResultOpenState(false);
+  }, [setOnlineResultOpenState]);
   const canRetry = Boolean(credentials || activeRequest);
   const currentTurnName = snapshot?.currentTurn
     ? snapshot.players.find((player) => player.id === snapshot.currentTurn)
