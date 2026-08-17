@@ -961,6 +961,13 @@ export default function OnlineLobby() {
     saveCredentials(null);
     requestTransitionFocus("lobby-heading");
     const current = socketRef.current;
+    if (current?.readyState === WebSocket.OPEN) {
+      try {
+        current.send(JSON.stringify({ type: "leave" }));
+      } catch {
+        // close処理を優先する。server側のcloseでも同じ権限引継ぎを行う。
+      }
+    }
     socketRef.current = null;
     current?.close();
     setSocket(null);
@@ -1048,7 +1055,7 @@ export default function OnlineLobby() {
               {snapshot.players.map((player) => (
                 <span
                   key={player.id}
-                  className={player.connected ? "" : "text-foreground/45"}
+                  className={player.connected ? "" : "text-foreground/60"}
                 >
                   {player.name}
                   {player.isHost ? "（ホスト）" : ""}
@@ -1060,6 +1067,19 @@ export default function OnlineLobby() {
               {currentTurnName ? `${currentTurnName}の手番` : "対局終了"}
             </span>
           </div>
+
+          {snapshot.hostNotice ? (
+            <div
+              className="rounded-lg border border-control-border bg-foreground/5 px-4 py-3 text-sm"
+              role="status"
+              aria-live="polite"
+            >
+              <p>{snapshot.hostNotice.message}</p>
+              <p className="mt-1 text-foreground/70">
+                次の操作: {snapshot.hostNotice.nextAction}
+              </p>
+            </div>
+          ) : null}
 
           <ConnectionFeedback
             status={status}

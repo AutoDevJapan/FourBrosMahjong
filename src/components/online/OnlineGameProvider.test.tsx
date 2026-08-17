@@ -44,6 +44,7 @@ function snapshotFixture(): OnlineSnapshot {
     code: "ABC234",
     version: 3,
     you: "p0",
+    hostId: "p0",
     phase: engine.phase,
     view: selectView(engine, "p0"),
     pending: engine.pending,
@@ -53,32 +54,70 @@ function snapshotFixture(): OnlineSnapshot {
       { id: "p1", name: "ゲスト", connected: true, isHost: false },
     ],
     currentTurn: "p0",
+    hostNotice: null,
   };
 }
 
 describe("OnlineGameProvider", () => {
-  it("同じseatのhost flagだけを信頼し、不完全なsnapshotはguestとして扱う", () => {
+  it("動的hostIdに従って引継ぎ後のguestへhost権限を公開し、不完全なsnapshotはguest扱いにする", () => {
     expect(
       onlinePermissions({
         you: "p0",
+        hostId: "p0",
         players: [{ id: "p0", name: "ホスト", connected: true, isHost: true }],
       }),
     ).toEqual({ playerId: "p0", isHost: true });
     expect(
       onlinePermissions({
         you: "p1",
+        hostId: "p1",
         players: [{ id: "p1", name: "ゲスト", connected: true, isHost: true }],
       }),
-    ).toEqual({ playerId: "p1", isHost: false });
+    ).toEqual({ playerId: "p1", isHost: true });
     expect(
       onlinePermissions({
         you: "p1",
-        players: [{ id: "p0", name: "ホスト", connected: true, isHost: true }],
+        hostId: "p0",
+        players: [{ id: "p1", name: "ゲスト", connected: true, isHost: true }],
       }),
     ).toEqual({ playerId: "p1", isHost: false });
   });
 
-  it("公開したyou/isHostをcontextへ渡し、guestのhost-only actionを送信しない", async () => {
+  it("引継ぎ後のhost-only actionを送信し、guestのUI権限を閉じる", async () => {
+    const send = vi.fn();
+    const socket = { readyState: 1, send } as unknown as WebSocket;
+    const snapshot = {
+      ...snapshotFixture(),
+      you: "p1" as const,
+      hostId: "p1" as const,
+      players: [
+        { id: "p0" as const, name: "ホスト", connected: false, isHost: false },
+        { id: "p1" as const, name: "ゲスト", connected: true, isHost: true },
+      ],
+    };
+    render(
+      <OnlineGameProvider socket={socket} snapshot={snapshot}>
+        <PermissionProbe />
+      </OnlineGameProvider>,
+    );
+
+    expect(screen.getByTestId("player-id")).toHaveTextContent("p1");
+    expect(screen.getByTestId("is-host")).toHaveTextContent("true");
+    await userEvent.click(screen.getByRole("button", { name: "次の局へ" }));
+    await userEvent.click(
+      screen.getByRole("button", { name: "新しい半荘を開始" }),
+    );
+    expect(send).toHaveBeenCalledTimes(2);
+    expect(JSON.parse(send.mock.calls[0][0] as string)).toMatchObject({
+      type: "action",
+      action: { type: "nextRound" },
+    });
+    expect(JSON.parse(send.mock.calls[1][0] as string)).toEqual({
+      type: "newGame",
+    });
+  });
+
+  it("guestのhost-only actionを送信しない", async () => {
     const send = vi.fn();
     const socket = { readyState: 1, send } as unknown as WebSocket;
     const snapshot = { ...snapshotFixture(), you: "p1" as const };
@@ -90,7 +129,6 @@ describe("OnlineGameProvider", () => {
 
     expect(screen.getByTestId("player-id")).toHaveTextContent("p1");
     expect(screen.getByTestId("is-host")).toHaveTextContent("false");
-
     await userEvent.click(screen.getByRole("button", { name: "次の局へ" }));
     await userEvent.click(
       screen.getByRole("button", { name: "新しい半荘を開始" }),

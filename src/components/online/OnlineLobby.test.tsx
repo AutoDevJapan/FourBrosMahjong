@@ -120,12 +120,14 @@ function snapshotFixture(): OnlineSnapshot {
     code: "ABC234",
     version: 0,
     you: "p0",
+    hostId: "p0",
     phase: engine.phase,
     view: selectView(engine, "p0"),
     pending: engine.pending,
     roundSummary: engine.lastRound,
     players: [{ id: "p0", name: "たろう", connected: true, isHost: true }],
     currentTurn: "p0",
+    hostNotice: null,
   };
 }
 
@@ -747,6 +749,11 @@ describe("OnlineLobby connection recovery", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "退出" }));
     expect(sockets[0]?.readyState).toBe(TestWebSocket.CLOSED);
+    expect(
+      sockets[0]?.sent
+        .map((value) => JSON.parse(value))
+        .some((message) => message.type === "leave"),
+    ).toBe(true);
 
     act(() => vi.advanceTimersByTime(60_000));
 
@@ -757,6 +764,45 @@ describe("OnlineLobby connection recovery", () => {
     expect(
       document.querySelector('[data-connection-status="idle"]'),
     ).not.toBeNull();
+  });
+
+  it("shows the host handoff reason and the next operation in the online snapshot", () => {
+    render(<OnlineLobby />);
+
+    fireEvent.change(screen.getByLabelText("表示名"), {
+      target: { value: "ゲスト" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "新しいルームを作る" }));
+
+    const handoff = {
+      ...snapshotFixture(),
+      you: "p1" as const,
+      hostId: "p1" as const,
+      players: [
+        { id: "p0" as const, name: "ホスト", connected: false, isHost: false },
+        { id: "p1" as const, name: "ゲスト", connected: true, isHost: true },
+      ],
+      hostNotice: {
+        reason: "disconnected" as const,
+        message: "ホストが切断したため、ゲストへホスト権限を引き継ぎました。",
+        nextAction: "「次の局へ」を押して対局を続けてください。",
+      },
+    };
+    act(() => {
+      sockets[0]?.open();
+      sockets[0]?.message({
+        type: "session",
+        token: "t".repeat(24),
+        snapshot: handoff,
+      });
+    });
+
+    expect(screen.getByRole("status")).toHaveTextContent(
+      "ホストが切断したため、ゲストへホスト権限を引き継ぎました。",
+    );
+    expect(screen.getByRole("status")).toHaveTextContent(
+      "次の操作: 「次の局へ」を押して対局を続けてください。",
+    );
   });
 
   it("bounds an oversized retryAfterMs value", () => {

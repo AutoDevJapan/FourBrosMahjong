@@ -5,6 +5,10 @@ import {
 } from "../src/components/game/gamePersistence";
 import { selectView } from "../src/components/game/gameView";
 import type { GameViewState } from "../src/components/game/types";
+import type {
+  OnlineHostNotice,
+  OnlineHostTransitionReason,
+} from "../src/components/online/types";
 import {
   createGame,
   DEFAULT_NAMES,
@@ -12,6 +16,7 @@ import {
   type Pending,
   type PlayerId,
   type PlayerNames,
+  removeHumanPlayerIds,
   setHumanPlayerIds,
 } from "../src/domain/game/engine";
 import { sanitizePlayerName } from "../src/lib/playerName";
@@ -34,6 +39,7 @@ export interface RoomSnapshot {
   readonly code: string;
   readonly version: number;
   readonly you: PlayerId;
+  readonly hostId: PlayerId | null;
   readonly phase: EngineState["phase"];
   readonly view: GameViewState;
   /** 相手の手牌を含む非公開入力は担当者にだけ返す。 */
@@ -41,6 +47,7 @@ export interface RoomSnapshot {
   readonly roundSummary: EngineState["lastRound"];
   readonly players: readonly RoomPlayerSnapshot[];
   readonly currentTurn: PlayerId | null;
+  readonly hostNotice: OnlineHostNotice | null;
 }
 
 interface RoomPlayer {
@@ -48,7 +55,13 @@ interface RoomPlayer {
   readonly token: string;
   name: string;
   connected: boolean;
+  resumable: boolean;
   lastSeenAt: number;
+}
+
+interface HostTransition {
+  readonly reason: OnlineHostTransitionReason;
+  readonly message: string;
 }
 
 interface Room {
@@ -56,6 +69,11 @@ interface Room {
   state: EngineState;
   version: number;
   readonly players: Map<PlayerId, RoomPlayer>;
+  /** 現在のhost席。host切断後は接続中のguestへ即時に移る。 */
+  hostId: PlayerId | null;
+  /** 現局で人間席だったか。切断時にAIへ解放してもresumeで復元する。 */
+  readonly humanPlayerIds: Set<PlayerId>;
+  hostTransition: HostTransition | null;
   lastActivityAt: number;
 }
 
@@ -129,10 +147,73 @@ function playerNameChanged(
 
 /** 現半荘の人間入力 roster に新規 seat だけを追加する。 */
 function addHumanPlayer(room: Room, playerId: PlayerId): void {
+  room.humanPlayerIds.add(playerId);
   room.state = setHumanPlayerIds(room.state, [
     ...(room.state.humanPlayerIds ?? ["p0"]),
     playerId,
   ]);
+}
+
+function nextHostAction(phase: EngineState["phase"]): string {
+  switch (phase) {
+    case "playing":
+      return "現在の手番に従って操作してください。";
+    case "roundEnd":
+      return "「次の局へ」を押して対局を続けてください。";
+    case "gameEnd":
+      return "「新しい半荘を開始」を押して次の半荘へ進めてください。";
+  }
+}
+
+function hostNoticeFor(room: Room): OnlineHostNotice | null {
+  const transition = room.hostTransition;
+  if (transition === null) return null;
+  return {
+    reason: transition.reason,
+    message: transition.message,
+    nextAction:
+      room.hostId === null
+        ? "ホストが再接続するか、参加者が接続すると次のホストが決まります。"
+        : nextHostAction(room.state.phase),
+  };
+}
+
+function firstConnectedPlayer(
+  room: Room,
+  excluding: PlayerId | null = null,
+): RoomPlayer | null {
+  for (const id of PLAYER_IDS) {
+    if (id === excluding) continue;
+    const player = room.players.get(id);
+    if (player?.connected) return player;
+  }
+  return null;
+}
+
+function rememberHostTransition(
+  room: Room,
+  reason: OnlineHostTransitionReason,
+  departing: RoomPlayer,
+  replacement: RoomPlayer | null,
+): void {
+  const verb = reason === "left" ? "退出" : "切断";
+  room.hostTransition = {
+    reason,
+    message: replacement
+      ? `「${departing.name}」さん（ホスト）が${verb}したため、${replacement.name}さんへホスト権限を引き継ぎました。`
+      : `「${departing.name}」さん（ホスト）が${verb}しました。接続中の参加者がいないため、再接続または参加者の接続を待っています。`,
+  };
+}
+
+function transferHost(
+  room: Room,
+  departing: RoomPlayer,
+  reason: OnlineHostTransitionReason,
+): RoomPlayer | null {
+  const replacement = firstConnectedPlayer(room, departing.id);
+  room.hostId = replacement?.id ?? null;
+  rememberHostTransition(room, reason, departing, replacement);
+  return replacement;
 }
 
 function isValidTile(value: unknown): value is {
@@ -203,6 +284,7 @@ export class RoomManager {
       token: randomToken(),
       name,
       connected: true,
+      resumable: true,
       lastSeenAt: now(),
     };
     const room: Room = {
@@ -214,6 +296,9 @@ export class RoomManager {
       }),
       version: 0,
       players: new Map([[player.id, player]]),
+      hostId: "p0",
+      humanPlayerIds: new Set(["p0"]),
+      hostTransition: null,
       lastActivityAt: now(),
     };
     this.rooms.set(code, room);
@@ -232,6 +317,7 @@ export class RoomManager {
       token: randomToken(),
       name: normalizePlayerName(nameValue),
       connected: true,
+      resumable: true,
       lastSeenAt: now(),
     };
     room.players.set(id, player);
@@ -239,6 +325,16 @@ export class RoomManager {
     // `room.players` also retains disconnected seats for resume. Only the
     // newly assigned seat joins this half-game's human-input roster.
     addHumanPlayer(room, id);
+    if (
+      room.hostId === null ||
+      room.players.get(room.hostId)?.connected !== true
+    ) {
+      room.hostId = id;
+      room.hostTransition = {
+        reason: room.hostTransition?.reason ?? "disconnected",
+        message: `ホストが不在のため、${player.name}さんへホスト権限を引き継ぎました。`,
+      };
+    }
     room.lastActivityAt = now();
     return { room, player };
   }
@@ -249,7 +345,7 @@ export class RoomManager {
     const room = this.rooms.get(code);
     if (!room) return null;
     const player = [...room.players.values()].find(
-      (candidate) => candidate.token === token,
+      (candidate) => candidate.resumable && candidate.token === token,
     );
     if (!player) return null;
     player.connected = true;
@@ -258,6 +354,21 @@ export class RoomManager {
     // Do not promote a seat that was omitted from that roster on resume: doing
     // so would turn a disconnected seat back into a blocking human pending
     // during the same half-game. A seat that was already human remains so.
+    const before = room.state;
+    if (room.humanPlayerIds.has(player.id)) {
+      room.state = setHumanPlayerIds(room.state, [
+        ...(room.state.humanPlayerIds ?? ["p0"]),
+        player.id,
+      ]);
+    }
+    if (room.state !== before) room.version += 1;
+    if (
+      room.hostId === null ||
+      room.players.get(room.hostId)?.connected !== true
+    ) {
+      room.hostId = player.id;
+      room.hostTransition = null;
+    }
     room.lastActivityAt = now();
     return { room, player };
   }
@@ -271,6 +382,27 @@ export class RoomManager {
   disconnect(room: Room, player: RoomPlayer): void {
     player.connected = false;
     player.lastSeenAt = now();
+    if (room.hostId === player.id) {
+      transferHost(room, player, "disconnected");
+      const before = room.state;
+      room.state = removeHumanPlayerIds(room.state, [player.id]);
+      if (room.state !== before) room.version += 1;
+    }
+    room.lastActivityAt = now();
+  }
+
+  /** 明示退出。hostは権限を引き継ぎ、旧tokenではresumeできない。 */
+  leave(room: Room, player: RoomPlayer): void {
+    player.connected = false;
+    player.lastSeenAt = now();
+    if (room.hostId === player.id) {
+      player.resumable = false;
+      room.humanPlayerIds.delete(player.id);
+      transferHost(room, player, "left");
+      const before = room.state;
+      room.state = removeHumanPlayerIds(room.state, [player.id]);
+      if (room.state !== before) room.version += 1;
+    }
     room.lastActivityAt = now();
   }
 
@@ -288,7 +420,7 @@ export class RoomManager {
         room,
       };
     }
-    if (action.type === "nextRound" && player.id !== "p0") {
+    if (action.type === "nextRound" && player.id !== room.hostId) {
       return {
         ok: false,
         error: "次の局へ進められるのはホストだけです。",
@@ -317,7 +449,7 @@ export class RoomManager {
   }
 
   newGame(room: Room, player: RoomPlayer): RoomMutation {
-    if (player.id !== "p0")
+    if (player.id !== room.hostId)
       return {
         ok: false,
         error: "新しい半荘を始められるのはホストだけです。",
@@ -329,15 +461,20 @@ export class RoomManager {
         error: "新しい半荘を始められるのは対局終了後です。",
         room,
       };
+    const connectedPlayerIds = [...room.players.values()]
+      .filter((roomPlayer) => roomPlayer.connected)
+      .map((roomPlayer) => roomPlayer.id);
+    room.humanPlayerIds.clear();
+    for (const playerId of connectedPlayerIds) {
+      room.humanPlayerIds.add(playerId);
+    }
     room.state = createGame({
       seed: randomSeed(),
       names: namesOf(room),
       // Preserve the current-hand reconnect guard, but do not carry a seat
       // that is still disconnected into a fresh half-game. Otherwise the new
       // game stops at that seat's pending input with no connected actor.
-      humanPlayerIds: [...room.players.values()]
-        .filter((roomPlayer) => roomPlayer.connected)
-        .map((roomPlayer) => roomPlayer.id),
+      humanPlayerIds: connectedPlayerIds,
     });
     room.version += 1;
     room.lastActivityAt = now();
@@ -349,6 +486,7 @@ export class RoomManager {
       code: room.code,
       version: room.version,
       you: player.id,
+      hostId: room.hostId,
       phase: room.state.phase,
       view: selectView(room.state, player.id),
       pending:
@@ -364,13 +502,14 @@ export class RoomManager {
             id,
             name: roomPlayer.name,
             connected: roomPlayer.connected,
-            isHost: id === "p0",
+            isHost: id === room.hostId,
           },
         ];
       }),
       currentTurn: room.state.hand
         ? room.state.hand.seating[room.state.hand.turn]
         : null,
+      hostNotice: hostNoticeFor(room),
     };
   }
 
