@@ -144,6 +144,84 @@ describe("online room manager", () => {
     expect(after.players).toEqual(before.players);
   });
 
+  it("keeps a disconnected seat out of the new game after resume", () => {
+    const manager = new RoomManager();
+    const host = manager.create("ホスト");
+    const guest = manager.join(host.room.code, "ゲスト");
+    if (!guest) throw new Error("guest should join");
+    reachGameEnd(manager, host);
+
+    manager.disconnect(guest.room, guest.player);
+    const started = manager.newGame(host.room, host.player);
+    expect(started.ok).toBe(true);
+    expect(host.room.state.humanPlayerIds).toEqual(["p0"]);
+
+    const firstDraw = host.room.state.hand?.drawn?.tile;
+    if (!firstDraw) throw new Error("host should start on a draw decision");
+    const afterHost = manager.apply(
+      host.room,
+      host.player,
+      { type: "discard", tile: firstDraw },
+      host.room.version,
+    );
+    expect(afterHost.ok).toBe(true);
+    expect(manager.snapshot(host.room, host.player).pending?.playerId).toBe(
+      "p0",
+    );
+
+    const resumed = manager.resume(host.room.code, guest.player.token);
+    expect(resumed?.player.id).toBe("p1");
+    expect(host.room.state.humanPlayerIds).toEqual(["p0"]);
+
+    // The resumed socket can disappear again before the host advances. It
+    // must not make p1 a blocking pending player in this fresh half-game.
+    if (!resumed) throw new Error("guest should resume");
+    manager.disconnect(resumed.room, resumed.player);
+    const resumedGameDraw = host.room.state.hand?.drawn?.tile;
+    if (!resumedGameDraw) throw new Error("host should have a drawn tile");
+    const afterResume = manager.apply(
+      host.room,
+      host.player,
+      { type: "discard", tile: resumedGameDraw },
+      host.room.version,
+    );
+    expect(afterResume.ok).toBe(true);
+    expect(manager.snapshot(host.room, host.player).pending?.playerId).toBe(
+      "p0",
+    );
+  });
+
+  it("does not reintroduce a disconnected seat when another player joins after newGame", () => {
+    const manager = new RoomManager();
+    const host = manager.create("ホスト");
+    const guest = manager.join(host.room.code, "ゲスト");
+    if (!guest) throw new Error("guest should join");
+    reachGameEnd(manager, host);
+
+    manager.disconnect(guest.room, guest.player);
+    const started = manager.newGame(host.room, host.player);
+    expect(started.ok).toBe(true);
+
+    const lateGuest = manager.join(host.room.code, "後参加");
+    expect(lateGuest?.player.id).toBe("p2");
+    expect(host.room.state.humanPlayerIds).toEqual(["p0", "p2"]);
+
+    const firstDraw = host.room.state.hand?.drawn?.tile;
+    if (!firstDraw) throw new Error("host should start on a draw decision");
+    const afterHost = manager.apply(
+      host.room,
+      host.player,
+      { type: "discard", tile: firstDraw },
+      host.room.version,
+    );
+    expect(afterHost.ok).toBe(true);
+    // p2 is the newly joined human seat; p1 must not be resurrected merely
+    // because it is still retained in room.players for resume.
+    expect(manager.snapshot(host.room, host.player).pending?.playerId).not.toBe(
+      "p1",
+    );
+  });
+
   it("validates action tiles before the engine sees them", () => {
     for (const rank of [1, 2, 3, 4, 5, 6, 7, 8, 9]) {
       expect(
