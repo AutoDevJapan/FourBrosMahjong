@@ -137,8 +137,17 @@ describe("online room manager", () => {
     expect(manager.snapshot(host.room, host.player).hostId).toBe("p0");
 
     const rejoined = manager.join(host.room.code, "再参加");
-    expect(rejoined?.player.id).toBe("p2");
+    expect(rejoined?.player.id).toBe("p1");
+    expect(manager.resume(host.room.code, guest.player.token)).toBeNull();
     expect(manager.snapshot(host.room, host.player).hostId).toBe("p0");
+
+    // A repeated explicit leave/join cycle reuses the released seat instead
+    // of consuming p2 and p3 until the room becomes falsely full.
+    if (!rejoined) throw new Error("guest should rejoin");
+    manager.leave(rejoined.room, rejoined.player);
+    const rejoinedAgain = manager.join(host.room.code, "再参加2");
+    expect(rejoinedAgain?.player.id).toBe("p1");
+    expect(manager.join(host.room.code, "別ゲスト")?.player.id).toBe("p2");
   });
 
   it("hands playing host authority to a connected guest and releases the disconnected host turn", () => {

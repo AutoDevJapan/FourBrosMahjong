@@ -1284,9 +1284,32 @@ describe("online host handoff (#681)", () => {
         clients.push(rejoined);
         await rejoined.open();
         rejoined.send({ type: "join", code, name: "再参加ゲスト" });
-        await expect(rejoined.waitForSession()).resolves.toMatchObject({
-          snapshot: { you: "p2", hostId: "p0" },
+        const rejoinedSession = await rejoined.waitForSession();
+        expect(rejoinedSession).toMatchObject({
+          snapshot: { you: "p1", hostId: "p0" },
         });
+
+        let activeGuest = rejoined;
+        let activeSession = rejoinedSession;
+        for (const name of ["再参加ゲスト2", "再参加ゲスト3"]) {
+          activeGuest.send({ type: "leave" });
+          await host.waitForSnapshot(
+            (snapshot) =>
+              snapshot.version > activeSession.snapshot.version &&
+              snapshot.departureNotice?.playerId === "p1" &&
+              snapshot.players.find((player) => player.id === "p1")
+                ?.connected === false,
+          );
+
+          const nextGuest = new OnlineTestClient(server.url, TEST_ORIGIN);
+          clients.push(nextGuest);
+          await nextGuest.open();
+          nextGuest.send({ type: "join", code, name });
+          activeSession = await nextGuest.waitForSession();
+          expect(activeSession.snapshot.you).toBe("p1");
+          expect(activeSession.snapshot.hostId).toBe("p0");
+          activeGuest = nextGuest;
+        }
       } finally {
         await closeTestClients(clients);
         if (server !== undefined) await stopLocalOnlineServer(server);

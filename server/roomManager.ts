@@ -76,6 +76,8 @@ interface Room {
   state: EngineState;
   version: number;
   readonly players: Map<PlayerId, RoomPlayer>;
+  /** 明示退出したguestのseat。次のjoinで同じIDを安全に置換する。 */
+  readonly reusableSeatIds: Set<PlayerId>;
   /** 現在のhost席。host切断後は接続中のguestへ即時に移る。 */
   hostId: PlayerId | null;
   /** 現局で人間席だったか。切断時にAIへ解放してもresumeで復元する。 */
@@ -318,6 +320,7 @@ export class RoomManager {
       }),
       version: 0,
       players: new Map([[player.id, player]]),
+      reusableSeatIds: new Set(),
       hostId: "p0",
       humanPlayerIds: new Set(["p0"]),
       hostTransition: null,
@@ -333,8 +336,11 @@ export class RoomManager {
     if (code === null) return null;
     const room = this.rooms.get(code);
     if (!room) return null;
-    const id = PLAYER_IDS.find((candidate) => !room.players.has(candidate));
+    const id =
+      PLAYER_IDS.find((candidate) => room.reusableSeatIds.has(candidate)) ??
+      PLAYER_IDS.find((candidate) => !room.players.has(candidate));
     if (!id) return null;
+    if (room.reusableSeatIds.delete(id)) room.players.delete(id);
     const player: RoomPlayer = {
       id,
       token: randomToken(),
@@ -345,6 +351,7 @@ export class RoomManager {
     };
     room.players.set(id, player);
     room.state = playerNameChanged(room.state, id, player.name);
+    room.departureNotice = null;
     // `room.players` also retains disconnected seats for resume. Only the
     // newly assigned seat joins this half-game's human-input roster.
     addHumanPlayer(room, id);
@@ -426,6 +433,8 @@ export class RoomManager {
     if (room.hostId !== player.id) rememberDeparture(room, player);
     if (room.hostId === player.id) {
       transferHost(room, player, "left");
+    } else {
+      room.reusableSeatIds.add(player.id);
     }
     room.lastActivityAt = now();
   }
