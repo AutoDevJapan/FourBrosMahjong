@@ -33,6 +33,7 @@ import {
   type EngineState,
   type GamePhase,
   type Pending,
+  type PlayerId,
   type PlayerNames,
   type RoundSummary,
 } from "@/domain/game/engine";
@@ -78,6 +79,10 @@ export interface GameControls {
 }
 
 export interface GameContextValue {
+  /** この画面を操作している席。オンラインでは server snapshot の `you`。 */
+  readonly playerId: PlayerId;
+  /** host 専用の局進行・次半荘操作を表示できるか。認可そのものは server が行う。 */
+  readonly isHost: boolean;
   /** 対局画面の表示ビューモデル。 */
   readonly view: GameViewState;
   /** 半荘のフェーズ(playing / roundEnd / gameEnd)。 */
@@ -401,6 +406,8 @@ export function GameProvider({ children, initialGame }: GameProviderProps) {
 
   const value = useMemo<GameContextValue>(
     () => ({
+      playerId: "p0",
+      isHost: true,
       view: selectView(engine),
       phase: engine.phase,
       pending: engine.pending,
