@@ -9,7 +9,11 @@ import {
   useState,
 } from "react";
 import GameBoard from "@/components/game/GameBoard";
+import { useGame } from "@/components/game/GameProvider";
+import type { GameResultView } from "@/components/game/types";
 import ScreenNavigation from "@/components/layout/ScreenNavigation";
+import RankingTable from "@/components/result/RankingTable";
+import SoshiiBreakdown from "@/components/result/SoshiiBreakdown";
 import {
   limitPlayerName,
   MAX_PLAYER_NAME_LENGTH,
@@ -279,6 +283,99 @@ function ConnectionFeedback({
   );
 }
 
+interface OnlineResultViewProps {
+  readonly result: GameResultView;
+  readonly onBack: () => void;
+  readonly newGameDisabled: boolean;
+}
+
+function OnlineResultView({
+  result,
+  onBack,
+  newGameDisabled,
+}: OnlineResultViewProps) {
+  const { controls, isHost } = useGame();
+  const headingRef = useRef<HTMLHeadingElement>(null);
+  const orderedPlayers = [...result.players].sort((a, b) => a.rank - b.rank);
+
+  useEffect(() => {
+    headingRef.current?.focus({ preventScroll: true });
+  }, []);
+
+  const newGameUnavailableMessage = !isHost
+    ? "新しい半荘を開始できるのはホストだけです。"
+    : newGameDisabled
+      ? "接続が復旧すると新しい半荘を開始できます。"
+      : null;
+
+  return (
+    <section
+      aria-labelledby="online-result-heading"
+      className="flex flex-col gap-6 rounded-xl border border-control-border p-4 sm:p-6"
+    >
+      <h2
+        id="online-result-heading"
+        ref={headingRef}
+        tabIndex={-1}
+        className="text-xl font-bold"
+      >
+        対局結果
+      </h2>
+      <section aria-labelledby="online-result-ranking-heading">
+        <h3
+          id="online-result-ranking-heading"
+          className="text-lg font-semibold"
+        >
+          最終順位
+        </h3>
+        <RankingTable players={result.players} />
+      </section>
+      <section aria-labelledby="online-result-soshii-heading">
+        <h3 id="online-result-soshii-heading" className="text-lg font-semibold">
+          ソシー内訳(素点+ウマ+祝儀)
+        </h3>
+        <div className="grid gap-3 sm:grid-cols-2">
+          {orderedPlayers.map((player) => (
+            <SoshiiBreakdown key={player.rank} player={player} />
+          ))}
+        </div>
+      </section>
+      <div className="flex flex-wrap items-start gap-3">
+        <button
+          type="button"
+          onClick={onBack}
+          className="inline-flex min-h-11 items-center rounded-full border border-control-border px-4 py-2 text-sm hover:bg-foreground/5"
+        >
+          対局画面へ戻る
+        </button>
+        <div className="flex flex-col items-start gap-1">
+          <button
+            type="button"
+            disabled={!isHost || newGameDisabled}
+            onClick={controls.newGame}
+            aria-describedby={
+              newGameUnavailableMessage
+                ? "online-result-new-game-requirement"
+                : undefined
+            }
+            className="inline-flex min-h-11 items-center rounded-lg border border-control-border px-4 py-2 text-sm font-medium hover:bg-foreground/5 disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            新しい半荘を開始
+          </button>
+          {newGameUnavailableMessage ? (
+            <p
+              id="online-result-new-game-requirement"
+              className="max-w-sm text-xs text-foreground/70"
+            >
+              {newGameUnavailableMessage}
+            </p>
+          ) : null}
+        </div>
+      </div>
+    </section>
+  );
+}
+
 export default function OnlineLobby() {
   const [name, setName] = useState("");
   const [roomCode, setRoomCode] = useState("");
@@ -290,6 +387,12 @@ export default function OnlineLobby() {
   const [status, setStatus] = useState<ConnectionStatus>("idle");
   const [error, setError] = useState("");
   const [retryAfterMs, setRetryAfterMs] = useState(0);
+  const [onlineResultOpen, setOnlineResultOpen] = useState(false);
+  const onlineResultButtonRef = useRef<HTMLButtonElement>(null);
+  const onlineGameFallbackRef = useRef<HTMLElement>(null);
+  const restoreOnlineResultFocusRef = useRef(false);
+  const restoreOnlineGameFocusRef = useRef(false);
+  const onlineResultOpenRef = useRef(false);
   const socketRef = useRef<WebSocket | null>(null);
   const credentialsRef = useRef<OnlineCredentials | null>(null);
   const reconnectAttemptRef = useRef(0);
@@ -312,6 +415,28 @@ export default function OnlineLobby() {
     (request: JoinRequest, reconnecting?: boolean) => void
   >(() => undefined);
 
+  const setOnlineResultOpenState = useCallback((open: boolean) => {
+    onlineResultOpenRef.current = open;
+    setOnlineResultOpen(open);
+  }, []);
+
+  const applyOnlineSnapshot = useCallback(
+    (nextSnapshot: OnlineSnapshot) => {
+      setSnapshot(nextSnapshot);
+      setRoomCode(nextSnapshot.code);
+      if (
+        nextSnapshot.phase !== "gameEnd" ||
+        nextSnapshot.view.result === null
+      ) {
+        if (onlineResultOpenRef.current) {
+          restoreOnlineGameFocusRef.current = true;
+        }
+        setOnlineResultOpenState(false);
+      }
+    },
+    [setOnlineResultOpenState],
+  );
+
   useEffect(() => {
     if (!focusAfterRetryRef.current) return;
     feedbackRef.current?.focus({ preventScroll: true });
@@ -319,6 +444,28 @@ export default function OnlineLobby() {
       focusAfterRetryRef.current = false;
     }
   }, [snapshot, status]);
+
+  useEffect(() => {
+    if (
+      onlineResultOpen ||
+      (!restoreOnlineResultFocusRef.current &&
+        !restoreOnlineGameFocusRef.current)
+    ) {
+      return;
+    }
+
+    const resultButton = onlineResultButtonRef.current;
+    resultButton?.focus({ preventScroll: true });
+    if (resultButton !== null && document.activeElement === resultButton) {
+      restoreOnlineResultFocusRef.current = false;
+      restoreOnlineGameFocusRef.current = false;
+      return;
+    }
+
+    onlineGameFallbackRef.current?.focus({ preventScroll: true });
+    restoreOnlineResultFocusRef.current = false;
+    restoreOnlineGameFocusRef.current = false;
+  }, [onlineResultOpen]);
 
   const clearReconnectTimer = useCallback(() => {
     if (reconnectTimerRef.current !== null) {
@@ -533,14 +680,12 @@ export default function OnlineLobby() {
             credentialsRef.current = nextCredentials;
             setCredentials(nextCredentials);
             saveCredentials(nextCredentials);
-            setRoomCode(message.snapshot.code);
-            setSnapshot(message.snapshot);
+            applyOnlineSnapshot(message.snapshot);
             setStatus("connected");
             return;
           }
           if (message.type === "snapshot") {
-            setSnapshot(message.snapshot);
-            setRoomCode(message.snapshot.code);
+            applyOnlineSnapshot(message.snapshot);
             return;
           }
           if (message.type === "error") {
@@ -610,6 +755,7 @@ export default function OnlineLobby() {
       clearReconnectTimer,
       clearRetryCooldown,
       applyRetryCooldown,
+      applyOnlineSnapshot,
       failHandshake,
       handleTransportFailure,
       scheduleReconnect,
@@ -723,11 +869,24 @@ export default function OnlineLobby() {
     current?.close();
     setSocket(null);
     setSnapshot(null);
+    restoreOnlineResultFocusRef.current = false;
+    restoreOnlineGameFocusRef.current = false;
+    setOnlineResultOpenState(false);
     setStatus("idle");
     setError("");
   };
 
   const onSendError = useCallback((message: string) => setError(message), []);
+  const openOnlineResult = useCallback(() => {
+    restoreOnlineResultFocusRef.current = false;
+    restoreOnlineGameFocusRef.current = false;
+    setOnlineResultOpenState(true);
+  }, [setOnlineResultOpenState]);
+  const returnToOnlineGame = useCallback(() => {
+    restoreOnlineResultFocusRef.current = true;
+    restoreOnlineGameFocusRef.current = false;
+    setOnlineResultOpenState(false);
+  }, [setOnlineResultOpenState]);
   const canRetry = Boolean(credentials || activeRequest);
   const currentTurnName = snapshot?.currentTurn
     ? snapshot.players.find((player) => player.id === snapshot.currentTurn)
@@ -735,13 +894,19 @@ export default function OnlineLobby() {
     : null;
 
   if (snapshot) {
+    const onlineResult = snapshot.view.result;
     return (
       <OnlineGameProvider
         socket={status === "connected" ? socket : null}
         snapshot={snapshot}
         onSendError={onSendError}
       >
-        <section className="flex flex-col gap-4" aria-label="オンライン対局">
+        <section
+          ref={onlineGameFallbackRef}
+          tabIndex={-1}
+          className="flex flex-col gap-4"
+          aria-label="オンライン対局"
+        >
           <h1 id="online-game-heading" className="text-2xl font-bold">
             オンライン対戦
           </h1>
@@ -799,17 +964,26 @@ export default function OnlineLobby() {
             feedbackRef={feedbackRef}
             onRetry={retry}
           />
-          <GameBoard
-            resultHref="/online"
-            interactionDisabled={status !== "connected"}
-            interactionDisabledReason={
-              status === "failed"
-                ? "failed"
-                : status === "connected"
-                  ? undefined
-                  : "reconnecting"
-            }
-          />
+          {onlineResultOpen && onlineResult !== null ? (
+            <OnlineResultView
+              result={onlineResult}
+              onBack={returnToOnlineGame}
+              newGameDisabled={status !== "connected"}
+            />
+          ) : (
+            <GameBoard
+              onResult={openOnlineResult}
+              resultButtonRef={onlineResultButtonRef}
+              interactionDisabled={status !== "connected"}
+              interactionDisabledReason={
+                status === "failed"
+                  ? "failed"
+                  : status === "connected"
+                    ? undefined
+                    : "reconnecting"
+              }
+            />
+          )}
         </section>
       </OnlineGameProvider>
     );

@@ -6,8 +6,9 @@ import {
   waitFor,
 } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { StrictMode } from "react";
+import { type RefObject, StrictMode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { walkToGameEnd } from "@/components/game/finishedGameFixture";
 import { selectView } from "@/components/game/gameView";
 import { createGame } from "@/domain/game/engine";
 import OnlineLobby from "./OnlineLobby";
@@ -17,9 +18,13 @@ vi.mock("@/components/game/GameBoard", () => ({
   default: ({
     interactionDisabled,
     interactionDisabledReason,
+    onResult,
+    resultButtonRef,
   }: {
     interactionDisabled?: boolean;
     interactionDisabledReason?: "reconnecting" | "failed";
+    onResult?: () => void;
+    resultButtonRef?: RefObject<HTMLButtonElement | null>;
   }) => (
     <div
       data-testid="game-board"
@@ -27,6 +32,11 @@ vi.mock("@/components/game/GameBoard", () => ({
       data-interaction-disabled-reason={String(interactionDisabledReason)}
     >
       対局盤
+      {onResult ? (
+        <button ref={resultButtonRef} type="button" onClick={onResult}>
+          結果を見る
+        </button>
+      ) : null}
     </div>
   ),
 }));
@@ -116,6 +126,26 @@ function snapshotFixture(): OnlineSnapshot {
     roundSummary: engine.lastRound,
     players: [{ id: "p0", name: "たろう", connected: true, isHost: true }],
     currentTurn: "p0",
+  };
+}
+
+function finishedSnapshotFixture(you: "p0" | "p1" = "p0"): OnlineSnapshot {
+  const finished = walkToGameEnd(1).state;
+  return {
+    code: "ABC234",
+    version: 1,
+    you,
+    phase: finished.phase,
+    view: selectView(finished, you),
+    pending: finished.pending,
+    roundSummary: finished.lastRound,
+    players: finished.players.map((player) => ({
+      id: player.id,
+      name: player.name,
+      connected: true,
+      isHost: player.id === "p0",
+    })),
+    currentTurn: null,
   };
 }
 
@@ -829,5 +859,158 @@ describe("OnlineLobby connection recovery", () => {
     expect(
       window.sessionStorage.getItem("four-bros-mahjong.online.session.v1"),
     ).toBeNull();
+  });
+});
+
+describe("OnlineLobby の終局結果導線", () => {
+  it("終局snapshotの結果を見るでオンライン結果を表示し、同じ終局画面へ戻らない", () => {
+    render(<OnlineLobby />);
+
+    fireEvent.change(screen.getByLabelText("表示名"), {
+      target: { value: "たろう" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "新しいルームを作る" }));
+
+    act(() => {
+      sockets[0]?.open();
+      sockets[0]?.message({
+        type: "session",
+        token: "t".repeat(24),
+        snapshot: finishedSnapshotFixture(),
+      });
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "結果を見る" }));
+
+    expect(
+      screen.getByRole("heading", { level: 2, name: "対局結果" }),
+    ).toHaveFocus();
+    expect(
+      screen.getByRole("heading", { level: 3, name: "最終順位" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("heading", {
+        level: 3,
+        name: "ソシー内訳(素点+ウマ+祝儀)",
+      }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "対局画面へ戻る" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "新しい半荘を開始" }),
+    ).toBeEnabled();
+    expect(screen.queryByTestId("game-board")).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "対局画面へ戻る" }));
+    expect(screen.getByTestId("game-board")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "結果を見る" })).toHaveFocus();
+
+    fireEvent.click(screen.getByRole("button", { name: "結果を見る" }));
+    fireEvent.click(screen.getByRole("button", { name: "新しい半荘を開始" }));
+    expect(JSON.parse(sockets[0]?.sent.at(-1) ?? "{}")).toEqual({
+      type: "newGame",
+    });
+
+    act(() => {
+      sockets[0]?.message({
+        type: "snapshot",
+        snapshot: snapshotFixture(),
+      });
+    });
+    expect(screen.getByTestId("game-board")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "結果を見る" })).toHaveFocus();
+  });
+
+  it("guestは結果ビューの新局CTAをdisabledにし、対局画面へ戻っても送信しない", () => {
+    render(<OnlineLobby />);
+
+    fireEvent.change(screen.getByLabelText("表示名"), {
+      target: { value: "じろう" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "新しいルームを作る" }));
+
+    act(() => {
+      sockets[0]?.open();
+      sockets[0]?.message({
+        type: "session",
+        token: "t".repeat(24),
+        snapshot: finishedSnapshotFixture("p1"),
+      });
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "結果を見る" }));
+
+    const newGameButton = screen.getByRole("button", {
+      name: "新しい半荘を開始",
+    });
+    expect(newGameButton).toBeDisabled();
+    expect(newGameButton).toHaveAccessibleDescription(
+      "新しい半荘を開始できるのはホストだけです。",
+    );
+    fireEvent.click(newGameButton);
+    expect(
+      sockets[0]?.sent.some(
+        (message) => JSON.parse(message).type === "newGame",
+      ),
+    ).toBe(false);
+
+    fireEvent.click(screen.getByRole("button", { name: "対局画面へ戻る" }));
+    expect(screen.getByTestId("game-board")).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "新しい半荘を開始" }),
+    ).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "結果を見る" })).toHaveFocus();
+    expect(
+      sockets[0]?.sent.some(
+        (message) => JSON.parse(message).type === "newGame",
+      ),
+    ).toBe(false);
+  });
+
+  it("新局snapshot後は結果を見るまで結果を自動表示しない", () => {
+    render(<OnlineLobby />);
+
+    fireEvent.change(screen.getByLabelText("表示名"), {
+      target: { value: "たろう" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "新しいルームを作る" }));
+
+    act(() => {
+      sockets[0]?.open();
+      sockets[0]?.message({
+        type: "session",
+        token: "t".repeat(24),
+        snapshot: finishedSnapshotFixture(),
+      });
+    });
+    fireEvent.click(screen.getByRole("button", { name: "結果を見る" }));
+
+    act(() => {
+      sockets[0]?.message({
+        type: "snapshot",
+        snapshot: snapshotFixture(),
+      });
+    });
+    expect(
+      screen.queryByRole("heading", { level: 2, name: "対局結果" }),
+    ).not.toBeInTheDocument();
+    expect(screen.getByTestId("game-board")).toBeInTheDocument();
+
+    // 新局から終局snapshotを受けても、ユーザーが「結果を見る」を押すまでは開かない。
+    act(() => {
+      sockets[0]?.message({
+        type: "snapshot",
+        snapshot: finishedSnapshotFixture(),
+      });
+    });
+    expect(
+      screen.queryByRole("heading", { level: 2, name: "対局結果" }),
+    ).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "結果を見る" }));
+    expect(
+      screen.getByRole("heading", { level: 2, name: "対局結果" }),
+    ).toBeInTheDocument();
   });
 });

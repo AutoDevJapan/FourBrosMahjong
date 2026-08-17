@@ -1,4 +1,5 @@
 import type { Page } from "@playwright/test";
+import { walkToGameEnd } from "../../src/components/game/finishedGameFixture";
 import { selectView } from "../../src/components/game/gameView";
 import type { OnlineSnapshot } from "../../src/components/online/types";
 import { createGame } from "../../src/domain/game/engine";
@@ -26,6 +27,28 @@ export function onlineSnapshotFixture(): OnlineSnapshot {
     roundSummary: engine.lastRound,
     players: [{ id: "p0", name: "たろう", connected: true, isHost: true }],
     currentTurn: "p0",
+  };
+}
+
+export function onlineFinishedSnapshotFixture(
+  you: "p0" | "p1" = "p0",
+): OnlineSnapshot {
+  const finished = walkToGameEnd(1).state;
+  return {
+    code: "ABC234",
+    version: 1,
+    you,
+    phase: finished.phase,
+    view: selectView(finished, you),
+    pending: finished.pending,
+    roundSummary: finished.lastRound,
+    players: finished.players.map((player) => ({
+      id: player.id,
+      name: player.name,
+      connected: true,
+      isHost: player.id === "p0",
+    })),
+    currentTurn: null,
   };
 }
 

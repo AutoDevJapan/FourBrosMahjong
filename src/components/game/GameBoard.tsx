@@ -20,9 +20,11 @@
  */
 import { useRouter } from "next/navigation";
 import {
+  type RefObject,
   useCallback,
   useEffect,
   useId,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -72,8 +74,12 @@ export function residualSticksNote(
 }
 
 export interface GameBoardProps {
-  /** 結果ボタンの遷移先。オンライン対局は同じルームへ戻るため上書きする。 */
+  /** 結果ボタンの遷移先。onResultを指定した画面では使わない。 */
   readonly resultHref?: string;
+  /** 結果ボタンの動作。オンライン対局の結果表示など、画面内遷移を差し替える。 */
+  readonly onResult?: () => void;
+  /** 結果ビューから戻るときに結果ボタンへフォーカスを戻すための ref。 */
+  readonly resultButtonRef?: RefObject<HTMLButtonElement | null>;
   /** オンライン再接続中など、サーバー操作を一時的に停止する。 */
   readonly interactionDisabled?: boolean;
   /** 操作停止の理由。failed では自動再接続待ちではなく再試行を案内する。 */
@@ -82,6 +88,8 @@ export interface GameBoardProps {
 
 export default function GameBoard({
   resultHref = "/game/result",
+  onResult,
+  resultButtonRef,
   interactionDisabled = false,
   interactionDisabledReason = "reconnecting",
 }: GameBoardProps) {
@@ -99,15 +107,48 @@ export default function GameBoard({
     () => true,
     () => false,
   );
+  // トリガー(「全体盤面」ボタン)は段階②のサブツリー内にあり、卓幅が 360px 以上へ変わると
+  // コンテナクエリの display:none で到達不能になる。その場合の最終復帰先として、常に描画され
+  // 続ける盤面ルートを渡す(スペック5 5.2.2 / #377)。
+  const boardRootRef = useRef<HTMLDivElement>(null);
+
+  // 実盤面と狭幅盤面は同じ操作パネルを2つ描画し、コンテナクエリで片方だけを表示する。
+  // 同じ object ref を両方の「結果を見る」へ渡すと最後に描画された非表示側を指すため、
+  // 結果画面から戻る際は現在表示されているボタンへ ref を補正する(#676)。
+  useLayoutEffect(() => {
+    if (!resultButtonRef || !mounted) return;
+    const buttons = boardRootRef.current?.querySelectorAll<HTMLButtonElement>(
+      '[data-action-key="result"]',
+    );
+    if (!buttons || buttons.length === 0) {
+      resultButtonRef.current = null;
+      return;
+    }
+
+    const visibleButton = [...buttons].find((button) => {
+      let element: HTMLElement | null = button;
+      while (element !== null) {
+        const style = window.getComputedStyle(element);
+        if (style.display === "none" || style.visibility === "hidden") {
+          return false;
+        }
+        element = element.parentElement;
+      }
+      return true;
+    });
+    resultButtonRef.current = visibleButton ?? buttons[0] ?? null;
+
+    return () => {
+      if (resultButtonRef.current === visibleButton) {
+        resultButtonRef.current = null;
+      }
+    };
+  }, [mounted, phase, resultButtonRef]);
 
   // 全体盤面モーダル(スペック5 5.3.2 段階②): フォーカス表示でコンパクト化された他家情報を
   // クロス配置のまま再確認するための開閉状態。モーダルの表示自体は `< 360px` でのみ意味を持つ。
   const [boardOpen, setBoardOpen] = useState(false);
   const boardOpenerRef = useRef<HTMLButtonElement>(null);
-  // トリガー(「全体盤面」ボタン)は段階②のサブツリー内にあり、卓幅が 360px 以上へ変わると
-  // コンテナクエリの display:none で到達不能になる。その場合の最終復帰先として、常に描画され
-  // 続ける盤面ルートを渡す(スペック5 5.2.2 / #377)。
-  const boardRootRef = useRef<HTMLDivElement>(null);
   const selfKitaCount =
     slots.self.kind === "seated" ? slots.self.player.kitaCount : 0;
   const roundKey = `${tableInfo.roundWind}-${tableInfo.handNumber}-${tableInfo.honba}`;
@@ -260,25 +301,25 @@ export default function GameBoard({
     if (phase === "gameEnd") {
       // 終局後の /game の出口(#207): 結果確認に加えて、その場で新規半荘を開始できる。
       // `newGame` は journal を新規半荘で上書きするため、以後の /game 再訪は新しい対局になる。
-      const items: ActionItem[] = [
+      const resultAction: ActionItem = {
+        key: "result",
+        label: "結果を見る",
+        icon: "▶",
+        onClick: onResult ?? (() => router.push(resultHref)),
+        buttonRef: resultButtonRef,
+        requiresConnection: false,
+        primary: true,
+      };
+      if (!isHost) return [resultAction];
+      return [
+        resultAction,
         {
-          key: "result",
-          label: "結果を見る",
-          icon: "▶",
-          onClick: () => router.push(resultHref),
-          requiresConnection: false,
-          primary: true,
-        },
-      ];
-      if (isHost) {
-        items.push({
           key: "newGame",
           label: "新しい半荘を開始",
           icon: "新",
           onClick: controls.newGame,
-        });
-      }
-      return items;
+        },
+      ];
     }
     // 他家打牌への反応(ロン / ポン / 明槓 / スルー)。
     if (pending?.kind === "humanReact") {
@@ -368,7 +409,17 @@ export default function GameBoard({
       return items;
     }
     return [];
-  }, [phase, pending, controls, isHost, router, resultHref, riichiArmed]);
+  }, [
+    phase,
+    pending,
+    controls,
+    isHost,
+    onResult,
+    resultButtonRef,
+    router,
+    resultHref,
+    riichiArmed,
+  ]);
 
   const hint = useMemo(() => {
     if (interactionDisabled) {
