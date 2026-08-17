@@ -83,6 +83,134 @@ test.describe("オンラインロビーの参加条件", () => {
   });
 });
 
+test.describe("オンラインロビーのfocus lifecycle (#682)", () => {
+  test("session接続成功と退出で見出しへfocusし、狭幅でもaxe違反がない", async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 320, height: 800 });
+    await page.goto("/online");
+    await installWebSocketStub(page);
+
+    await page.getByLabel("表示名").fill("たろう");
+    const createButton = page.getByRole("button", {
+      name: "新しいルームを作る",
+    });
+    await createButton.focus();
+    await page.keyboard.press("Enter");
+    await expect(
+      page.locator('[data-connection-status="connecting"]'),
+    ).toBeVisible();
+
+    await page.evaluate((snapshot) => {
+      const socket = (window as unknown as OnlineTestWindow)
+        .__fourBrosOnlineSockets[0];
+      socket?.open();
+      socket?.message({
+        type: "session",
+        token: "t".repeat(24),
+        snapshot,
+      });
+    }, onlineSnapshotFixture());
+
+    const gameHeading = page.getByRole("heading", {
+      level: 1,
+      name: "オンライン対戦",
+    });
+    await expect(gameHeading).toBeFocused();
+    await expect(
+      page.locator('[data-connection-status="connected"]'),
+    ).toBeVisible();
+    expect(
+      await page.evaluate(
+        () =>
+          document.documentElement.scrollWidth -
+          document.documentElement.clientWidth,
+      ),
+    ).toBeLessThanOrEqual(1);
+    expect(
+      (await new AxeBuilder({ page }).include("main").analyze()).violations,
+    ).toEqual([]);
+
+    const leaveButton = page.getByRole("button", { name: "退出" });
+    await leaveButton.focus();
+    await page.keyboard.press("Enter");
+
+    const lobbyHeading = page.getByRole("heading", {
+      level: 1,
+      name: "オンライン対戦",
+    });
+    await expect(lobbyHeading).toBeFocused();
+    await page.keyboard.press("Tab");
+    await expect(page.getByLabel("表示名")).toBeFocused();
+    expect(
+      (await new AxeBuilder({ page }).include("main").analyze()).violations,
+    ).toEqual([]);
+  });
+
+  test("自動再接続成功で接続状態へfocusし、axe違反を増やさない", async ({
+    page,
+  }) => {
+    await page.goto("/online");
+    await installWebSocketStub(page);
+
+    await page.getByLabel("表示名").fill("たろう");
+    await page.getByRole("button", { name: "新しいルームを作る" }).click();
+    await expect(
+      page.locator('[data-connection-status="connecting"]'),
+    ).toBeVisible();
+
+    await page.evaluate((snapshot) => {
+      const socket = (window as unknown as OnlineTestWindow)
+        .__fourBrosOnlineSockets[0];
+      socket?.open();
+      socket?.message({
+        type: "session",
+        token: "t".repeat(24),
+        snapshot,
+      });
+    }, onlineSnapshotFixture());
+    await expect(
+      page.locator('[data-connection-status="connected"]'),
+    ).toBeVisible();
+
+    await page.evaluate(() => {
+      (
+        window as unknown as OnlineTestWindow
+      ).__fourBrosOnlineSockets[0]?.fail();
+    });
+    await expect(
+      page.locator('[data-connection-status="reconnecting"]'),
+    ).toBeVisible();
+    await expect
+      .poll(() =>
+        page.evaluate(
+          () =>
+            (window as unknown as OnlineTestWindow).__fourBrosOnlineSockets
+              .length,
+        ),
+      )
+      .toBe(2);
+
+    await page.evaluate((snapshot) => {
+      const socket = (window as unknown as OnlineTestWindow)
+        .__fourBrosOnlineSockets[1];
+      socket?.open();
+      socket?.message({
+        type: "session",
+        token: "t".repeat(24),
+        snapshot,
+      });
+    }, onlineSnapshotFixture());
+
+    await expect(
+      page.locator('[data-connection-status="connected"]'),
+    ).toBeFocused();
+    expect(
+      (await new AxeBuilder({ page }).include("main").analyze()).violations,
+    ).toEqual([]);
+  });
+});
+
 test.describe("オンラインロビーの接続失敗復帰", () => {
   test("接続失敗時に再試行でき、入力を保持したまま成功状態へ遷移する", async ({
     page,
@@ -117,11 +245,22 @@ test.describe("オンラインロビーの接続失敗復帰", () => {
     await expect(
       page.getByText("オンラインサーバーへ接続しています…"),
     ).toHaveCount(0);
-    await expect(page.getByRole("button", { name: "再試行" })).toBeEnabled();
+    const retryButton = page.getByRole("button", { name: "再試行" });
+    await expect(retryButton).toBeEnabled();
+    await expect(retryButton).toBeFocused();
+    expect(
+      await page.evaluate(() => ({
+        tagName: document.activeElement?.tagName,
+        text: document.activeElement?.textContent?.trim(),
+      })),
+    ).toEqual({ tagName: "BUTTON", text: "再試行" });
+    expect(
+      (await new AxeBuilder({ page }).include("main").analyze()).violations,
+    ).toEqual([]);
     await expect(page.getByLabel("表示名")).toHaveValue("たろう");
     await expect(page.getByLabel("ルームコード")).toHaveValue("ABC234");
 
-    await page.getByRole("button", { name: "再試行" }).click();
+    await page.keyboard.press("Enter");
     await expect(
       page.locator('[data-connection-status="reconnecting"]'),
     ).toBeVisible();
@@ -167,6 +306,16 @@ test.describe("オンラインロビーの接続失敗復帰", () => {
     await expect(
       page.locator('[data-connection-status="connected"]'),
     ).toBeFocused();
+    expect(
+      await page.evaluate(
+        () =>
+          (document.activeElement as HTMLElement | null)?.dataset
+            .connectionStatus,
+      ),
+    ).toBe("connected");
+    expect(
+      (await new AxeBuilder({ page }).include("main").analyze()).violations,
+    ).toEqual([]);
   });
 
   test("終局snapshotの結果を見るで最終結果を表示し、オンライン対局へ戻れる", async ({
