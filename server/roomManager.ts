@@ -26,11 +26,7 @@ import {
   ROOM_CODE_LENGTH,
 } from "../src/lib/roomCode";
 
-export {
-  normalizeRoomCode,
-  ROOM_CODE_ALPHABET,
-  ROOM_CODE_LENGTH,
-} from "../src/lib/roomCode";
+export { normalizeRoomCode } from "../src/lib/roomCode";
 
 const ROOM_TTL_MS = 60 * 60 * 1000;
 const MAX_ROOMS = 1_000;
