@@ -30,14 +30,16 @@ export function onlineSnapshotFixture(): OnlineSnapshot {
   };
 }
 
-export function onlineFinishedSnapshotFixture(): OnlineSnapshot {
+export function onlineFinishedSnapshotFixture(
+  you: "p0" | "p1" = "p0",
+): OnlineSnapshot {
   const finished = walkToGameEnd(1).state;
   return {
     code: "ABC234",
     version: 1,
-    you: "p0",
+    you,
     phase: finished.phase,
-    view: selectView(finished, "p0"),
+    view: selectView(finished, you),
     pending: finished.pending,
     roundSummary: finished.lastRound,
     players: finished.players.map((player) => ({

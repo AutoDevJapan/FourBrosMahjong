@@ -129,14 +129,14 @@ function snapshotFixture(): OnlineSnapshot {
   };
 }
 
-function finishedSnapshotFixture(): OnlineSnapshot {
+function finishedSnapshotFixture(you: "p0" | "p1" = "p0"): OnlineSnapshot {
   const finished = walkToGameEnd(1).state;
   return {
     code: "ABC234",
     version: 1,
-    you: "p0",
+    you,
     phase: finished.phase,
-    view: selectView(finished, "p0"),
+    view: selectView(finished, you),
     pending: finished.pending,
     roundSummary: finished.lastRound,
     players: finished.players.map((player) => ({
@@ -920,6 +920,52 @@ describe("OnlineLobby の終局結果導線", () => {
     });
     expect(screen.getByTestId("game-board")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "結果を見る" })).toHaveFocus();
+  });
+
+  it("guestは結果ビューの新局CTAをdisabledにし、対局画面へ戻っても送信しない", () => {
+    render(<OnlineLobby />);
+
+    fireEvent.change(screen.getByLabelText("表示名"), {
+      target: { value: "じろう" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "新しいルームを作る" }));
+
+    act(() => {
+      sockets[0]?.open();
+      sockets[0]?.message({
+        type: "session",
+        token: "t".repeat(24),
+        snapshot: finishedSnapshotFixture("p1"),
+      });
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "結果を見る" }));
+
+    const newGameButton = screen.getByRole("button", {
+      name: "新しい半荘を開始",
+    });
+    expect(newGameButton).toBeDisabled();
+    expect(newGameButton).toHaveAccessibleDescription(
+      "新しい半荘を開始できるのはホストだけです。",
+    );
+    fireEvent.click(newGameButton);
+    expect(
+      sockets[0]?.sent.some(
+        (message) => JSON.parse(message).type === "newGame",
+      ),
+    ).toBe(false);
+
+    fireEvent.click(screen.getByRole("button", { name: "対局画面へ戻る" }));
+    expect(screen.getByTestId("game-board")).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "新しい半荘を開始" }),
+    ).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "結果を見る" })).toHaveFocus();
+    expect(
+      sockets[0]?.sent.some(
+        (message) => JSON.parse(message).type === "newGame",
+      ),
+    ).toBe(false);
   });
 
   it("新局snapshot後は結果を見るまで結果を自動表示しない", () => {

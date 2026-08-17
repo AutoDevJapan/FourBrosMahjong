@@ -301,26 +301,25 @@ export default function GameBoard({
     if (phase === "gameEnd") {
       // 終局後の /game の出口(#207): 結果確認に加えて、その場で新規半荘を開始できる。
       // `newGame` は journal を新規半荘で上書きするため、以後の /game 再訪は新しい対局になる。
-      const items: ActionItem[] = [
+      const resultAction: ActionItem = {
+        key: "result",
+        label: "結果を見る",
+        icon: "▶",
+        onClick: onResult ?? (() => router.push(resultHref)),
+        buttonRef: resultButtonRef,
+        requiresConnection: false,
+        primary: true,
+      };
+      if (!isHost) return [resultAction];
+      return [
+        resultAction,
         {
-          key: "result",
-          label: "結果を見る",
-          icon: "▶",
-          onClick: onResult ?? (() => router.push(resultHref)),
-          buttonRef: resultButtonRef,
-          requiresConnection: false,
-          primary: true,
-        },
-      ];
-      if (isHost) {
-        items.push({
           key: "newGame",
           label: "新しい半荘を開始",
           icon: "新",
           onClick: controls.newGame,
-        });
-      }
-      return items;
+        },
+      ];
     }
     // 他家打牌への反応(ロン / ポン / 明槓 / スルー)。
     if (pending?.kind === "humanReact") {

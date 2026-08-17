@@ -286,17 +286,15 @@ function ConnectionFeedback({
 interface OnlineResultViewProps {
   readonly result: GameResultView;
   readonly onBack: () => void;
-  readonly canStartNewGame: boolean;
   readonly newGameDisabled: boolean;
 }
 
 function OnlineResultView({
   result,
   onBack,
-  canStartNewGame,
   newGameDisabled,
 }: OnlineResultViewProps) {
-  const { controls } = useGame();
+  const { controls, isHost } = useGame();
   const headingRef = useRef<HTMLHeadingElement>(null);
   const orderedPlayers = [...result.players].sort((a, b) => a.rank - b.rank);
 
@@ -304,7 +302,7 @@ function OnlineResultView({
     headingRef.current?.focus({ preventScroll: true });
   }, []);
 
-  const newGameUnavailableMessage = !canStartNewGame
+  const newGameUnavailableMessage = !isHost
     ? "新しい半荘を開始できるのはホストだけです。"
     : newGameDisabled
       ? "接続が復旧すると新しい半荘を開始できます。"
@@ -353,7 +351,7 @@ function OnlineResultView({
         <div className="flex flex-col items-start gap-1">
           <button
             type="button"
-            disabled={!canStartNewGame || newGameDisabled}
+            disabled={!isHost || newGameDisabled}
             onClick={controls.newGame}
             aria-describedby={
               newGameUnavailableMessage
@@ -897,9 +895,6 @@ export default function OnlineLobby() {
 
   if (snapshot) {
     const onlineResult = snapshot.view.result;
-    const canStartNewGame =
-      snapshot.players.find((player) => player.id === snapshot.you)?.isHost ??
-      false;
     return (
       <OnlineGameProvider
         socket={status === "connected" ? socket : null}
@@ -973,7 +968,6 @@ export default function OnlineLobby() {
             <OnlineResultView
               result={onlineResult}
               onBack={returnToOnlineGame}
-              canStartNewGame={canStartNewGame}
               newGameDisabled={status !== "connected"}
             />
           ) : (

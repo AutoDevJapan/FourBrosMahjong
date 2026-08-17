@@ -261,4 +261,71 @@ test.describe("オンラインロビーの接続失敗復帰", () => {
     await page.getByRole("button", { name: "対局画面へ戻る" }).click();
     await expect(resultButton).toBeFocused();
   });
+
+  test("guestは結果ビューから戻っても新局CTAを有効表示/送信せず、結果導線のaxeも清潔", async ({
+    page,
+  }) => {
+    await page.goto("/online");
+    await installWebSocketStub(page);
+
+    await page.getByLabel("表示名").fill("じろう");
+    await page.getByRole("button", { name: "新しいルームを作る" }).click();
+    await expect(
+      page.locator('[data-connection-status="connecting"]'),
+    ).toBeVisible();
+
+    await page.evaluate((snapshot) => {
+      const socket = (window as unknown as OnlineTestWindow)
+        .__fourBrosOnlineSockets[0];
+      if (!socket) throw new Error("オンラインテスト用socketがありません");
+      socket.open();
+      socket.message({ type: "session", token: "t".repeat(24), snapshot });
+    }, onlineFinishedSnapshotFixture("p1"));
+
+    await expect(
+      page.locator('[data-connection-status="connected"]'),
+    ).toBeVisible();
+    await page.getByRole("button", { name: "結果を見る" }).click();
+
+    await expect(
+      page.getByRole("heading", { level: 2, name: "対局結果" }),
+    ).toBeFocused();
+    const resultNewGameButton = page.getByRole("button", {
+      name: "新しい半荘を開始",
+    });
+    await expect(resultNewGameButton).toBeDisabled();
+    await expect(resultNewGameButton).toHaveAccessibleDescription(
+      "新しい半荘を開始できるのはホストだけです。",
+    );
+    await expect(
+      page.getByRole("button", { name: "対局画面へ戻る" }),
+    ).toBeVisible();
+    const resultA11y = await new AxeBuilder({ page }).include("main").analyze();
+    expect(resultA11y.violations).toEqual([]);
+
+    await page.getByRole("button", { name: "対局画面へ戻る" }).click();
+    await expect(page.locator('[data-phase="gameEnd"]')).toBeVisible();
+    await expect(
+      page.getByRole("button", { name: "新しい半荘を開始" }),
+    ).toHaveCount(0);
+    await expect(
+      page
+        .locator('[role="group"][aria-label="操作パネル"]:visible')
+        .getByText("ホストの操作を待っています。"),
+    ).toBeVisible();
+    await expect(
+      page.getByRole("button", { name: "結果を見る" }),
+    ).toBeFocused();
+    const boardA11y = await new AxeBuilder({ page }).include("main").analyze();
+    expect(boardA11y.violations).toEqual([]);
+
+    const newGameRequests = await page.evaluate(() => {
+      const socket = (window as unknown as OnlineTestWindow)
+        .__fourBrosOnlineSockets[0];
+      return (socket?.sent ?? [])
+        .map((message) => JSON.parse(message) as { type?: string })
+        .filter((message) => message.type === "newGame");
+    });
+    expect(newGameRequests).toEqual([]);
+  });
 });
