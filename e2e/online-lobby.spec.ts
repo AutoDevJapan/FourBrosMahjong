@@ -432,6 +432,84 @@ test.describe("オンラインロビーの接続失敗復帰", () => {
     await expect(resultButton).toBeFocused();
   });
 
+  test("拒否後の最新snapshotと次の成功操作で古い操作エラーを再通知しない", async ({
+    page,
+  }) => {
+    await page.goto("/online");
+    await installWebSocketStub(page);
+
+    await page.getByLabel("表示名").fill("たろう");
+    await page.getByRole("button", { name: "新しいルームを作る" }).click();
+    await page.evaluate((snapshot) => {
+      const socket = (window as unknown as OnlineTestWindow)
+        .__fourBrosOnlineSockets[0];
+      if (!socket) throw new Error("オンラインテスト用socketがありません");
+      socket.open();
+      socket.message({ type: "session", token: "t".repeat(24), snapshot });
+    }, onlineSnapshotFixture());
+
+    const firstTile = page.getByRole("option").first();
+    await firstTile.focus();
+    await page.keyboard.press("Enter");
+    await expect
+      .poll(() =>
+        page.evaluate(() => {
+          const socket = (window as unknown as OnlineTestWindow)
+            .__fourBrosOnlineSockets[0];
+          return JSON.parse(socket?.sent.at(-1) ?? "{}").type;
+        }),
+      )
+      .toBe("action");
+
+    const staleMessage = "対局状態が更新されています。最新状態を受信しました。";
+    await page.evaluate((message) => {
+      const socket = (window as unknown as OnlineTestWindow)
+        .__fourBrosOnlineSockets[0];
+      socket?.message({ type: "error", message });
+    }, staleMessage);
+    await expect(page.getByText(staleMessage)).toHaveCount(1);
+
+    await page.evaluate((snapshot) => {
+      const socket = (window as unknown as OnlineTestWindow)
+        .__fourBrosOnlineSockets[0];
+      socket?.message({ type: "snapshot", snapshot });
+    }, onlineSnapshotFixture());
+    await expect(page.getByText(staleMessage)).toHaveCount(0);
+
+    // The next correct operation delivers a newer authoritative snapshot;
+    // the previous rejection must not be re-announced.
+    await firstTile.focus();
+    await page.keyboard.press("Enter");
+    await expect
+      .poll(() =>
+        page.evaluate(() => {
+          const socket = (window as unknown as OnlineTestWindow)
+            .__fourBrosOnlineSockets[0];
+          return JSON.parse(socket?.sent.at(-1) ?? "{}").type;
+        }),
+      )
+      .toBe("action");
+    await page.evaluate(
+      ({ message, snapshot }) => {
+        const socket = (window as unknown as OnlineTestWindow)
+          .__fourBrosOnlineSockets[0];
+        socket?.message({ type: "error", message });
+        socket?.message({ type: "snapshot", snapshot });
+      },
+      {
+        message: staleMessage,
+        snapshot: { ...onlineSnapshotFixture(), version: 2 },
+      },
+    );
+    await expect(page.getByText(staleMessage)).toHaveCount(0);
+    await expect(
+      page.locator('[data-connection-status="connected"] [aria-live="polite"]'),
+    ).toHaveCount(1);
+    expect(
+      (await new AxeBuilder({ page }).include("main").analyze()).violations,
+    ).toEqual([]);
+  });
+
   test("guestは結果ビューから戻っても新局CTAを有効表示/送信せず、結果導線のaxeも清潔", async ({
     page,
   }) => {

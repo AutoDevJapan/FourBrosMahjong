@@ -871,6 +871,119 @@ describe("OnlineLobby connection recovery", () => {
     expect(screen.getByRole("button", { name: "再試行" })).toBeEnabled();
   });
 
+  it("clears a rejected operation after its authoritative snapshot and next success", () => {
+    render(<OnlineLobby />);
+
+    fireEvent.change(screen.getByLabelText("表示名"), {
+      target: { value: "たろう" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "新しいルームを作る" }));
+
+    act(() => {
+      sockets[0]?.open();
+      sockets[0]?.message({
+        type: "session",
+        token: "t".repeat(24),
+        snapshot: snapshotFixture(),
+      });
+      sockets[0]?.message({
+        type: "error",
+        message: "対局状態が更新されています。最新状態を受信しました。",
+      });
+    });
+
+    const staleMessage = "対局状態が更新されています。最新状態を受信しました。";
+    expect(screen.getByText(staleMessage)).toBeInTheDocument();
+    expect(
+      screen
+        .getByText(staleMessage)
+        .closest('[data-connection-status="connected"]'),
+    ).not.toBeNull();
+
+    act(() => {
+      sockets[0]?.message({
+        type: "snapshot",
+        snapshot: { ...snapshotFixture(), version: 1 },
+      });
+    });
+
+    expect(screen.queryByText(staleMessage)).not.toBeInTheDocument();
+    expect(
+      document.querySelector('[data-connection-status="connected"]'),
+    ).not.toBeNull();
+
+    // A later rejection is also retired by the next successful authoritative
+    // snapshot, without re-announcing the old wording.
+    act(() => {
+      sockets[0]?.message({
+        type: "error",
+        message: "現在はあなたの操作順ではありません。",
+      });
+      sockets[0]?.message({
+        type: "snapshot",
+        snapshot: { ...snapshotFixture(), version: 2 },
+      });
+    });
+    expect(
+      screen.queryByText("現在はあなたの操作順ではありません。"),
+    ).not.toBeInTheDocument();
+  });
+
+  it("does not clear rate-limit guidance when a snapshot follows it", () => {
+    vi.useFakeTimers();
+    render(<OnlineLobby />);
+
+    fireEvent.change(screen.getByLabelText("表示名"), {
+      target: { value: "たろう" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "新しいルームを作る" }));
+
+    const rateLimitMessage = "対局操作が多すぎます。";
+    act(() => {
+      sockets[0]?.open();
+      sockets[0]?.message({
+        type: "session",
+        token: "t".repeat(24),
+        snapshot: snapshotFixture(),
+      });
+      sockets[0]?.message({
+        type: "error",
+        message: rateLimitMessage,
+        code: "rate_limited",
+        scope: "action",
+        retryAfterMs: 4_000,
+      });
+      sockets[0]?.message({
+        type: "snapshot",
+        snapshot: { ...snapshotFixture(), version: 1 },
+      });
+    });
+
+    expect(screen.getAllByText(rateLimitMessage)).toHaveLength(1);
+    expect(
+      screen.getByText("再試行まで約4秒お待ちください。"),
+    ).toBeInTheDocument();
+    const feedback = document.querySelector(
+      '[data-connection-status="connected"]',
+    );
+    expect(feedback?.querySelectorAll('[aria-live="polite"]')).toHaveLength(2);
+    expect(feedback?.querySelectorAll('[role="status"]')).toHaveLength(2);
+
+    const oversizedMessage = "メッセージが大きすぎます。";
+    act(() => {
+      sockets[0]?.message({
+        type: "error",
+        message: oversizedMessage,
+        code: "message_too_large",
+      });
+      sockets[0]?.message({
+        type: "snapshot",
+        snapshot: { ...snapshotFixture(), version: 2 },
+      });
+    });
+    expect(screen.getAllByText(oversizedMessage)).toHaveLength(1);
+  });
+
   it("shows a retry action after a failed connection and keeps the form values", async () => {
     const user = userEvent.setup();
     const focus = vi.spyOn(HTMLElement.prototype, "focus");
