@@ -127,6 +127,14 @@ function playerNameChanged(
   };
 }
 
+/** 現半荘の人間入力 roster に新規 seat だけを追加する。 */
+function addHumanPlayer(room: Room, playerId: PlayerId): void {
+  room.state = setHumanPlayerIds(room.state, [
+    ...(room.state.humanPlayerIds ?? ["p0"]),
+    playerId,
+  ]);
+}
+
 function isValidTile(value: unknown): value is {
   readonly suit: "man" | "pin" | "sou" | "honor";
   readonly rank: number;
@@ -228,7 +236,9 @@ export class RoomManager {
     };
     room.players.set(id, player);
     room.state = playerNameChanged(room.state, id, player.name);
-    room.state = setHumanPlayerIds(room.state, [...room.players.keys()]);
+    // `room.players` also retains disconnected seats for resume. Only the
+    // newly assigned seat joins this half-game's human-input roster.
+    addHumanPlayer(room, id);
     room.lastActivityAt = now();
     return { room, player };
   }
@@ -244,13 +254,10 @@ export class RoomManager {
     if (!player) return null;
     player.connected = true;
     player.lastSeenAt = now();
-    // A disconnected seat is treated as AI only when a fresh half-game starts.
-    // Re-adding it here lets a player who returns during that half-game reclaim
-    // human input without changing the current hand or its version.
-    room.state = setHumanPlayerIds(room.state, [
-      ...(room.state.humanPlayerIds ?? []),
-      player.id,
-    ]);
+    // `newGame` snapshots connected seats into the current half-game roster.
+    // Do not promote a seat that was omitted from that roster on resume: doing
+    // so would turn a disconnected seat back into a blocking human pending
+    // during the same half-game. A seat that was already human remains so.
     room.lastActivityAt = now();
     return { room, player };
   }
