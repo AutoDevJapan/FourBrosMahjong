@@ -174,10 +174,10 @@ pnpm test:e2e:ui    # Playwright UI モード(対話的にテストを選択・�
 ローカルでは、Next.js と Railway サーバーを別々に起動します。
 
 ```bash
-pnpm server:dev       # ws://localhost:8080/ws
+ALLOWED_ORIGINS=http://localhost:3000 pnpm server:dev # ws://localhost:8080/ws
 pnpm dev              # http://localhost:3000
 ```
 
-Vercel では `NEXT_PUBLIC_ONLINE_WS_URL` に Railway の公開 URL(`https://...` または `wss://...`)を設定します。WebSocket の Origin 制限を有効にする場合は、Railway の `ALLOWED_ORIGINS` に Vercel の本番URLをカンマ区切りで指定してください。ルームは匿名トークンで再接続できますが、認証・永続化・観戦・途中参加者の座席予約はまだ対象外です。
+Vercel では `NEXT_PUBLIC_ONLINE_WS_URL` に Railway の公開 URL(`https://...` または `wss://...`)を設定します。Railway の `ALLOWED_ORIGINS` には、接続を許可するVercelのOriginをカンマ区切りで必ず明示してください。未設定・空の場合はWebSocket handshakeをfail-closedで拒否します。ルームは匿名トークンで再接続できますが、認証・永続化・観戦・途中参加者の座席予約はまだ対象外です。
 
 WebSocket の接続数・接続元ごとの作成/参加/再接続試行・メッセージ/対局操作レートには、4人対局を妨げない固定上限を設けています。上限値と再試行エラーの契約は [`docs/デプロイ環境運用.md`](./docs/デプロイ環境運用.md#websocket-の-abuse-control-641) を参照してください。
