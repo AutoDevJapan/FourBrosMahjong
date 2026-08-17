@@ -137,6 +137,7 @@ function finishedSnapshotFixture(you: "p0" | "p1" = "p0"): OnlineSnapshot {
     code: "ABC234",
     version: 1,
     you,
+    hostId: "p0",
     phase: finished.phase,
     view: selectView(finished, you),
     pending: finished.pending,
@@ -148,6 +149,7 @@ function finishedSnapshotFixture(you: "p0" | "p1" = "p0"): OnlineSnapshot {
       isHost: player.id === "p0",
     })),
     currentTurn: null,
+    hostNotice: null,
   };
 }
 
