@@ -98,6 +98,49 @@ describe("online room manager", () => {
     expect(stale.ok).toBe(false);
   });
 
+  it("releases an explicitly departed guest before its pending turn can block the room", () => {
+    const manager = new RoomManager();
+    const host = manager.create("ホスト");
+    const guest = manager.join(host.room.code, "ゲスト");
+    if (!guest) throw new Error("guest should join");
+
+    const drawn = host.room.state.hand?.drawn?.tile;
+    if (!drawn) throw new Error("host should start on a draw decision");
+    expect(
+      manager.apply(
+        host.room,
+        host.player,
+        { type: "discard", tile: drawn },
+        host.room.version,
+      ),
+    ).toMatchObject({ ok: true });
+    expect(manager.snapshot(host.room, guest.player).pending?.playerId).toBe(
+      "p1",
+    );
+
+    manager.leave(guest.room, guest.player);
+
+    const snapshot = manager.snapshot(host.room, host.player);
+    expect(host.room.state.humanPlayerIds).toEqual(["p0"]);
+    expect(snapshot.players).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: "p1", connected: false, isHost: false }),
+      ]),
+    );
+    expect(snapshot.pending?.playerId).not.toBe("p1");
+    expect(snapshot.departureNotice).toMatchObject({
+      playerId: "p1",
+      playerName: "ゲスト",
+      nextAction: "表示された現在の手番に従って操作してください。",
+    });
+    expect(manager.resume(host.room.code, guest.player.token)).toBeNull();
+    expect(manager.snapshot(host.room, host.player).hostId).toBe("p0");
+
+    const rejoined = manager.join(host.room.code, "再参加");
+    expect(rejoined?.player.id).toBe("p2");
+    expect(manager.snapshot(host.room, host.player).hostId).toBe("p0");
+  });
+
   it("hands playing host authority to a connected guest and releases the disconnected host turn", () => {
     const manager = new RoomManager();
     const host = manager.create("ホスト");

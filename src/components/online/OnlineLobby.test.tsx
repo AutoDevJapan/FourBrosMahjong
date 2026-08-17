@@ -842,6 +842,44 @@ describe("OnlineLobby connection recovery", () => {
     );
   });
 
+  it("shows the released guest seat and the next operation after an explicit leave", () => {
+    render(<OnlineLobby />);
+
+    fireEvent.change(screen.getByLabelText("表示名"), {
+      target: { value: "ホスト" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "新しいルームを作る" }));
+
+    act(() => {
+      sockets[0]?.open();
+      sockets[0]?.message({
+        type: "session",
+        token: "t".repeat(24),
+        snapshot: {
+          ...snapshotFixture(),
+          players: [
+            { id: "p0", name: "ホスト", connected: true, isHost: true },
+            { id: "p1", name: "ゲスト", connected: false, isHost: false },
+          ],
+          departureNotice: {
+            playerId: "p1",
+            playerName: "ゲスト",
+            message: "「ゲスト」さんが退出したため、その席をAIに戻しました。",
+            nextAction: "表示された現在の手番に従って操作してください。",
+          },
+        },
+      });
+    });
+
+    expect(screen.getByRole("status")).toHaveTextContent(
+      "「ゲスト」さんが退出したため、その席をAIに戻しました。",
+    );
+    expect(screen.getByRole("status")).toHaveTextContent(
+      "次の操作: 表示された現在の手番に従って操作してください。",
+    );
+    expect(screen.getByText("ゲスト（切断）")).toBeInTheDocument();
+  });
+
   it("bounds an oversized retryAfterMs value", () => {
     vi.useFakeTimers();
     render(<OnlineLobby />);

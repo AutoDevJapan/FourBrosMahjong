@@ -1225,4 +1225,73 @@ describe("online host handoff (#681)", () => {
     },
     TEST_TIMEOUT_MS,
   );
+
+  it(
+    "explicit guest leave releases its pending seat, keeps host authority, and invalidates the old token",
+    async () => {
+      let server: LocalOnlineServer | undefined;
+      const clients: OnlineTestClient[] = [];
+      try {
+        server = await startLocalOnlineServer();
+        const host = new OnlineTestClient(server.url, TEST_ORIGIN);
+        const guest = new OnlineTestClient(server.url, TEST_ORIGIN);
+        clients.push(host, guest);
+        await Promise.all([host.open(), guest.open()]);
+
+        host.send({ type: "create", name: "ホスト" });
+        const session = await host.waitForSession();
+        const code = session.snapshot.code;
+        guest.send({ type: "join", code, name: "退出ゲスト" });
+        const guestSession = await guest.waitForSession();
+        await host.waitForSnapshot((snapshot) => snapshot.players.length === 2);
+
+        const hostSnapshot = await host.waitForSnapshot(
+          (snapshot) => snapshot.pending?.playerId === "p0",
+        );
+        host.send({
+          type: "action",
+          version: hostSnapshot.version,
+          action: actionFor(hostSnapshot),
+        });
+        const guestTurn = await guest.waitForSnapshot(
+          (snapshot) => snapshot.pending?.playerId === "p1",
+        );
+
+        guest.send({ type: "leave" });
+        const released = await host.waitForSnapshot(
+          (snapshot) =>
+            snapshot.version > guestTurn.version &&
+            snapshot.departureNotice?.playerId === "p1",
+        );
+        expect(released.hostId).toBe("p0");
+        expect(released.pending?.playerId).not.toBe("p1");
+        expect(released.departureNotice).toMatchObject({
+          playerName: "退出ゲスト",
+        });
+        expect(
+          released.players.find((player) => player.id === "p1"),
+        ).toMatchObject({ connected: false, isHost: false });
+
+        const stale = new OnlineTestClient(server.url, TEST_ORIGIN);
+        clients.push(stale);
+        await stale.open();
+        stale.send({ type: "resume", code, token: guestSession.token });
+        await expect(stale.waitForError()).resolves.toMatchObject({
+          message: "再接続情報が無効か、ルームの有効期限が切れています。",
+        });
+
+        const rejoined = new OnlineTestClient(server.url, TEST_ORIGIN);
+        clients.push(rejoined);
+        await rejoined.open();
+        rejoined.send({ type: "join", code, name: "再参加ゲスト" });
+        await expect(rejoined.waitForSession()).resolves.toMatchObject({
+          snapshot: { you: "p2", hostId: "p0" },
+        });
+      } finally {
+        await closeTestClients(clients);
+        if (server !== undefined) await stopLocalOnlineServer(server);
+      }
+    },
+    TEST_TIMEOUT_MS,
+  );
 });
