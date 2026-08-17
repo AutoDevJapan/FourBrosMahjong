@@ -20,9 +20,18 @@ import {
   setHumanPlayerIds,
 } from "../src/domain/game/engine";
 import { sanitizePlayerName } from "../src/lib/playerName";
+import {
+  normalizeRoomCode,
+  ROOM_CODE_ALPHABET,
+  ROOM_CODE_LENGTH,
+} from "../src/lib/roomCode";
 
-const ROOM_CODE_LENGTH = 6;
-const ROOM_CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+export {
+  normalizeRoomCode,
+  ROOM_CODE_ALPHABET,
+  ROOM_CODE_LENGTH,
+} from "../src/lib/roomCode";
+
 const ROOM_TTL_MS = 60 * 60 * 1000;
 const MAX_ROOMS = 1_000;
 
@@ -104,12 +113,6 @@ function randomRoomCode(): string {
 
 function randomSeed(): number {
   return randomBytes(4).readUInt32BE(0);
-}
-
-export function normalizeRoomCode(value: unknown): string | null {
-  if (typeof value !== "string") return null;
-  const code = value.trim().toUpperCase();
-  return /^[A-Z2-9]{6}$/.test(code) ? code : null;
 }
 
 export function normalizePlayerName(

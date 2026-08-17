@@ -5,6 +5,7 @@ import type {
   OnlineErrorCode,
   OnlineRateLimitScope,
 } from "../src/components/online/types";
+import { ROOM_CODE_FORMAT_MESSAGE } from "../src/lib/roomCode";
 import {
   type AbuseRejection,
   type ClientAbuseState,
@@ -223,6 +224,10 @@ function handleMessage(client: Client, value: unknown): void {
         return;
       }
       const code = normalizeRoomCode(message.code);
+      if (code === null) {
+        sendError(client, ROOM_CODE_FORMAT_MESSAGE);
+        return;
+      }
       const session = manager.join(code, message.name);
       if (!session) {
         sendError(client, "ルームが見つからないか、満席です。");

@@ -188,7 +188,7 @@ describe("OnlineLobby (#605)", () => {
   });
 
   it("ignores an invalid room code in a shared URL", async () => {
-    window.history.replaceState({}, "", "/online?room=ABC123");
+    window.history.replaceState({}, "", "/online?room=ABCI01");
 
     render(
       <StrictMode>
@@ -199,6 +199,24 @@ describe("OnlineLobby (#605)", () => {
     await waitFor(() =>
       expect(screen.getByLabelText("ルームコード")).toHaveValue(""),
     );
+  });
+
+  it("does not restore a saved session whose code is no longer generated", async () => {
+    window.sessionStorage.setItem(
+      "four-bros-mahjong.online.session.v1",
+      JSON.stringify({ code: "ABCI01", token: "i".repeat(24) }),
+    );
+
+    render(
+      <StrictMode>
+        <OnlineLobby />
+      </StrictMode>,
+    );
+
+    await waitFor(() =>
+      expect(screen.getByLabelText("ルームコード")).toHaveValue(""),
+    );
+    expect(sockets).toHaveLength(0);
   });
 
   it("keeps reconnecting a restored session under StrictMode", async () => {
@@ -228,7 +246,7 @@ describe("OnlineLobby (#605)", () => {
   it("prefers a different shared room over an old restored session", async () => {
     window.sessionStorage.setItem(
       "four-bros-mahjong.online.session.v1",
-      JSON.stringify({ code: "OLD234", token: "o".repeat(24) }),
+      JSON.stringify({ code: "XYZ234", token: "o".repeat(24) }),
     );
     window.history.replaceState({}, "", "/online?room=ABC234");
 
@@ -519,6 +537,23 @@ describe("OnlineLobby の参加条件", () => {
     expect(joinButton).toHaveAccessibleDescription(
       /参加条件を満たしています。参加できます。/,
     );
+  });
+
+  it("I/O/0/1を含むコードを参加前に具体的に拒否する", async () => {
+    const user = userEvent.setup();
+    render(<OnlineLobby />);
+
+    await user.type(screen.getByLabelText("表示名"), "たろう");
+    const roomCodeInput = screen.getByLabelText("ルームコード");
+    await user.type(roomCodeInput, "abci01");
+
+    expect(roomCodeInput).toHaveValue("ABCI01");
+    expect(roomCodeInput).toHaveAttribute("aria-invalid", "true");
+    expect(roomCodeInput).toHaveAccessibleDescription(/I\/O\/0\/1/);
+    expect(screen.getByRole("button", { name: "参加する" })).toBeDisabled();
+
+    await user.keyboard("{Enter}");
+    expect(sockets).toHaveLength(0);
   });
 
   it("表示名は絵文字を1書記素として制限し、lone surrogateを修復する", async () => {
@@ -984,7 +1019,7 @@ describe("OnlineLobby connection recovery", () => {
   it("clears saved credentials before starting a new room request", async () => {
     window.sessionStorage.setItem(
       "four-bros-mahjong.online.session.v1",
-      JSON.stringify({ code: "OLD234", token: "o".repeat(24) }),
+      JSON.stringify({ code: "XYZ234", token: "o".repeat(24) }),
     );
     const user = userEvent.setup();
     render(<OnlineLobby />);
