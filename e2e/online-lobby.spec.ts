@@ -3,6 +3,7 @@ import { expect, test } from "@playwright/test";
 import {
   installWebSocketStub,
   type OnlineTestWindow,
+  onlineFinishedSnapshotFixture,
   onlineSnapshotFixture,
 } from "./helpers/onlineTest";
 
@@ -166,5 +167,56 @@ test.describe("オンラインロビーの接続失敗復帰", () => {
     await expect(
       page.locator('[data-connection-status="connected"]'),
     ).toBeFocused();
+  });
+
+  test("終局snapshotの結果を見るで最終結果を表示し、オンライン対局へ戻れる", async ({
+    page,
+  }) => {
+    await page.goto("/online");
+    await installWebSocketStub(page);
+
+    await page.getByLabel("表示名").fill("たろう");
+    await page.getByRole("button", { name: "新しいルームを作る" }).click();
+    await expect(
+      page.locator('[data-connection-status="connecting"]'),
+    ).toBeVisible();
+
+    await page.evaluate((snapshot) => {
+      const socket = (window as unknown as OnlineTestWindow)
+        .__fourBrosOnlineSockets[0];
+      if (!socket) throw new Error("オンラインテスト用socketがありません");
+      socket.open();
+      socket.message({ type: "session", token: "t".repeat(24), snapshot });
+    }, onlineFinishedSnapshotFixture());
+
+    await expect(
+      page.locator('[data-connection-status="connected"]'),
+    ).toBeVisible();
+    await page.getByRole("button", { name: "結果を見る" }).click();
+
+    await expect(
+      page.getByRole("heading", { level: 2, name: "対局結果" }),
+    ).toBeFocused();
+    await expect(
+      page.getByRole("heading", { level: 3, name: "最終順位" }),
+    ).toBeVisible();
+    await expect(
+      page.getByRole("heading", {
+        level: 3,
+        name: "ソシー内訳(素点+ウマ+祝儀)",
+      }),
+    ).toBeVisible();
+    const resultA11y = await new AxeBuilder({ page }).include("main").analyze();
+    expect(resultA11y.violations).toEqual([]);
+    await expect(
+      page.getByRole("button", { name: "対局画面へ戻る" }),
+    ).toBeVisible();
+    await expect(page.locator('[data-phase="gameEnd"]')).toHaveCount(0);
+
+    await page.getByRole("button", { name: "対局画面へ戻る" }).click();
+    await expect(page.locator('[data-phase="gameEnd"]')).toBeVisible();
+    await expect(
+      page.getByRole("button", { name: "結果を見る" }),
+    ).toBeVisible();
   });
 });

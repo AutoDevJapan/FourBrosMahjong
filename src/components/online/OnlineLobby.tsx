@@ -9,7 +9,10 @@ import {
   useState,
 } from "react";
 import GameBoard from "@/components/game/GameBoard";
+import type { GameResultView } from "@/components/game/types";
 import ScreenNavigation from "@/components/layout/ScreenNavigation";
+import RankingTable from "@/components/result/RankingTable";
+import SoshiiBreakdown from "@/components/result/SoshiiBreakdown";
 import {
   limitPlayerName,
   MAX_PLAYER_NAME_LENGTH,
@@ -279,6 +282,62 @@ function ConnectionFeedback({
   );
 }
 
+interface OnlineResultViewProps {
+  readonly result: GameResultView;
+  readonly onBack: () => void;
+}
+
+function OnlineResultView({ result, onBack }: OnlineResultViewProps) {
+  const headingRef = useRef<HTMLHeadingElement>(null);
+  const orderedPlayers = [...result.players].sort((a, b) => a.rank - b.rank);
+
+  useEffect(() => {
+    headingRef.current?.focus({ preventScroll: true });
+  }, []);
+
+  return (
+    <section
+      aria-labelledby="online-result-heading"
+      className="flex flex-col gap-6 rounded-xl border border-control-border p-4 sm:p-6"
+    >
+      <h2
+        id="online-result-heading"
+        ref={headingRef}
+        tabIndex={-1}
+        className="text-xl font-bold"
+      >
+        対局結果
+      </h2>
+      <section aria-labelledby="online-result-ranking-heading">
+        <h3
+          id="online-result-ranking-heading"
+          className="text-lg font-semibold"
+        >
+          最終順位
+        </h3>
+        <RankingTable players={result.players} />
+      </section>
+      <section aria-labelledby="online-result-soshii-heading">
+        <h3 id="online-result-soshii-heading" className="text-lg font-semibold">
+          ソシー内訳(素点+ウマ+祝儀)
+        </h3>
+        <div className="grid gap-3 sm:grid-cols-2">
+          {orderedPlayers.map((player) => (
+            <SoshiiBreakdown key={player.rank} player={player} />
+          ))}
+        </div>
+      </section>
+      <button
+        type="button"
+        onClick={onBack}
+        className="inline-flex min-h-11 self-start items-center rounded-full border border-control-border px-4 py-2 text-sm hover:bg-foreground/5"
+      >
+        対局画面へ戻る
+      </button>
+    </section>
+  );
+}
+
 export default function OnlineLobby() {
   const [name, setName] = useState("");
   const [roomCode, setRoomCode] = useState("");
@@ -290,6 +349,7 @@ export default function OnlineLobby() {
   const [status, setStatus] = useState<ConnectionStatus>("idle");
   const [error, setError] = useState("");
   const [retryAfterMs, setRetryAfterMs] = useState(0);
+  const [onlineResultOpen, setOnlineResultOpen] = useState(false);
   const socketRef = useRef<WebSocket | null>(null);
   const credentialsRef = useRef<OnlineCredentials | null>(null);
   const reconnectAttemptRef = useRef(0);
@@ -723,6 +783,7 @@ export default function OnlineLobby() {
     current?.close();
     setSocket(null);
     setSnapshot(null);
+    setOnlineResultOpen(false);
     setStatus("idle");
     setError("");
   };
@@ -735,6 +796,7 @@ export default function OnlineLobby() {
     : null;
 
   if (snapshot) {
+    const onlineResult = snapshot.view.result;
     return (
       <OnlineGameProvider
         socket={status === "connected" ? socket : null}
@@ -799,17 +861,24 @@ export default function OnlineLobby() {
             feedbackRef={feedbackRef}
             onRetry={retry}
           />
-          <GameBoard
-            resultHref="/online"
-            interactionDisabled={status !== "connected"}
-            interactionDisabledReason={
-              status === "failed"
-                ? "failed"
-                : status === "connected"
-                  ? undefined
-                  : "reconnecting"
-            }
-          />
+          {onlineResultOpen && onlineResult !== null ? (
+            <OnlineResultView
+              result={onlineResult}
+              onBack={() => setOnlineResultOpen(false)}
+            />
+          ) : (
+            <GameBoard
+              onResult={() => setOnlineResultOpen(true)}
+              interactionDisabled={status !== "connected"}
+              interactionDisabledReason={
+                status === "failed"
+                  ? "failed"
+                  : status === "connected"
+                    ? undefined
+                    : "reconnecting"
+              }
+            />
+          )}
         </section>
       </OnlineGameProvider>
     );

@@ -72,8 +72,10 @@ export function residualSticksNote(
 }
 
 export interface GameBoardProps {
-  /** 結果ボタンの遷移先。オンライン対局は同じルームへ戻るため上書きする。 */
+  /** 結果ボタンの遷移先。onResultを指定した画面では使わない。 */
   readonly resultHref?: string;
+  /** 結果ボタンの動作。オンライン対局の結果表示など、画面内遷移を差し替える。 */
+  readonly onResult?: () => void;
   /** オンライン再接続中など、サーバー操作を一時的に停止する。 */
   readonly interactionDisabled?: boolean;
   /** 操作停止の理由。failed では自動再接続待ちではなく再試行を案内する。 */
@@ -82,6 +84,7 @@ export interface GameBoardProps {
 
 export default function GameBoard({
   resultHref = "/game/result",
+  onResult,
   interactionDisabled = false,
   interactionDisabledReason = "reconnecting",
 }: GameBoardProps) {
@@ -265,7 +268,7 @@ export default function GameBoard({
           key: "result",
           label: "結果を見る",
           icon: "▶",
-          onClick: () => router.push(resultHref),
+          onClick: onResult ?? (() => router.push(resultHref)),
           requiresConnection: false,
           primary: true,
         },
@@ -368,7 +371,16 @@ export default function GameBoard({
       return items;
     }
     return [];
-  }, [phase, pending, controls, isHost, router, resultHref, riichiArmed]);
+  }, [
+    phase,
+    pending,
+    controls,
+    isHost,
+    onResult,
+    router,
+    resultHref,
+    riichiArmed,
+  ]);
 
   const hint = useMemo(() => {
     if (interactionDisabled) {
