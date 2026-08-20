@@ -23,13 +23,13 @@ export default function NotFound() {
       >
         <Link
           href="/"
-          className="rounded-full bg-foreground px-5 py-2 text-sm font-medium text-background"
+          className="inline-flex min-h-11 items-center rounded-full bg-foreground px-5 py-2 text-sm font-medium text-background"
         >
           ロビーへ戻る
         </Link>
         <Link
           href="/rules"
-          className="rounded-full border border-control-border px-5 py-2 text-sm"
+          className="inline-flex min-h-11 items-center rounded-full border border-control-border px-5 py-2 text-sm"
         >
           ルールを見る
         </Link>

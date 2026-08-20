@@ -136,7 +136,7 @@ export function PlayerNamesForm() {
                       composingIndex.current === index,
                     )
                   }
-                  className="w-full rounded-lg border border-control-border bg-transparent px-3 py-2 text-base"
+                  className="min-h-11 w-full rounded-lg border border-control-border bg-transparent px-3 py-2 text-base"
                 />
               </div>
             );
@@ -147,14 +147,14 @@ export function PlayerNamesForm() {
       <div className="flex flex-wrap gap-3">
         <button
           type="submit"
-          className="rounded-lg border border-control-border px-4 py-2 text-sm font-semibold hover:bg-foreground/5"
+          className="min-h-11 rounded-lg border border-control-border px-4 py-2 text-sm font-semibold hover:bg-foreground/5"
         >
           名前を保存
         </button>
         <button
           type="button"
           onClick={handleReset}
-          className="rounded-lg border border-control-border px-4 py-2 text-sm text-foreground/80 hover:bg-foreground/5"
+          className="min-h-11 rounded-lg border border-control-border px-4 py-2 text-sm text-foreground/80 hover:bg-foreground/5"
         >
           既定名に戻す
         </button>
