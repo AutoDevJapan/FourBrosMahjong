@@ -58,6 +58,10 @@ export const DOCUMENTATION_EXCEPTIONS = [
  * テスト自体の退行は引き続き検出される)。
  */
 const UNIT_TEST_ONLY = [
+  // `src/test/` には `*.test.ts` だけでなく、テストからだけ参照される共有ヘルパ
+  // (`webLocksStub.ts` / `appRoutes.ts` / `bannerLandmarks.ts`)も置く。production の
+  // Tailwind content graph も globals.css の `@source not "../test"` で同じ境界を除外する。
+  /^src\/test\//,
   /(^|\/)__testing__\//,
   /(^|\/)__oracle__\//,
   /\.(test|spec)\.tsx?$/,
