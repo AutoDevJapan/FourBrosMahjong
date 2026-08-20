@@ -687,6 +687,7 @@ describe("verification-scope の分類契約 (#491)", () => {
       "src/domain/game/__testing__/engine-fixtures.ts",
       "unit-test",
     ],
+    ["テスト共有ヘルパ", "src/test/webLocksStub.ts", "unit-test"],
     ["オラクル", "src/domain/hand/__oracle__/generator.ts", "unit-test"],
     ["E2E spec", "e2e/game.spec.ts", "e2e-asset"],
     ["Playwright 設定", "playwright.config.ts", "e2e-asset"],
@@ -735,10 +736,7 @@ describe("verification-scope の分類契約 (#491)", () => {
   });
 
   it("単体テストのみの変更は ci は検証し e2e は検証しない", () => {
-    const paths = [
-      "src/domain/game/engine.test.ts",
-      "documents/spec/game-flow.md",
-    ];
+    const paths = ["src/test/webLocksStub.ts", "documents/spec/game-flow.md"];
     expect(
       resolveScope({ job: "ci", paths, postMergeDuplicate: false }).verify,
     ).toBe(true);
