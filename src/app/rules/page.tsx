@@ -208,7 +208,7 @@ export default function RulesPage() {
         <nav aria-label="ページナビゲーション">
           <Link
             href="/"
-            className="inline-flex items-center gap-1 text-sm text-foreground/70 underline underline-offset-4 hover:text-foreground focus-visible:rounded-sm"
+            className="inline-flex min-h-11 items-center gap-1 text-sm text-foreground/70 underline underline-offset-4 hover:text-foreground focus-visible:rounded-sm"
           >
             <span aria-hidden>←</span> ロビーへ戻る
           </Link>
@@ -290,7 +290,7 @@ export default function RulesPage() {
         <footer className="border-t border-foreground/15 pt-6">
           <Link
             href="/"
-            className="inline-flex items-center gap-1 text-sm text-foreground/70 underline underline-offset-4 hover:text-foreground focus-visible:rounded-sm"
+            className="inline-flex min-h-11 items-center gap-1 text-sm text-foreground/70 underline underline-offset-4 hover:text-foreground focus-visible:rounded-sm"
           >
             <span aria-hidden>←</span> ロビーへ戻る
           </Link>
