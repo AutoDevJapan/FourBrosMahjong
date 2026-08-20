@@ -254,3 +254,85 @@ test.describe("狭幅の接続後オンライン操作と結果導線(#628)", ()
     });
   }
 });
+
+test.describe("狭幅の情報画面と404導線のタップ領域", () => {
+  for (const width of NARROW_WIDTHS) {
+    test(`${width}pxの設定操作が44px以上で横溢れしない`, async ({ page }) => {
+      await page.setViewportSize({ width, height: 800 });
+      await page.goto("/settings");
+      await expect(
+        page.getByRole("heading", { level: 1, name: "設定" }),
+      ).toBeVisible();
+      await expect(page.getByRole("radio").first()).toBeVisible();
+
+      await expectTouchTarget(
+        page.getByRole("link", { name: "ロビーへ戻る" }).first(),
+        "設定のロビーへ戻る",
+      );
+      for (const [index, input] of (
+        await page.getByRole("textbox").all()
+      ).entries()) {
+        await expectTouchTarget(input, `対局者名入力(${index + 1})`);
+      }
+      await expectTouchTarget(
+        page.getByRole("button", { name: "名前を保存" }),
+        "名前を保存",
+      );
+      await expectTouchTarget(
+        page.getByRole("button", { name: "既定名に戻す" }),
+        "既定名に戻す",
+      );
+      await expectTouchTarget(
+        page.getByRole("link", { name: "戦績を見る" }),
+        "設定の戦績を見る",
+      );
+      await expectNoHorizontalOverflow(page);
+      await expectAxeClean(page, "main");
+    });
+
+    test(`${width}pxの情報画面と404の主要導線が44px以上`, async ({ page }) => {
+      await page.setViewportSize({ width, height: 800 });
+
+      await page.goto("/history");
+      await expect(
+        page.getByRole("heading", { level: 1, name: "戦績" }),
+      ).toBeVisible();
+      await expectTouchTarget(
+        page.getByRole("link", { name: "ロビーへ戻る" }).first(),
+        "戦績のロビーへ戻る",
+      );
+      await expectNoHorizontalOverflow(page);
+      await expectAxeClean(page, "main");
+
+      await page.goto("/rules");
+      await expect(
+        page.getByRole("heading", { level: 1, name: "ルール説明" }),
+      ).toBeVisible();
+      for (const [index, backLink] of (
+        await page.getByRole("link", { name: "ロビーへ戻る" }).all()
+      ).entries()) {
+        await expectTouchTarget(backLink, `ルールのロビーへ戻る(${index + 1})`);
+      }
+      await expectNoHorizontalOverflow(page);
+      await expectAxeClean(page, "main");
+
+      await page.goto("/no-such-page-mobile-touch-targets");
+      await expect(
+        page.getByRole("heading", {
+          level: 1,
+          name: "ページが見つかりません",
+        }),
+      ).toBeVisible();
+      await expectTouchTarget(
+        page.getByRole("link", { name: "ロビーへ戻る" }),
+        "404のロビーへ戻る",
+      );
+      await expectTouchTarget(
+        page.getByRole("link", { name: "ルールを見る" }),
+        "404のルールを見る",
+      );
+      await expectNoHorizontalOverflow(page);
+      await expectAxeClean(page, "main");
+    });
+  }
+});
