@@ -130,6 +130,7 @@ async function waitForServer(
 
 async function startLocalOnlineServer(
   allowedOrigins = TEST_ORIGIN,
+  environment: Readonly<Record<string, string>> = {},
 ): Promise<LocalOnlineServer> {
   const port = await freePort();
   const output: string[] = [];
@@ -138,6 +139,9 @@ async function startLocalOnlineServer(
     cwd: process.cwd(),
     env: {
       ...process.env,
+      // Keep ordinary local tests independent from an ambient Railway shell.
+      RAILWAY_ENVIRONMENT_ID: "",
+      ...environment,
       ALLOWED_ORIGINS: allowedOrigins,
       PORT: String(port),
     },
@@ -163,6 +167,7 @@ async function stopLocalOnlineServer(server: LocalOnlineServer): Promise<void> {
 async function requestUpgrade(
   url: string,
   origin: string,
+  headers: Readonly<Record<string, string>> = {},
 ): Promise<UpgradeResponse> {
   const target = new URL(`${url}/ws`);
   return new Promise<UpgradeResponse>((resolve, reject) => {
@@ -177,6 +182,7 @@ async function requestUpgrade(
         Origin: origin,
         "Sec-WebSocket-Key": Buffer.from("four-bros-mahjon").toString("base64"),
         "Sec-WebSocket-Version": "13",
+        ...headers,
       },
     });
     const fail = (error: Error) => {
@@ -232,14 +238,15 @@ class OnlineTestClient {
   constructor(
     readonly url: string,
     origin?: string,
+    headers: Readonly<Record<string, string>> = {},
   ) {
     this.closePromise = new Promise((resolve) => {
       this.resolveClose = resolve;
     });
-    this.socket =
-      origin === undefined
-        ? new WebSocket(`${url}/ws`)
-        : new WebSocket(`${url}/ws`, { origin });
+    this.socket = new WebSocket(`${url}/ws`, {
+      ...(origin === undefined ? {} : { origin }),
+      headers,
+    });
     this.socket.on("message", (data) => {
       let message: ProtocolMessage;
       try {
@@ -897,6 +904,53 @@ async function expectRateLimited(
 }
 
 describe("online abuse boundary and four-client regression (#651)", () => {
+  it(
+    "Railway proxy越しでも実クライアントごとに接続上限を分離する",
+    async () => {
+      let server: LocalOnlineServer | undefined;
+      const clients: OnlineTestClient[] = [];
+      const firstSource = "203.0.113.10";
+      try {
+        const onlineServer = await startLocalOnlineServer(TEST_ORIGIN, {
+          RAILWAY_ENVIRONMENT_ID: "test-environment",
+        });
+        server = onlineServer;
+        const firstSourceClients = Array.from(
+          { length: ABUSE_LIMITS.maxConnectionsPerSource },
+          () =>
+            new OnlineTestClient(onlineServer.url, TEST_ORIGIN, {
+              "X-Real-IP": firstSource,
+            }),
+        );
+        clients.push(...firstSourceClients);
+        await Promise.all(firstSourceClients.map((client) => client.open()));
+
+        const otherSource = new OnlineTestClient(
+          onlineServer.url,
+          TEST_ORIGIN,
+          {
+            "X-Real-IP": "203.0.113.11",
+          },
+        );
+        clients.push(otherSource);
+        await otherSource.open();
+
+        const rejected = await requestUpgrade(onlineServer.url, TEST_ORIGIN, {
+          "X-Real-IP": firstSource,
+        });
+        expect(rejected.statusCode).toBe(503);
+        expect(JSON.parse(rejected.body)).toMatchObject({
+          ok: false,
+          code: "connection_limit",
+        });
+      } finally {
+        await closeTestClients(clients);
+        if (server !== undefined) await stopLocalOnlineServer(server);
+      }
+    },
+    TEST_TIMEOUT_MS,
+  );
+
   it(
     "実WebSocket upgrade拒否でHTTP status・Retry-After・JSON詳細を返す",
     async () => {
