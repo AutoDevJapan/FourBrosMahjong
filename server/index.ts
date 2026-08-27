@@ -402,6 +402,11 @@ function writeJson(
 }
 
 const httpServer = createServer((request, response) => {
+  const path = requestPath(request.url);
+  if (path === null) {
+    writeJson(response, 400, { ok: false, error: "bad_request" });
+    return;
+  }
   if (request.method === "OPTIONS") {
     response.writeHead(204, {
       "access-control-allow-origin": "*",
@@ -409,11 +414,6 @@ const httpServer = createServer((request, response) => {
       "access-control-allow-headers": "content-type",
     });
     response.end();
-    return;
-  }
-  const path = requestPath(request.url);
-  if (path === null) {
-    writeJson(response, 400, { ok: false, error: "bad_request" });
     return;
   }
   if (path === "/healthz") {

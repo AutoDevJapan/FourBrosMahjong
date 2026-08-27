@@ -212,15 +212,21 @@ async function requestUpgrade(
 async function requestRawHttp(
   url: string,
   requestTarget: string,
+  options: {
+    readonly method?: string;
+    readonly headers?: readonly string[];
+  } = {},
 ): Promise<string> {
   const target = new URL(url);
+  const method = options.method ?? "GET";
+  const headers = options.headers ?? ["Connection: close"];
   return new Promise<string>((resolve, reject) => {
     const chunks: Buffer[] = [];
     const socket = createConnection(
       { host: target.hostname, port: Number(target.port) },
       () => {
         socket.end(
-          `GET ${requestTarget} HTTP/1.1\r\nHost: ${target.host}\r\nConnection: close\r\n\r\n`,
+          `${method} ${requestTarget} HTTP/1.1\r\nHost: ${target.host}\r\n${headers.join("\r\n")}\r\n\r\n`,
         );
       },
     );
@@ -529,12 +535,38 @@ async function advanceVersion(
 
 describe("online HTTP request-target fallback (#704)", () => {
   it(
-    "不正request-targetを400へ変換し、その後もhealth checkへ応答する",
+    "HTTPとWebSocket upgradeの不正targetを400へ変換し、その後もhealth checkへ応答する",
     async () => {
       const server = await startLocalOnlineServer();
       try {
         const malformed = await requestRawHttp(server.url, "http://[");
         expect(malformed).toMatch(/^HTTP\/1\.1 400 Bad Request\r\n/);
+        expect(malformed).toContain(
+          JSON.stringify({ ok: false, error: "bad_request" }),
+        );
+
+        const malformedPreflight = await requestRawHttp(
+          server.url,
+          "http://[",
+          { method: "OPTIONS" },
+        );
+        expect(malformedPreflight).toMatch(/^HTTP\/1\.1 400 Bad Request\r\n/);
+
+        const validPreflight = await requestRawHttp(server.url, "/healthz", {
+          method: "OPTIONS",
+        });
+        expect(validPreflight).toMatch(/^HTTP\/1\.1 204 No Content\r\n/);
+
+        const malformedUpgrade = await requestRawHttp(server.url, "http://[", {
+          headers: [
+            "Connection: Upgrade",
+            "Upgrade: websocket",
+            `Origin: ${TEST_ORIGIN}`,
+            `Sec-WebSocket-Key: ${Buffer.from("four-bros-mahjon").toString("base64")}`,
+            "Sec-WebSocket-Version: 13",
+          ],
+        });
+        expect(malformedUpgrade).toMatch(/^HTTP\/1\.1 400 Bad Request\r\n/);
 
         const health = await fetch(`${server.url}/healthz`);
         expect(health.status).toBe(200);
