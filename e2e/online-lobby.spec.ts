@@ -305,6 +305,171 @@ test.describe("オンラインメンテナンス client-first (#726)", () => {
     ).toBe(1);
     await expect(page.getByRole("group", { name: "対局盤面" })).toBeVisible();
   });
+
+  test("accepting解除は320pxのlive案内後に現在局とcreate/joinを再許可する", async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 320, height: 800 });
+    await page.goto("/online");
+    await page.clock.install();
+    await installWebSocketStub(page);
+    await page.getByLabel("表示名").fill("たろう");
+    await page.getByRole("button", { name: "新しいルームを作る" }).click();
+    await page.evaluate((snapshot) => {
+      const socket = (window as unknown as OnlineTestWindow)
+        .__fourBrosOnlineSockets[0];
+      socket?.open();
+      socket?.message({ type: "session", token: "t".repeat(24), snapshot });
+      socket?.message({
+        type: "maintenance",
+        phase: "draining",
+        retryAfterMs: 5_000,
+      });
+      socket?.message({ type: "maintenance", phase: "accepting" });
+    }, onlineSnapshotFixture());
+
+    await expect(page.locator("#online-maintenance-notice")).toHaveCount(0);
+    const recovered = page.getByText(
+      "メンテナンス準備を解除しました。新しい受付を再開します。",
+    );
+    await expect(recovered).toBeVisible();
+    await expect(recovered).toHaveAttribute("role", "status");
+    await expect(recovered).toHaveAttribute("aria-live", "polite");
+    const storedCredentials = await page.evaluate(() =>
+      sessionStorage.getItem("four-bros-mahjong.online.session.v1"),
+    );
+    expect(storedCredentials).not.toBeNull();
+
+    const tile = page.getByRole("option").filter({ visible: true }).first();
+    await expect(tile).toBeEnabled();
+    await tile.click();
+    await expect
+      .poll(() =>
+        page.evaluate(() =>
+          (
+            window as unknown as OnlineTestWindow
+          ).__fourBrosOnlineSockets[0]?.sent
+            .map((value) => JSON.parse(value))
+            .some((message) => message.type === "action"),
+        ),
+      )
+      .toBe(true);
+    expect(
+      await page.evaluate(() =>
+        sessionStorage.getItem("four-bros-mahjong.online.session.v1"),
+      ),
+    ).toBe(storedCredentials);
+
+    await page.getByRole("button", { name: "退出" }).click();
+    await expect(
+      page.getByRole("button", { name: "新しいルームを作る" }),
+    ).toBeEnabled();
+    await page.getByLabel("ルームコード").fill("ABC234");
+    await expect(page.getByRole("button", { name: "参加する" })).toBeEnabled();
+    expect(
+      await page.evaluate(
+        () =>
+          document.documentElement.scrollWidth -
+          document.documentElement.clientWidth,
+      ),
+    ).toBeLessThanOrEqual(1);
+  });
+
+  test("phase不明rejectionのaccepting解除後はnewGameと通常のbounded reconnectへ戻る", async ({
+    page,
+  }) => {
+    await page.goto("/online");
+    await page.clock.install();
+    await installWebSocketStub(page);
+    await page.getByLabel("表示名").fill("たろう");
+    await page.getByRole("button", { name: "新しいルームを作る" }).click();
+    await page.evaluate((snapshot) => {
+      const socket = (window as unknown as OnlineTestWindow)
+        .__fourBrosOnlineSockets[0];
+      socket?.open();
+      socket?.message({ type: "session", token: "t".repeat(24), snapshot });
+      socket?.message({
+        type: "error",
+        code: "maintenance",
+        message: "server wording is not rendered",
+        retryAfterMs: 4_000,
+      });
+      socket?.message({ type: "maintenance", phase: "accepting" });
+    }, onlineFinishedSnapshotFixture());
+
+    const storedCredentials = await page.evaluate(() =>
+      sessionStorage.getItem("four-bros-mahjong.online.session.v1"),
+    );
+    await page.getByRole("button", { name: "結果を見る" }).click();
+    const newGame = page.getByRole("button", { name: "新しい半荘を開始" });
+    await expect(newGame).toBeEnabled();
+    await newGame.click();
+    expect(
+      await page.evaluate(() =>
+        (window as unknown as OnlineTestWindow).__fourBrosOnlineSockets[0]?.sent
+          .map((value) => JSON.parse(value))
+          .some((message) => message.type === "newGame"),
+      ),
+    ).toBe(true);
+
+    await page.evaluate(() => {
+      (
+        window as unknown as OnlineTestWindow
+      ).__fourBrosOnlineSockets[0]?.serverClose(1012, "service restart");
+    });
+    await page.clock.fastForward(500);
+    expect(
+      await page.evaluate(
+        () =>
+          (window as unknown as OnlineTestWindow).__fourBrosOnlineSockets
+            .length,
+      ),
+    ).toBe(2);
+    expect(
+      await page.evaluate(() =>
+        sessionStorage.getItem("four-bros-mahjong.online.session.v1"),
+      ),
+    ).toBe(storedCredentials);
+    await page.clock.fastForward(4_500);
+    await expect(
+      page.locator('[data-connection-status="reconnecting"]'),
+    ).toBeVisible();
+  });
+
+  test("pre-session maintenance rejectionはcredentialを保存せずreload guidanceを表示する", async ({
+    page,
+  }) => {
+    await page.goto("/online");
+    await installWebSocketStub(page);
+    await page.getByLabel("表示名").fill("たろう");
+    await page.getByLabel("ルームコード").fill("ABC234");
+    await page.getByRole("button", { name: "参加する" }).click();
+    await page.evaluate(() => {
+      const socket = (window as unknown as OnlineTestWindow)
+        .__fourBrosOnlineSockets[0];
+      socket?.open();
+      socket?.message({
+        type: "error",
+        code: "maintenance",
+        message: "server wording is not rendered",
+      });
+    });
+
+    await expect(
+      page.getByText(
+        "メンテナンス終了後も表示が残る場合は、ページを再読み込みして再試行してください。",
+      ),
+    ).toBeVisible();
+    await expect(
+      page.getByRole("button", { name: "新しいルームを作る" }),
+    ).toBeDisabled();
+    await expect(page.getByRole("button", { name: "参加する" })).toBeDisabled();
+    expect(
+      await page.evaluate(() =>
+        sessionStorage.getItem("four-bros-mahjong.online.session.v1"),
+      ),
+    ).toBeNull();
+  });
 });
 
 test.describe("オンラインロビーの接続失敗復帰", () => {

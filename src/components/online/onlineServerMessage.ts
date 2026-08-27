@@ -1,6 +1,7 @@
 import { CHARACTER_PLAYER_IDS } from "@/domain/game/characters";
 import type {
   OnlineErrorCode,
+  OnlineMaintenanceAcceptingNotice,
   OnlineMaintenanceNotice,
   OnlineMaintenancePhase,
   OnlineRateLimitScope,
@@ -599,7 +600,12 @@ function isIsoTimestamp(value: unknown): value is string {
 
 function parseMaintenance(
   message: Record<string, unknown>,
-): OnlineMaintenanceNotice | null {
+): OnlineMaintenanceNotice | OnlineMaintenanceAcceptingNotice | null {
+  if (message.phase === "accepting") {
+    return message.retryAfterMs === undefined && message.deadline === undefined
+      ? { type: "maintenance", phase: "accepting" }
+      : null;
+  }
   if (!isMaintenancePhase(message.phase)) return null;
   const retryAfterMs = maintenanceRetryAfterMs(message.retryAfterMs);
   if (retryAfterMs === null) return null;

@@ -50,6 +50,7 @@ const NAME_REQUIREMENT_ID = "online-lobby-name-requirement";
 const ROOM_CODE_REQUIREMENT_ID = "online-lobby-room-code-requirement";
 const JOIN_REQUIREMENT_ID = "online-lobby-join-requirement";
 const MAINTENANCE_NOTICE_ID = "online-maintenance-notice";
+const MAINTENANCE_RECOVERY_NOTICE_MS = 5_000;
 const MAX_AUTOMATIC_RECONNECT_ATTEMPTS = 5;
 // サーバーからの異常値で、UIを長時間ロックしないための上限。
 const MAX_SERVER_RETRY_AFTER_MS = MAX_MAINTENANCE_RETRY_AFTER_MS;
@@ -65,6 +66,8 @@ const HEARTBEAT_TIMEOUT_MESSAGE =
   "オンラインサーバーの応答が確認できないため、再接続しています。";
 const MAINTENANCE_OPERATION_MESSAGE =
   "メンテナンス中のため、この操作は利用できません。";
+const MAINTENANCE_REJECTION_RELOAD_MESSAGE =
+  "メンテナンス終了後も表示が残る場合は、ページを再読み込みして再試行してください。";
 
 type ConnectionStatus = OnlineConnectionStatus;
 type JoinRequest =
@@ -73,7 +76,7 @@ type JoinRequest =
   | { readonly type: "resume"; readonly code: string; readonly token: string };
 type ConnectionFailure = Pick<OnlineServerError, "message" | "retryAfterMs">;
 
-type ErrorFeedbackKind = "connection" | "operation";
+type ErrorFeedbackKind = "connection" | "maintenance" | "operation";
 
 interface ErrorFeedback {
   readonly kind: ErrorFeedbackKind;
@@ -256,6 +259,24 @@ function MaintenanceBanner({
           {retryAfterMessage(retryAfterMs)}
         </p>
       ) : null}
+      {maintenance.source === "rejection" ? (
+        <p className="mt-1 text-foreground/70">
+          {MAINTENANCE_REJECTION_RELOAD_MESSAGE}
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
+function MaintenanceRecoveryNotice() {
+  return (
+    <div
+      className="rounded-lg border border-control-border bg-foreground/5 px-4 py-3 text-sm font-medium"
+      role="status"
+      aria-live="polite"
+      aria-atomic="true"
+    >
+      メンテナンス準備を解除しました。新しい受付を再開します。
     </div>
   );
 }
@@ -445,6 +466,8 @@ export default function OnlineLobby() {
   const [maintenance, setMaintenance] = useState<MaintenanceClientState | null>(
     null,
   );
+  const [maintenanceRecoveryVisible, setMaintenanceRecoveryVisible] =
+    useState(false);
   const [onlineResultOpen, setOnlineResultOpen] = useState(false);
   const onlineResultButtonRef = useRef<HTMLButtonElement>(null);
   const onlineGameFallbackRef = useRef<HTMLElement>(null);
@@ -489,6 +512,10 @@ export default function OnlineLobby() {
     setError({ kind: "operation", message });
   }, []);
 
+  const setMaintenanceError = useCallback(() => {
+    setError({ kind: "maintenance", message: MAINTENANCE_OPERATION_MESSAGE });
+  }, []);
+
   const setOnlineResultOpenState = useCallback((open: boolean) => {
     onlineResultOpenRef.current = open;
     setOnlineResultOpen(open);
@@ -525,6 +552,15 @@ export default function OnlineLobby() {
   useLayoutEffect(() => {
     statusRef.current = status;
   }, [status]);
+
+  useEffect(() => {
+    if (!maintenanceRecoveryVisible) return;
+    const timer = window.setTimeout(
+      () => setMaintenanceRecoveryVisible(false),
+      MAINTENANCE_RECOVERY_NOTICE_MS,
+    );
+    return () => window.clearTimeout(timer);
+  }, [maintenanceRecoveryVisible]);
 
   const requestTransitionFocus = useCallback(
     (target: TransitionFocusTarget) => {
@@ -648,12 +684,13 @@ export default function OnlineLobby() {
       const next = { source: "notice", notice } as const;
       maintenanceRef.current = next;
       setMaintenance(next);
+      setMaintenanceRecoveryVisible(false);
       clearReconnectTimer();
       reconnectAttemptRef.current = 0;
-      setConnectionError(MAINTENANCE_OPERATION_MESSAGE);
+      setMaintenanceError();
       applyRetryCooldown(notice.retryAfterMs);
     },
-    [applyRetryCooldown, clearReconnectTimer, setConnectionError],
+    [applyRetryCooldown, clearReconnectTimer, setMaintenanceError],
   );
 
   const applyMaintenanceError = useCallback(
@@ -667,13 +704,31 @@ export default function OnlineLobby() {
         maintenanceRef.current = next;
         setMaintenance(next);
       }
+      setMaintenanceRecoveryVisible(false);
       clearReconnectTimer();
       reconnectAttemptRef.current = 0;
-      setConnectionError(MAINTENANCE_OPERATION_MESSAGE);
+      setMaintenanceError();
       applyRetryCooldown(retryAfter);
     },
-    [applyRetryCooldown, clearReconnectTimer, setConnectionError],
+    [applyRetryCooldown, clearReconnectTimer, setMaintenanceError],
   );
+
+  const applyMaintenanceAccepting = useCallback(() => {
+    const current = maintenanceRef.current;
+    if (
+      !current ||
+      (current.source === "notice" && current.notice.phase === "terminating")
+    ) {
+      return;
+    }
+    maintenanceRef.current = null;
+    setMaintenance(null);
+    setMaintenanceRecoveryVisible(true);
+    clearRetryCooldown();
+    setError((currentError) =>
+      currentError?.kind === "maintenance" ? null : currentError,
+    );
+  }, [clearRetryCooldown]);
 
   const settleMaintenanceDisconnect = useCallback(() => {
     const current = maintenanceRef.current;
@@ -690,9 +745,9 @@ export default function OnlineLobby() {
       saveCredentials(null);
     }
     setStatus("failed");
-    setConnectionError(MAINTENANCE_OPERATION_MESSAGE);
+    setMaintenanceError();
     return true;
-  }, [clearReconnectTimer, setConnectionError]);
+  }, [clearReconnectTimer, setMaintenanceError]);
 
   const scheduleReconnect = useCallback(
     (message = RECONNECTING_ERROR_MESSAGE, serverRetryAfterMs?: number) => {
@@ -871,7 +926,11 @@ export default function OnlineLobby() {
             return;
           }
           if (message.type === "maintenance") {
-            applyMaintenanceNotice(message);
+            if (message.phase === "accepting") {
+              applyMaintenanceAccepting();
+            } else {
+              applyMaintenanceNotice(message);
+            }
             return;
           }
           if (message.type === "session") {
@@ -995,6 +1054,7 @@ export default function OnlineLobby() {
     [
       clearReconnectTimer,
       clearRetryCooldown,
+      applyMaintenanceAccepting,
       applyMaintenanceError,
       applyMaintenanceNotice,
       applyRetryCooldown,
@@ -1262,15 +1322,20 @@ export default function OnlineLobby() {
           {maintenance ? (
             <MaintenanceBanner maintenance={maintenance} />
           ) : (
-            <ConnectionFeedback
-              status={status}
-              error={error?.message ?? ""}
-              canRetry={canRetry}
-              retryAfterMs={retryAfterMs}
-              feedbackRef={feedbackRef}
-              retryButtonRef={retryButtonRef}
-              onRetry={retry}
-            />
+            <>
+              {maintenanceRecoveryVisible ? (
+                <MaintenanceRecoveryNotice />
+              ) : null}
+              <ConnectionFeedback
+                status={status}
+                error={error?.message ?? ""}
+                canRetry={canRetry}
+                retryAfterMs={retryAfterMs}
+                feedbackRef={feedbackRef}
+                retryButtonRef={retryButtonRef}
+                onRetry={retry}
+              />
+            </>
           )}
           {onlineResultOpen && onlineResult !== null ? (
             <OnlineResultView
@@ -1338,7 +1403,11 @@ export default function OnlineLobby() {
     <>
       <ScreenNavigation currentPath="/online" />
       <section className="mx-auto flex w-full max-w-md flex-col gap-6 rounded-xl border border-control-border p-6">
-        {maintenance ? <MaintenanceBanner maintenance={maintenance} /> : null}
+        {maintenance ? (
+          <MaintenanceBanner maintenance={maintenance} />
+        ) : maintenanceRecoveryVisible ? (
+          <MaintenanceRecoveryNotice />
+        ) : null}
         <form
           aria-label="オンラインルーム接続"
           onSubmit={submitLobby}
