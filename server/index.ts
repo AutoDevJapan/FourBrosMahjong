@@ -12,6 +12,7 @@ import {
   OnlineAbuseControls,
   type RoomAttemptScope,
 } from "./abuseControl";
+import { connectionSource } from "./connectionSource";
 import {
   type ConnectionState,
   hasOpenPeer as hasOpenPeerConnection,
@@ -435,14 +436,6 @@ const websocketServer = new WebSocketServer({
   noServer: true,
   maxPayload: MAX_MESSAGE_BYTES,
 });
-
-function connectionSource(request: IncomingMessage): string {
-  const address = request.socket.remoteAddress;
-  if (!address) return "unknown";
-  return address.startsWith("::ffff:")
-    ? address.slice("::ffff:".length)
-    : address;
-}
 
 function activeSourceConnections(source: string): number {
   let count = 0;
