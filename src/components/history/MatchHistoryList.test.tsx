@@ -126,6 +126,9 @@ describe("MatchHistoryList (#293)", () => {
     expect(
       opened.getByRole("region", { name: /四郎のソシー内訳$/ }),
     ).toBeInTheDocument();
+    expect(opened.queryByText("優勝")).not.toBeInTheDocument();
+    expect(items[0].querySelector(".result-ranking-row")).toBeNull();
+    expect(items[0].querySelector(".result-breakdown-card")).toBeNull();
   });
 
   it("2段階確認つきで全件削除でき、キャンセルもできる", async () => {

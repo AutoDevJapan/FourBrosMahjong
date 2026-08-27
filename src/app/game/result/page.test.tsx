@@ -130,14 +130,16 @@ describe("/game/result page (spec 6.2 / 6.6)", () => {
     );
 
     // 「もう一半荘」は新規半荘を生成するボタン。
+    const actions = screen.getByRole("navigation", { name: "対局後の導線" });
     expect(
-      screen.getByRole("button", { name: "もう一半荘" }),
-    ).toBeInTheDocument();
-    const lobbyLinks = screen.getAllByRole("link", { name: "ロビーへ戻る" });
-    expect(lobbyLinks.length).toBeGreaterThan(0);
-    for (const link of lobbyLinks) {
-      expect(link).toHaveAttribute("href", "/");
-    }
+      within(actions).getByRole("button", { name: "もう一半荘" }),
+    ).toHaveAttribute("type", "button");
+    expect(
+      within(actions).getByRole("link", { name: "戦績を見る" }),
+    ).toHaveAttribute("href", "/history");
+    expect(
+      within(actions).getByRole("link", { name: "ロビーへ戻る" }),
+    ).toHaveAttribute("href", "/");
   });
 
   it.each([

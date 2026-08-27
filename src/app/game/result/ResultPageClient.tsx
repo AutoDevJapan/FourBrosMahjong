@@ -154,7 +154,7 @@ export default function ResultPageClient({
                   <span aria-hidden="true">01</span>
                   <h2 id="ranking-heading">最終順位</h2>
                 </div>
-                <RankingTable players={result.players} />
+                <RankingTable players={result.players} variant="result" />
               </section>
 
               <div className="result-divider" aria-hidden="true" />
@@ -170,7 +170,11 @@ export default function ResultPageClient({
                 <div className="result-breakdown-grid">
                   {orderedPlayers.map((player) => (
                     // 名前は重複し得る(#291)ため、一意な rank を key にする。
-                    <SoshiiBreakdown key={player.rank} player={player} />
+                    <SoshiiBreakdown
+                      key={player.rank}
+                      player={player}
+                      variant="result"
+                    />
                   ))}
                 </div>
               </section>

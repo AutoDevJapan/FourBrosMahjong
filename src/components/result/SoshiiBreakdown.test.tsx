@@ -14,7 +14,7 @@ const player: ResultPlayerView = {
 
 describe("SoshiiBreakdown (spec 6.7 / 6.8)", () => {
   it("shows the three soshii line items (rawScore / uma / bonus) and the total", () => {
-    render(<SoshiiBreakdown player={player} />);
+    const { container } = render(<SoshiiBreakdown player={player} />);
     expect(
       screen.getByText("素点（最終持ち点−返し40,000）"),
     ).toBeInTheDocument();
@@ -26,6 +26,19 @@ describe("SoshiiBreakdown (spec 6.7 / 6.8)", () => {
     expect(screen.getByText("+45,000")).toBeInTheDocument();
     expect(screen.getByText("+10,000")).toBeInTheDocument();
     expect(screen.getByText("+56,000")).toBeInTheDocument();
+    expect(screen.queryByText("優勝")).not.toBeInTheDocument();
+    expect(container.querySelector(".result-breakdown-card")).toBeNull();
+  });
+
+  it("result variantだけが優勝badgeと結果画面用classを追加する", () => {
+    const { container } = render(
+      <SoshiiBreakdown player={player} variant="result" />,
+    );
+    expect(screen.getByText("優勝")).toBeInTheDocument();
+    expect(container.querySelector(".result-breakdown-card")).not.toBeNull();
+    expect(
+      container.querySelector(".result-breakdown-card--winner"),
+    ).not.toBeNull();
   });
 
   it("conveys sign with text for screen readers, not color alone (spec 5)", () => {

@@ -35,11 +35,20 @@ describe("RankingTable (spec 6.7)", () => {
   it("renders each player's rank as text (not color-only) and the soshii total", () => {
     render(<RankingTable players={players} />);
     expect(screen.getByText("1位")).toBeInTheDocument();
-    expect(screen.getByText("優勝")).toBeInTheDocument();
+    expect(screen.queryByText("優勝")).not.toBeInTheDocument();
     expect(screen.getByText("3位")).toBeInTheDocument();
     expect(screen.getByText("4位")).toBeInTheDocument();
     // 首位のソシー合計(符号付き)。
     expect(screen.getByText("+56,000")).toBeInTheDocument();
+  });
+
+  it("result variantだけが優勝badgeと結果画面用classを追加する", () => {
+    const { container } = render(
+      <RankingTable players={players} variant="result" />,
+    );
+    expect(screen.getByText("優勝")).toBeInTheDocument();
+    expect(container.querySelector(".result-ranking-table")).not.toBeNull();
+    expect(container.querySelector(".result-rank-medal")).not.toBeNull();
   });
 
   it("orders rows by rank ascending regardless of input order", () => {
