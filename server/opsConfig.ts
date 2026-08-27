@@ -1,8 +1,13 @@
+import { ONLINE_DRAIN_RECONNECT_GRACE_MS } from "./maintenanceLimits";
 import { isValidOpsToken, OpsBearerAuthenticator } from "./opsAuth";
 
-export const ONLINE_DRAIN_RECONNECT_GRACE_DEFAULT_MS = 60_000;
-export const ONLINE_DRAIN_RECONNECT_GRACE_MIN_MS = 15_000;
-export const ONLINE_DRAIN_RECONNECT_GRACE_MAX_MS = 300_000;
+/** Compatibility aliases; bounds are owned by maintenanceLimits.ts. */
+export const ONLINE_DRAIN_RECONNECT_GRACE_DEFAULT_MS =
+  ONLINE_DRAIN_RECONNECT_GRACE_MS.default;
+export const ONLINE_DRAIN_RECONNECT_GRACE_MIN_MS =
+  ONLINE_DRAIN_RECONNECT_GRACE_MS.min;
+export const ONLINE_DRAIN_RECONNECT_GRACE_MAX_MS =
+  ONLINE_DRAIN_RECONNECT_GRACE_MS.max;
 export const ONLINE_SHUTDOWN_GRACE_DEFAULT_MS = 25_000;
 export const ONLINE_SHUTDOWN_GRACE_MIN_MS = 1_000;
 export const ONLINE_SHUTDOWN_GRACE_MAX_MS = 300_000;

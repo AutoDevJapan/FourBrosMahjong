@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { ONLINE_DRAIN_RECONNECT_GRACE_MS } from "./maintenanceLimits";
 import {
   ONLINE_DRAIN_RECONNECT_GRACE_DEFAULT_MS,
   ONLINE_DRAIN_RECONNECT_GRACE_MAX_MS,
@@ -16,6 +17,14 @@ const VALID_TOKEN = "A".repeat(32);
 const REVISION_40 = "ABCDEF0123456789abcdef0123456789ABCDEF01";
 
 describe("online ops configuration", () => {
+  it("keeps reconnect grace compatibility exports on the shared limits", () => {
+    expect({
+      default: ONLINE_DRAIN_RECONNECT_GRACE_DEFAULT_MS,
+      min: ONLINE_DRAIN_RECONNECT_GRACE_MIN_MS,
+      max: ONLINE_DRAIN_RECONNECT_GRACE_MAX_MS,
+    }).toEqual(ONLINE_DRAIN_RECONNECT_GRACE_MS);
+  });
+
   it("defaults optional ops and maintenance emission off", () => {
     const status = readOnlineOpsConfiguration({});
 
