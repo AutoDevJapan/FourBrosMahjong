@@ -71,6 +71,12 @@ function maintenanceDeadline(value: Date | undefined): string | undefined {
   if (!Number.isFinite(time)) {
     throw new RangeError("maintenance deadline must be a valid instant");
   }
+  const year = Date.prototype.getUTCFullYear.call(value);
+  if (year < 0 || year > 9_999) {
+    throw new RangeError(
+      "maintenance deadline must use the client-compatible four-digit year",
+    );
+  }
   return new Date(time).toISOString();
 }
 

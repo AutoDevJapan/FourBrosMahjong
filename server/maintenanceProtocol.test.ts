@@ -100,6 +100,37 @@ describe("maintenance protocol payload", () => {
     ).toThrow(TypeError);
   });
 
+  it.each([-1, 10_000])(
+    "rejects extended ISO year %s that the client parser cannot consume",
+    (year) => {
+      const deadline = new Date(0);
+      deadline.setUTCFullYear(year);
+      const serializedDeadline = deadline.toISOString();
+
+      expect(
+        parseOnlineServerMessage({
+          type: "maintenance",
+          phase: "draining",
+          deadline: serializedDeadline,
+        }),
+      ).toBeNull();
+      expect(() => createMaintenanceNotice("draining", { deadline })).toThrow(
+        RangeError,
+      );
+    },
+  );
+
+  it.each([0, 9_999])(
+    "round-trips the client-compatible four-digit ISO year boundary %s",
+    (year) => {
+      const deadline = new Date(0);
+      deadline.setUTCFullYear(year);
+      const message = createMaintenanceNotice("terminating", { deadline });
+
+      expect(parseOnlineServerMessage(message)).toEqual(message);
+    },
+  );
+
   it("creates exact accepting without stale timing or arbitrary fields", () => {
     const message = createMaintenanceAcceptingNotice();
 
