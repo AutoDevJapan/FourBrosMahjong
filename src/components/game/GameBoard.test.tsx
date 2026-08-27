@@ -193,9 +193,9 @@ describe("GameBoard (spec 6.6 client island / engine-driven)", () => {
     expect(
       screen.getAllByRole("listbox", { name: "自家の手牌" }).length,
     ).toBeGreaterThan(0);
-    // 東1 の抜け番は三郎(p3)。
+    // 東1 の抜け番は糸瓜(p3)。
     expect(
-      screen.getAllByRole("region", { name: "三郎(抜け番)" }).length,
+      screen.getAllByRole("region", { name: "糸瓜(抜け番)" }).length,
     ).toBeGreaterThan(0);
     // 打牌待ちでは「ツモ」ボタンが操作パネルに現れる。
     expect(
@@ -264,11 +264,11 @@ describe("GameBoard (spec 6.6 client island / engine-driven)", () => {
   it("決定的な公開状態から全プレイヤーの抜き北を表示し、自家の連続北抜きを通知する", () => {
     renderBoardWithKita();
 
-    const self = screen.getAllByRole("region", { name: "あなた(東家)" });
+    const self = screen.getAllByRole("region", { name: "粗悪品(東家)" });
     expect(self.some((region) => region.textContent?.includes("ガリ2"))).toBe(
       true,
     );
-    const west = screen.getAllByRole("region", { name: "二郎(西家)" });
+    const west = screen.getAllByRole("region", { name: "マサキ(西家)" });
     expect(west.some((region) => region.textContent?.includes("ガリ1"))).toBe(
       true,
     );
@@ -492,11 +492,11 @@ describe("GameBoard 終局後の出口(#206 / #207 / #277)", () => {
     expect(routerMock.replace).not.toHaveBeenCalled();
     expect(routerMock.push).not.toHaveBeenCalled();
 
-    // 最終局(seed=2024 は東4・一郎のロン 7,700点 / #294 の AI 変更後に再確認)の和了内訳が表示される。
+    // 最終局(seed=2024 は東4・竜二のロン 7,700点 / #294 の AI 変更後に再確認)の和了内訳が表示される。
     expect(
       screen.getAllByRole("heading", { name: "和了内訳" }).length,
     ).toBeGreaterThan(0);
-    // 各家の点数増減(±デルタ)も表示される(自家 −7,700 / 一郎 +8,700 = 7,700 + 供託1,000)。
+    // 各家の点数増減(±デルタ)も表示される(自家 −7,700 / 竜二 +8,700 = 7,700 + 供託1,000)。
     expect(screen.getAllByText("−7,700").length).toBeGreaterThan(0);
     expect(screen.getAllByText("+8,700").length).toBeGreaterThan(0);
 
@@ -622,7 +622,7 @@ describe("GameBoard online host handoff controls(#681 / #678)", () => {
 });
 
 describe("GameBoard 残存供託の帰属表示(#282)", () => {
-  /** 南4親流れ流局+供託2本残存で終局した状態(単独最高 p0 = あなた が取得)。 */
+  /** 南4親流れ流局+供託2本残存で終局した状態(単独最高 p0 = 粗悪品 が取得)。 */
   function drawEndedGameWithResidual(): EngineState {
     const base = createGame({ seed: 130 });
     const conclusion: RoundConclusion = {
@@ -656,7 +656,7 @@ describe("GameBoard 残存供託の帰属表示(#282)", () => {
 
     // hint(唯一の可視サマリ)に残存供託の帰属が明記される。
     expect(
-      screen.getAllByText(/残存供託2本（2,000点）はあなたが取得。/).length,
+      screen.getAllByText(/残存供託2本（2,000点）は粗悪品が取得。/).length,
     ).toBeGreaterThan(0);
     // 受取者のデルタ表示(+2,000)が持ち点(54,000)・供託カウント0と整合する。
     expect(screen.getAllByText("+2,000").length).toBeGreaterThan(0);
@@ -831,7 +831,7 @@ describe("GameBoard 対話 a11y 経路(#285)", () => {
     );
 
     // 自家の状態バッジに「リーチ」が付く(色非依存のテキスト表示)。
-    const selfRegions = screen.getAllByRole("region", { name: /^あなた/ });
+    const selfRegions = screen.getAllByRole("region", { name: /^粗悪品/ });
     expect(
       selfRegions.some((region) => region.textContent?.includes("リーチ")),
     ).toBe(true);
@@ -930,7 +930,7 @@ describe("GameBoard 対話 a11y 経路(#285)", () => {
       ),
     );
 
-    const selfBefore = screen.getAllByRole("region", { name: /^あなた/ })[0];
+    const selfBefore = screen.getAllByRole("region", { name: /^粗悪品/ })[0];
     expect(
       within(selfBefore).queryAllByRole("listitem", { name: "暗槓" }),
     ).toHaveLength(0);
@@ -941,7 +941,7 @@ describe("GameBoard 対話 a11y 経路(#285)", () => {
     expect(screen.queryAllByRole("button", { name: "暗槓 一萬" })).toHaveLength(
       0,
     );
-    const selfAfter = screen.getAllByRole("region", { name: /^あなた/ })[0];
+    const selfAfter = screen.getAllByRole("region", { name: /^粗悪品/ })[0];
     expect(
       within(selfAfter).getAllByRole("listitem", { name: "暗槓" }),
     ).toHaveLength(1);
@@ -962,7 +962,7 @@ describe("GameBoard 対話 a11y 経路(#285)", () => {
       ),
     );
 
-    const selfBefore = screen.getAllByRole("region", { name: /^あなた/ })[0];
+    const selfBefore = screen.getAllByRole("region", { name: /^粗悪品/ })[0];
     expect(
       within(selfBefore).getAllByRole("listitem", { name: "ポン" }).length,
     ).toBeGreaterThan(0);
@@ -973,7 +973,7 @@ describe("GameBoard 対話 a11y 経路(#285)", () => {
     expect(screen.queryAllByRole("button", { name: "加槓 東" })).toHaveLength(
       0,
     );
-    const selfAfter = screen.getAllByRole("region", { name: /^あなた/ })[0];
+    const selfAfter = screen.getAllByRole("region", { name: /^粗悪品/ })[0];
     expect(
       within(selfAfter).queryAllByRole("listitem", { name: "ポン" }),
     ).toHaveLength(0);

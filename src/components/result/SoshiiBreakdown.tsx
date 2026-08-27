@@ -6,6 +6,10 @@
  * 一切含めず、`GameProvider` 経由で渡された値を整形して並べるのみ(スペック6 6.8)。
  * 増減は色に依存せず符号+テキストで伝える(スペック5 5.2.1)。
  */
+
+import CharacterPortrait, {
+  characterAccentStyle,
+} from "@/components/game/CharacterPortrait";
 import type { ResultPlayerView } from "@/components/game/types";
 import { formatSignedSoshii } from "./soshiiFormat";
 
@@ -28,17 +32,20 @@ function SignedValue({ value }: { value: number }) {
 }
 
 export default function SoshiiBreakdown({ player }: SoshiiBreakdownProps) {
-  const { name, rank, rawScore, uma, bonus, soshiiTotal } = player;
+  const { playerId, name, rank, rawScore, uma, bonus, soshiiTotal } = player;
   const total = formatSignedSoshii(soshiiTotal);
 
   return (
     <section
       aria-label={`${name}のソシー内訳`}
-      className="rounded-lg border border-foreground/15 p-4"
+      data-character-id={playerId}
+      style={playerId ? characterAccentStyle(playerId) : undefined}
+      className="character-surface rounded-lg border p-4"
     >
-      <h3 className="flex items-baseline gap-2 text-sm font-semibold">
+      <h3 className="flex items-center gap-2 text-sm font-semibold">
+        {playerId ? <CharacterPortrait playerId={playerId} /> : null}
         <span className="text-foreground/70">{rank}位</span>
-        <span>{name}</span>
+        <span className="character-name">{name}</span>
       </h3>
       <dl className="mt-3 flex flex-col gap-1.5 text-sm">
         <div className="flex items-baseline justify-between gap-4">

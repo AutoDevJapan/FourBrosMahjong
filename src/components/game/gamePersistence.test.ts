@@ -350,13 +350,13 @@ describe("game persistence journal", () => {
     expect(parseJournal(JSON.stringify(journal))).toBeNull();
   });
 
-  it("v1の記録は既定名を補ってv2として受け入れる (#291)", () => {
+  it("v1の記録は当時の既定名を保ったままv2として受け入れる (#291/#711)", () => {
     const v1 = { version: 1, seed: 3, actions: [{ type: "tsumogiri" }] };
 
     expect(parseJournal(JSON.stringify(v1))).toEqual({
       version: 2,
       seed: 3,
-      names: DEFAULT_NAMES,
+      names: ["あなた", "一郎", "二郎", "三郎"],
       actions: [{ type: "tsumogiri" }],
     });
   });

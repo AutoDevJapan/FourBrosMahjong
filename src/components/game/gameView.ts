@@ -98,6 +98,7 @@ function buildSlotContent(
 
   if (seat === null) {
     const bench: BenchPlayerView = {
+      playerId: id,
       name: nameOf(engine, id),
       points: engine.points[id],
       ...(showDelta !== 0 ? { pointsDelta: showDelta } : {}),
@@ -130,6 +131,7 @@ function buildSlotContent(
       : null;
 
   const seated: SeatedPlayerView = {
+    playerId: id,
     name: nameOf(engine, id),
     points: engine.points[id],
     ...(showDelta !== 0 ? { pointsDelta: showDelta } : {}),
@@ -163,6 +165,7 @@ function buildResult(engine: EngineState): GameResultView | null {
   if (engine.result === null) return null;
   return {
     players: engine.result.map((r) => ({
+      playerId: r.playerId,
       name: r.name,
       rank: r.rank,
       rawScore: r.rawScore,

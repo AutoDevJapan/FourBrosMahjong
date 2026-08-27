@@ -432,7 +432,7 @@ test.describe("状態駆動 a11y 監査(リーチ/鳴き/和了アラート/ト�
       // バッジのみを一意に掴める(レイアウト変更に対して堅牢)。自家スロット(section)へ
       // 限定し、監査対象が自家バッジであることを明示する。
       const riichiBadge = page
-        .getByRole("region", { name: /^あなた/ })
+        .getByRole("region", { name: /^粗悪品/ })
         .getByTestId("status-badge-riichi");
 
       // 標準戦略で進め、「リーチ」ボタンが出た手番で武装 →「リーチ可」の牌で宣言する。
@@ -540,7 +540,7 @@ test.describe("状態駆動 a11y 監査(裏ドラ開示 / #261)", () => {
       await expect(board).toHaveAttribute("data-phase", "roundEnd");
       await expect(board).toHaveAttribute("data-round-kind", "win");
       await expect(page.getByRole("alert").first()).toContainText(
-        "あなたのツモ",
+        "粗悪品のツモ",
       );
       await expect(page.getByText("裏ドラ開示").first()).toBeVisible();
 

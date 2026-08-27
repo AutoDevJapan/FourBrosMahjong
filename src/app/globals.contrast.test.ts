@@ -247,4 +247,15 @@ describe("spec 5.4.2 が名指しするトークンのコントラスト(#388)",
       );
     });
   }
+
+  it("ライト: --positive が全キャラクター結果カード地に対し 4.5:1 以上", () => {
+    const scope = ":root";
+    const bg = token(scope, "--background");
+    const positive = token(scope, "--positive");
+
+    for (const theme of ["red", "blue", "yellow", "green"] as const) {
+      const surface = composite(token(scope, `--character-${theme}`), 0.07, bg);
+      expect(contrast(positive, surface), theme).toBeGreaterThanOrEqual(4.5);
+    }
+  });
 });

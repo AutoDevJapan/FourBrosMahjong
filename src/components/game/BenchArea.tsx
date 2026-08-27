@@ -14,6 +14,7 @@
  * 「この局は休み」の補足文はコンパクト帯では省き、抜け番バッジで休みを伝える。
  */
 
+import CharacterPortrait, { characterAccentStyle } from "./CharacterPortrait";
 import ScoreDisplay from "./ScoreDisplay";
 import StatusBadge from "./StatusBadge";
 import type { BenchPlayerView } from "./types";
@@ -30,11 +31,14 @@ export default function BenchArea({ player, compact = false }: BenchAreaProps) {
     return (
       <section
         aria-label={`${player.name}(抜け番)`}
-        className="flex flex-col gap-2 rounded-lg border border-dashed border-foreground/25 bg-foreground/[.03] p-2"
+        data-character-id={player.playerId}
+        style={characterAccentStyle(player.playerId)}
+        className="character-accent-edge flex flex-col gap-2 rounded-lg border border-dashed border-foreground/25 bg-foreground/[.03] p-2"
       >
         <header className="flex flex-wrap items-center gap-x-2 gap-y-1">
+          <CharacterPortrait playerId={player.playerId} />
           <StatusBadge icon="⏸" label="抜け番" variant="bench" />
-          <span className="font-medium">{player.name}</span>
+          <span className="character-name font-medium">{player.name}</span>
         </header>
         <ScoreDisplay points={player.points} delta={player.pointsDelta} />
       </section>
@@ -44,10 +48,13 @@ export default function BenchArea({ player, compact = false }: BenchAreaProps) {
   return (
     <section
       aria-label={`${player.name}(抜け番)`}
-      className="flex h-full flex-col items-center justify-center gap-2 rounded-lg border border-dashed border-foreground/25 bg-foreground/[.03] p-3 text-center"
+      data-character-id={player.playerId}
+      style={characterAccentStyle(player.playerId)}
+      className="character-accent-edge flex h-full flex-col items-center justify-center gap-2 rounded-lg border border-dashed border-foreground/25 bg-foreground/[.03] p-3 text-center"
     >
+      <CharacterPortrait playerId={player.playerId} size="medium" />
       <StatusBadge icon="⏸" label="抜け番" variant="bench" />
-      <p className="font-medium">{player.name}</p>
+      <p className="character-name font-medium">{player.name}</p>
       <ScoreDisplay points={player.points} delta={player.pointsDelta} />
       <p className="text-xs text-foreground/60">この局は休み</p>
     </section>

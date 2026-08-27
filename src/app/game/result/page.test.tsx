@@ -48,9 +48,9 @@ describe("/game/result page (spec 6.2 / 6.6)", () => {
     );
     // 順位表とソシー内訳の双方に順位が現れる。
     expect(screen.getAllByText("1位").length).toBeGreaterThan(0);
-    // ソシー内訳セクションは自家(あなた)のリージョンを持つ。
+    // ソシー内訳セクションは自家(粗悪品)のリージョンを持つ。
     expect(
-      screen.getByRole("region", { name: "あなたのソシー内訳" }),
+      screen.getByRole("region", { name: "粗悪品のソシー内訳" }),
     ).toBeInTheDocument();
   });
 
