@@ -86,7 +86,7 @@ test.describe("PWAオフライン動作(#292)", () => {
     await expect
       .poll(() =>
         offlinePage.evaluate(() => {
-          const raw = sessionStorage.getItem("four-bros-mahjong.game.v1");
+          const raw = sessionStorage.getItem("four-bros-mahjong.game.v3");
           return raw === null ? 0 : (JSON.parse(raw).actions?.length ?? 0);
         }),
       )
@@ -156,7 +156,7 @@ test.describe("PWAオフライン動作(#292)", () => {
     await expect
       .poll(() =>
         page.evaluate(() => {
-          const raw = sessionStorage.getItem("four-bros-mahjong.game.v1");
+          const raw = sessionStorage.getItem("four-bros-mahjong.game.v3");
           return raw === null ? 0 : (JSON.parse(raw).actions?.length ?? 0);
         }),
       )

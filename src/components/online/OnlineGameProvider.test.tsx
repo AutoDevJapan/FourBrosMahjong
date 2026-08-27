@@ -49,6 +49,7 @@ function snapshotFixture(): OnlineSnapshot {
     code: "ABC234",
     version: 3,
     you: "p0",
+    explicitKita: true,
     hostId: "p0",
     phase: engine.phase,
     view: selectView(engine, "p0"),
@@ -189,6 +190,22 @@ describe("OnlineGameProvider", () => {
       version: 3,
       action: { type: "kita" },
     });
+  });
+
+  it("capability欠落の旧server snapshotではkita actionを送らない", async () => {
+    const send = vi.fn();
+    const socket = { readyState: 1, send } as unknown as WebSocket;
+    const { explicitKita, ...legacySnapshot } = snapshotFixture();
+    expect(explicitKita).toBe(true);
+    render(
+      <OnlineGameProvider socket={socket} snapshot={legacySnapshot}>
+        <ActionProbe />
+      </OnlineGameProvider>,
+    );
+
+    await userEvent.click(screen.getByRole("button", { name: "北抜" }));
+
+    expect(send).not.toHaveBeenCalled();
   });
 
   it("does not send a stale action while the socket is unavailable", async () => {

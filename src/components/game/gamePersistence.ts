@@ -22,11 +22,13 @@ import {
 } from "@/domain/game/engine";
 import { createTile, type Tile } from "@/domain/tiles/tile";
 
-const GAME_SESSION_KEY = "four-bros-mahjong.game.v1";
-// v2 で `names`(対局者名 / issue #291)を追加。半荘の表示名は開始時に固定したいので
+export const LEGACY_GAME_SESSION_KEY = "four-bros-mahjong.game.v1";
+export const GAME_SESSION_KEY = "four-bros-mahjong.game.v3";
+// v2 で `names`、v3 で明示的な北抜き操作を追加。旧clientは未知actionを見つけると
+// v1 keyを削除するため、v3は別keyへ保存し、旧keyは移行後も一切変更しない。
 // 設定側(`localStorage`)を再生時に読み直さず、ジャーナル自身に保存する。
-// v1 の記録は既定名を補って v2 として受け入れる(`namesOfVersion`)。
-const VERSION = 2;
+// v1 の記録は既定名を補って v3 形式へ正規化する(`namesOfVersion`)。
+const VERSION = 3;
 /** v1ジャーナル作成当時の表示名。既存の進行中半荘をデプロイで改名しない。 */
 const LEGACY_V1_DEFAULT_NAMES: PlayerNames = ["あなた", "一郎", "二郎", "三郎"];
 // engine は最大32局で終了し、完走fixtureも5,000遷移を安全ガードにしている。
@@ -51,10 +53,12 @@ export type GameAction =
   | { readonly type: "nextRound" };
 
 export interface GameJournal {
-  readonly version: 2;
+  readonly version: 3;
   readonly seed: number;
   /** この半荘の対局者名(index 0 = 自家)。開始時に固定し、以後の設定変更では変わらない。 */
   readonly names: PlayerNames;
+  /** trueならp0の北抜きを操作列へ記録。falseは旧版と同じ自動ガリで再生する。 */
+  readonly explicitKita: boolean;
   readonly actions: readonly GameAction[];
 }
 
@@ -106,10 +110,11 @@ export function hasOnlyKeys(
   );
 }
 
-function isAction(value: unknown): value is GameAction {
+function isAction(value: unknown, allowKita: boolean): value is GameAction {
   if (!value || typeof value !== "object") return false;
   const action = value as Record<string, unknown>;
   if (noTileActions.has(String(action.type))) {
+    if (action.type === "kita" && !allowKita) return false;
     return hasOnlyKeys(action, ["type"]);
   }
   return (
@@ -151,8 +156,12 @@ function namesOfVersion(value: Record<string, unknown>): PlayerNames | null {
       ? LEGACY_V1_DEFAULT_NAMES
       : null;
   }
-  if (value.version !== VERSION) return null;
-  if (!hasOnlyKeys(value, ["version", "seed", "names", "actions"])) return null;
+  if (value.version !== 2 && value.version !== VERSION) return null;
+  const expectedKeys =
+    value.version === VERSION
+      ? ["version", "seed", "names", "explicitKita", "actions"]
+      : ["version", "seed", "names", "actions"];
+  if (!hasOnlyKeys(value, expectedKeys)) return null;
   if (!isNames(value.names)) return null;
   const [east, south, west, bench] = value.names;
   return [
@@ -163,32 +172,52 @@ function namesOfVersion(value: Record<string, unknown>): PlayerNames | null {
   ];
 }
 
-export function parseJournal(raw: string): GameJournal | null {
+interface ParsedJournal {
+  readonly journal: GameJournal;
+  readonly sourceVersion: 1 | 2 | 3;
+}
+
+function parseJournalWithVersion(raw: string): ParsedJournal | null {
   if (raw.length * 2 > MAX_JOURNAL_BYTES) return null;
   try {
     const value = JSON.parse(raw) as Record<string, unknown>;
     if (!value || typeof value !== "object") return null;
     const names = namesOfVersion(value);
+    const sourceVersion = value.version;
+    const explicitKita =
+      sourceVersion === VERSION && value.explicitKita === true;
     if (
       names === null ||
+      (sourceVersion !== 1 &&
+        sourceVersion !== 2 &&
+        sourceVersion !== VERSION) ||
+      (sourceVersion === VERSION && typeof value.explicitKita !== "boolean") ||
       !Number.isSafeInteger(value.seed) ||
       Number(value.seed) < 0 ||
       Number(value.seed) > 0xffffffff ||
       !Array.isArray(value.actions) ||
       value.actions.length > MAX_JOURNAL_ACTIONS ||
-      !value.actions.every(isAction)
+      !value.actions.every((action) => isAction(action, explicitKita))
     ) {
       return null;
     }
     return {
-      version: VERSION,
-      seed: value.seed as number,
-      names,
-      actions: value.actions as readonly GameAction[],
+      sourceVersion,
+      journal: {
+        version: VERSION,
+        seed: value.seed as number,
+        names,
+        explicitKita,
+        actions: value.actions as readonly GameAction[],
+      },
     };
   } catch {
     return null;
   }
+}
+
+export function parseJournal(raw: string): GameJournal | null {
+  return parseJournalWithVersion(raw)?.journal ?? null;
 }
 
 export function applyGameAction(
@@ -225,7 +254,11 @@ export function applyGameAction(
 }
 
 export function replayJournal(journal: GameJournal): EngineState {
-  let state = createGame({ seed: journal.seed, names: journal.names });
+  let state = createGame({
+    seed: journal.seed,
+    names: journal.names,
+    explicitKitaPlayerIds: journal.explicitKita ? ["p0"] : [],
+  });
   for (const [index, action] of journal.actions.entries()) {
     const next = applyGameAction(state, action);
     // engine の公開操作は不正な局面・牌を例外ではなく同一 state の no-op で拒否する。
@@ -243,11 +276,20 @@ export function replayJournal(journal: GameJournal): EngineState {
 
 export function loadJournal(storage: Storage): GameJournal | null {
   try {
-    const raw = storage.getItem(GAME_SESSION_KEY);
-    if (raw === null) return null;
-    const journal = parseJournal(raw);
-    if (journal === null) storage.removeItem(GAME_SESSION_KEY);
-    return journal;
+    const currentRaw = storage.getItem(GAME_SESSION_KEY);
+    if (currentRaw !== null) {
+      const current = parseJournalWithVersion(currentRaw);
+      if (current?.sourceVersion === VERSION) return current.journal;
+      storage.removeItem(GAME_SESSION_KEY);
+    }
+
+    // 旧keyは旧clientとの共存・rollback用に読取専用とし、破損時も削除しない。
+    const legacyRaw = storage.getItem(LEGACY_GAME_SESSION_KEY);
+    if (legacyRaw === null) return null;
+    const legacy = parseJournalWithVersion(legacyRaw);
+    return legacy?.sourceVersion === 1 || legacy?.sourceVersion === 2
+      ? legacy.journal
+      : null;
   } catch {
     return null;
   }
@@ -255,7 +297,16 @@ export function loadJournal(storage: Storage): GameJournal | null {
 
 export function saveJournal(storage: Storage, journal: GameJournal): void {
   try {
-    storage.setItem(GAME_SESSION_KEY, JSON.stringify(journal));
+    storage.setItem(
+      GAME_SESSION_KEY,
+      JSON.stringify({
+        version: VERSION,
+        seed: journal.seed,
+        names: journal.names,
+        explicitKita: journal.explicitKita,
+        actions: journal.actions,
+      } satisfies GameJournal),
+    );
   } catch {
     // 保存不可でも現在タブの対局は継続する。
   }

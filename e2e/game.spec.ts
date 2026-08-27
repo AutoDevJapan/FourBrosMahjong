@@ -416,8 +416,8 @@ test.describe("対局画面(/game)", () => {
   test("開始時、自家の手番がライブリージョンへ通知され操作パネルが操作可能(スペック5 5.2.2 / 5.2.3)", async ({
     page,
   }) => {
-    // seed=0 は開始ツモが北ではなく、通常の手番通知を決定的に検証できる。
-    await page.goto("/game?seed=0");
+    // seed=4 は開始時に北抜候補がなく、通常の手番通知を決定的に検証できる。
+    await page.goto("/game?seed=4");
 
     // 自家の手番(打牌待ち)は polite ライブリージョンへ通知される(sr-only だが DOM 常駐)。
     await expect(page.locator('[aria-live="polite"]').first()).toHaveText(
@@ -430,27 +430,50 @@ test.describe("対局画面(/game)", () => {
     await expect(actionPanel.getByRole("button").first()).toBeVisible();
   });
 
-  test("配牌北とツモ北を公開し、320pxと全体盤面でもガリ枚数を確認できる(#171/#178)", async ({
+  test("320pxで北抜をキーボード/タップ操作でき、可視・aria-live通知と横幅を保つ(#708)", async ({
     page,
   }) => {
-    await page.setViewportSize({ width: 700, height: 900 });
+    await page.setViewportSize({ width: 320, height: 800 });
     await page.goto("/game?seed=1");
 
     const self = page.getByRole("region", { name: "粗悪品(東家)" });
-    await expect(self.getByTestId("kita-display")).toContainText("ガリ2");
-    await expect(
-      self.getByTestId("kita-display").locator('[data-face="Pei"]'),
-    ).toHaveCount(2);
-    await expect(
-      page
-        .locator('[aria-live="polite"]')
-        .filter({ hasText: "北を2枚抜きました" }),
-    ).toHaveText(
-      "北を2枚抜きました。嶺上牌を補充しました。ガリは合計2枚です。",
+    const kita = page
+      .getByRole("button", { name: "北抜" })
+      .filter({ visible: true })
+      .first();
+    await expect(kita).toBeVisible();
+    const touchBox = await kita.boundingBox();
+    expect(touchBox?.width ?? 0).toBeGreaterThanOrEqual(44);
+    expect(touchBox?.height ?? 0).toBeGreaterThanOrEqual(44);
+
+    await kita.focus();
+    await page.keyboard.press("Enter");
+    await expect(self.getByTestId("kita-display")).toContainText("ガリ1");
+    const status = page.getByRole("status");
+    await expect(status).toBeVisible();
+    await expect(status).toHaveAttribute("aria-live", "polite");
+    await expect(status).toHaveText(
+      "北を抜きました。嶺上牌を補充しました。ガリは合計1枚です。",
     );
 
-    await page.setViewportSize({ width: 320, height: 800 });
+    // 2枚目は通常のポインター操作（44pxタップ領域）で抜き、同じ手番を継続する。
+    await page
+      .getByRole("button", { name: "北抜" })
+      .filter({ visible: true })
+      .first()
+      .click();
     await expect(self.getByTestId("kita-display")).toContainText("ガリ2");
+    await expect(status).toHaveText(
+      "北を抜きました。嶺上牌を補充しました。ガリは合計2枚です。",
+    );
+    expect(
+      await page.evaluate(
+        () =>
+          document.documentElement.scrollWidth -
+          document.documentElement.clientWidth,
+      ),
+    ).toBeLessThanOrEqual(1);
+
     await page.getByRole("button", { name: "全体盤面" }).click();
     const dialog = page.getByRole("dialog", { name: "全体盤面" });
     await expect(
@@ -464,7 +487,8 @@ test.describe("対局画面(/game)", () => {
     page,
   }) => {
     await page.setViewportSize({ width: 900, height: 900 });
-    await page.goto("/game?seed=0");
+    // seed=4 は開始時に北抜候補がなく、残り山52枚から始まる。
+    await page.goto("/game?seed=4");
     const board = page.locator("[data-phase]").first();
     const remaining = page.getByTestId("remaining-live-tiles").filter({
       hasText: /残り山\s*52枚/,

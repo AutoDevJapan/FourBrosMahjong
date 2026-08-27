@@ -473,9 +473,12 @@ export default function GameBoard({
     }
     if (pending?.kind === "humanDiscard") {
       if (pending.locked) {
-        return pending.canKita
-          ? "リーチ中です。ツモ和了、北抜、ツモ切りを選べます。"
-          : "リーチ中です。ツモ和了かツモ切りを選んでください。";
+        const choices = [
+          pending.canTsumo ? "ツモ和了" : null,
+          pending.canKita ? "北抜" : null,
+          "ツモ切り",
+        ].filter((choice): choice is string => choice !== null);
+        return `リーチ中です。${choices.join("、")}を選べます。`;
       }
       if (riichiArmed) {
         return "リーチ宣言牌を選んでください(テンパイを保つ牌のみ有効)。";
@@ -722,10 +725,20 @@ export default function GameBoard({
         </Modal>
       ) : null}
 
+      {kitaAnnouncement ? (
+        <p
+          role="status"
+          aria-live="polite"
+          aria-atomic="true"
+          className="mx-auto mt-2 max-w-2xl rounded-lg border border-emerald-300/50 bg-emerald-950/85 px-3 py-2 text-center text-sm font-semibold text-emerald-50 shadow-lg"
+        >
+          {kitaAnnouncement}
+        </p>
+      ) : null}
+
       <LiveRegion
         politeMessage={announcement}
         politeMessageKey={tileFeedback.eventId}
-        secondaryPoliteMessage={kitaAnnouncement}
         assertiveMessage={assertive}
       />
     </div>

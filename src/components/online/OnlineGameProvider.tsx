@@ -105,7 +105,11 @@ export default function OnlineGameProvider({
       ron: () => sendPlayerAction({ type: "ron" }, playerId),
       pon: () => sendPlayerAction({ type: "pon" }, playerId),
       kan: () => sendPlayerAction({ type: "kan" }, playerId),
-      kita: () => sendPlayerAction({ type: "kita" }, playerId),
+      kita: () => {
+        // capability欠落の旧serverでは北は従来どおり自動処理される。
+        if (snapshot.explicitKita !== true) return;
+        sendPlayerAction({ type: "kita" }, playerId);
+      },
       ankan: (tile) =>
         sendPlayerAction({ type: "ankan", tile: wireTile(tile) }, playerId),
       kakan: (tile) =>
@@ -126,7 +130,14 @@ export default function OnlineGameProvider({
         socket.send(JSON.stringify({ type: "newGame" }));
       },
     }),
-    [isHost, onSendError, playerId, sendPlayerAction, socket],
+    [
+      isHost,
+      onSendError,
+      playerId,
+      sendPlayerAction,
+      snapshot.explicitKita,
+      socket,
+    ],
   );
 
   const value = useMemo<GameContextValue>(

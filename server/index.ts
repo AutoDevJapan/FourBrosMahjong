@@ -207,7 +207,10 @@ function handleMessage(client: Client, value: unknown): void {
       try {
         attach(
           client,
-          manager.create(normalizePlayerName(message.name, "ホスト")),
+          manager.create(
+            normalizePlayerName(message.name, "ホスト"),
+            message.explicitKita === true,
+          ),
         );
       } catch (error) {
         sendError(
@@ -230,7 +233,11 @@ function handleMessage(client: Client, value: unknown): void {
         sendError(client, ROOM_CODE_FORMAT_MESSAGE);
         return;
       }
-      const session = manager.join(code, message.name);
+      const session = manager.join(
+        code,
+        message.name,
+        message.explicitKita === true,
+      );
       if (!session) {
         sendError(client, "ルームが見つからないか、満席です。");
         return;
@@ -244,7 +251,11 @@ function handleMessage(client: Client, value: unknown): void {
         sendError(client, "すでにルームへ接続しています。");
         return;
       }
-      const session = manager.resume(message.code, message.token);
+      const session = manager.resume(
+        message.code,
+        message.token,
+        message.explicitKita === true,
+      );
       if (!session) {
         sendError(
           client,

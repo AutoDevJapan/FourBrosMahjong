@@ -47,7 +47,13 @@ export function walkToGameEnd(seed: number): FinishedGameFixture {
   }
   if (s.phase !== "gameEnd") throw new Error("半荘が終了しなかった");
   return {
-    journal: { version: 2, seed, names: DEFAULT_NAMES, actions },
+    journal: {
+      version: 3,
+      seed,
+      names: DEFAULT_NAMES,
+      explicitKita: true,
+      actions,
+    },
     state: s,
   };
 }

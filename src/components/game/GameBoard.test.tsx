@@ -272,11 +272,11 @@ describe("GameBoard (spec 6.6 client island / engine-driven)", () => {
     expect(west.some((region) => region.textContent?.includes("ガリ1"))).toBe(
       true,
     );
-    expect(
-      screen.getByText(
-        "北を2枚抜きました。嶺上牌を補充しました。ガリは合計2枚です。",
-      ),
-    ).toBeInTheDocument();
+    const initialStatus = screen.getByRole("status");
+    expect(initialStatus).toBeVisible();
+    expect(initialStatus).toHaveTextContent(
+      "北を2枚抜きました。嶺上牌を補充しました。ガリは合計2枚です。",
+    );
     expect(
       screen.getByText("あなたの手番です。北抜できます。"),
     ).toBeInTheDocument();
@@ -299,16 +299,17 @@ describe("GameBoard (spec 6.6 client island / engine-driven)", () => {
     await user.click(screen.getAllByRole("button", { name: "北抜" })[0]);
 
     const selfAfterOne = screen.getAllByRole("region", {
-      name: "あなた(東家)",
+      name: "粗悪品(東家)",
     });
     expect(
       selfAfterOne.some((region) => region.textContent?.includes("ガリ1")),
     ).toBe(true);
-    expect(
-      screen.getByText(
-        "北を抜きました。嶺上牌を補充しました。ガリは合計1枚です。",
-      ),
-    ).toBeInTheDocument();
+    const status = screen.getByRole("status");
+    expect(status).toBeVisible();
+    expect(status).toHaveTextContent(
+      "北を抜きました。嶺上牌を補充しました。ガリは合計1枚です。",
+    );
+    expect(status).toHaveAttribute("aria-live", "polite");
     // seed=1 は配牌と第1ツモの2枚が北。1枚抜いた後も同じ手番で再度選べる。
     expect(
       screen.getAllByRole("button", { name: "北抜" }).length,
@@ -319,11 +320,40 @@ describe("GameBoard (spec 6.6 client island / engine-driven)", () => {
       screen.queryByRole("button", { name: "北抜" }),
     ).not.toBeInTheDocument();
     const selfAfterTwo = screen.getAllByRole("region", {
-      name: "あなた(東家)",
+      name: "粗悪品(東家)",
     });
     expect(
       selfAfterTwo.some((region) => region.textContent?.includes("ガリ2")),
     ).toBe(true);
+  });
+
+  it("リーチ中の操作案内は実際にtrueの選択肢だけを読み上げる", () => {
+    const base = createGame({ seed: 1 });
+    if (base.pending?.kind !== "humanDiscard") {
+      throw new Error("human discard fixture expected");
+    }
+    const state: EngineState = {
+      ...base,
+      pending: {
+        ...base.pending,
+        locked: true,
+        canTsumo: false,
+        canKita: true,
+      },
+    };
+
+    render(
+      <GameProvider initialGame={state}>
+        <GameBoard />
+      </GameProvider>,
+    );
+
+    expect(
+      screen.getAllByText("リーチ中です。北抜、ツモ切りを選べます。").length,
+    ).toBeGreaterThan(0);
+    expect(
+      screen.queryByText(/リーチ中です。ツモ和了/),
+    ).not.toBeInTheDocument();
   });
 
   it("同じガリ枚数でも局キーが変われば新しい北抜きとして検知する", () => {

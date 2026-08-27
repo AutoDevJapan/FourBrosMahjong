@@ -220,7 +220,7 @@ test.describe("狭幅の接続後オンライン操作と結果導線(#628)", ()
       await page.setViewportSize({ width, height: 800 });
       await page.addInitScript(
         (raw) => {
-          sessionStorage.setItem("four-bros-mahjong.game.v1", raw);
+          sessionStorage.setItem("four-bros-mahjong.game.v3", raw);
         },
         JSON.stringify(walkToGameEnd(1).journal),
       );

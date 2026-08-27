@@ -25,7 +25,7 @@ import {
   subscribeHistory,
 } from "./matchHistory";
 
-const GAME_SESSION_KEY = "four-bros-mahjong.game.v1";
+const GAME_SESSION_KEY = "four-bros-mahjong.game.v3";
 
 const originalLocalStorageDescriptor = Object.getOwnPropertyDescriptor(
   window,

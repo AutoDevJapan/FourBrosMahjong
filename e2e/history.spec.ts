@@ -62,7 +62,7 @@ test.describe("戦績のローカル保存・閲覧(#293)", () => {
     await Promise.all(
       [first, second].map((tab, index) =>
         tab.addInitScript(
-          (raw) => sessionStorage.setItem("four-bros-mahjong.game.v1", raw),
+          (raw) => sessionStorage.setItem("four-bros-mahjong.game.v3", raw),
           JSON.stringify(journals[index]),
         ),
       ),
@@ -244,7 +244,7 @@ test.describe("戦績のローカル保存・閲覧(#293)", () => {
     }) => {
       await page.addInitScript(
         ({ raw, failure }) => {
-          sessionStorage.setItem("four-bros-mahjong.game.v1", raw);
+          sessionStorage.setItem("four-bros-mahjong.game.v3", raw);
           if (failure === "SecurityError") {
             Object.defineProperty(window, "localStorage", {
               configurable: true,
@@ -307,7 +307,7 @@ test.describe("戦績のローカル保存・閲覧(#293)", () => {
     // 実エンジンで決定的に生成した終局済みジャーナルを注入し、終局直後のタブを再現する。
     await page.addInitScript(
       (raw) => {
-        sessionStorage.setItem("four-bros-mahjong.game.v1", raw);
+        sessionStorage.setItem("four-bros-mahjong.game.v3", raw);
       },
       JSON.stringify(walkToGameEnd(1).journal),
     );

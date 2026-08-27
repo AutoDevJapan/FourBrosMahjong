@@ -214,7 +214,9 @@ function newJournal(
   seed: number,
   names: PlayerNames,
 ): GameJournal | null {
-  return storage === null ? null : { version: 2, seed, names, actions: [] };
+  return storage === null
+    ? null
+    : { version: 3, seed, names, explicitKita: true, actions: [] };
 }
 
 function initialSession(initialGame?: EngineState): {
@@ -231,6 +233,8 @@ function initialSession(initialGame?: EngineState): {
   if (stored && (urlSeed === null || stored.seed === urlSeed)) {
     try {
       const engine = replayJournal(stored);
+      // v1/v2からの移行も新keyへだけ保存する。旧keyは旧client/rollback用に保持する。
+      if (storage !== null) saveJournal(storage, stored);
       // 復元時の戦績追記(終局時の保存失敗の補完)はマウント効果側で行う(#310)。
       return {
         engine,

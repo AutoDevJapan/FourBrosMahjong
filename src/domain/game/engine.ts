@@ -401,6 +401,8 @@ export interface EngineState {
   readonly order: PlayerRing<PlayerId>;
   /** 人間が操作する席。未指定の旧テスト状態は `[p0]` として扱う。 */
   readonly humanPlayerIds?: readonly PlayerId[];
+  /** 北抜きを明示操作する人間席。未指定時は人間席と同じ（新規対局）。 */
+  readonly explicitKitaPlayerIds?: readonly PlayerId[];
   readonly round: RoundState<PlayerId>;
   /** 各プレイヤーの持ち点(素点)。半荘開始時 35,000。 */
   readonly points: Record<PlayerId, number>;
@@ -440,6 +442,8 @@ export interface CreateGameOptions {
   readonly names?: PlayerNames;
   /** オンライン対局などで人間が担当するプレイヤーID。既定は `[p0]`。 */
   readonly humanPlayerIds?: readonly PlayerId[];
+  /** 北抜きを明示操作できる人間席。旧対局の自動ガリ再生では `[]`。 */
+  readonly explicitKitaPlayerIds?: readonly PlayerId[];
 }
 
 /**
@@ -484,6 +488,17 @@ function humanPlayerIdsOf(state: EngineState): readonly PlayerId[] {
 
 function isHumanPlayer(state: EngineState, playerId: PlayerId): boolean {
   return humanPlayerIdsOf(state).includes(playerId);
+}
+
+function explicitKitaPlayerIdsOf(state: EngineState): readonly PlayerId[] {
+  return state.explicitKitaPlayerIds ?? humanPlayerIdsOf(state);
+}
+
+function usesExplicitKita(state: EngineState, playerId: PlayerId): boolean {
+  return (
+    isHumanPlayer(state, playerId) &&
+    explicitKitaPlayerIdsOf(state).includes(playerId)
+  );
 }
 
 function pendingBelongsTo(state: EngineState, playerId: PlayerId): boolean {
@@ -698,6 +713,11 @@ export function createGame(options: CreateGameOptions = {}): EngineState {
     players,
     order: ALL_IDS,
     humanPlayerIds: [...(options.humanPlayerIds ?? DEFAULT_HUMAN_PLAYER_IDS)],
+    explicitKitaPlayerIds: [
+      ...(options.explicitKitaPlayerIds ??
+        options.humanPlayerIds ??
+        DEFAULT_HUMAN_PLAYER_IDS),
+    ],
     round,
     points,
     bonus,
@@ -738,6 +758,22 @@ export function setHumanPlayerIds(
   return next.pending === null && next.phase === "playing" ? pump(next) : next;
 }
 
+/** 北抜きを明示操作できる席を更新する（能力は切断中もRoomManager側で保持する）。 */
+export function setExplicitKitaPlayerIds(
+  state: EngineState,
+  playerIds: readonly PlayerId[],
+): EngineState {
+  const unique = ALL_IDS.filter((id) => playerIds.includes(id));
+  const current = explicitKitaPlayerIdsOf(state);
+  if (
+    current.length === unique.length &&
+    current.every((id, index) => id === unique[index])
+  ) {
+    return state;
+  }
+  return { ...state, explicitKitaPlayerIds: unique };
+}
+
 /** 現局の席割り・配牌・ドラを用意し、進行を人間の意思決定点まで進める。 */
 function beginRound(state: EngineState): EngineState {
   const dice = rollDice(state.rng);
@@ -771,7 +807,7 @@ function beginRound(state: EngineState): EngineState {
   };
   autoPullDealtNorths(hand, (seat) => {
     const occupant = seatOccupant(hand.seating, seat);
-    return !isHumanPlayer(state, occupant);
+    return !usesExplicitKita(state, occupant);
   });
   const next: EngineState = {
     ...state,
@@ -1249,6 +1285,7 @@ function pump(state: EngineState): EngineState {
     const seat = hand.turn;
     const occupant = seatOccupant(hand.seating, seat);
     const isHuman = isHumanPlayer(s, occupant);
+    const explicitKita = usesExplicitKita(s, occupant);
 
     // 1. ツモ(未ツモなら山から引く)。山が尽きていれば流局。
     if (hand.drawn === null) {
@@ -1256,7 +1293,7 @@ function pump(state: EngineState): EngineState {
         return settleDraw(s);
       }
       const raw = hand.wall.draw();
-      const pull = isHuman
+      const pull = explicitKita
         ? { tile: raw, pulled: false }
         : autoPullNorth(hand, seat, raw);
       hand.drawn = {
@@ -1279,7 +1316,7 @@ function pump(state: EngineState): EngineState {
         // ならない暗槓は許可する(標準慣行 / Q18・#116)。
         const tsumo = analyzeTsumo(s, seat, hand.drawn.tile, haitei);
         const ankanTiles = riichiAnkanTiles(hand, seat);
-        const canKita = canDeclareKita(hand, seat);
+        const canKita = explicitKita && canDeclareKita(hand, seat, true);
         if (tsumo !== null || ankanTiles.length > 0 || canKita) {
           return {
             ...s,
@@ -1568,8 +1605,13 @@ function kakanCandidates(hand: HandState, seat: SeatKey, pool: Tile[]): Tile[] {
 }
 
 /** 人間の自手番で、手牌またはツモ牌の北を1枚抜いて補充できるか。 */
-function canDeclareKita(hand: HandState, seat: SeatKey): boolean {
+function canDeclareKita(
+  hand: HandState,
+  seat: SeatKey,
+  locked: boolean,
+): boolean {
   if (hand.wall.remainingReplacements <= 0) return false;
+  if (locked) return hand.drawn !== null && isNorth(hand.drawn.tile);
   return [...hand.hands[seat], ...(hand.drawn ? [hand.drawn.tile] : [])].some(
     isNorth,
   );
@@ -1617,7 +1659,8 @@ function buildHumanPending(state: EngineState, seat: SeatKey): Pending {
     riichiTiles,
     ankanTiles,
     kakanTiles,
-    canKita: canDeclareKita(hand, seat),
+    canKita:
+      usesExplicitKita(state, occupant) && canDeclareKita(hand, seat, false),
     forbiddenDiscards,
     locked: false,
   };
@@ -2457,6 +2500,34 @@ export function removeHumanPlayerIds(
     (id) => current.includes(id) && !removed.has(id),
   );
   next = { ...next, humanPlayerIds };
+  const hand = next.hand;
+  if (next.phase === "playing" && hand !== null) {
+    for (const playerId of removed) {
+      const seat = seatOfPlayer(hand.seating, playerId);
+      if (seat === null) continue;
+
+      // AI引継ぎ時点ですでに保持していた北も、従来の自動ガリ席と同じ意味になる。
+      // 配牌/手牌の北を先に1枚ずつ処理し、最後に現在のツモ牌を処理する。
+      hand.hands[seat] = hand.hands[seat].map((tile) =>
+        isNorth(tile) ? autoPullNorth(hand, seat, tile).tile : tile,
+      );
+      if (
+        hand.turn === seat &&
+        hand.drawn !== null &&
+        isNorth(hand.drawn.tile)
+      ) {
+        const previousSource = hand.drawn.source;
+        const pull = autoPullNorth(hand, seat, hand.drawn.tile);
+        hand.drawn = {
+          tile: pull.tile,
+          source:
+            pull.pulled && previousSource !== "kanReplacement"
+              ? "kitaReplacement"
+              : previousSource,
+        };
+      }
+    }
+  }
   return next.phase === "playing" && next.pending === null ? pump(next) : next;
 }
 
@@ -2551,6 +2622,7 @@ function declareKitaImpl(
     state.phase !== "playing" ||
     state.pending?.kind !== "humanDiscard" ||
     !pendingBelongsTo(state, playerId) ||
+    !usesExplicitKita(state, playerId) ||
     !state.pending.canKita ||
     state.hand === null
   ) {
@@ -2566,12 +2638,21 @@ function declareKitaImpl(
     return state;
   }
 
-  // 手牌とツモ牌を一度まとめ、北をちょうど1枚だけ取り除く。補充牌を新しい
-  // `drawn` として扱うことで、その牌でのツモ和了と供給元判定を正しく維持する。
-  const pool = [...hand.hands[seat], ...(hand.drawn ? [hand.drawn.tile] : [])];
-  const northIndex = pool.findIndex(isNorth);
-  if (northIndex < 0) return state;
-  const rest = [...pool.slice(0, northIndex), ...pool.slice(northIndex + 1)];
+  // リーチ後は送り北を認めず、直前のツモ牌が北のときだけその1枚を抜く。
+  // 通常時は手牌とツモ牌を合わせた中から北をちょうど1枚取り除く。
+  let rest: Tile[];
+  if (state.pending.locked) {
+    if (hand.drawn === null || !isNorth(hand.drawn.tile)) return state;
+    rest = [...hand.hands[seat]];
+  } else {
+    const pool = [
+      ...hand.hands[seat],
+      ...(hand.drawn ? [hand.drawn.tile] : []),
+    ];
+    const northIndex = pool.findIndex(isNorth);
+    if (northIndex < 0) return state;
+    rest = [...pool.slice(0, northIndex), ...pool.slice(northIndex + 1)];
+  }
 
   let replacement: Tile;
   try {
@@ -2819,7 +2900,11 @@ function declareKanImpl(
   hand.turn = seat;
   const abortiveDraw = settleFourKanAbortiveDraw(state);
   if (abortiveDraw !== null) return abortiveDraw;
-  drawKanReplacement(hand, seat, false); // 嶺上ツモ。人間の北抜きは明示操作。
+  drawKanReplacement(
+    hand,
+    seat,
+    !usesExplicitKita(state, seatOccupant(hand.seating, seat)),
+  );
   return { ...state, pending: buildHumanPending(state, seat) };
 }
 
@@ -2877,7 +2962,11 @@ function declareAnkanImpl(
   hand.callsMade = true;
   const abortiveDraw = settleFourKanAbortiveDraw(state);
   if (abortiveDraw !== null) return abortiveDraw;
-  drawKanReplacement(hand, seat, false); // 嶺上ツモ。人間の北抜きは明示操作。
+  drawKanReplacement(
+    hand,
+    seat,
+    !usesExplicitKita(state, seatOccupant(hand.seating, seat)),
+  );
   // リーチ中の暗槓(Q18・#116)は打牌の自由が無いため、pump に委ねて嶺上ツモ和了 /
   // 連続暗槓 / 自動ツモ切りを解決する(通常の打牌待ちに戻さない)。
   if (hand.riichi[seat]) return pump({ ...state, pending: null });
@@ -2944,7 +3033,11 @@ function declareKakanImpl(
   hand.callsMade = true;
   const abortiveDraw = settleFourKanAbortiveDraw(state);
   if (abortiveDraw !== null) return abortiveDraw;
-  drawKanReplacement(hand, seat, false); // 嶺上ツモ。人間の北抜きは明示操作。
+  drawKanReplacement(
+    hand,
+    seat,
+    !usesExplicitKita(state, seatOccupant(hand.seating, seat)),
+  );
   return { ...state, pending: buildHumanPending(state, seat) };
 }
 

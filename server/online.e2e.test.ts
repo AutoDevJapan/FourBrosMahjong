@@ -489,6 +489,7 @@ function actionFor(snapshot: OnlineSnapshot): Record<string, unknown> {
     if (pending.canKan) return { type: "kan" };
     return { type: "passRon" };
   }
+  if (pending.canKita) return { type: "kita" };
   if (pending.locked) return { type: "tsumogiri" };
   if (pending.canTsumo) return { type: "tsumo" };
   if (!isHumanDiscardPending(pending)) {
@@ -614,126 +615,161 @@ describe("online multiplayer local E2E (#629)", () => {
     await client.close();
   });
 
-  it(
-    "2クライアントで作成・参加・開始・同期操作・結果・resume/reconnectを完走する",
-    async () => {
-      if (server === undefined)
-        throw new Error("テストサーバーが起動していません。");
-      const host = new OnlineTestClient(server.url, TEST_ORIGIN);
-      let guest = new OnlineTestClient(server.url, TEST_ORIGIN);
-      clients.push(host, guest);
-      await Promise.all([host.open(), guest.open()]);
+  it("capability欠落の旧席とexplicitKita席を同一roomで識別する", async () => {
+    if (server === undefined)
+      throw new Error("テストサーバーが起動していません。");
+    const legacy = new OnlineTestClient(server.url, TEST_ORIGIN);
+    const capable = new OnlineTestClient(server.url, TEST_ORIGIN);
+    clients.push(legacy, capable);
+    await Promise.all([legacy.open(), capable.open()]);
 
-      host.send({ type: "create", name: "ホスト" });
-      const hostSession = await host.waitForSession();
-      const code = hostSession.snapshot.code;
-      expect(ROOM_CODE_PATTERN.test(code)).toBe(true);
-      expect(hostSession.snapshot.phase).toBe("playing");
-      expect(hostSession.snapshot.you).toBe("p0");
+    legacy.send({ type: "create", name: "旧席" });
+    const legacySession = await legacy.waitForSession();
+    expect(legacySession.snapshot.explicitKita).toBe(false);
+    capable.send({
+      type: "join",
+      code: legacySession.snapshot.code,
+      name: "新席",
+      explicitKita: true,
+    });
+    const capableSession = await capable.waitForSession();
+    expect(capableSession.snapshot.explicitKita).toBe(true);
 
-      guest.send({ type: "join", code: code.toLowerCase(), name: "ゲスト" });
-      const guestSession = await guest.waitForSession();
-      expect(guestSession.snapshot.code).toBe(code);
-      expect(guestSession.snapshot.you).toBe("p1");
-      expect(guestSession.snapshot.phase).toBe("playing");
-      const hostJoinedSnapshot = await host.waitForSnapshot(
-        (snapshot) =>
-          snapshot.version === 0 &&
-          snapshot.players.length === 2 &&
-          playerConnected(snapshot, "p1"),
-      );
-      expect(hostJoinedSnapshot.players.map((player) => player.name)).toEqual([
-        "ホスト",
-        "ゲスト",
-      ]);
+    legacy.send({
+      type: "action",
+      version: legacySession.snapshot.version,
+      action: { type: "kita" },
+    });
+    await expect(legacy.waitForError()).resolves.toMatchObject({
+      message: "この接続では北抜きは自動処理されます。",
+    });
+    await legacy.close();
+    await capable.close();
+  });
 
-      let hostSnapshot = hostJoinedSnapshot;
-      let guestSnapshot = guestSession.snapshot;
-      let version = hostSnapshot.version;
-      let reconnectVerified = false;
-      let actions = 0;
+  it("2クライアントで作成・参加・開始・同期操作・結果・resume/reconnectを完走する", async () => {
+    if (server === undefined)
+      throw new Error("テストサーバーが起動していません。");
+    const host = new OnlineTestClient(server.url, TEST_ORIGIN);
+    let guest = new OnlineTestClient(server.url, TEST_ORIGIN);
+    clients.push(host, guest);
+    await Promise.all([host.open(), guest.open()]);
 
-      while (hostSnapshot.phase !== "gameEnd") {
-        if (actions > 1_000) {
-          throw new Error(
-            "オンライン対局が1,000操作以内に終局しませんでした。",
-          );
-        }
+    host.send({ type: "create", name: "ホスト", explicitKita: true });
+    const hostSession = await host.waitForSession();
+    const code = hostSession.snapshot.code;
+    expect(ROOM_CODE_PATTERN.test(code)).toBe(true);
+    expect(hostSession.snapshot.phase).toBe("playing");
+    expect(hostSession.snapshot.you).toBe("p0");
+    expect(hostSession.snapshot.explicitKita).toBe(true);
 
-        if (!reconnectVerified && version >= 2) {
-          await guest.close();
-          hostSnapshot = await host.waitForSnapshot(
-            (snapshot) =>
-              snapshot.version === version && !playerConnected(snapshot, "p1"),
-          );
-          expect(hostSnapshot.phase).toBe("playing");
+    guest.send({
+      type: "join",
+      code: code.toLowerCase(),
+      name: "ゲスト",
+      explicitKita: true,
+    });
+    const guestSession = await guest.waitForSession();
+    expect(guestSession.snapshot.code).toBe(code);
+    expect(guestSession.snapshot.you).toBe("p1");
+    expect(guestSession.snapshot.phase).toBe("playing");
+    expect(guestSession.snapshot.explicitKita).toBe(true);
+    const hostJoinedSnapshot = await host.waitForSnapshot(
+      (snapshot) =>
+        snapshot.version === 0 &&
+        snapshot.players.length === 2 &&
+        playerConnected(snapshot, "p1"),
+    );
+    expect(hostJoinedSnapshot.players.map((player) => player.name)).toEqual([
+      "ホスト",
+      "ゲスト",
+    ]);
 
-          const resumedGuest = new OnlineTestClient(server.url, TEST_ORIGIN);
-          clients.push(resumedGuest);
-          await resumedGuest.open();
-          resumedGuest.send({
-            type: "resume",
-            code,
-            token: guestSession.token,
-          });
-          const resumedSession = await resumedGuest.waitForSession();
-          expect(resumedSession.snapshot.you).toBe("p1");
-          expect(resumedSession.snapshot.version).toBe(version);
-          guestSnapshot = await resumedGuest.waitForSnapshot(
-            (snapshot) => snapshot.version === version,
-          );
-          hostSnapshot = await host.waitForSnapshot(
-            (snapshot) =>
-              snapshot.version === version && playerConnected(snapshot, "p1"),
-          );
-          expect(hostSnapshot.phase).toBe(guestSnapshot.phase);
-          reconnectVerified = true;
-          // 以降は再接続後のクライアントをguestとして扱う。
-          guest = resumedGuest;
-        }
+    let hostSnapshot = hostJoinedSnapshot;
+    let guestSnapshot = guestSession.snapshot;
+    let version = hostSnapshot.version;
+    let reconnectVerified = false;
+    let actions = 0;
 
-        const actorSnapshot =
-          hostSnapshot.phase === "roundEnd"
-            ? hostSnapshot
-            : hostSnapshot.pending?.playerId === hostSnapshot.you
-              ? hostSnapshot
-              : guestSnapshot.pending?.playerId === guestSnapshot.you
-                ? guestSnapshot
-                : null;
-        if (actorSnapshot === null) {
-          throw new Error(
-            "2クライアントのどちらにも操作担当pendingがありません。",
-          );
-        }
-        const actor = actorSnapshot.you === "p0" ? host : guest;
-        const action =
-          hostSnapshot.phase === "roundEnd"
-            ? { type: "nextRound" }
-            : actionFor(actorSnapshot);
-        const [nextHostSnapshot, nextGuestSnapshot] = await advanceVersion(
-          [host, guest],
-          version,
-          actor,
-          action,
-        );
-        hostSnapshot = nextHostSnapshot;
-        guestSnapshot = nextGuestSnapshot;
-        version = nextHostSnapshot.version;
-        actions += 1;
+    while (hostSnapshot.phase !== "gameEnd") {
+      if (actions > 1_000) {
+        throw new Error("オンライン対局が1,000操作以内に終局しませんでした。");
       }
 
-      expect(reconnectVerified).toBe(true);
-      expect(hostSnapshot.phase).toBe("gameEnd");
-      expect(guestSnapshot.phase).toBe("gameEnd");
-      expect(hostSnapshot.view.result).not.toBeNull();
-      expect(guestSnapshot.view.result).toEqual(hostSnapshot.view.result);
-      const result = hostSnapshot.view.result;
-      if (result === null) throw new Error("終局結果がありません。");
-      expect(result.players).toHaveLength(4);
-      expect(new Set(result.players.map((player) => player.rank)).size).toBe(4);
-    },
-    TEST_TIMEOUT_MS,
-  );
+      if (!reconnectVerified && version >= 2) {
+        await guest.close();
+        hostSnapshot = await host.waitForSnapshot(
+          (snapshot) => !playerConnected(snapshot, "p1"),
+        );
+        expect(hostSnapshot.phase).toBe("playing");
+        version = hostSnapshot.version;
+
+        const resumedGuest = new OnlineTestClient(server.url, TEST_ORIGIN);
+        clients.push(resumedGuest);
+        await resumedGuest.open();
+        resumedGuest.send({
+          type: "resume",
+          code,
+          token: guestSession.token,
+          explicitKita: true,
+        });
+        const resumedSession = await resumedGuest.waitForSession();
+        expect(resumedSession.snapshot.you).toBe("p1");
+        expect(resumedSession.snapshot.explicitKita).toBe(true);
+        version = resumedSession.snapshot.version;
+        guestSnapshot = await resumedGuest.waitForSnapshot(
+          (snapshot) => snapshot.version === version,
+        );
+        hostSnapshot = await host.waitForSnapshot(
+          (snapshot) =>
+            snapshot.version === version && playerConnected(snapshot, "p1"),
+        );
+        expect(hostSnapshot.phase).toBe(guestSnapshot.phase);
+        reconnectVerified = true;
+        // 以降は再接続後のクライアントをguestとして扱う。
+        guest = resumedGuest;
+      }
+
+      const actorSnapshot =
+        hostSnapshot.phase === "roundEnd"
+          ? hostSnapshot
+          : hostSnapshot.pending?.playerId === hostSnapshot.you
+            ? hostSnapshot
+            : guestSnapshot.pending?.playerId === guestSnapshot.you
+              ? guestSnapshot
+              : null;
+      if (actorSnapshot === null) {
+        throw new Error(
+          "2クライアントのどちらにも操作担当pendingがありません。",
+        );
+      }
+      const actor = actorSnapshot.you === "p0" ? host : guest;
+      const action =
+        hostSnapshot.phase === "roundEnd"
+          ? { type: "nextRound" }
+          : actionFor(actorSnapshot);
+      const [nextHostSnapshot, nextGuestSnapshot] = await advanceVersion(
+        [host, guest],
+        version,
+        actor,
+        action,
+      );
+      hostSnapshot = nextHostSnapshot;
+      guestSnapshot = nextGuestSnapshot;
+      version = nextHostSnapshot.version;
+      actions += 1;
+    }
+
+    expect(reconnectVerified).toBe(true);
+    expect(hostSnapshot.phase).toBe("gameEnd");
+    expect(guestSnapshot.phase).toBe("gameEnd");
+    expect(hostSnapshot.view.result).not.toBeNull();
+    expect(guestSnapshot.view.result).toEqual(hostSnapshot.view.result);
+    const result = hostSnapshot.view.result;
+    if (result === null) throw new Error("終局結果がありません。");
+    expect(result.players).toHaveLength(4);
+    expect(new Set(result.players.map((player) => player.rank)).size).toBe(4);
+  }, 60_000);
 
   it(
     "空のOrigin allowlistではOriginなし・明示Originをfail-closedで拒否する",
