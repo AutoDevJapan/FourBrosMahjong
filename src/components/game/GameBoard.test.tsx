@@ -998,6 +998,17 @@ describe("GameBoard 対話 a11y 経路(#285)", () => {
       pending: { ...base.pending, canRiichi: true, riichiTiles: [] },
     });
 
+    // 同時に合法なカン系操作は、デスクトップ/狭幅で共有するDOM配列上でもリーチより前に置く。
+    for (const panel of screen.getAllByRole("group", { name: "操作パネル" })) {
+      expect(
+        within(panel)
+          .getAllByRole("button")
+          .map((button) => button.getAttribute("data-action-key")),
+      ).toEqual(["tsumo", "ankan-man-1", "riichi"]);
+    }
+    // 三麻にはチーを追加しない。
+    expect(screen.queryByRole("button", { name: "チー" })).toBeNull();
+
     await user.click(screen.getAllByRole("button", { name: "リーチ" })[0]);
     expect(
       screen.getAllByText(
