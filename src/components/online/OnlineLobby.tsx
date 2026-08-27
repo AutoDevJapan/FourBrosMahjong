@@ -28,15 +28,18 @@ import {
   ROOM_CODE_LENGTH,
 } from "@/lib/roomCode";
 import OnlineGameProvider, { onlineSocketUrl } from "./OnlineGameProvider";
+import {
+  MAX_MAINTENANCE_RETRY_AFTER_MS,
+  parseOnlineServerMessage,
+} from "./onlineServerMessage";
 import RoomShareControls from "./RoomShareControls";
 import { readSharedRoomCode, roomShareUrl } from "./roomSharing";
 import type {
   OnlineConnectionStatus,
   OnlineCredentials,
-  OnlineErrorCode,
-  OnlineRateLimitScope,
+  OnlineMaintenanceNotice,
+  OnlineMaintenancePhase,
   OnlineServerError,
-  OnlineServerMessage,
   OnlineSnapshot,
 } from "./types";
 
@@ -46,9 +49,10 @@ const ROOM_CODE_INPUT_ID = "online-lobby-room-code";
 const NAME_REQUIREMENT_ID = "online-lobby-name-requirement";
 const ROOM_CODE_REQUIREMENT_ID = "online-lobby-room-code-requirement";
 const JOIN_REQUIREMENT_ID = "online-lobby-join-requirement";
+const MAINTENANCE_NOTICE_ID = "online-maintenance-notice";
 const MAX_AUTOMATIC_RECONNECT_ATTEMPTS = 5;
 // サーバーからの異常値で、UIを長時間ロックしないための上限。
-const MAX_SERVER_RETRY_AFTER_MS = 10 * 60 * 1000;
+const MAX_SERVER_RETRY_AFTER_MS = MAX_MAINTENANCE_RETRY_AFTER_MS;
 // The application ping also exercises the server's JSON response path.
 const CLIENT_HEARTBEAT_INTERVAL_MS = 15 * 1000;
 // Three missed application pongs transition the existing reconnect state.
@@ -59,6 +63,8 @@ const RECONNECTING_ERROR_MESSAGE =
   "オンラインサーバーとの接続が切れました。再接続しています。";
 const HEARTBEAT_TIMEOUT_MESSAGE =
   "オンラインサーバーの応答が確認できないため、再接続しています。";
+const MAINTENANCE_OPERATION_MESSAGE =
+  "メンテナンス中のため、この操作は利用できません。";
 
 type ConnectionStatus = OnlineConnectionStatus;
 type JoinRequest =
@@ -73,6 +79,16 @@ interface ErrorFeedback {
   readonly kind: ErrorFeedbackKind;
   readonly message: string;
 }
+
+type MaintenanceClientState =
+  | {
+      readonly source: "notice";
+      readonly notice: OnlineMaintenanceNotice;
+    }
+  | {
+      readonly source: "rejection";
+      readonly retryAfterMs?: number;
+    };
 
 function readCredentials(): OnlineCredentials | null {
   if (typeof window === "undefined") return null;
@@ -109,53 +125,11 @@ function saveCredentials(credentials: OnlineCredentials | null): void {
   }
 }
 
-function isOnlineErrorCode(value: unknown): value is OnlineErrorCode {
-  return (
-    value === "connection_limit" ||
-    value === "message_too_large" ||
-    value === "rate_limited"
-  );
-}
-
-function isOnlineRateLimitScope(value: unknown): value is OnlineRateLimitScope {
-  return (
-    value === "connection" ||
-    value === "create" ||
-    value === "join" ||
-    value === "resume" ||
-    value === "action" ||
-    value === "message"
-  );
-}
-
 function normalizeRetryAfterMs(value: unknown): number | undefined {
   if (typeof value !== "number" || !Number.isFinite(value) || value < 0) {
     return undefined;
   }
   return Math.min(MAX_SERVER_RETRY_AFTER_MS, Math.ceil(value));
-}
-
-function messageOf(value: unknown): OnlineServerMessage | null {
-  if (value === null || typeof value !== "object") return null;
-  const message = value as Record<string, unknown>;
-  if (typeof message.type !== "string") return null;
-  if (message.type !== "error") {
-    return message as unknown as OnlineServerMessage;
-  }
-  if (typeof message.message !== "string") return null;
-
-  const code = isOnlineErrorCode(message.code) ? message.code : undefined;
-  const scope = isOnlineRateLimitScope(message.scope)
-    ? message.scope
-    : undefined;
-  const retryAfterMs = normalizeRetryAfterMs(message.retryAfterMs);
-  return {
-    type: "error",
-    message: message.message,
-    ...(code === undefined ? {} : { code }),
-    ...(scope === undefined ? {} : { scope }),
-    ...(retryAfterMs === undefined ? {} : { retryAfterMs }),
-  };
 }
 
 function nameRequirementMessage(name: string): string {
@@ -227,6 +201,63 @@ function connectionStatusMessage(status: ConnectionStatus): string {
 
 function retryAfterMessage(retryAfterMs: number): string {
   return `再試行まで約${Math.max(1, Math.ceil(retryAfterMs / 1000))}秒お待ちください。`;
+}
+
+const MAINTENANCE_PHASE_RANK: Readonly<Record<OnlineMaintenancePhase, number>> =
+  {
+    draining: 0,
+    drained: 1,
+    terminating: 2,
+  };
+
+function maintenanceMessage(phase: OnlineMaintenancePhase): string {
+  switch (phase) {
+    case "draining":
+      return "メンテナンス準備中です。現在の半荘はそのまま続けられます。新しいルームの作成・参加と、新しい半荘の開始はできません。";
+    case "drained":
+      return "メンテナンスのため新しい受付を停止しています。表示中の対局・結果は確認できます。新しいルームの作成・参加と、新しい半荘の開始はできません。";
+    case "terminating":
+      return "メンテナンスのためサーバーを再起動しています。表示中の対局・結果は確認できます。新しいルームの作成・参加と、新しい半荘の開始はできません。";
+  }
+}
+
+function MaintenanceBanner({
+  maintenance,
+}: {
+  readonly maintenance: MaintenanceClientState;
+}) {
+  const notice = maintenance.source === "notice" ? maintenance.notice : null;
+  const retryAfterMs =
+    maintenance.source === "notice"
+      ? maintenance.notice.retryAfterMs
+      : maintenance.retryAfterMs;
+  return (
+    <div
+      id={MAINTENANCE_NOTICE_ID}
+      data-maintenance-phase={notice?.phase ?? "unknown"}
+      data-maintenance-source={maintenance.source}
+      className="rounded-lg border border-control-border bg-foreground/5 px-4 py-3 text-sm"
+      role="status"
+      aria-live="polite"
+      aria-atomic="true"
+    >
+      <p className="font-medium">
+        {notice
+          ? maintenanceMessage(notice.phase)
+          : "メンテナンスのため新しい受付を停止しています。新しいルームの作成・参加と、新しい半荘の開始はできません。"}
+      </p>
+      {notice?.deadline ? (
+        <p className="mt-1 text-foreground/70">
+          サーバー停止予定: {notice.deadline}
+        </p>
+      ) : null}
+      {retryAfterMs !== undefined && retryAfterMs > 0 ? (
+        <p className="mt-1 text-foreground/70">
+          {retryAfterMessage(retryAfterMs)}
+        </p>
+      ) : null}
+    </div>
+  );
 }
 
 interface ConnectionFeedbackProps {
@@ -307,12 +338,14 @@ interface OnlineResultViewProps {
   readonly result: GameResultView;
   readonly onBack: () => void;
   readonly newGameDisabled: boolean;
+  readonly newGameDisabledByMaintenance: boolean;
 }
 
 function OnlineResultView({
   result,
   onBack,
   newGameDisabled,
+  newGameDisabledByMaintenance,
 }: OnlineResultViewProps) {
   const { controls, isHost } = useGame();
   const headingRef = useRef<HTMLHeadingElement>(null);
@@ -324,9 +357,11 @@ function OnlineResultView({
 
   const newGameUnavailableMessage = !isHost
     ? "新しい半荘を開始できるのはホストだけです。"
-    : newGameDisabled
-      ? "接続が復旧すると新しい半荘を開始できます。"
-      : null;
+    : newGameDisabledByMaintenance
+      ? MAINTENANCE_OPERATION_MESSAGE
+      : newGameDisabled
+        ? "接続が復旧すると新しい半荘を開始できます。"
+        : null;
 
   return (
     <section
@@ -407,6 +442,9 @@ export default function OnlineLobby() {
   const [status, setStatus] = useState<ConnectionStatus>("idle");
   const [error, setError] = useState<ErrorFeedback | null>(null);
   const [retryAfterMs, setRetryAfterMs] = useState(0);
+  const [maintenance, setMaintenance] = useState<MaintenanceClientState | null>(
+    null,
+  );
   const [onlineResultOpen, setOnlineResultOpen] = useState(false);
   const onlineResultButtonRef = useRef<HTMLButtonElement>(null);
   const onlineGameFallbackRef = useRef<HTMLElement>(null);
@@ -418,6 +456,7 @@ export default function OnlineLobby() {
   const snapshotRef = useRef<OnlineSnapshot | null>(null);
   const statusRef = useRef<ConnectionStatus>("idle");
   const credentialsRef = useRef<OnlineCredentials | null>(null);
+  const maintenanceRef = useRef<MaintenanceClientState | null>(null);
   const reconnectAttemptRef = useRef(0);
   const composingNameRef = useRef(false);
   const reconnectTimerRef = useRef<number | null>(null);
@@ -596,9 +635,68 @@ export default function OnlineLobby() {
     retryAfterTimerRef.current = timer;
   }, []);
 
+  const applyMaintenanceNotice = useCallback(
+    (notice: OnlineMaintenanceNotice) => {
+      const current = maintenanceRef.current;
+      if (
+        current?.source === "notice" &&
+        MAINTENANCE_PHASE_RANK[current.notice.phase] >
+          MAINTENANCE_PHASE_RANK[notice.phase]
+      ) {
+        return;
+      }
+      const next = { source: "notice", notice } as const;
+      maintenanceRef.current = next;
+      setMaintenance(next);
+      clearReconnectTimer();
+      reconnectAttemptRef.current = 0;
+      setConnectionError(MAINTENANCE_OPERATION_MESSAGE);
+      applyRetryCooldown(notice.retryAfterMs);
+    },
+    [applyRetryCooldown, clearReconnectTimer, setConnectionError],
+  );
+
+  const applyMaintenanceError = useCallback(
+    (retryAfter: number | undefined) => {
+      const current = maintenanceRef.current;
+      if (current?.source !== "notice") {
+        const next = {
+          source: "rejection",
+          ...(retryAfter === undefined ? {} : { retryAfterMs: retryAfter }),
+        } as const;
+        maintenanceRef.current = next;
+        setMaintenance(next);
+      }
+      clearReconnectTimer();
+      reconnectAttemptRef.current = 0;
+      setConnectionError(MAINTENANCE_OPERATION_MESSAGE);
+      applyRetryCooldown(retryAfter);
+    },
+    [applyRetryCooldown, clearReconnectTimer, setConnectionError],
+  );
+
+  const settleMaintenanceDisconnect = useCallback(() => {
+    const current = maintenanceRef.current;
+    if (!current) return false;
+    clearReconnectTimer();
+    reconnectAttemptRef.current = 0;
+    if (
+      current.source === "notice" &&
+      (current.notice.phase === "drained" ||
+        current.notice.phase === "terminating")
+    ) {
+      credentialsRef.current = null;
+      setCredentials(null);
+      saveCredentials(null);
+    }
+    setStatus("failed");
+    setConnectionError(MAINTENANCE_OPERATION_MESSAGE);
+    return true;
+  }, [clearReconnectTimer, setConnectionError]);
+
   const scheduleReconnect = useCallback(
     (message = RECONNECTING_ERROR_MESSAGE, serverRetryAfterMs?: number) => {
-      if (manualCloseRef.current) return;
+      if (manualCloseRef.current || maintenanceRef.current) return;
       clearReconnectTimer();
       const retryAfter = normalizeRetryAfterMs(serverRetryAfterMs);
       const attempt = reconnectAttemptRef.current;
@@ -668,6 +766,7 @@ export default function OnlineLobby() {
         setStatus("idle");
         return;
       }
+      if (settleMaintenanceDisconnect()) return;
       if (credentialsRef.current) {
         scheduleReconnect(failure.message, failure.retryAfterMs);
       } else {
@@ -681,6 +780,7 @@ export default function OnlineLobby() {
       applyRetryCooldown,
       requestTransitionFocus,
       scheduleReconnect,
+      settleMaintenanceDisconnect,
       setConnectionError,
     ],
   );
@@ -764,15 +864,16 @@ export default function OnlineLobby() {
         if (socketRef.current !== next) return;
         try {
           const raw = JSON.parse(String(event.data));
-          if (
-            raw !== null &&
-            typeof raw === "object" &&
-            (raw as Record<string, unknown>).type === "pong"
-          ) {
-            lastPongAt = Date.now();
-          }
-          const message = messageOf(raw);
+          const message = parseOnlineServerMessage(raw);
           if (!message) return;
+          if (message.type === "pong") {
+            lastPongAt = Date.now();
+            return;
+          }
+          if (message.type === "maintenance") {
+            applyMaintenanceNotice(message);
+            return;
+          }
           if (message.type === "session") {
             const wasInGame = snapshotRef.current !== null;
             if (wasInGame) {
@@ -808,6 +909,19 @@ export default function OnlineLobby() {
             return;
           }
           if (message.type === "error") {
+            if (message.code === "maintenance") {
+              applyMaintenanceError(message.retryAfterMs);
+              const failure: ConnectionFailure = {
+                message: MAINTENANCE_OPERATION_MESSAGE,
+                ...(message.retryAfterMs === undefined
+                  ? {}
+                  : { retryAfterMs: message.retryAfterMs }),
+              };
+              if (pendingSessionSocketRef.current === next) {
+                failHandshake(next, failure);
+              }
+              return;
+            }
             const failure: ConnectionFailure = {
               message: message.message,
               ...(message.code === "rate_limited" &&
@@ -853,6 +967,7 @@ export default function OnlineLobby() {
         pendingSessionSocketRef.current = null;
         socketRef.current = null;
         setSocket(null);
+        if (settleMaintenanceDisconnect()) return;
         if (manualCloseRef.current || !credentialsRef.current) {
           if (!manualCloseRef.current) {
             requestTransitionFocus("connection-retry");
@@ -880,12 +995,15 @@ export default function OnlineLobby() {
     [
       clearReconnectTimer,
       clearRetryCooldown,
+      applyMaintenanceError,
+      applyMaintenanceNotice,
       applyRetryCooldown,
       applyOnlineSnapshot,
       failHandshake,
       handleTransportFailure,
       requestTransitionFocus,
       scheduleReconnect,
+      settleMaintenanceDisconnect,
       setConnectionError,
       setOperationError,
     ],
@@ -943,6 +1061,10 @@ export default function OnlineLobby() {
   );
 
   const start = (request: JoinRequest) => {
+    if (maintenanceRef.current) {
+      setOperationError(MAINTENANCE_OPERATION_MESSAGE);
+      return;
+    }
     restoreCanceledRef.current = true;
     if (restoreTimerRef.current !== null) {
       window.clearTimeout(restoreTimerRef.current);
@@ -964,7 +1086,7 @@ export default function OnlineLobby() {
   };
 
   const retry = (restoreFocus = false) => {
-    if (retryAfterMs > 0) return;
+    if (retryAfterMs > 0 || maintenanceRef.current) return;
     manualCloseRef.current = false;
     reconnectAttemptRef.current = 0;
     clearRetryCooldown();
@@ -1036,7 +1158,8 @@ export default function OnlineLobby() {
     restoreOnlineGameFocusRef.current = false;
     setOnlineResultOpenState(false);
   }, [setOnlineResultOpenState]);
-  const canRetry = Boolean(credentials || activeRequest);
+  const canRetry =
+    maintenance === null && Boolean(credentials || activeRequest);
   const currentTurnName = snapshot?.currentTurn
     ? snapshot.players.find((player) => player.id === snapshot.currentTurn)
         ?.name
@@ -1048,6 +1171,7 @@ export default function OnlineLobby() {
       <OnlineGameProvider
         socket={status === "connected" ? socket : null}
         snapshot={snapshot}
+        newGameDisabled={maintenance !== null}
         onSendError={onSendError}
       >
         <section
@@ -1135,20 +1259,25 @@ export default function OnlineLobby() {
             </div>
           ) : null}
 
-          <ConnectionFeedback
-            status={status}
-            error={error?.message ?? ""}
-            canRetry={canRetry}
-            retryAfterMs={retryAfterMs}
-            feedbackRef={feedbackRef}
-            retryButtonRef={retryButtonRef}
-            onRetry={retry}
-          />
+          {maintenance ? (
+            <MaintenanceBanner maintenance={maintenance} />
+          ) : (
+            <ConnectionFeedback
+              status={status}
+              error={error?.message ?? ""}
+              canRetry={canRetry}
+              retryAfterMs={retryAfterMs}
+              feedbackRef={feedbackRef}
+              retryButtonRef={retryButtonRef}
+              onRetry={retry}
+            />
+          )}
           {onlineResultOpen && onlineResult !== null ? (
             <OnlineResultView
               result={onlineResult}
               onBack={returnToOnlineGame}
-              newGameDisabled={status !== "connected"}
+              newGameDisabled={status !== "connected" || maintenance !== null}
+              newGameDisabledByMaintenance={maintenance !== null}
             />
           ) : (
             <GameBoard
@@ -1171,6 +1300,7 @@ export default function OnlineLobby() {
 
   const normalizedName = sanitizePlayerName(name);
   const canSubmit =
+    maintenance === null &&
     normalizedName !== null &&
     status !== "connecting" &&
     status !== "reconnecting";
@@ -1208,6 +1338,7 @@ export default function OnlineLobby() {
     <>
       <ScreenNavigation currentPath="/online" />
       <section className="mx-auto flex w-full max-w-md flex-col gap-6 rounded-xl border border-control-border p-6">
+        {maintenance ? <MaintenanceBanner maintenance={maintenance} /> : null}
         <form
           aria-label="オンラインルーム接続"
           onSubmit={submitLobby}
@@ -1271,7 +1402,7 @@ export default function OnlineLobby() {
               placeholder="例: たろう"
               required
               aria-invalid={name.trim().length === 0}
-              aria-describedby={NAME_REQUIREMENT_ID}
+              aria-describedby={`${NAME_REQUIREMENT_ID}${maintenance ? ` ${MAINTENANCE_NOTICE_ID}` : ""}`}
               className="min-h-11 rounded-lg border border-control-border bg-transparent px-3 py-2 font-normal"
             />
             <span
@@ -1289,7 +1420,7 @@ export default function OnlineLobby() {
               data-intent="create"
               formNoValidate
               disabled={!canSubmit}
-              aria-describedby={NAME_REQUIREMENT_ID}
+              aria-describedby={`${NAME_REQUIREMENT_ID}${maintenance ? ` ${MAINTENANCE_NOTICE_ID}` : ""}`}
               onClick={(event) => {
                 event.preventDefault();
                 createRoom();
@@ -1339,7 +1470,7 @@ export default function OnlineLobby() {
                 type="submit"
                 data-intent="join"
                 disabled={joinDisabled}
-                aria-describedby={`${NAME_REQUIREMENT_ID} ${ROOM_CODE_REQUIREMENT_ID} ${JOIN_REQUIREMENT_ID}`}
+                aria-describedby={`${NAME_REQUIREMENT_ID} ${ROOM_CODE_REQUIREMENT_ID} ${JOIN_REQUIREMENT_ID}${maintenance ? ` ${MAINTENANCE_NOTICE_ID}` : ""}`}
                 onClick={(event) => {
                   event.preventDefault();
                   joinRoom();
@@ -1361,15 +1492,17 @@ export default function OnlineLobby() {
           </p>
         </form>
 
-        <ConnectionFeedback
-          status={status}
-          error={error?.message ?? ""}
-          canRetry={canRetry}
-          retryAfterMs={retryAfterMs}
-          feedbackRef={feedbackRef}
-          retryButtonRef={retryButtonRef}
-          onRetry={retry}
-        />
+        {maintenance === null ? (
+          <ConnectionFeedback
+            status={status}
+            error={error?.message ?? ""}
+            canRetry={canRetry}
+            retryAfterMs={retryAfterMs}
+            feedbackRef={feedbackRef}
+            retryButtonRef={retryButtonRef}
+            onRetry={retry}
+          />
+        ) : null}
         {credentials && !snapshot ? (
           <button
             type="button"

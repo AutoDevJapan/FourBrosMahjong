@@ -12,7 +12,7 @@ import { walkToGameEnd } from "@/components/game/finishedGameFixture";
 import { selectView } from "@/components/game/gameView";
 import { createGame } from "@/domain/game/engine";
 import OnlineLobby from "./OnlineLobby";
-import type { OnlineServerMessage, OnlineSnapshot } from "./types";
+import type { OnlineSnapshot } from "./types";
 
 vi.mock("@/components/game/GameBoard", () => ({
   default: ({
@@ -86,9 +86,16 @@ class TestWebSocket {
   }
 
   close(): void {
+    this.serverClose(1000);
+  }
+
+  serverClose(code: number, reason = ""): void {
     if (this.readyState === TestWebSocket.CLOSED) return;
     this.readyState = TestWebSocket.CLOSED;
-    this.emit("close");
+    this.emit(
+      "close",
+      new CloseEvent("close", { code, reason, wasClean: true }),
+    );
   }
 
   open(): void {
@@ -100,7 +107,7 @@ class TestWebSocket {
     this.emit("error");
   }
 
-  message(message: OnlineServerMessage): void {
+  message(message: unknown): void {
     this.emit(
       "message",
       new MessageEvent("message", { data: JSON.stringify(message) }),
@@ -816,10 +823,16 @@ describe("OnlineLobby connection recovery", () => {
     });
     fireEvent.click(screen.getByRole("button", { name: "新しいルームを作る" }));
 
+    const handoffEngine = createGame({
+      seed: 31,
+      humanPlayerIds: ["p0", "p1"],
+    });
     const handoff = {
       ...snapshotFixture(),
       you: "p1" as const,
       hostId: "p1" as const,
+      view: selectView(handoffEngine, "p1"),
+      pending: null,
       players: [
         { id: "p0" as const, name: "ホスト", connected: false, isHost: false },
         { id: "p1" as const, name: "ゲスト", connected: true, isHost: true },
@@ -1211,6 +1224,245 @@ describe("OnlineLobby connection recovery", () => {
     expect(
       window.sessionStorage.getItem("four-bros-mahjong.online.session.v1"),
     ).toBeNull();
+  });
+});
+
+describe("OnlineLobby maintenance client-first (#726)", () => {
+  function startSession(snapshot = snapshotFixture()): TestWebSocket {
+    fireEvent.change(screen.getByLabelText("表示名"), {
+      target: { value: "たろう" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "新しいルームを作る" }));
+    const socket = sockets[0];
+    if (!socket) throw new Error("maintenance test socket expected");
+    act(() => {
+      socket.open();
+      socket.message({
+        type: "session",
+        token: "t".repeat(24),
+        snapshot,
+      });
+    });
+    return socket;
+  }
+
+  it("draining noticeは固定live bannerを表示し、close後もsnapshotとcredentialを保って再接続しない", () => {
+    vi.useFakeTimers();
+    render(<OnlineLobby />);
+    const socket = startSession();
+
+    act(() =>
+      socket.message({
+        type: "maintenance",
+        phase: "draining",
+        retryAfterMs: 5_000,
+        deadline: "2026-08-28T06:00:00.000Z",
+      }),
+    );
+
+    const banner = document.querySelector(
+      '[data-maintenance-phase="draining"]',
+    );
+    expect(banner).toHaveAttribute("role", "status");
+    expect(banner).toHaveAttribute("aria-live", "polite");
+    expect(banner).toHaveAttribute("aria-atomic", "true");
+    expect(banner).toHaveTextContent("現在の半荘はそのまま続けられます");
+    expect(banner).toHaveTextContent(
+      "新しいルームの作成・参加と、新しい半荘の開始はできません",
+    );
+    expect(banner).toHaveTextContent("2026-08-28T06:00:00.000Z");
+    expect(banner).toHaveTextContent("再試行まで約5秒");
+    expect(screen.getByTestId("game-board")).toHaveAttribute(
+      "data-interaction-disabled",
+      "false",
+    );
+
+    act(() => socket.serverClose(1012, "service restart"));
+    act(() => vi.advanceTimersByTime(60_000));
+
+    expect(sockets).toHaveLength(1);
+    expect(screen.getByTestId("game-board")).toBeInTheDocument();
+    expect(
+      window.sessionStorage.getItem("four-bros-mahjong.online.session.v1"),
+    ).not.toBeNull();
+  });
+
+  it.each(["drained", "terminating"] as const)(
+    "%s notice後のcloseはsnapshotを保ち、terminal credentialだけ失効する",
+    (phase) => {
+      vi.useFakeTimers();
+      render(
+        <StrictMode>
+          <OnlineLobby />
+        </StrictMode>,
+      );
+      const socket = startSession();
+
+      act(() => {
+        socket.message({ type: "maintenance", phase });
+        socket.serverClose(1012, "service restart");
+        vi.advanceTimersByTime(60_000);
+      });
+
+      expect(sockets).toHaveLength(1);
+      expect(screen.getByTestId("game-board")).toBeInTheDocument();
+      expect(
+        document.querySelector(`[data-maintenance-phase="${phase}"]`),
+      ).toBeInTheDocument();
+      expect(
+        window.sessionStorage.getItem("four-bros-mahjong.online.session.v1"),
+      ).toBeNull();
+    },
+  );
+
+  it("terminal stateは遅れて届いたdraining noticeへ後退しない", () => {
+    render(<OnlineLobby />);
+    const socket = startSession();
+
+    act(() => {
+      socket.message({ type: "maintenance", phase: "terminating" });
+      socket.message({ type: "maintenance", phase: "draining" });
+    });
+
+    expect(
+      document.querySelector('[data-maintenance-phase="terminating"]'),
+    ).toBeInTheDocument();
+    expect(
+      document.querySelector('[data-maintenance-phase="draining"]'),
+    ).not.toBeInTheDocument();
+  });
+
+  it("noticeなしの1012 closeは旧server互換のbounded reconnectを維持する", () => {
+    vi.useFakeTimers();
+    render(<OnlineLobby />);
+    const socket = startSession();
+
+    act(() => socket.serverClose(1012, "service restart"));
+    expect(
+      document.querySelector('[data-connection-status="reconnecting"]'),
+    ).toBeInTheDocument();
+    act(() => vi.advanceTimersByTime(500));
+    expect(sockets).toHaveLength(2);
+  });
+
+  it("stale socketのmaintenance noticeと未知messageは現在接続へ影響しない", () => {
+    vi.useFakeTimers();
+    render(<OnlineLobby />);
+    const staleSocket = startSession();
+    act(() => staleSocket.close());
+    act(() => vi.advanceTimersByTime(500));
+    const currentSocket = sockets[1];
+    if (!currentSocket) throw new Error("reconnect socket expected");
+    act(() => {
+      currentSocket.open();
+      currentSocket.message({
+        type: "session",
+        token: "t".repeat(24),
+        snapshot: snapshotFixture(),
+      });
+      staleSocket.message({ type: "maintenance", phase: "terminating" });
+      currentSocket.message({ type: "future-message", payload: true });
+    });
+
+    expect(document.querySelector("[data-maintenance-phase]")).toBeNull();
+    expect(
+      document.querySelector('[data-connection-status="connected"]'),
+    ).toBeInTheDocument();
+  });
+
+  it("maintenance errorはserver文言を表示せず固定案内にし、ロビー操作とretryを停止する", () => {
+    vi.useFakeTimers();
+    render(<OnlineLobby />);
+    fireEvent.change(screen.getByLabelText("表示名"), {
+      target: { value: "たろう" },
+    });
+    fireEvent.change(screen.getByLabelText("ルームコード"), {
+      target: { value: "ABC234" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "参加する" }));
+    const socket = sockets[0];
+    if (!socket) throw new Error("maintenance handshake socket expected");
+
+    act(() => {
+      socket.open();
+      socket.message({
+        type: "error",
+        code: "maintenance",
+        message: "任意のserver文言",
+        retryAfterMs: 4_000,
+      });
+      vi.advanceTimersByTime(60_000);
+    });
+
+    expect(screen.queryByText("任意のserver文言")).not.toBeInTheDocument();
+    expect(
+      screen.getByText(/メンテナンスのため新しい受付を停止しています/),
+    ).toBeInTheDocument();
+    expect(
+      document.querySelector('[data-maintenance-source="rejection"]'),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "新しいルームを作る" }),
+    ).toBeDisabled();
+    expect(
+      screen.getByRole("button", { name: "新しいルームを作る" }),
+    ).toHaveAccessibleDescription(
+      /メンテナンスのため新しい受付を停止しています/,
+    );
+    expect(screen.getByRole("button", { name: "参加する" })).toBeDisabled();
+    expect(screen.queryByRole("button", { name: "再試行" })).toBeNull();
+    expect(sockets).toHaveLength(1);
+  });
+
+  it("phase不明のmaintenance error後はcloseを再接続せず、snapshotとcredentialを保持する", () => {
+    vi.useFakeTimers();
+    render(<OnlineLobby />);
+    const socket = startSession();
+
+    act(() => {
+      socket.message({
+        type: "error",
+        code: "maintenance",
+        message: "terminalかもしれないserver文言",
+      });
+      socket.serverClose(1012, "service restart");
+      vi.advanceTimersByTime(60_000);
+    });
+
+    expect(sockets).toHaveLength(1);
+    expect(screen.getByTestId("game-board")).toBeInTheDocument();
+    expect(
+      document.querySelector('[data-maintenance-source="rejection"]'),
+    ).toHaveTextContent("新しい受付を停止しています");
+    expect(
+      document.querySelector('[data-maintenance-source="rejection"]'),
+    ).not.toHaveTextContent("現在の半荘はそのまま続けられます");
+    expect(
+      window.sessionStorage.getItem("four-bros-mahjong.online.session.v1"),
+    ).not.toBeNull();
+  });
+
+  it("maintenance中は結果snapshotを保持し、hostの新しい半荘を表示とsendの両方で止める", () => {
+    render(<OnlineLobby />);
+    const socket = startSession(finishedSnapshotFixture());
+    fireEvent.click(screen.getByRole("button", { name: "結果を見る" }));
+
+    act(() => socket.message({ type: "maintenance", phase: "draining" }));
+
+    const newGameButton = screen.getByRole("button", {
+      name: "新しい半荘を開始",
+    });
+    expect(newGameButton).toBeDisabled();
+    expect(newGameButton).toHaveAccessibleDescription(
+      "メンテナンス中のため、この操作は利用できません。",
+    );
+    fireEvent.click(newGameButton);
+    expect(
+      socket.sent.some((value) => JSON.parse(value).type === "newGame"),
+    ).toBe(false);
+    expect(
+      screen.getByRole("heading", { level: 2, name: "対局結果" }),
+    ).toBeInTheDocument();
   });
 });
 

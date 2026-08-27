@@ -152,6 +152,8 @@ const ALLOWED_RAW_IS_RED_READS: readonly string[] = [
   "components/game/gameView.ts: return { suit: tile.suit, rank: tile.rank, isRed: tile.isRed };",
   "components/game/gameView.ts: Number(a.isRed) - Number(b.isRed),",
   "components/game/gameView.ts: Number(a.isRed) - Number(b.isRed),",
+  // WebSocket由来TileDataの赤フラグ型検証。赤ドラの意味づけには使わない。
+  "components/online/onlineServerMessage.ts: isOptionalBoolean(value.isRed)",
 ];
 
 /**

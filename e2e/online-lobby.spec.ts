@@ -232,6 +232,81 @@ test.describe("オンラインロビーのfocus lifecycle (#682)", () => {
   });
 });
 
+test.describe("オンラインメンテナンス client-first (#726)", () => {
+  test("320pxでも現在局を保持し、新規操作と再接続を止めてlive案内する", async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 320, height: 800 });
+    await page.goto("/online");
+    await page.clock.install();
+    await installWebSocketStub(page);
+    await page.getByLabel("表示名").fill("たろう");
+    await page.getByRole("button", { name: "新しいルームを作る" }).click();
+
+    await page.evaluate((snapshot) => {
+      const socket = (window as unknown as OnlineTestWindow)
+        .__fourBrosOnlineSockets[0];
+      socket?.open();
+      socket?.message({
+        type: "session",
+        token: "t".repeat(24),
+        snapshot,
+      });
+      socket?.message({
+        type: "maintenance",
+        phase: "draining",
+        deadline: "2026-08-28T06:00:00.000Z",
+      });
+    }, onlineSnapshotFixture());
+
+    const banner = page.locator("#online-maintenance-notice");
+    await expect(banner).toBeVisible();
+    await expect(banner).toHaveAttribute("role", "status");
+    await expect(banner).toHaveAttribute("aria-live", "polite");
+    await expect(banner).toHaveAttribute("aria-atomic", "true");
+    await expect(banner).toContainText("現在の半荘はそのまま続けられます");
+    const firstTile = page.getByRole("option").first();
+    await expect(firstTile).toBeEnabled();
+    await firstTile.click();
+    await expect
+      .poll(() =>
+        page.evaluate(() =>
+          (
+            window as unknown as OnlineTestWindow
+          ).__fourBrosOnlineSockets[0]?.sent
+            .map((value) => JSON.parse(value))
+            .find((message) => message.type === "action"),
+        ),
+      )
+      .toMatchObject({ type: "action", action: { type: "discard" } });
+    expect(
+      await page.evaluate(
+        () =>
+          document.documentElement.scrollWidth -
+          document.documentElement.clientWidth,
+      ),
+    ).toBeLessThanOrEqual(1);
+    expect(
+      (await new AxeBuilder({ page }).include("main").analyze()).violations,
+    ).toEqual([]);
+
+    await page.evaluate(() => {
+      (
+        window as unknown as OnlineTestWindow
+      ).__fourBrosOnlineSockets[0]?.serverClose(1012, "service restart");
+    });
+    await page.clock.fastForward(60_000);
+    expect(
+      await page.evaluate(
+        () =>
+          (window as unknown as OnlineTestWindow).__fourBrosOnlineSockets
+            .length,
+      ),
+    ).toBe(1);
+    await expect(page.getByRole("group", { name: "対局盤面" })).toBeVisible();
+  });
+});
+
 test.describe("オンラインロビーの接続失敗復帰", () => {
   test("接続失敗時に再試行でき、入力を保持したまま成功状態へ遷移する", async ({
     page,

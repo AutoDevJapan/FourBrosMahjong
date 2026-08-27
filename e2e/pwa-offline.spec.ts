@@ -83,6 +83,28 @@ test.describe("PWAオフライン動作(#292)", () => {
       offlineOnlinePage.getByRole("heading", { name: "オンライン対戦" }),
     ).toBeVisible();
     await expect(offlineOnlinePage.getByLabel("表示名")).toBeVisible();
+    // WebSocket URL が未設定のproduction buildでも、maintenance対応を含む
+    // `/online` client chunk自体がinstall cacheへ収録されていることを固定する。
+    // UI state-machineの実動作はonline-lobby.spec.tsでWebSocket stubにより検証する。
+    expect(
+      await offlineOnlinePage.evaluate(async () => {
+        const cacheName = (await caches.keys()).find((key) =>
+          key.startsWith("fbm-precache-"),
+        );
+        if (!cacheName) return false;
+        const cache = await caches.open(cacheName);
+        const scripts = (await cache.keys()).filter((request) =>
+          new URL(request.url).pathname.endsWith(".js"),
+        );
+        for (const request of scripts) {
+          const response = await cache.match(request);
+          if ((await response?.text())?.includes("メンテナンス準備中です")) {
+            return true;
+          }
+        }
+        return false;
+      }),
+    ).toBe(true);
     await offlineOnlinePage.close();
 
     // Rules固有CSSをroute chunkへ分離しても、install時に全routeのbuild assetを

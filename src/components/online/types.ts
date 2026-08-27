@@ -55,6 +55,7 @@ export interface OnlineCredentials {
 
 export type OnlineErrorCode =
   | "connection_limit"
+  | "maintenance"
   | "message_too_large"
   | "rate_limited";
 
@@ -73,6 +74,16 @@ export interface OnlineServerError {
   readonly scope?: OnlineRateLimitScope;
   readonly retryAfterMs?: number;
 }
+
+export type OnlineMaintenancePhase = "draining" | "drained" | "terminating";
+
+export interface OnlineMaintenanceNotice {
+  readonly type: "maintenance";
+  readonly phase: OnlineMaintenancePhase;
+  readonly retryAfterMs?: number;
+  readonly deadline?: string;
+}
+
 export type OnlineConnectionStatus =
   | "idle"
   | "connecting"
@@ -88,4 +99,5 @@ export type OnlineServerMessage =
     }
   | { readonly type: "snapshot"; readonly snapshot: OnlineSnapshot }
   | OnlineServerError
+  | OnlineMaintenanceNotice
   | { readonly type: "pong" };
