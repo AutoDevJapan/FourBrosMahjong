@@ -117,7 +117,7 @@ test.describe("終局後の /game の出口(#206 / #207)", () => {
 
     // ロビーを履歴の起点にし、終局画面から結果画面へ進む。
     await page.goto("/");
-    await page.getByRole("link", { name: /対局を開始/ }).click();
+    await page.getByRole("link", { name: /対局を始める/ }).click();
     await page.getByRole("button", { name: "結果を見る" }).first().click();
     await expect(page).toHaveURL(/\/game\/result$/);
     await expect(page.getByRole("heading", { name: "最終順位" })).toBeVisible();
@@ -147,7 +147,7 @@ test.describe("終局後の /game の出口(#206 / #207)", () => {
     ).toBeVisible();
   });
 
-  test("終局journal残存時もロビー「対局を開始」で /game に留まり、戻る・新規半荘開始が機能する", async ({
+  test("終局journal残存時もロビー「対局を始める」で /game に留まり、戻る・新規半荘開始が機能する", async ({
     page,
   }) => {
     test.setTimeout(60_000);
@@ -160,9 +160,9 @@ test.describe("終局後の /game の出口(#206 / #207)", () => {
       JSON.stringify(walkToGameEnd(1).journal),
     );
 
-    // ロビー →「対局を開始」: /game/result へ強制リダイレクトされず /game に留まる(#207)。
+    // ロビー →「対局を始める」: /game/result へ強制リダイレクトされず /game に留まる(#207)。
     await page.goto("/");
-    await page.getByRole("link", { name: /対局を開始/ }).click();
+    await page.getByRole("link", { name: /対局を始める/ }).click();
     await expect(
       page.getByRole("button", { name: "新しい半荘を開始" }).first(),
     ).toBeVisible();
@@ -183,7 +183,7 @@ test.describe("終局後の /game の出口(#206 / #207)", () => {
     await expect(page).toHaveURL(/\/$/);
 
     // 再訪して「新しい半荘を開始」→ 新規半荘の打牌待ちが始まる。
-    await page.getByRole("link", { name: /対局を開始/ }).click();
+    await page.getByRole("link", { name: /対局を始める/ }).click();
     await page
       .getByRole("button", { name: "新しい半荘を開始" })
       .first()

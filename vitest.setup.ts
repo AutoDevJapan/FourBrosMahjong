@@ -11,7 +11,16 @@
  */
 import "@testing-library/jest-dom/vitest";
 import { cleanup } from "@testing-library/react";
-import { afterEach } from "vitest";
+import { afterEach, vi } from "vitest";
+
+// next/fontはNext buildのcompiler transformで関数化されるため、素のVite importでは
+// page module収集時に呼べない。component testではclass contractだけを忠実に代替する。
+vi.mock("next/font/google", () => ({
+  Geist: () => ({ variable: "test-font-geist-sans" }),
+  Geist_Mono: () => ({ variable: "test-font-geist-mono" }),
+  Noto_Sans_JP: () => ({ variable: "test-font-noto-sans-jp" }),
+  Yuji_Syuku: () => ({ variable: "test-font-yuji-syuku" }),
+}));
 
 window.scrollTo = () => {};
 

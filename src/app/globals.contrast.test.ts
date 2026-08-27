@@ -259,3 +259,83 @@ describe("spec 5.4.2 が名指しするトークンのコントラスト(#388)",
     }
   });
 });
+
+describe("Issue #712 共通UI foundationのコントラスト", () => {
+  const scopes = [
+    ["ライト", ":root"],
+    ['手動ダーク(data-theme="dark")', ':root[data-theme="dark"]'],
+    ["OS ダーク追従", ":root:not([data-theme])"],
+  ] as const;
+
+  for (const [label, scope] of scopes) {
+    const canvas = token(scope, "--ui-canvas");
+    const surface = token(scope, "--ui-surface");
+    const raised = token(scope, "--ui-surface-raised");
+    const decoration = token(scope, "--ui-gold-decoration");
+    const panel = composite(surface, 0.96, canvas);
+
+    it(`${label}: 本文・補助文・gold textがsurface上で4.5:1以上`, () => {
+      for (const name of ["--ui-text", "--ui-muted", "--ui-gold-text"]) {
+        expect(
+          contrast(token(scope, name), surface),
+          name,
+        ).toBeGreaterThanOrEqual(4.5);
+      }
+    });
+
+    it(`${label}: primary文字が通常・hover地で4.5:1以上`, () => {
+      const foreground = token(scope, "--ui-accent-foreground");
+      expect(
+        contrast(foreground, token(scope, "--ui-accent")),
+      ).toBeGreaterThanOrEqual(4.5);
+      expect(
+        contrast(foreground, token(scope, "--ui-accent-hover")),
+      ).toBeGreaterThanOrEqual(4.5);
+    });
+
+    it(`${label}: 金罫線がcanvas・surfaceの双方で3:1以上`, () => {
+      const frame = token(scope, "--ui-frame");
+      expect(contrast(frame, canvas)).toBeGreaterThanOrEqual(3);
+      expect(contrast(frame, panel)).toBeGreaterThanOrEqual(3);
+    });
+
+    it(`${label}: 96% panel上の本文・補助文が実合成後も4.5:1以上`, () => {
+      expect(contrast(token(scope, "--ui-text"), panel)).toBeGreaterThanOrEqual(
+        4.5,
+      );
+      expect(
+        contrast(token(scope, "--ui-muted"), panel),
+      ).toBeGreaterThanOrEqual(4.5);
+    });
+
+    it(`${label}: secondary通常・hover地の本文と補助文が実合成後も4.5:1以上`, () => {
+      const hover = composite(decoration, 0.14, raised);
+      for (const foreground of ["--ui-text", "--ui-muted"]) {
+        expect(
+          contrast(token(scope, foreground), raised),
+        ).toBeGreaterThanOrEqual(4.5);
+        expect(
+          contrast(token(scope, foreground), hover),
+        ).toBeGreaterThanOrEqual(4.5);
+      }
+    });
+
+    it(`${label}: primary補助文82%文字が通常・hover地へ合成後も4.5:1以上`, () => {
+      const foreground = token(scope, "--ui-accent-foreground");
+      for (const backgroundName of ["--ui-accent", "--ui-accent-hover"]) {
+        const background = token(scope, backgroundName);
+        expect(
+          contrast(composite(foreground, 0.82, background), background),
+        ).toBeGreaterThanOrEqual(4.5);
+      }
+    });
+
+    it(`${label}: character名色が8% accent card地の実合成後も4.5:1以上`, () => {
+      for (const theme of ["red", "blue", "yellow", "green"]) {
+        const accent = token(scope, `--character-${theme}`);
+        const card = composite(accent, 0.08, raised);
+        expect(contrast(accent, card), theme).toBeGreaterThanOrEqual(4.5);
+      }
+    });
+  }
+});

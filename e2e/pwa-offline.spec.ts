@@ -143,6 +143,14 @@ test.describe("PWAオフライン動作(#292)", () => {
     ]) {
       expect(precached).toContain(route);
     }
+    for (const portrait of [
+      "/characters/p0-soakuhin-portrait.avif",
+      "/characters/p1-ryuji-portrait.avif",
+      "/characters/p2-masaki-portrait.avif",
+      "/characters/p3-hechima-portrait.avif",
+    ]) {
+      expect(precached).toContain(portrait);
+    }
     expect(precached).toContain("/tiles/Back.svg");
 
     // 上の再読込でサブリソースも SW 経由(runtime cache)になる。
@@ -208,6 +216,17 @@ test.describe("PWAオフライン動作(#292)", () => {
     await expect(
       page.getByRole("heading", { name: /四兄弟麻雀/ }),
     ).toBeVisible();
+    await expect
+      .poll(() =>
+        page
+          .locator(".lobby-character-image")
+          .evaluateAll((images) =>
+            images.map((image) =>
+              image instanceof HTMLImageElement ? image.naturalWidth : 0,
+            ),
+          ),
+      )
+      .toEqual([220, 220, 220, 220]);
     await context.setOffline(false);
   });
 
@@ -236,7 +255,7 @@ test.describe("PWAオフライン動作(#292)", () => {
     await page.getByRole("link", { name: "ロビーへ戻る" }).click();
     const rscResponse = await rscResponsePromise;
     expect(rscResponse.ok()).toBe(true);
-    await page.getByRole("link", { name: /対局を開始/ }).click();
+    await page.getByRole("link", { name: /対局を始める/ }).click();
     await expect(page.getByRole("heading", { name: "対局画面" })).toBeVisible();
 
     const cachedDocumentType = await page.evaluate(async () => {
