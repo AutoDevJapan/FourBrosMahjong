@@ -72,7 +72,7 @@ export default function PlayerArea({
 
   return (
     <section
-      aria-label={`${name}(${SEAT_WIND_LABEL[seatWind]})`}
+      aria-label={`${name}(${isSelf ? "あなた・" : ""}${SEAT_WIND_LABEL[seatWind]})`}
       data-character-id={player.playerId}
       data-player-kind="seated"
       data-player-role={isSelf ? "self" : "opponent"}
@@ -84,6 +84,14 @@ export default function PlayerArea({
           : "border-foreground/15"
       }`}
     >
+      {isSelf ? (
+        <span
+          aria-hidden="true"
+          className="game-self-badge inline-flex self-start whitespace-nowrap rounded-full border border-foreground/25 bg-background px-1.5 py-0.5 text-xs font-semibold"
+        >
+          あなた
+        </span>
+      ) : null}
       <header className="game-player-header flex flex-wrap items-center gap-x-2 gap-y-1">
         <CharacterPortrait playerId={player.playerId} />
         <span className="rounded bg-foreground/10 px-1.5 py-0.5 text-xs font-semibold">

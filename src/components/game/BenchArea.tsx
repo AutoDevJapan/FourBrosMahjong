@@ -21,22 +21,39 @@ import type { BenchPlayerView } from "./types";
 
 export interface BenchAreaProps {
   player: BenchPlayerView;
+  /** 自分の物理スロットか。抜け番へ回っても自己識別を維持する。 */
+  isSelf: boolean;
   /** 狭幅の帯表示(自分手番フォーカス時、着席他家と密度を揃える)(スペック6 6.4.3)。 */
   compact?: boolean;
 }
 
-export default function BenchArea({ player, compact = false }: BenchAreaProps) {
+export default function BenchArea({
+  player,
+  isSelf,
+  compact = false,
+}: BenchAreaProps) {
+  const accessibleName = `${player.name}(${isSelf ? "あなた・" : ""}抜け番)`;
+
   if (compact) {
     // 着席他家(`PlayerArea` compact)と同じ体裁の薄い帯: 抜け番バッジ+名前+持ち点のみ。
     return (
       <section
-        aria-label={`${player.name}(抜け番)`}
+        aria-label={accessibleName}
         data-character-id={player.playerId}
         data-player-kind="bench"
+        data-player-role={isSelf ? "self" : "opponent"}
         style={characterAccentStyle(player.playerId)}
         className="game-bench-area game-bench-area--compact character-accent-edge flex flex-col gap-2 rounded-lg border border-dashed border-foreground/25 bg-foreground/[.03] p-2"
       >
         <header className="flex flex-wrap items-center gap-x-2 gap-y-1">
+          {isSelf ? (
+            <span
+              aria-hidden="true"
+              className="game-self-badge inline-flex self-start whitespace-nowrap rounded-full border border-foreground/25 bg-background px-1.5 py-0.5 text-xs font-semibold"
+            >
+              あなた
+            </span>
+          ) : null}
           <CharacterPortrait playerId={player.playerId} />
           <StatusBadge icon="⏸" label="抜け番" variant="bench" />
           <span className="character-name font-medium">{player.name}</span>
@@ -48,12 +65,21 @@ export default function BenchArea({ player, compact = false }: BenchAreaProps) {
 
   return (
     <section
-      aria-label={`${player.name}(抜け番)`}
+      aria-label={accessibleName}
       data-character-id={player.playerId}
       data-player-kind="bench"
+      data-player-role={isSelf ? "self" : "opponent"}
       style={characterAccentStyle(player.playerId)}
       className="game-bench-area character-accent-edge flex h-full flex-col items-center justify-center gap-2 rounded-lg border border-dashed border-foreground/25 bg-foreground/[.03] p-3 text-center"
     >
+      {isSelf ? (
+        <span
+          aria-hidden="true"
+          className="game-self-badge inline-flex self-start whitespace-nowrap rounded-full border border-foreground/25 bg-background px-1.5 py-0.5 text-xs font-semibold"
+        >
+          あなた
+        </span>
+      ) : null}
       <CharacterPortrait playerId={player.playerId} size="medium" />
       <StatusBadge icon="⏸" label="抜け番" variant="bench" />
       <p className="character-name font-medium">{player.name}</p>

@@ -182,7 +182,7 @@ test.describe("対局画面(/game)", () => {
 
     // 4スロット: 着席3人(粗悪品=東家 / 竜二=南家 / マサキ=西家)+ 抜け番(糸瓜)。
     await expect(
-      page.getByRole("region", { name: "粗悪品(東家)" }),
+      page.getByRole("region", { name: "粗悪品(あなた・東家)" }),
     ).toBeVisible();
     await expect(
       page.getByRole("region", { name: "竜二(南家)" }),
@@ -195,7 +195,7 @@ test.describe("対局画面(/game)", () => {
     ).toBeVisible();
     for (const character of [
       {
-        region: "粗悪品(東家)",
+        region: "粗悪品(あなた・東家)",
         playerId: "p0",
         portrait: "/characters/p0-soakuhin-portrait.avif",
       },
@@ -240,7 +240,7 @@ test.describe("対局画面(/game)", () => {
       page.getByRole("listbox", { name: "自家の手牌" }).first(),
     ).toBeVisible();
     await expect(
-      page.getByRole("region", { name: "粗悪品(東家)" }),
+      page.getByRole("region", { name: "粗悪品(あなた・東家)" }),
     ).toContainText("35,000");
 
     // 操作パネル(role=group)。開始直後は自家の打牌待ちで「ツモ」ボタンが現れる。
@@ -367,7 +367,7 @@ test.describe("対局画面(/game)", () => {
     });
     await page.getByRole("button", { name: "次の局へ" }).first().click();
     const rotatedBench = page
-      .getByRole("region", { name: "粗悪品(抜け番)" })
+      .getByRole("region", { name: "粗悪品(あなた・抜け番)" })
       .filter({ visible: true })
       .first();
     await expect(rotatedBench).toHaveAttribute("data-character-id", "p0");
@@ -512,7 +512,9 @@ test.describe("対局画面(/game)", () => {
     await page.setViewportSize({ width: 320, height: 800 });
     await page.goto("/game?seed=1");
 
-    const self = page.getByRole("region", { name: "粗悪品(東家)" });
+    const self = page.getByRole("region", {
+      name: "粗悪品(あなた・東家)",
+    });
     const kita = page
       .getByRole("button", { name: "北抜" })
       .filter({ visible: true })
@@ -554,7 +556,7 @@ test.describe("対局画面(/game)", () => {
     const dialog = page.getByRole("dialog", { name: "全体盤面" });
     await expect(
       dialog
-        .getByRole("region", { name: "粗悪品(東家)" })
+        .getByRole("region", { name: "粗悪品(あなた・東家)" })
         .getByTestId("kita-display"),
     ).toContainText("ガリ2");
   });

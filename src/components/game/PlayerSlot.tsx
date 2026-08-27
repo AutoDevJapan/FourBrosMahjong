@@ -40,24 +40,23 @@ export default function PlayerSlot({
   handTileStates,
   onBlockedTile,
 }: PlayerSlotProps) {
+  const isSelf = position === "self";
   if (content.kind === "bench") {
-    return <BenchArea player={content.player} compact={compact} />;
+    return (
+      <BenchArea player={content.player} isSelf={isSelf} compact={compact} />
+    );
   }
   return (
     <PlayerArea
       player={content.player}
-      isSelf={position === "self"}
+      isSelf={isSelf}
       compact={compact}
-      onSelectTile={position === "self" ? onSelectTile : undefined}
-      confirmTouchSelection={
-        position === "self" ? confirmTouchSelection : undefined
-      }
-      confirmTouchSelectionMode={
-        position === "self" ? confirmTouchSelectionMode : undefined
-      }
-      handReadOnly={position === "self" ? handReadOnly : undefined}
-      handTileStates={position === "self" ? handTileStates : undefined}
-      onBlockedTile={position === "self" ? onBlockedTile : undefined}
+      onSelectTile={isSelf ? onSelectTile : undefined}
+      confirmTouchSelection={isSelf ? confirmTouchSelection : undefined}
+      confirmTouchSelectionMode={isSelf ? confirmTouchSelectionMode : undefined}
+      handReadOnly={isSelf ? handReadOnly : undefined}
+      handTileStates={isSelf ? handTileStates : undefined}
+      onBlockedTile={isSelf ? onBlockedTile : undefined}
     />
   );
 }

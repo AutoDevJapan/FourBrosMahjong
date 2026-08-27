@@ -179,9 +179,8 @@
   );
 }
 
-.game-page .game-player-area[data-player-role="self"]::before,
-.game-full-board-modal .game-player-area[data-player-role="self"]::before {
-  content: "あなた";
+.game-page .game-self-badge,
+.game-full-board-modal .game-self-badge {
   align-self: flex-start;
   margin-bottom: -0.25rem;
   padding: 0.12rem 0.45rem;

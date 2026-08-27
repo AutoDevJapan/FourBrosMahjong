@@ -5,7 +5,7 @@ import type { SeatedPlayerView } from "./types";
 
 const PLAYER: SeatedPlayerView = {
   playerId: "p0",
-  name: "あなた",
+  name: "粗悪品",
   points: 35000,
   seatWind: "east",
   hand: [],
@@ -14,6 +14,24 @@ const PLAYER: SeatedPlayerView = {
 };
 
 describe("PlayerArea status badges (spec 5.2.1)", () => {
+  it("自分を可視badgeとstate-drivenなaccessible nameの両方で示す", () => {
+    const { rerender } = render(
+      <PlayerArea player={{ ...PLAYER, status: {} }} isSelf />,
+    );
+
+    const self = screen.getByRole("region", {
+      name: "粗悪品(あなた・東家)",
+    });
+    expect(self).toHaveAttribute("data-player-role", "self");
+    expect(screen.getByText("あなた")).toBeVisible();
+
+    rerender(<PlayerArea player={{ ...PLAYER, status: {} }} isSelf={false} />);
+    expect(
+      screen.getByRole("region", { name: "粗悪品(東家)" }),
+    ).toHaveAttribute("data-player-role", "opponent");
+    expect(screen.queryByText("あなた")).not.toBeInTheDocument();
+  });
+
   it("手番と親を色だけでなくアイコン+テキストのバッジで示す", () => {
     render(
       <PlayerArea
