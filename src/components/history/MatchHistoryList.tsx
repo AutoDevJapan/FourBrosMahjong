@@ -82,12 +82,11 @@ function HistoryItem({ entry }: { entry: MatchHistoryEntry }) {
   const finishedAt = finishedAtFormat.format(new Date(entry.finishedAt));
   // 保存JSONは旧クライアントと同じv1形状を維持する。engineが保存してきた固定配列順
   // p0→p3から表示モデルにだけIDを付け、旧戦績にも現在の肖像を対応させる。
-  const ordered = entry.players
-    .map((player, index) => ({
-      ...player,
-      playerId: CHARACTER_PLAYER_IDS[index],
-    }))
-    .sort((a, b) => a.rank - b.rank);
+  const fixedPlayers = entry.players.map((player, index) => ({
+    ...player,
+    playerId: CHARACTER_PLAYER_IDS[index],
+  }));
+  const ordered = [...fixedPlayers].sort((a, b) => a.rank - b.rank);
   const top = ordered[0];
   const topTotal = formatSignedSoshii(top.soshiiTotal);
 
@@ -95,38 +94,65 @@ function HistoryItem({ entry }: { entry: MatchHistoryEntry }) {
     <details
       data-character-id={top.playerId}
       style={top.playerId ? characterAccentStyle(top.playerId) : undefined}
-      className="character-accent-edge group rounded-lg border border-control-border"
+      className="history-entry character-accent-edge group rounded-lg border border-control-border"
     >
-      <summary className="flex cursor-pointer flex-wrap items-baseline gap-x-3 gap-y-1 rounded-lg p-4 text-sm hover:bg-foreground/5">
-        <span className="font-medium">{finishedAt}</span>
-        {top.playerId ? <CharacterPortrait playerId={top.playerId} /> : null}
-        <span className="text-foreground/70">
-          1位 {top.name}(<span aria-hidden="true">{topTotal.display}</span>
-          <span className="sr-only">{topTotal.srLabel}</span>)
+      <summary className="history-entry-summary flex cursor-pointer flex-wrap items-baseline gap-x-3 gap-y-1 rounded-lg p-4 text-sm hover:bg-foreground/5">
+        <span className="history-entry-time">
+          <span className="history-entry-date">{finishedAt}</span>
+          <span className="history-entry-kind">半荘</span>
+        </span>
+        <span
+          role="group"
+          aria-label="四兄弟の最終順位"
+          className="history-placement-list"
+        >
+          {fixedPlayers.map((player) => (
+            <span
+              key={player.playerId}
+              role="img"
+              aria-label={`${player.name} ${player.rank}位`}
+              data-player-id={player.playerId}
+              data-rank={player.rank}
+              style={characterAccentStyle(player.playerId)}
+              className="history-placement-chip"
+            >
+              {player.rank}
+            </span>
+          ))}
+        </span>
+        <span className="history-entry-winner text-foreground/70">
+          {top.playerId ? <CharacterPortrait playerId={top.playerId} /> : null}
+          <span className="history-entry-winner-copy">
+            <span className="history-entry-winner-name">1位 {top.name}</span>
+            <span className="history-entry-total">
+              <span aria-hidden="true">{topTotal.display}</span>
+              <span className="sr-only">{topTotal.srLabel}</span>
+            </span>
+          </span>
         </span>
         <span
           aria-hidden="true"
-          className="ml-auto text-foreground/70 transition-transform motion-reduce:transition-none group-open:rotate-90"
+          className="history-entry-arrow ml-auto text-foreground/70 transition-transform motion-reduce:transition-none group-open:rotate-90"
         >
           →
         </span>
       </summary>
-      <div className="flex flex-col gap-4 border-t border-foreground/10 p-4">
+      <div className="history-entry-details flex flex-col gap-4 border-t border-foreground/10 p-4">
         {/* 見出しは h1(ページ)→ h2(本節)→ h3(SoshiiBreakdown 内の選手名)の順で
             レベルを飛ばさない(axe heading-order / スペック5)。 */}
         <section
           aria-label={`${finishedAt}の最終順位`}
-          className="flex flex-col gap-2"
+          className="history-detail-section flex flex-col gap-2"
         >
           <h2 className="text-sm font-semibold">最終順位</h2>
           <RankingTable players={ordered} />
         </section>
         <section
           aria-label={`${finishedAt}のソシー内訳`}
-          className="flex flex-col gap-2"
+          className="history-detail-section flex flex-col gap-2"
         >
           <h2 className="text-sm font-semibold">{SOSHII_BREAKDOWN_HEADING}</h2>
-          <div className="grid gap-3 sm:grid-cols-2">
+          <div className="history-breakdown-grid grid gap-3 sm:grid-cols-2">
             {ordered.map((player) => (
               // 名前は重複し得る(#291)ため、一意な rank を key にする。
               <SoshiiBreakdown key={player.rank} player={player} />
@@ -162,12 +188,17 @@ export default function MatchHistoryList() {
   // 削除完了までに別タブの終局保存が届くと一覧が再び描かれ、空状態が存在しない。
   // その場合の着地点(名前とロールを持つ「戦績をすべて削除」ボタン)。
   const clearButtonRef = useRef<HTMLButtonElement>(null);
+  // 破壊操作の確認を始めた直後と削除失敗後は、安全側の「キャンセル」へ移す。
+  const cancelButtonRef = useRef<HTMLButtonElement>(null);
   // 「削除直後の1回だけ」を表す一過性のフラグ。state にすると描画に影響しない値で
   // 再描画が走るうえ、効果内での state 更新になるため ref で持つ。
-  const pendingFocusRef = useRef(false);
+  const pendingFocusRef = useRef<
+    "confirm-cancel" | "trigger" | "success" | "failure" | null
+  >(null);
 
   useEffect(() => {
-    if (!pendingFocusRef.current) return;
+    const request = pendingFocusRef.current;
+    if (request === null) return;
     // 着地点は空状態が第一候補。削除完了までに別タブの終局保存が届くと一覧が再び描かれ、
     // 空状態が存在しないため、そのときは「戦績をすべて削除」ボタンへ連鎖する。
     // 到達可否は DOM 接続では判定できない(#377)ので、実際に activeElement が移ったかで
@@ -175,18 +206,28 @@ export default function MatchHistoryList() {
     // 外部ストア通知と確認UIのstate更新が別コミットになることがあるため、候補がまだ
     // 描画されていない中間renderではフラグを消費しない。先に消費すると、次のrenderで
     // 空状態が現れてもフォーカスを取りこぼし、bodyへ落ちる(#482)。
+    const candidates =
+      request === "success"
+        ? [emptyStateRef.current, clearButtonRef.current]
+        : request === "trigger"
+          ? [clearButtonRef.current, emptyStateRef.current]
+          : [
+              cancelButtonRef.current,
+              clearButtonRef.current,
+              emptyStateRef.current,
+            ];
     let hasCandidate = false;
-    for (const candidate of [emptyStateRef.current, clearButtonRef.current]) {
+    for (const candidate of candidates) {
       if (candidate === null) continue;
       hasCandidate = true;
       candidate.focus();
       if (candidate.ownerDocument.activeElement === candidate) {
-        pendingFocusRef.current = false;
+        pendingFocusRef.current = null;
         return;
       }
     }
     if (!hasCandidate) return;
-    pendingFocusRef.current = false;
+    pendingFocusRef.current = null;
     // 削除成功時は必ず確認UIを畳むため、通常はどちらかへ到達する。到達できないのは
     // 着地点が隠されている等の契約違反であり、黙って <body> へ落とさず知らせる。
     if (process.env.NODE_ENV !== "production") {
@@ -221,7 +262,7 @@ export default function MatchHistoryList() {
         // 購読通知は同期的に再描画を起こし得るため、通知より先に着地点を予約する。
         // 先に通知すると、その再描画で effect が走った時点ではフラグがまだ falseで、
         // 高負荷時にフォーカス移動を取りこぼして body へ落ちる(#482 / スペック5 5.2.2)。
-        pendingFocusRef.current = true;
+        pendingFocusRef.current = "success";
         // 永続化と購読者への通知は分離されているため、削除後に明示的に知らせる(#302)。
         notifyHistoryChanged();
         // 「削除する」ボタンごと一覧セクションが消えるので、着地点へフォーカスを移す。
@@ -232,6 +273,7 @@ export default function MatchHistoryList() {
       // 削除できなかった場合は一覧が残る。「削除しました」と読み上げると実態と食い違う。
       // 確認UIも畳まない ─ 畳むと押した「削除する」ボタンが消える一方で空状態も描かれず、
       // フォーカスの行き先が無くなって body へ落ちるため(成功時と同じ a11y 契約を守る)。
+      pendingFocusRef.current = "failure";
       setStatusMessage(CLEAR_FAILURE_MESSAGE[result]);
     } finally {
       clearTimeout(progressTimer);
@@ -244,7 +286,7 @@ export default function MatchHistoryList() {
     return (
       <div
         role="status"
-        className="flex min-h-40 items-center justify-center rounded-lg border border-foreground/15 p-6 text-sm text-foreground/70"
+        className="history-state-card history-loading flex min-h-40 items-center justify-center rounded-lg border border-foreground/15 p-6 text-sm text-foreground/70"
       >
         戦績を読み込んでいます…
       </div>
@@ -252,21 +294,21 @@ export default function MatchHistoryList() {
   }
 
   return (
-    <div className="flex flex-col gap-6">
+    <div className="history-content flex flex-col gap-6">
       {entries.length === 0 ? (
         <div
           ref={emptyStateRef}
           // 削除直後にフォーカスを受け取るため、プログラム的にのみフォーカス可能にする。
           tabIndex={-1}
-          className="flex flex-col gap-4 rounded-lg border border-foreground/15 p-6"
+          className="history-state-card history-empty flex flex-col gap-4 rounded-lg border border-foreground/15 p-6"
         >
-          <p className="text-sm text-foreground/70">
+          <p className="history-empty-copy text-sm text-foreground/70">
             保存された戦績はまだありません。半荘終了時にこの端末のストレージが利用できる場合、最終順位とソシー内訳が自動で記録されます。記録されない場合は、ブラウザのストレージ設定や空き容量を確認してください。
           </p>
           <div
             role="group"
             aria-labelledby="history-empty-actions-heading"
-            className="flex min-w-0 flex-col gap-3"
+            className="history-empty-actions flex min-w-0 flex-col gap-3"
           >
             <h2
               id="history-empty-actions-heading"
@@ -274,10 +316,10 @@ export default function MatchHistoryList() {
             >
               次の対局を選ぶ
             </h2>
-            <div className="grid min-w-0 gap-3 sm:grid-cols-2">
+            <div className="history-empty-action-grid grid min-w-0 gap-3 sm:grid-cols-2">
               <section
                 aria-labelledby="history-local-game-heading"
-                className="flex min-w-0 flex-col items-start gap-3 rounded-lg border border-control-border p-4"
+                className="history-empty-action-card flex min-w-0 flex-col items-start gap-3 rounded-lg border border-control-border p-4"
               >
                 <div>
                   <h3 id="history-local-game-heading" className="font-medium">
@@ -293,14 +335,14 @@ export default function MatchHistoryList() {
                 <Link
                   href="/game"
                   aria-describedby="history-local-game-description"
-                  className="inline-flex min-h-11 items-center rounded-full bg-foreground px-4 py-2 text-sm font-medium text-background hover:opacity-90"
+                  className="history-empty-link history-empty-link--primary inline-flex min-h-11 items-center rounded-full bg-foreground px-4 py-2 text-sm font-medium text-background hover:opacity-90"
                 >
                   対局を開始
                 </Link>
               </section>
               <section
                 aria-labelledby="history-online-game-heading"
-                className="flex min-w-0 flex-col items-start gap-3 rounded-lg border border-control-border p-4"
+                className="history-empty-action-card flex min-w-0 flex-col items-start gap-3 rounded-lg border border-control-border p-4"
               >
                 <div>
                   <h3 id="history-online-game-heading" className="font-medium">
@@ -316,7 +358,7 @@ export default function MatchHistoryList() {
                 <Link
                   href="/online"
                   aria-describedby="history-online-game-description"
-                  className="inline-flex min-h-11 items-center rounded-full border border-control-border px-4 py-2 text-sm font-medium hover:bg-foreground/5"
+                  className="history-empty-link history-empty-link--secondary inline-flex min-h-11 items-center rounded-full border border-control-border px-4 py-2 text-sm font-medium hover:bg-foreground/5"
                 >
                   オンライン対戦へ
                 </Link>
@@ -326,7 +368,7 @@ export default function MatchHistoryList() {
         </div>
       ) : (
         <>
-          <p className="text-sm text-foreground/70">
+          <p className="history-list-introduction text-sm text-foreground/70">
             半荘の結果を新しい順に表示しています(この端末に最大
             {MAX_HISTORY_ENTRIES}
             件まで保存され、超えた分は古い記録から削除されます)。
@@ -337,7 +379,7 @@ export default function MatchHistoryList() {
           <ol
             role="list"
             aria-label="保存された半荘結果"
-            className="flex flex-col gap-3"
+            className="history-entry-list flex flex-col gap-3"
           >
             {entries.map((entry) => (
               <li key={`${entry.seed}-${entry.finishedAt}`}>
@@ -348,13 +390,13 @@ export default function MatchHistoryList() {
 
           <section
             aria-labelledby="clear-history-heading"
-            className="flex flex-col items-start gap-3 border-t border-foreground/15 pt-6"
+            className="history-clear-section flex flex-col items-start gap-3 border-t border-foreground/15 pt-6"
           >
             <h2 id="clear-history-heading" className="text-sm font-semibold">
               戦績の削除
             </h2>
             {confirmingClear ? (
-              <div className="flex flex-col items-start gap-3">
+              <div className="history-clear-confirmation flex flex-col items-start gap-3">
                 <p className="text-sm text-foreground/70">
                   保存されているすべての戦績(この端末の
                   {entries.length}件)を削除します。よろしいですか?
@@ -370,29 +412,31 @@ export default function MatchHistoryList() {
                   「キャンセル」は**単に効かない**ので、既存の非活性表現(`Hand` /
                   `ActionPanel` と同じ淡色化)に揃える。
                 */}
-                <div className="flex flex-wrap gap-3">
+                <div className="history-clear-actions flex flex-wrap gap-3">
                   <button
                     type="button"
                     onClick={() => {
                       void executeClear();
                     }}
                     aria-disabled={clearing || undefined}
-                    className={`rounded-full border border-danger px-4 py-2 text-sm font-medium text-danger ${
+                    className={`history-clear-button history-clear-button--danger rounded-full border border-danger px-4 py-2 text-sm font-medium text-danger ${
                       clearing ? "cursor-progress" : "hover:bg-danger/10"
                     }`}
                   >
                     {clearing ? "削除しています…" : "削除する"}
                   </button>
                   <button
+                    ref={cancelButtonRef}
                     type="button"
                     // 待機中にキャンセルで確認UIを畳むと、押した「削除する」ボタンが
                     // 消える一方で削除はまだ終わっておらず、フォーカスの行き先が無い。
                     onClick={() => {
                       if (clearingRef.current) return;
+                      pendingFocusRef.current = "trigger";
                       setConfirmingClear(false);
                     }}
                     aria-disabled={clearing || undefined}
-                    className={`rounded-full border border-control-border px-4 py-2 text-sm ${
+                    className={`history-clear-button history-clear-button--cancel rounded-full border border-control-border px-4 py-2 text-sm ${
                       clearing
                         ? "cursor-not-allowed opacity-45"
                         : "hover:bg-foreground/5"
@@ -408,9 +452,10 @@ export default function MatchHistoryList() {
                 type="button"
                 onClick={() => {
                   setStatusMessage("");
+                  pendingFocusRef.current = "confirm-cancel";
                   setConfirmingClear(true);
                 }}
-                className="rounded-full border border-control-border px-4 py-2 text-sm hover:bg-foreground/5"
+                className="history-clear-trigger rounded-full border border-control-border px-4 py-2 text-sm hover:bg-foreground/5"
               >
                 戦績をすべて削除
               </button>
@@ -435,7 +480,7 @@ export default function MatchHistoryList() {
         className={
           statusMessage === ""
             ? "sr-only"
-            : "rounded-lg border border-foreground/15 p-4 text-sm text-foreground"
+            : "history-status rounded-lg border border-foreground/15 p-4 text-sm text-foreground"
         }
       >
         {statusMessage}

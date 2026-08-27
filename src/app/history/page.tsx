@@ -9,11 +9,25 @@
  * `MatchHistoryList` に分離する。これによりルートレイアウトの title template が適用される。
  */
 import type { Metadata } from "next";
+import { Yuji_Syuku } from "next/font/google";
 import Link from "next/link";
 import { socialMetadata } from "@/app/_lib/metadata";
 import MatchHistoryList from "@/components/history/MatchHistoryList";
+import {
+  DesignPageShell,
+  DesignPanel,
+} from "@/components/layout/DesignSurface";
 import ScreenNavigation from "@/components/layout/ScreenNavigation";
 import { SOSHII_BREAKDOWN_HEADING } from "@/components/result/resultLabels";
+
+// Phase B6画面だけで読み込む筆文字。他routeのfont payloadへ波及させない。
+const yujiSyuku = Yuji_Syuku({
+  variable: "--font-yuji-syuku",
+  weight: "400",
+  subsets: ["latin"],
+  display: "swap",
+  preload: false,
+});
 
 const description =
   "四兄弟麻雀でこの端末に保存された半荘ごとの戦績(最終順位・ソシー内訳)を新しい順に閲覧できます。";
@@ -30,27 +44,32 @@ export const metadata: Metadata = {
 
 export default function HistoryPage() {
   return (
-    <div className="mx-auto min-h-screen w-full max-w-3xl p-4 sm:p-6">
+    <DesignPageShell className={`history-page ${yujiSyuku.variable}`}>
       {/* ページヘッダーは <main> の内側に置く(スペック5 5.2.6)。外に出すと <header> が
           banner ランドマークになり、ルートごとにランドマーク構成が割れる(#431)。 */}
-      <main className="flex flex-col gap-6">
-        <header className="flex flex-col gap-3">
-          <Link
-            href="/"
-            className="inline-flex min-h-11 w-fit items-center gap-1 rounded-md text-sm text-foreground/70 underline-offset-4 hover:underline"
-          >
-            <span aria-hidden="true">←</span> ロビーへ戻る
+      <main className="history-main">
+        <header className="history-header">
+          <Link href="/" className="history-back-link">
+            <span aria-hidden="true">←</span>
+            ロビーへ戻る
           </Link>
-          <h1 className="text-xl font-bold sm:text-2xl">戦績</h1>
-          <p className="text-sm/6 text-foreground/70">
-            半荘が終了するたびに、最終順位と
-            {SOSHII_BREAKDOWN_HEADING}がこの端末に自動で保存されます。
-          </p>
+          <div className="history-heading-copy">
+            <p className="history-kicker">対局の記録</p>
+            <h1 className="history-title">戦績</h1>
+            <p className="history-introduction">
+              半荘が終了するたびに、最終順位と
+              {SOSHII_BREAKDOWN_HEADING}がこの端末に自動で保存されます。
+            </p>
+          </div>
         </header>
 
-        <ScreenNavigation currentPath="/history" />
-        <MatchHistoryList />
+        <div className="history-screen-navigation">
+          <ScreenNavigation currentPath="/history" />
+        </div>
+        <DesignPanel className="history-panel">
+          <MatchHistoryList />
+        </DesignPanel>
       </main>
-    </div>
+    </DesignPageShell>
   );
 }

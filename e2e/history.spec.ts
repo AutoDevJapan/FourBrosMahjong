@@ -1,4 +1,5 @@
-import { expect, test } from "@playwright/test";
+import AxeBuilder from "@axe-core/playwright";
+import { expect, type Page, test } from "@playwright/test";
 import { walkToGameEnd } from "@/components/game/finishedGameFixture";
 import { expectCharacterPortraits } from "./helpers/characters";
 
@@ -50,6 +51,57 @@ const SAVED_HISTORY = JSON.stringify({
     },
   ],
 });
+
+const CHARACTER_NAMES = ["粗悪品", "竜二", "マサキ", "糸瓜"] as const;
+const RANK_ORDERS = [
+  [1, 2, 3, 4],
+  [3, 1, 2, 4],
+  [2, 4, 1, 3],
+  [4, 3, 2, 1],
+  [1, 3, 4, 2],
+] as const;
+const RANK_VALUES = [
+  { rawScore: 31_700, uma: 30_000, soshiiTotal: 61_700 },
+  { rawScore: 15_600, uma: 5_000, soshiiTotal: 20_600 },
+  { rawScore: -16_000, uma: -5_000, soshiiTotal: -21_000 },
+  { rawScore: -51_300, uma: -10_000, soshiiTotal: -61_300 },
+] as const;
+
+function designHistory(names: readonly string[] = CHARACTER_NAMES): string {
+  return JSON.stringify({
+    version: 1,
+    entries: RANK_ORDERS.map((ranks, entryIndex) => ({
+      seed: entryIndex + 10,
+      finishedAt: Date.UTC(2026, 7, 25, 14 - entryIndex, 42 - entryIndex * 3),
+      players: ranks.map((rank, playerIndex) => ({
+        name: names[playerIndex],
+        rank,
+        ...RANK_VALUES[rank - 1],
+        bonus: 0,
+      })),
+    })),
+  });
+}
+
+async function openSavedHistory(
+  page: Page,
+  options: { raw?: string; theme?: "light" | "dark" } = {},
+): Promise<void> {
+  await page.addInitScript(
+    ({ raw, theme }) => {
+      localStorage.setItem("four-bros-mahjong.history.v1", raw);
+      if (theme) localStorage.setItem("theme", theme);
+    },
+    { raw: options.raw ?? designHistory(), theme: options.theme },
+  );
+  await page.goto("/history");
+  await expect(
+    page.getByRole("heading", { level: 1, name: "戦績" }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("list", { name: "保存された半荘結果" }),
+  ).toBeVisible();
+}
 
 test.describe("戦績のローカル保存・閲覧(#293)", () => {
   test("同一ブラウザの2タブが同時に終局復元しても両方の戦績を残す(#363)", async ({
@@ -447,6 +499,149 @@ test.describe("戦績のローカル保存・閲覧(#293)", () => {
       await expect(
         page.getByRole("heading", { level: 1, name: "オンライン対戦" }),
       ).toBeVisible();
+    }
+  });
+});
+
+test.describe("Issue #712 Phase B6 戦績デザイン", () => {
+  test("320px・長い重複名でも新しい順・詳細・44px・削除focusを保つ", async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 320, height: 844 });
+    await openSavedHistory(page, {
+      raw: designHistory(Array(4).fill("同名の長いプレイヤー名")),
+      theme: "dark",
+    });
+
+    const list = page.getByRole("list", { name: "保存された半荘結果" });
+    const items = list.getByRole("listitem");
+    await expect(items).toHaveCount(5);
+    await expect(items.first()).toContainText("2026/08/25");
+    await expect(items.first()).toContainText("同名の長いプレイヤー名");
+    await expect(
+      items.first().getByRole("group", { name: "四兄弟の最終順位" }),
+    ).toBeVisible();
+
+    const firstSummary = items.first().locator("summary");
+    const summaryBox = await firstSummary.boundingBox();
+    expect(summaryBox?.height).toBeGreaterThanOrEqual(44);
+    await firstSummary.focus();
+    await firstSummary.press("Enter");
+    await expect(items.first().locator("details")).toHaveAttribute("open", "");
+    await expect(
+      items.first().getByRole("heading", {
+        name: "ソシー内訳（素点＋ウマ・オカ＋役満祝儀）",
+      }),
+    ).toBeVisible();
+    await expect(
+      items.first().getByText("素点（最終持ち点−返し40,000）"),
+    ).toHaveCount(4);
+    await expect(
+      items.first().getByRole("region", {
+        name: /1位 同名の長いプレイヤー名のソシー内訳/,
+      }),
+    ).toBeVisible();
+
+    const clearTrigger = page.getByRole("button", {
+      name: "戦績をすべて削除",
+    });
+    await expect(clearTrigger).toBeVisible();
+    expect((await clearTrigger.boundingBox())?.height).toBeGreaterThanOrEqual(
+      44,
+    );
+    await clearTrigger.click();
+    const cancel = page.getByRole("button", { name: "キャンセル" });
+    await expect(cancel).toBeFocused();
+    await cancel.press("Enter");
+    await expect(clearTrigger).toBeFocused();
+
+    expect(
+      await page.evaluate(
+        () =>
+          document.documentElement.scrollWidth <=
+          document.documentElement.clientWidth,
+      ),
+    ).toBe(true);
+    const results = await new AxeBuilder({ page }).include("main").analyze();
+    expect(results.violations).toEqual([]);
+  });
+
+  test("forced-colorsとreduced-motionでも順位・展開・削除操作を装飾だけに依存しない", async ({
+    page,
+  }) => {
+    await page.emulateMedia({
+      forcedColors: "active",
+      reducedMotion: "reduce",
+    });
+    await openSavedHistory(page);
+
+    const first = page
+      .getByRole("list", { name: "保存された半荘結果" })
+      .getByRole("listitem")
+      .first();
+    await expect(
+      first.getByText("1位", { exact: false }).first(),
+    ).toBeVisible();
+    await expect(first.locator(".history-placement-chip")).toHaveCount(4);
+    await expect(first.locator(".history-entry-arrow")).toHaveCSS(
+      "transition-duration",
+      "0s",
+    );
+    expect(
+      await page
+        .locator(".history-panel")
+        .evaluate((element) => getComputedStyle(element, "::before").display),
+    ).toBe("none");
+    await first.locator("summary").click();
+    const results = await new AxeBuilder({ page }).include("main").analyze();
+    expect(results.violations).toEqual([]);
+  });
+
+  test("phone/tablet/desktopとlight/darkのvisual baselineを固定する", async ({
+    page,
+  }) => {
+    const cases = [
+      {
+        name: "phone-320-dark-history.png",
+        width: 320,
+        height: 844,
+        theme: "dark",
+      },
+      {
+        name: "tablet-768-light-history.png",
+        width: 768,
+        height: 1024,
+        theme: "light",
+      },
+      {
+        name: "desktop-1280-dark-history.png",
+        width: 1280,
+        height: 900,
+        theme: "dark",
+      },
+    ] as const;
+
+    for (const visualCase of cases) {
+      await page.setViewportSize(visualCase);
+      await openSavedHistory(page, { theme: visualCase.theme });
+      await page.evaluate(async () => document.fonts.ready);
+      await expect(page.locator("html")).toHaveAttribute(
+        "data-theme",
+        visualCase.theme,
+      );
+      expect(
+        await page.evaluate(
+          () =>
+            document.documentElement.scrollWidth <=
+            document.documentElement.clientWidth,
+        ),
+      ).toBe(true);
+      await expect(page).toHaveScreenshot(visualCase.name, {
+        fullPage: true,
+        animations: "disabled",
+        maxDiffPixelRatio: 0.005,
+        stylePath: "e2e/visual-screenshot.css",
+      });
     }
   });
 });
