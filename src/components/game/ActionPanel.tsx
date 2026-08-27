@@ -5,10 +5,13 @@
  *
  * すべての操作はネイティブ `<button>` によりキーボードのみで完結できる(スペック5 5.2.2:
  * `Tab` 到達・`Enter`/`Space` 決定)。表示するアクションは**現在の局面**(engine の pending/phase)に
- * 応じて呼び出し側が構築し、本コンポーネントは受け取ったアクション定義を描画するだけの純表示に徹する
- * (スペック6 6.8: 判定は engine 側)。
+ * 応じて呼び出し側が構築する。本コンポーネントは合法性を判断せず、受け取った定義のうち麻雀操作4種だけを
+ * 標準相対順へ整えて描画する純表示に徹する(issue #709 / スペック6 6.8: 判定は engine 側)。
  */
 import type { RefObject } from "react";
+
+/** 複数表示時に相対順を固定する麻雀アクショングループ(issue #709)。 */
+type StandardActionOrder = "chi" | "pon" | "kan" | "riichi";
 
 export interface ActionItem {
   /** 一意キー。 */
@@ -27,6 +30,8 @@ export interface ActionItem {
   readonly requiresConnection?: boolean;
   /** 強調(主要操作)。 */
   readonly primary?: boolean;
+  /** チー→ポン→カン→リーチの標準相対順へ参加する場合のグループ。 */
+  readonly standardOrder?: StandardActionOrder;
 }
 
 export interface ActionPanelProps {
@@ -38,11 +43,49 @@ export interface ActionPanelProps {
   readonly disabled?: boolean;
 }
 
+const STANDARD_ACTION_RANK: Readonly<Record<StandardActionOrder, number>> = {
+  chi: 0,
+  pon: 1,
+  kan: 2,
+  riichi: 3,
+};
+
+/**
+ * 対象4種だけを標準相対順へ並べ、ロン・ツモ・北抜・スルー等の位置は変えない。
+ * 暗槓・加槓など同じグループ内は入力順を維持する。返却配列だけを作り、props は変更しない。
+ */
+function orderActionItems(
+  actions: readonly ActionItem[],
+): readonly ActionItem[] {
+  const ordered = actions
+    .map((action, index) => ({ action, index }))
+    .filter(
+      (
+        entry,
+      ): entry is typeof entry & {
+        action: ActionItem & { standardOrder: StandardActionOrder };
+      } => entry.action.standardOrder !== undefined,
+    )
+    .sort(
+      (a, b) =>
+        STANDARD_ACTION_RANK[a.action.standardOrder] -
+          STANDARD_ACTION_RANK[b.action.standardOrder] || a.index - b.index,
+    )
+    .map(({ action }) => action);
+
+  if (ordered.length < 2) return actions;
+  let next = 0;
+  return actions.map((action) =>
+    action.standardOrder === undefined ? action : ordered[next++],
+  );
+}
+
 export default function ActionPanel({
   actions,
   hint,
   disabled = false,
 }: ActionPanelProps) {
+  const orderedActions = orderActionItems(actions);
   return (
     <div
       role="group"
@@ -50,9 +93,9 @@ export default function ActionPanel({
       className="flex flex-col items-center gap-2"
     >
       {hint ? <p className="text-xs text-foreground/70">{hint}</p> : null}
-      {actions.length > 0 ? (
+      {orderedActions.length > 0 ? (
         <div className="flex flex-wrap items-center justify-center gap-2">
-          {actions.map(
+          {orderedActions.map(
             ({
               key,
               label,
