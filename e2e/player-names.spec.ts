@@ -10,7 +10,7 @@ import { expectCharacterPortraits } from "./helpers/characters";
 
 const NAMES = ["12345678901😀", "龍さん", "下ちゃん", "翔生くん"] as const;
 const DEFAULT_NAMES = ["粗悪品", "竜二", "マサキ", "糸瓜"] as const;
-const LABELS = ["粗悪品(自家)", "竜二", "マサキ", "糸瓜"] as const;
+const LABELS = ["粗悪品", "竜二", "マサキ", "糸瓜"] as const;
 
 /**
  * `/settings` を開き、保存値が入力欄へ反映されるまで待つ。

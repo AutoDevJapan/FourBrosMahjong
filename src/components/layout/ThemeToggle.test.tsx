@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ThemeToggle } from "./ThemeToggle";
@@ -104,5 +104,18 @@ describe("ThemeToggle", () => {
     );
     // removeItem は利用可能な想定なので、モジュール内の揮発設定も後続テスト前に戻す。
     await user.click(screen.getByRole("radio", { name: "システム設定に従う" }));
+  });
+
+  it("別タブの変更をstorageイベントでradioとDOMへ反映する", async () => {
+    render(<ThemeToggle />);
+    localStorage.setItem("theme", "dark");
+    window.dispatchEvent(
+      new StorageEvent("storage", { key: "theme", newValue: "dark" }),
+    );
+
+    await waitFor(() =>
+      expect(screen.getByRole("radio", { name: "ダーク" })).toBeChecked(),
+    );
+    expect(document.documentElement).toHaveAttribute("data-theme", "dark");
   });
 });
