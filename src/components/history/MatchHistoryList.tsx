@@ -24,12 +24,14 @@ import CharacterPortrait, {
 } from "@/components/game/CharacterPortrait";
 import {
   clearHistoryAcrossTabs,
-  getHistorySnapshot,
-  getServerHistorySnapshot,
+  getHistoryViewSnapshot,
+  getServerHistoryViewSnapshot,
   type HistoryClearResult,
+  type HistoryViewSnapshot,
   MAX_HISTORY_ENTRIES,
   type MatchHistoryEntry,
   notifyHistoryChanged,
+  retryHistoryViewSnapshot,
   subscribeHistory,
 } from "@/components/game/matchHistory";
 import RankingTable from "@/components/result/RankingTable";
@@ -145,7 +147,7 @@ function HistoryItem({ entry }: { entry: MatchHistoryEntry }) {
           className="history-detail-section flex flex-col gap-2"
         >
           <h2 className="text-sm font-semibold">最終順位</h2>
-          <RankingTable players={ordered} />
+          <RankingTable players={ordered} variant="history" />
         </section>
         <section
           aria-label={`${finishedAt}のソシー内訳`}
@@ -155,7 +157,11 @@ function HistoryItem({ entry }: { entry: MatchHistoryEntry }) {
           <div className="history-breakdown-grid grid gap-3 sm:grid-cols-2">
             {ordered.map((player) => (
               // 名前は重複し得る(#291)ため、一意な rank を key にする。
-              <SoshiiBreakdown key={player.rank} player={player} />
+              <SoshiiBreakdown
+                key={player.rank}
+                player={player}
+                variant="history"
+              />
             ))}
           </div>
         </section>
@@ -169,10 +175,10 @@ export default function MatchHistoryList() {
   // (issue #302 / `playerNames.ts` と同じ方式)。サーバー描画・初回 hydration は
   // `null`(= 読み込み中)で一致させ、マウント後に保存値へ切り替える。全件削除や
   // 別タブでの変更は購読経由で反映されるため、描画中に localStorage は読まない。
-  const entries = useSyncExternalStore<readonly MatchHistoryEntry[] | null>(
+  const historyView = useSyncExternalStore<HistoryViewSnapshot | null>(
     subscribeHistory,
-    getHistorySnapshot,
-    getServerHistorySnapshot,
+    getHistoryViewSnapshot,
+    getServerHistoryViewSnapshot,
   );
   const [confirmingClear, setConfirmingClear] = useState(false);
   const [statusMessage, setStatusMessage] = useState("");
@@ -282,7 +288,7 @@ export default function MatchHistoryList() {
     }
   };
 
-  if (entries === null) {
+  if (historyView === null) {
     return (
       <div
         role="status"
@@ -292,6 +298,50 @@ export default function MatchHistoryList() {
       </div>
     );
   }
+
+  if (historyView.status !== "ready") {
+    const isCorrupt = historyView.status.startsWith("corrupt-");
+    const corruptWasCleaned = historyView.status === "corrupt-cleaned";
+    return (
+      <section
+        role="alert"
+        aria-labelledby="history-read-error-heading"
+        className="history-state-card history-read-error flex min-h-40 flex-col items-start justify-center gap-4 rounded-lg border border-foreground/15 p-6"
+      >
+        <div className="history-read-error-copy">
+          <h2 id="history-read-error-heading" className="font-semibold">
+            {isCorrupt
+              ? "保存された戦績データが壊れていました"
+              : "戦績を読み込めませんでした"}
+          </h2>
+          <p className="mt-2 text-sm text-foreground/70">
+            {isCorrupt
+              ? corruptWasCleaned
+                ? "保存内容を読み込めないため表示していません。壊れた戦績データは安全のため削除しました。"
+                : "保存内容を読み込めないため表示していません。データを自動削除できなかったため、ブラウザのストレージ設定を確認してください。"
+              : "この端末のストレージへアクセスできません。ブラウザのストレージ設定を確認してください。保存データは削除していません。"}
+          </p>
+        </div>
+        <div className="history-read-error-actions flex flex-wrap gap-3">
+          <button
+            type="button"
+            onClick={retryHistoryViewSnapshot}
+            className="history-empty-link history-empty-link--primary"
+          >
+            もう一度読み込む
+          </button>
+          <Link
+            href="/"
+            className="history-empty-link history-empty-link--secondary"
+          >
+            ロビーへ戻る
+          </Link>
+        </div>
+      </section>
+    );
+  }
+
+  const { entries } = historyView;
 
   return (
     <div className="history-content flex flex-col gap-6">

@@ -16,8 +16,8 @@ import { formatSignedSoshii } from "./soshiiFormat";
 export interface RankingTableProps {
   /** 確定済みの最終内訳。表示前に順位(rank)昇順へ整列する。 */
   players: readonly ResultPlayerView[];
-  /** `/game/result` だけで使う祝祭的な順位装飾。共有先は従来の簡素な表を保つ。 */
-  variant?: "default" | "result";
+  /** routeが明示的に選ぶ表示presentation。未指定は従来の簡素な表。 */
+  variant?: "default" | "result" | "history";
 }
 
 export default function RankingTable({
@@ -26,16 +26,16 @@ export default function RankingTable({
 }: RankingTableProps) {
   // 与えられた確定順位で並べるだけ(値の計算ではなく表示順の整列)。
   const ordered = [...players].sort((a, b) => a.rank - b.rank);
-  const isResultPresentation = variant === "result";
+  const presentation = variant === "default" ? null : variant;
+  const presentationClass = (suffix: string) =>
+    presentation === null ? undefined : `${presentation}-${suffix}`;
 
   return (
     <table
-      className={`${isResultPresentation ? "result-ranking-table " : ""}w-full border-collapse text-left text-sm`}
+      className={`${presentationClass("ranking-table") ?? ""}${presentation ? " " : ""}w-full border-collapse text-left text-sm`}
     >
       <caption className="sr-only">最終順位とソシー合計</caption>
-      <thead
-        className={isResultPresentation ? "result-ranking-head" : undefined}
-      >
+      <thead className={presentationClass("ranking-head")}>
         <tr className="border-b border-foreground/20 text-foreground/70">
           <th scope="col" className="py-2 pr-3 font-medium">
             順位
@@ -64,20 +64,23 @@ export default function RankingTable({
                   : undefined
               }
               className={
-                isResultPresentation
-                  ? `result-ranking-row border-b border-foreground/10${isTop ? " result-ranking-row--winner" : ""}`
+                presentation
+                  ? `${presentationClass("ranking-row")} border-b border-foreground/10${isTop ? ` ${presentationClass("ranking-row--winner")}` : ""}`
                   : "border-b border-foreground/10"
               }
             >
               <th
                 scope="row"
-                className={`${isResultPresentation ? "result-ranking-rank " : ""}py-2 pr-3 font-normal whitespace-nowrap`}
+                className={`${presentationClass("ranking-rank") ?? ""}${presentation ? " " : ""}py-2 pr-3 font-normal whitespace-nowrap`}
               >
                 <span
-                  className={`${isResultPresentation ? "result-rank-group " : ""}inline-flex items-center gap-1`}
+                  className={`${presentationClass("rank-group") ?? ""}${presentation ? " " : ""}inline-flex items-center gap-1`}
                 >
-                  {isResultPresentation ? (
-                    <span className="result-rank-medal" aria-hidden="true">
+                  {presentation ? (
+                    <span
+                      className={presentationClass("rank-medal")}
+                      aria-hidden="true"
+                    >
                       {player.rank}
                     </span>
                   ) : isTop ? (
@@ -85,23 +88,21 @@ export default function RankingTable({
                       👑
                     </span>
                   ) : null}
-                  <span
-                    className={
-                      isResultPresentation ? "result-rank-text" : undefined
-                    }
-                  >
+                  <span className={presentationClass("rank-text")}>
                     {player.rank}位
                   </span>
-                  {isResultPresentation && isTop ? (
-                    <span className="result-winner-label">優勝</span>
+                  {presentation && isTop ? (
+                    <span className={presentationClass("winner-label")}>
+                      優勝
+                    </span>
                   ) : null}
                 </span>
               </th>
               <td
-                className={`${isResultPresentation ? "result-ranking-player " : ""}py-2 pr-3`}
+                className={`${presentationClass("ranking-player") ?? ""}${presentation ? " " : ""}py-2 pr-3`}
               >
                 <span
-                  className={`${isResultPresentation ? "result-ranking-player-inner " : ""}inline-flex items-center gap-2`}
+                  className={`${presentationClass("ranking-player-inner") ?? ""}${presentation ? " " : ""}inline-flex items-center gap-2`}
                 >
                   {player.playerId ? (
                     <CharacterPortrait playerId={player.playerId} />
@@ -112,7 +113,7 @@ export default function RankingTable({
                 </span>
               </td>
               <td
-                className={`${isResultPresentation ? "result-ranking-total " : ""}py-2 text-right font-mono tabular-nums`}
+                className={`${presentationClass("ranking-total") ?? ""}${presentation ? " " : ""}py-2 text-right font-mono tabular-nums`}
               >
                 <span aria-hidden="true">{total.display}</span>
                 <span className="sr-only">{total.srLabel}</span>

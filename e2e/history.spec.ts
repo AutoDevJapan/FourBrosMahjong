@@ -346,10 +346,19 @@ test.describe("戦績のローカル保存・閲覧(#293)", () => {
       ).toBeVisible();
 
       await page.getByRole("link", { name: "戦績を見る" }).click();
-      await expect(
-        page.getByText(/この端末のストレージが利用できる場合/),
-      ).toBeVisible();
-      await expect(page.getByText(/自動で記録されます/)).toBeVisible();
+      if (failure === "SecurityError") {
+        await expect(
+          page.getByRole("alert", { name: /戦績を読み込めません/ }),
+        ).toBeVisible();
+        await expect(
+          page.getByText(/保存データは削除していません/),
+        ).toBeVisible();
+      } else {
+        await expect(
+          page.getByText(/この端末のストレージが利用できる場合/),
+        ).toBeVisible();
+        await expect(page.getByText(/自動で記録されます/)).toBeVisible();
+      }
     });
   }
 
@@ -526,6 +535,13 @@ test.describe("Issue #712 Phase B6 戦績デザイン", () => {
     const summaryBox = await firstSummary.boundingBox();
     expect(summaryBox?.height).toBeGreaterThanOrEqual(44);
     await firstSummary.focus();
+    await expect(firstSummary).toHaveCSS("outline-style", "solid");
+    await expect(firstSummary).toHaveCSS("outline-width", "3px");
+    await expect(firstSummary).toHaveCSS("outline-offset", "3px");
+    await expect(items.first().locator("details")).toHaveCSS(
+      "overflow",
+      "visible",
+    );
     await firstSummary.press("Enter");
     await expect(items.first().locator("details")).toHaveAttribute("open", "");
     await expect(
@@ -541,6 +557,12 @@ test.describe("Issue #712 Phase B6 戦績デザイン", () => {
         name: /1位 同名の長いプレイヤー名のソシー内訳/,
       }),
     ).toBeVisible();
+    await expect(page).toHaveScreenshot("phone-320-dark-history-expanded.png", {
+      fullPage: true,
+      animations: "disabled",
+      maxDiffPixelRatio: 0.005,
+      stylePath: "e2e/visual-screenshot.css",
+    });
 
     const clearTrigger = page.getByRole("button", {
       name: "戦績をすべて削除",
@@ -595,6 +617,160 @@ test.describe("Issue #712 Phase B6 戦績デザイン", () => {
     await first.locator("summary").click();
     const results = await new AxeBuilder({ page }).include("main").analyze();
     expect(results.violations).toEqual([]);
+  });
+
+  test("破損cleanupと読取失敗をemptyと区別し、再読込・外部保存で復帰する", async ({
+    page,
+  }) => {
+    await page.addInitScript(({ key, raw }) => localStorage.setItem(key, raw), {
+      key: HISTORY_KEY,
+      raw: '{"version":1,"entries":[{}]}',
+    });
+    await page.goto("/history");
+    await expect(
+      page.getByRole("alert", {
+        name: "保存された戦績データが壊れていました",
+      }),
+    ).toBeVisible();
+    expect(
+      await page.evaluate((key) => localStorage.getItem(key), HISTORY_KEY),
+    ).toBeNull();
+    await page.getByRole("button", { name: "もう一度読み込む" }).click();
+    await expect(
+      page.getByText("保存された戦績はまだありません", {
+        exact: false,
+      }),
+    ).toBeVisible();
+
+    await page.addInitScript((key) => {
+      const originalGetItem = Storage.prototype.getItem;
+      (
+        window as typeof window & { __historyReadBlocked?: boolean }
+      ).__historyReadBlocked = true;
+      Storage.prototype.getItem = function (this: Storage, storageKey: string) {
+        if (
+          storageKey === key &&
+          (window as typeof window & { __historyReadBlocked?: boolean })
+            .__historyReadBlocked
+        ) {
+          throw new DOMException("Storage is disabled", "SecurityError");
+        }
+        return originalGetItem.call(this, storageKey);
+      };
+    }, HISTORY_KEY);
+    await page.reload();
+    await expect(
+      page.getByRole("alert", { name: /戦績を読み込めません/ }),
+    ).toBeVisible();
+    await expect(
+      page.getByText("保存された戦績はまだありません", {
+        exact: false,
+      }),
+    ).toHaveCount(0);
+
+    await page.evaluate(
+      ({ key, raw }) => {
+        localStorage.setItem(key, raw);
+        (
+          window as typeof window & { __historyReadBlocked?: boolean }
+        ).__historyReadBlocked = false;
+        window.dispatchEvent(new StorageEvent("storage", { key }));
+      },
+      { key: HISTORY_KEY, raw: designHistory() },
+    );
+    await expect(
+      page.getByRole("list", { name: "保存された半荘結果" }),
+    ).toBeVisible();
+  });
+
+  test("展開詳細のvisual baselineを固定する", async ({ page }) => {
+    await page.setViewportSize({ width: 768, height: 1024 });
+    await openSavedHistory(page, { theme: "light" });
+    const summary = page
+      .getByRole("list", { name: "保存された半荘結果" })
+      .getByRole("listitem")
+      .first()
+      .locator("summary");
+    await summary.focus();
+    await summary.press("Enter");
+    await expect(page.locator("html")).toHaveAttribute("data-theme", "light");
+    await expect(page).toHaveScreenshot(
+      "tablet-768-light-history-expanded.png",
+      {
+        fullPage: true,
+        animations: "disabled",
+        maxDiffPixelRatio: 0.005,
+        stylePath: "e2e/visual-screenshot.css",
+      },
+    );
+  });
+
+  test("インライン削除確認のvisual baselineを固定する", async ({ page }) => {
+    await page.setViewportSize({ width: 375, height: 844 });
+    await openSavedHistory(page, { theme: "dark" });
+    const clearTrigger = page.getByRole("button", {
+      name: "戦績をすべて削除",
+    });
+    // プログラムfocusではChromiumの`:focus-visible` heuristicがOS間で異なる。
+    // 実際のTab移動でtriggerへ到達し、Enter起点のCancel ringを固定する。
+    for (let step = 0; step < 20; step += 1) {
+      if (
+        await clearTrigger.evaluate(
+          (element) => element === document.activeElement,
+        )
+      ) {
+        break;
+      }
+      await page.keyboard.press("Tab");
+    }
+    await expect(clearTrigger).toBeFocused();
+    await clearTrigger.press("Enter");
+    const cancel = page.getByRole("button", { name: "キャンセル" });
+    await expect(cancel).toBeFocused();
+    await expect(cancel).toHaveCSS("outline-style", "solid");
+    await expect(cancel).toHaveCSS("outline-width", "3px");
+    await expect(cancel).toHaveCSS("outline-offset", "3px");
+    await expect(cancel).toHaveCSS(
+      "box-shadow",
+      "rgb(96, 165, 250) 0px 0px 0px 3px",
+    );
+    // Darwin headlessのfull-page合成は`:focus`装飾を画像へ出さないため、
+    // 計算済みstyleは上で固定し、実ピクセルはLinux VRTの青い3px ringで固定する。
+    await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
+    await expect(page).toHaveScreenshot(
+      "phone-375-dark-history-clear-confirm.png",
+      {
+        fullPage: true,
+        animations: "disabled",
+        maxDiffPixelRatio: 0.005,
+        stylePath: "e2e/visual-screenshot.css",
+      },
+    );
+  });
+
+  test("読取失敗のvisual baselineをlightで固定する", async ({ page }) => {
+    await page.setViewportSize({ width: 320, height: 844 });
+    await page.addInitScript((key) => {
+      localStorage.setItem("theme", "light");
+      const originalGetItem = Storage.prototype.getItem;
+      Storage.prototype.getItem = function (this: Storage, storageKey: string) {
+        if (storageKey === key) {
+          throw new DOMException("Storage is disabled", "SecurityError");
+        }
+        return originalGetItem.call(this, storageKey);
+      };
+    }, HISTORY_KEY);
+    await page.goto("/history");
+    await expect(
+      page.getByRole("alert", { name: /戦績を読み込めません/ }),
+    ).toBeVisible();
+    await expect(page.locator("html")).toHaveAttribute("data-theme", "light");
+    await expect(page).toHaveScreenshot("phone-320-light-history-error.png", {
+      fullPage: true,
+      animations: "disabled",
+      maxDiffPixelRatio: 0.005,
+      stylePath: "e2e/visual-screenshot.css",
+    });
   });
 
   test("phone/tablet/desktopとlight/darkのvisual baselineを固定する", async ({

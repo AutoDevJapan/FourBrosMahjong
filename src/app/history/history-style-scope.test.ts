@@ -17,6 +17,7 @@ describe("Issue #712 History route style scope", () => {
     expect(historyPage).toContain('weight: "400"');
     expect(historyPage).toContain("preload: false");
     expect(historyStyles).toContain(".history-main");
+    expect(historyStyles).not.toContain(".result-");
     expect(
       historyStyles
         .split("\n")

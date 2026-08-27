@@ -15,9 +15,12 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   appendHistory,
   getHistorySnapshot,
+  getHistoryViewSnapshot,
   getServerHistorySnapshot,
+  getServerHistoryViewSnapshot,
   MATCH_HISTORY_KEY,
   notifyHistoryChanged,
+  retryHistoryViewSnapshot,
   subscribeHistory,
 } from "./matchHistory";
 
@@ -53,7 +56,9 @@ function subscribe(callback: () => void): () => void {
 
 afterEach(() => {
   while (activeSubscriptions.length > 0) activeSubscriptions.pop()?.();
+  vi.restoreAllMocks();
   window.localStorage.clear();
+  retryHistoryViewSnapshot();
 });
 
 describe("match history store (#302)", () => {
@@ -114,6 +119,78 @@ describe("match history store (#302)", () => {
     unsubscribe();
   });
 
+  it("表示snapshotは破損cleanupを未保存と区別し、再読み込みで空状態へ復帰する", () => {
+    window.localStorage.setItem(MATCH_HISTORY_KEY, CORRUPTED);
+
+    expect(getHistoryViewSnapshot()).toEqual({ status: "corrupt-retained" });
+    const unsubscribe = subscribe(() => {});
+    expect(window.localStorage.getItem(MATCH_HISTORY_KEY)).toBeNull();
+    // cleanup直後に「履歴が無い」へ落とさず、削除事実を一過性表示する。
+    expect(getHistoryViewSnapshot()).toEqual({ status: "corrupt-cleaned" });
+
+    retryHistoryViewSnapshot();
+    expect(getHistoryViewSnapshot()).toEqual({ status: "ready", entries: [] });
+    unsubscribe();
+  });
+
+  it("破損cleanupのremoveItemが失敗したら削除済みを騙らずkeyを残す", () => {
+    window.localStorage.setItem(MATCH_HISTORY_KEY, CORRUPTED);
+    vi.spyOn(Storage.prototype, "removeItem").mockImplementation(() => {
+      throw new DOMException("Storage is read-only", "SecurityError");
+    });
+
+    const unsubscribe = subscribe(() => {});
+    expect(getHistoryViewSnapshot()).toEqual({ status: "corrupt-retained" });
+    expect(window.localStorage.getItem(MATCH_HISTORY_KEY)).toBe(CORRUPTED);
+    unsubscribe();
+  });
+
+  it("外部storage eventで入った破損値も効果側でcleanupし通知を保つ", () => {
+    const callback = vi.fn();
+    const unsubscribe = subscribe(callback);
+    expect(getHistoryViewSnapshot()).toEqual({ status: "ready", entries: [] });
+
+    window.localStorage.setItem(MATCH_HISTORY_KEY, CORRUPTED);
+    window.dispatchEvent(
+      new StorageEvent("storage", { key: MATCH_HISTORY_KEY }),
+    );
+    expect(callback).toHaveBeenCalledTimes(1);
+    expect(window.localStorage.getItem(MATCH_HISTORY_KEY)).toBeNull();
+    expect(getHistoryViewSnapshot()).toEqual({ status: "corrupt-cleaned" });
+    unsubscribe();
+  });
+
+  it("読取例外を空履歴と区別し、外部storage event後に一覧へ復帰する", () => {
+    const originalGetItem = Storage.prototype.getItem;
+    let blocked = true;
+    vi.spyOn(Storage.prototype, "getItem").mockImplementation(function (
+      this: Storage,
+      key: string,
+    ) {
+      if (blocked && key === MATCH_HISTORY_KEY) {
+        throw new DOMException("Storage is disabled", "SecurityError");
+      }
+      return originalGetItem.call(this, key);
+    });
+
+    const callback = vi.fn();
+    const unsubscribe = subscribe(callback);
+    expect(getHistoryViewSnapshot()).toEqual({ status: "read-error" });
+
+    appendHistory(window.localStorage, entry(9));
+    blocked = false;
+    window.dispatchEvent(
+      new StorageEvent("storage", { key: MATCH_HISTORY_KEY }),
+    );
+    expect(callback).toHaveBeenCalledTimes(1);
+    const recovered = getHistoryViewSnapshot();
+    expect(recovered.status).toBe("ready");
+    if (recovered.status === "ready") {
+      expect(recovered.entries.map((item) => item.seed)).toEqual([9]);
+    }
+    unsubscribe();
+  });
+
   it("購読解除後は通知されない(購読の対称性)", () => {
     const callback = vi.fn();
     const unsubscribe = subscribe(callback);
@@ -165,5 +242,6 @@ describe("match history store (#302)", () => {
 
   it("サーバー描画時のスナップショットは null(= 読み込み中)", () => {
     expect(getServerHistorySnapshot()).toBeNull();
+    expect(getServerHistoryViewSnapshot()).toBeNull();
   });
 });

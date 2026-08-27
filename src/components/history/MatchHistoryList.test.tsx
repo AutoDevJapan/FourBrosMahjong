@@ -7,11 +7,13 @@ import {
   waitFor,
   within,
 } from "@testing-library/react";
+import { StrictMode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   appendHistory,
   MATCH_HISTORY_KEY,
   type MatchHistoryEntry,
+  retryHistoryViewSnapshot,
 } from "@/components/game/matchHistory";
 import { restoreWebLocks, stubWebLocks } from "@/test/webLocksStub";
 import MatchHistoryList from "./MatchHistoryList";
@@ -58,9 +60,10 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  window.localStorage.clear();
   // スパイの復元をテスト本体末尾に置くと、手前の expect が落ちた際に次のテストへ漏れる。
   vi.restoreAllMocks();
+  window.localStorage.clear();
+  retryHistoryViewSnapshot();
   restoreWebLocks(originalLocksDescriptor);
 });
 
@@ -133,9 +136,11 @@ describe("MatchHistoryList (#293)", () => {
     expect(
       opened.getByRole("region", { name: /四郎のソシー内訳$/ }),
     ).toBeInTheDocument();
-    expect(opened.queryByText("優勝")).not.toBeInTheDocument();
+    expect(opened.getAllByText("優勝")).toHaveLength(2);
     expect(items[0].querySelector(".result-ranking-row")).toBeNull();
     expect(items[0].querySelector(".result-breakdown-card")).toBeNull();
+    expect(items[0].querySelector(".history-ranking-row")).not.toBeNull();
+    expect(items[0].querySelector(".history-breakdown-card")).not.toBeNull();
   });
 
   it("2段階確認つきで全件削除でき、キャンセルもできる", async () => {
@@ -182,37 +187,80 @@ describe("MatchHistoryList (#293)", () => {
     );
   });
 
-  it("破損データは空状態で描画し、次回以降のために削除する(#302)", async () => {
+  it("破損データはStrictModeでもcleanup事実を保ち、再読み込みで復帰する(#302)", async () => {
     window.localStorage.setItem(
       MATCH_HISTORY_KEY,
       '{"version":1,"entries":[{}]}',
     );
 
-    render(<MatchHistoryList />);
+    render(
+      <StrictMode>
+        <MatchHistoryList />
+      </StrictMode>,
+    );
 
+    expect(
+      await screen.findByRole("alert", {
+        name: "保存された戦績データが壊れていました",
+      }),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/保存された戦績はまだ/)).not.toBeInTheDocument();
+    expect(screen.getByText(/安全のため削除しました/)).toBeVisible();
+    // 削除は描画中(getSnapshot)ではなく購読(効果)側で行われる。
+    expect(window.localStorage.getItem(MATCH_HISTORY_KEY)).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "もう一度読み込む" }));
     expect(
       await screen.findByText(/保存された戦績はまだありません/),
     ).toBeInTheDocument();
-    // 削除は描画中(getSnapshot)ではなく購読(効果)側で行われる。
-    expect(window.localStorage.getItem(MATCH_HISTORY_KEY)).toBeNull();
   });
 
-  it("localStorageの読み込み自体が失敗しても空状態と復帰導線を表示する", async () => {
+  it("破損データを自動削除できなければ保存keyを残して事実を案内する", async () => {
+    const corrupted = '{"version":1,"entries":[{}]}';
+    window.localStorage.setItem(MATCH_HISTORY_KEY, corrupted);
+    vi.spyOn(Storage.prototype, "removeItem").mockImplementation(() => {
+      throw new DOMException("Storage is read-only", "SecurityError");
+    });
+
+    render(<MatchHistoryList />);
+
+    expect(
+      await screen.findByRole("alert", {
+        name: "保存された戦績データが壊れていました",
+      }),
+    ).toBeInTheDocument();
+    expect(screen.getByText(/自動削除できなかった/)).toBeVisible();
+    expect(window.localStorage.getItem(MATCH_HISTORY_KEY)).toBe(corrupted);
+  });
+
+  it("localStorageの読み込み失敗を空状態と区別し、storage event後に復帰する", async () => {
+    const originalGetItem = Storage.prototype.getItem;
+    let blocked = true;
     const getItem = vi
       .spyOn(Storage.prototype, "getItem")
-      .mockImplementation(() => {
+      .mockImplementation(function (this: Storage, key: string) {
+        if (!blocked || key !== MATCH_HISTORY_KEY) {
+          return originalGetItem.call(this, key);
+        }
         throw new DOMException("Storage is disabled", "SecurityError");
       });
 
     render(<MatchHistoryList />);
 
     expect(
-      await screen.findByText(/保存された戦績はまだありません/),
+      await screen.findByRole("alert", { name: /戦績を読み込めません/ }),
     ).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "対局を開始" })).toBeVisible();
+    expect(screen.queryByText(/保存された戦績はまだ/)).not.toBeInTheDocument();
     expect(
-      screen.getByRole("link", { name: "オンライン対戦へ" }),
+      screen.getByRole("button", { name: "もう一度読み込む" }),
     ).toBeVisible();
+    expect(screen.getByRole("link", { name: "ロビーへ戻る" })).toBeVisible();
+
+    appendHistory(window.localStorage, entry(9, 1_753_200_000_000, "二郎"));
+    blocked = false;
+    fireEvent(window, new StorageEvent("storage", { key: MATCH_HISTORY_KEY }));
+    expect(
+      await screen.findByRole("list", { name: "保存された半荘結果" }),
+    ).toHaveTextContent("1位 二郎");
     getItem.mockRestore();
   });
 

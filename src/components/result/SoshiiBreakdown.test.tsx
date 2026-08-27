@@ -41,6 +41,18 @@ describe("SoshiiBreakdown (spec 6.7 / 6.8)", () => {
     ).not.toBeNull();
   });
 
+  it("history variantはResult classを漏らさず戦績画面用classを追加する", () => {
+    const { container } = render(
+      <SoshiiBreakdown player={player} variant="history" />,
+    );
+    expect(screen.getByText("優勝")).toBeInTheDocument();
+    expect(container.querySelector(".history-breakdown-card")).not.toBeNull();
+    expect(
+      container.querySelector(".history-breakdown-card--winner"),
+    ).not.toBeNull();
+    expect(container.querySelector(".result-breakdown-card")).toBeNull();
+  });
+
   it("conveys sign with text for screen readers, not color alone (spec 5)", () => {
     render(<SoshiiBreakdown player={{ ...player, uma: -5000 }} />);
     expect(screen.getByText("−5,000")).toBeInTheDocument();

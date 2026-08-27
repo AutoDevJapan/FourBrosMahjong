@@ -502,10 +502,89 @@ const EMPTY_HISTORY: readonly MatchHistoryEntry[] = Object.freeze([]);
 let cachedRaw: string | null = null;
 let cachedEntries: readonly MatchHistoryEntry[] = EMPTY_HISTORY;
 
+/** `/history` が未保存・破損・読取失敗を混同しないための表示専用snapshot。 */
+export type HistoryViewSnapshot =
+  | {
+      readonly status: "ready";
+      readonly entries: readonly MatchHistoryEntry[];
+    }
+  | { readonly status: "corrupt-cleaned" | "corrupt-retained" }
+  | { readonly status: "read-error" };
+
+const EMPTY_HISTORY_VIEW: HistoryViewSnapshot = Object.freeze({
+  status: "ready",
+  entries: EMPTY_HISTORY,
+});
+const CORRUPT_CLEANED_HISTORY_VIEW: HistoryViewSnapshot = Object.freeze({
+  status: "corrupt-cleaned",
+});
+const CORRUPT_RETAINED_HISTORY_VIEW: HistoryViewSnapshot = Object.freeze({
+  status: "corrupt-retained",
+});
+const READ_ERROR_HISTORY_VIEW: HistoryViewSnapshot = Object.freeze({
+  status: "read-error",
+});
+let cachedViewRaw: string | null | undefined;
+let cachedHistoryView: HistoryViewSnapshot = EMPTY_HISTORY_VIEW;
+// `subscribeHistory` が破損v1をcleanupした直後に「未保存」へ落とさず、
+// そのmount中は何が起き、保存値を削除したかを利用者へ伝える。
+let latchedCorruptView: "corrupt-cleaned" | "corrupt-retained" | null = null;
+
+function invalidateHistoryViewSnapshot(): void {
+  cachedViewRaw = undefined;
+  cachedHistoryView = EMPTY_HISTORY_VIEW;
+  latchedCorruptView = null;
+}
+
+function corruptView(
+  status: "corrupt-cleaned" | "corrupt-retained",
+): HistoryViewSnapshot {
+  return status === "corrupt-cleaned"
+    ? CORRUPT_CLEANED_HISTORY_VIEW
+    : CORRUPT_RETAINED_HISTORY_VIEW;
+}
+
+/**
+ * 効果/event handlerからだけ呼ぶ破損v1 cleanup。snapshot/renderからは呼ばない。
+ * removeItemが例外・no-op・削除後の読み戻し不能のときは「削除済み」を騙らない。
+ */
+function cleanupCorruptHistory(
+  storage: Storage,
+): "none" | "cleaned" | "retained" | "read-error" {
+  let raw: string | null;
+  try {
+    raw = storage.getItem(MATCH_HISTORY_KEY);
+  } catch {
+    return "read-error";
+  }
+  if (raw === null || parseHistory(raw) !== null) return "none";
+  try {
+    storage.removeItem(MATCH_HISTORY_KEY);
+    return storage.getItem(MATCH_HISTORY_KEY) === null ? "cleaned" : "retained";
+  } catch {
+    return "retained";
+  }
+}
+
+function latchCleanupResult(
+  result: ReturnType<typeof cleanupCorruptHistory>,
+): void {
+  if (result !== "cleaned" && result !== "retained") return;
+  latchedCorruptView =
+    result === "cleaned" ? "corrupt-cleaned" : "corrupt-retained";
+  cachedViewRaw = undefined;
+  cachedHistoryView = corruptView(latchedCorruptView);
+}
+
 function onStorageEvent(event: StorageEvent): void {
   // key === null は「別タブが clear() した」を意味する(全キーが対象)。
   if (event.key === MATCH_HISTORY_KEY || event.key === null) {
-    notifyHistoryChanged();
+    // event callbackは描画外の効果経路。外部から入った破損値もここで
+    // cleanupし、「削除した」表示と実際のkeyを一致させる。
+    invalidateHistoryViewSnapshot();
+    const storage = localStorageOrNull();
+    if (storage !== null) latchCleanupResult(cleanupCorruptHistory(storage));
+    for (const callback of subscribers) callback();
   }
 }
 
@@ -527,14 +606,17 @@ function onStorageEvent(event: StorageEvent): void {
  * (= 描画フェーズ)ではなくマウント後の効果から行う(issue #310)。
  */
 export function notifyHistoryChanged(): void {
+  // 正規APIによる外部保存・全件削除後は、一過性の破損表示も含め
+  // 必ず実値を読み直す。storage eventはcleanup成否を保つ専用経路を通る。
+  invalidateHistoryViewSnapshot();
   for (const callback of subscribers) callback();
 }
 
 /**
  * `localStorage` の変更(このタブの削除操作、別タブの `storage` イベント)を購読する。
  *
- * 購読のたびに `loadHistory` を通し、破損データが残っていれば次回以降のために削除する
- * (描画中ではなく効果として実行される)。`loadHistory` は冪等なので重複実行は無害。
+ * 購読開始とstorage eventの効果経路で破損データをcleanupし、
+ * 成否を表示snapshotに保つ。描画中のgetSnapshotは書き込みを行わない。
  *
  * 購読者は `Set` で保持するため、**同一の関数参照で2回購読することは非対応**
  * (2回目が重複排除され、片方の解除で両方が通知を失う)。想定利用者である
@@ -548,13 +630,63 @@ export function subscribeHistory(callback: () => void): () => void {
   }
   subscribers.add(callback);
   const storage = localStorageOrNull();
-  if (storage !== null) loadHistory(storage);
+  if (storage !== null) latchCleanupResult(cleanupCorruptHistory(storage));
   return () => {
     subscribers.delete(callback);
     if (subscribers.size === 0) {
       window.removeEventListener("storage", onStorageEvent);
+      // 破損通知は通常unmountで消さない。React Strict Modeのsetup→cleanup→setupで
+      // cleanup済みkeyしか見えなくなっても、明示的な再読込み/外部更新まで保つ。
     }
   };
+}
+
+/**
+ * `/history` 表示用snapshot。保存shape/keyや追記APIは変えず、UIだけが
+ * 未保存(`ready` + 空配列)・破損・Storage読取失敗を判別する。
+ * `getSnapshot`の契約どおり書き込みは行わない。破損v1の削除は従来どおり
+ * `subscribeHistory` の効果側で実行する。
+ */
+export function getHistoryViewSnapshot(): HistoryViewSnapshot {
+  const storage = localStorageOrNull();
+  if (storage === null) return READ_ERROR_HISTORY_VIEW;
+
+  let raw: string | null;
+  try {
+    raw = storage.getItem(MATCH_HISTORY_KEY);
+  } catch {
+    return READ_ERROR_HISTORY_VIEW;
+  }
+
+  if (raw === null) {
+    if (latchedCorruptView !== null) return corruptView(latchedCorruptView);
+    cachedViewRaw = null;
+    cachedHistoryView = EMPTY_HISTORY_VIEW;
+    return EMPTY_HISTORY_VIEW;
+  }
+  if (raw === cachedViewRaw) return cachedHistoryView;
+
+  const entries = parseHistory(raw);
+  cachedViewRaw = raw;
+  if (entries === null) {
+    // cleanupはここで行わない。購読効果が成否を確定するまでは、
+    // 「削除済み」を騙らない retained 表示を返す。
+    latchedCorruptView = "corrupt-retained";
+    cachedHistoryView = CORRUPT_RETAINED_HISTORY_VIEW;
+    return CORRUPT_RETAINED_HISTORY_VIEW;
+  }
+
+  latchedCorruptView = null;
+  cachedHistoryView = Object.freeze({ status: "ready", entries });
+  return cachedHistoryView;
+}
+
+/** エラー案内の「もう一度読み込む」から現在のStorageを再評価する。 */
+export function retryHistoryViewSnapshot(): void {
+  invalidateHistoryViewSnapshot();
+  const storage = localStorageOrNull();
+  if (storage !== null) latchCleanupResult(cleanupCorruptHistory(storage));
+  for (const callback of subscribers) callback();
 }
 
 /**
@@ -588,5 +720,10 @@ export function getHistorySnapshot(): readonly MatchHistoryEntry[] {
 export function getServerHistorySnapshot():
   | readonly MatchHistoryEntry[]
   | null {
+  return null;
+}
+
+/** `/history` のSSR/初回hydrationは読み込み中に揃える。 */
+export function getServerHistoryViewSnapshot(): HistoryViewSnapshot | null {
   return null;
 }
