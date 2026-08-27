@@ -62,6 +62,18 @@ describe("RulesPage (/rules)", () => {
     ).toBeInTheDocument();
   });
 
+  it("人間の任意北抜きとCPUの自動ガリを区別して説明する(#708)", () => {
+    render(<RulesPage />);
+
+    expect(
+      screen.getByText(
+        /人間は自分の手番で北を持っているときに「北抜」を任意に選び、北を1枚ずつ場に晒して嶺上牌を補充できる/,
+      ),
+    ).toHaveTextContent(
+      "北を抜かずに保持したり、通常どおり打牌したりしてもよい。CPUは北を自動で抜く。和了時は抜いた北1枚ごとにドラ1枚として加算する。",
+    );
+  });
+
   it("折りたたみセクションを details/summary で提供する", () => {
     const { container } = render(<RulesPage />);
     const sections = container.querySelectorAll("details");

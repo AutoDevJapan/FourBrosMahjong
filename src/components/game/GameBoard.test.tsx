@@ -261,7 +261,7 @@ describe("GameBoard (spec 6.6 client island / engine-driven)", () => {
     ).not.toBeInTheDocument();
   });
 
-  it("決定的な公開状態から全プレイヤーの抜き北を表示し、自家の連続北抜きを通知する", () => {
+  it("復元済みの抜き北は表示するが、mount時に過去の北抜きを再通知しない", () => {
     renderBoardWithKita();
 
     const self = screen.getAllByRole("region", { name: "粗悪品(東家)" });
@@ -272,11 +272,7 @@ describe("GameBoard (spec 6.6 client island / engine-driven)", () => {
     expect(west.some((region) => region.textContent?.includes("ガリ1"))).toBe(
       true,
     );
-    const initialStatus = screen.getByRole("status");
-    expect(initialStatus).toBeVisible();
-    expect(initialStatus).toHaveTextContent(
-      "北を2枚抜きました。嶺上牌を補充しました。ガリは合計2枚です。",
-    );
+    expect(screen.queryByRole("status")).not.toBeInTheDocument();
     expect(
       screen.getByText("あなたの手番です。北抜できます。"),
     ).toBeInTheDocument();

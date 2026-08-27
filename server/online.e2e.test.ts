@@ -690,6 +690,7 @@ describe("online multiplayer local E2E (#629)", () => {
     let version = hostSnapshot.version;
     let reconnectVerified = false;
     let actions = 0;
+    let kitaActions = 0;
 
     while (hostSnapshot.phase !== "gameEnd") {
       if (actions > 1_000) {
@@ -748,6 +749,7 @@ describe("online multiplayer local E2E (#629)", () => {
         hostSnapshot.phase === "roundEnd"
           ? { type: "nextRound" }
           : actionFor(actorSnapshot);
+      if (action.type === "kita") kitaActions += 1;
       const [nextHostSnapshot, nextGuestSnapshot] = await advanceVersion(
         [host, guest],
         version,
@@ -761,6 +763,7 @@ describe("online multiplayer local E2E (#629)", () => {
     }
 
     expect(reconnectVerified).toBe(true);
+    expect(kitaActions).toBeGreaterThan(0);
     expect(hostSnapshot.phase).toBe("gameEnd");
     expect(guestSnapshot.phase).toBe("gameEnd");
     expect(hostSnapshot.view.result).not.toBeNull();

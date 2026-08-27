@@ -605,6 +605,57 @@ describe("online room manager", () => {
     });
   });
 
+  it("新capability guestは混在roomで北抜きし、同じ手番を継続する", () => {
+    const manager = new RoomManager();
+    const host = manager.create("旧ホスト");
+    const guest = manager.join(host.room.code, "新ゲスト", true);
+    if (!guest) throw new Error("guest should join");
+
+    // seed=4は旧p0の最初の打牌後、新p1が北を保持した打牌待ちになる決定的fixture。
+    host.room.state = createGame({
+      seed: 4,
+      names: ["旧ホスト", "新ゲスト", "AI2", "AI3"],
+      humanPlayerIds: ["p0", "p1"],
+      explicitKitaPlayerIds: ["p1"],
+    });
+    const hostDraw = host.room.state.hand?.drawn?.tile;
+    if (hostDraw === undefined) throw new Error("host draw expected");
+    expect(
+      manager.apply(
+        host.room,
+        host.player,
+        { type: "discard", tile: hostDraw },
+        host.room.version,
+      ),
+    ).toMatchObject({ ok: true, stateChanged: true });
+
+    const before = manager.snapshot(guest.room, guest.player);
+    expect(before.explicitKita).toBe(true);
+    expect(before.currentTurn).toBe("p1");
+    expect(before.pending).toMatchObject({
+      kind: "humanDiscard",
+      playerId: "p1",
+      canKita: true,
+    });
+    const hand = host.room.state.hand;
+    const seat = hand ? seatOfPlayer(hand.seating, "p1") : null;
+    if (hand === null || seat === null) throw new Error("guest seat expected");
+    const kitaBefore = hand.kita[seat];
+
+    expect(
+      manager.apply(guest.room, guest.player, { type: "kita" }, before.version),
+    ).toMatchObject({ ok: true, stateChanged: true });
+
+    const after = manager.snapshot(guest.room, guest.player);
+    expect(after.version).toBe(before.version + 1);
+    expect(host.room.state.hand?.kita[seat]).toBe(kitaBefore + 1);
+    expect(after.currentTurn).toBe("p1");
+    expect(after.pending).toMatchObject({
+      kind: "humanDiscard",
+      playerId: "p1",
+    });
+  });
+
   it("明示北抜きguestの切断で保持北を即時にAIガリし、resume後もcapabilityを保持する", () => {
     let fixtureSeed = 0;
     for (let seed = 1; seed <= 1_000; seed += 1) {

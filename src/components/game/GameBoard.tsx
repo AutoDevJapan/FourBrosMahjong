@@ -153,10 +153,11 @@ export default function GameBoard({
     slots.self.kind === "seated" ? slots.self.player.kitaCount : 0;
   const roundKey = `${tableInfo.roundWind}-${tableInfo.handNumber}-${tableInfo.honba}`;
   // 北抜きは engine 遷移内で完了するため、公開枚数の増加を UI イベントとして保持する。
-  // 初期配牌で抜いた場合も 0→N として通知し、局替わりの N→0 では通知を消す。
+  // mount時点の公開枚数は既知の状態として基準にし、reload/resumeで過去の北抜きを再通知しない。
+  // 同じmount中の局替わりでは0枚を起点として、新しい局の北抜きだけを通知する。
   const [kitaObservation, setKitaObservation] = useState<KitaObservation>({
     roundKey,
-    count: 0,
+    count: selfKitaCount,
   });
   const [kitaAnnouncement, setKitaAnnouncement] = useState("");
   if (

@@ -34,6 +34,11 @@ describe("GameGlossary (#610)", () => {
     expect(
       within(dialog).getByRole("link", { name: "ルール説明を詳しく見る" }),
     ).toHaveAttribute("href", "/rules");
+    expect(
+      within(dialog).getByText(
+        "人間は自分の手番で「北抜」を任意に選び、北を1枚ずつ公開して嶺上牌を補充できます。北を抜かずに保持したり、通常どおり打牌したりしても構いません。CPUは北を自動で抜き、抜いた北1枚ごとにドラが1枚増えます。",
+      ),
+    ).toBeInTheDocument();
 
     await user.keyboard("{Escape}");
     expect(
