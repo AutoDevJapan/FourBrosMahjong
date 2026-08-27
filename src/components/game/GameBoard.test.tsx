@@ -185,6 +185,52 @@ function renderBoardWithKita() {
 }
 
 describe("GameBoard (spec 6.6 client island / engine-driven)", () => {
+  it("各盤面variantは常に4物理枠だけを持ち、3着席+1抜け番を同じ枠内に表示する(#712)", () => {
+    const { container } = renderBoard();
+
+    for (const layout of ["cross", "focus"] as const) {
+      const board = container.querySelector(`[data-board-layout="${layout}"]`);
+      expect(board).not.toBeNull();
+      const slots = board?.querySelectorAll("[data-slot-position]") ?? [];
+      expect(slots).toHaveLength(4);
+      expect(
+        [...slots]
+          .map((slot) => slot.getAttribute("data-slot-position"))
+          .sort(),
+      ).toEqual(["across", "left", "right", "self"]);
+      expect(
+        board?.querySelectorAll('[data-player-kind="seated"]'),
+      ).toHaveLength(3);
+      expect(
+        board?.querySelectorAll('[data-player-kind="bench"]'),
+      ).toHaveLength(1);
+    }
+
+    // 抜け番を卓の外へ独立した5枠目として描かない。
+    for (const bench of container.querySelectorAll(
+      '[data-player-kind="bench"]',
+    )) {
+      expect(bench.closest("[data-slot-position]")).not.toBeNull();
+    }
+  });
+
+  it("オンラインの自分IDも物理self枠へstate駆動で写像し、4枠契約を維持する", () => {
+    const { container } = renderOnlineBoard(createGame({ seed: 4 }), "p1");
+    const cross = container.querySelector('[data-board-layout="cross"]');
+    expect(cross?.querySelectorAll("[data-slot-position]")).toHaveLength(4);
+    expect(
+      cross?.querySelector(
+        '[data-slot-position="self"] [data-character-id="p1"][data-player-role="self"]',
+      ),
+    ).not.toBeNull();
+    expect(cross?.querySelectorAll('[data-player-kind="seated"]')).toHaveLength(
+      3,
+    );
+    expect(cross?.querySelectorAll('[data-player-kind="bench"]')).toHaveLength(
+      1,
+    );
+  });
+
   it("実エンジン状態から卓情報・自家手牌・抜け番スロット・操作パネルを描画する", () => {
     renderBoard();
     // レスポンシブで md/base の両ツリーが jsdom には出るため getAll で検証。

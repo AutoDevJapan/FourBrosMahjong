@@ -18,7 +18,7 @@ export interface TableProps {
 
 export default function Table({ info, dora, showGlossary = true }: TableProps) {
   return (
-    <div className="flex flex-col items-center justify-center gap-3 rounded-xl bg-table-felt p-4 shadow-inner">
+    <div className="game-table flex flex-col items-center justify-center gap-3 rounded-xl bg-table-felt p-4 shadow-inner">
       <TableInfo info={info} />
       <div className="flex flex-wrap items-center justify-center gap-2">
         <DoraIndicator dora={dora} />

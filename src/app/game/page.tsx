@@ -1,7 +1,22 @@
 import type { Metadata } from "next";
-import Link from "next/link";
+import { Yuji_Syuku } from "next/font/google";
 import { socialMetadata } from "@/app/_lib/metadata";
 import GameBoard from "@/components/game/GameBoard";
+import {
+  DesignLinkButton,
+  DesignPageShell,
+  DesignPanel,
+} from "@/components/layout/DesignSurface";
+import "./game.css";
+
+// Phase B4の対局画面だけで読み込む筆文字。ほかのrouteへfont payloadを波及させない。
+const yujiSyuku = Yuji_Syuku({
+  variable: "--font-yuji-syuku",
+  weight: "400",
+  subsets: ["latin"],
+  display: "swap",
+  preload: false,
+});
 
 const description =
   "関西式三人打ちをベースにした四人回しの四兄弟麻雀をプレイする対局画面です。";
@@ -27,23 +42,26 @@ export const metadata: Metadata = {
 
 export default function GamePage() {
   return (
-    <div className="mx-auto min-h-screen w-full max-w-5xl p-4 sm:p-6">
+    <DesignPageShell className={`game-page ${yujiSyuku.variable}`}>
       {/* 本文は単一の <main> に収める(スペック5 5.2.6)。盤面はランドマーク外に置かない。
           ページヘッダー(<h1>)も <main> の内側に置く。外に出すと <header> が banner
           ランドマークになり、ルートごとにランドマーク構成が割れる(#431)。 */}
-      <main className="flex flex-col gap-4">
-        <header className="flex items-center justify-between gap-4">
-          <h1 className="text-xl font-bold sm:text-2xl">対局画面</h1>
-          <Link
-            href="/"
-            className="inline-flex min-h-11 items-center rounded-full border border-control-border px-3 py-1.5 text-sm hover:bg-foreground/5"
-          >
+      <main className="game-main">
+        <header className="game-header">
+          <div className="game-heading-copy">
+            <p className="game-kicker">四人回し・関西式三人打ち</p>
+            <h1 className="game-title">対局画面</h1>
+          </div>
+          <DesignLinkButton href="/" className="game-back-link">
+            <span aria-hidden="true">←</span>
             ロビーへ戻る
-          </Link>
+          </DesignLinkButton>
         </header>
 
-        <GameBoard />
+        <DesignPanel className="game-board-panel">
+          <GameBoard />
+        </DesignPanel>
       </main>
-    </div>
+    </DesignPageShell>
   );
 }

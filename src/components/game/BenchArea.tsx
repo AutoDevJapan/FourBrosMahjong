@@ -32,8 +32,9 @@ export default function BenchArea({ player, compact = false }: BenchAreaProps) {
       <section
         aria-label={`${player.name}(抜け番)`}
         data-character-id={player.playerId}
+        data-player-kind="bench"
         style={characterAccentStyle(player.playerId)}
-        className="character-accent-edge flex flex-col gap-2 rounded-lg border border-dashed border-foreground/25 bg-foreground/[.03] p-2"
+        className="game-bench-area game-bench-area--compact character-accent-edge flex flex-col gap-2 rounded-lg border border-dashed border-foreground/25 bg-foreground/[.03] p-2"
       >
         <header className="flex flex-wrap items-center gap-x-2 gap-y-1">
           <CharacterPortrait playerId={player.playerId} />
@@ -49,8 +50,9 @@ export default function BenchArea({ player, compact = false }: BenchAreaProps) {
     <section
       aria-label={`${player.name}(抜け番)`}
       data-character-id={player.playerId}
+      data-player-kind="bench"
       style={characterAccentStyle(player.playerId)}
-      className="character-accent-edge flex h-full flex-col items-center justify-center gap-2 rounded-lg border border-dashed border-foreground/25 bg-foreground/[.03] p-3 text-center"
+      className="game-bench-area character-accent-edge flex h-full flex-col items-center justify-center gap-2 rounded-lg border border-dashed border-foreground/25 bg-foreground/[.03] p-3 text-center"
     >
       <CharacterPortrait playerId={player.playerId} size="medium" />
       <StatusBadge icon="⏸" label="抜け番" variant="bench" />

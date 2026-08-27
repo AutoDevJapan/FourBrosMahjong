@@ -74,14 +74,17 @@ export default function PlayerArea({
     <section
       aria-label={`${name}(${SEAT_WIND_LABEL[seatWind]})`}
       data-character-id={player.playerId}
+      data-player-kind="seated"
+      data-player-role={isSelf ? "self" : "opponent"}
+      data-seat-wind={seatWind}
       style={characterAccentStyle(player.playerId)}
-      className={`character-accent-edge flex flex-col gap-2 rounded-lg border p-2 ${
+      className={`game-player-area character-accent-edge flex flex-col gap-2 rounded-lg border p-2 ${
         status?.isCurrentTurn
           ? "border-turn-highlight bg-turn-highlight/5"
           : "border-foreground/15"
       }`}
     >
-      <header className="flex flex-wrap items-center gap-x-2 gap-y-1">
+      <header className="game-player-header flex flex-wrap items-center gap-x-2 gap-y-1">
         <CharacterPortrait playerId={player.playerId} />
         <span className="rounded bg-foreground/10 px-1.5 py-0.5 text-xs font-semibold">
           {SEAT_WIND_LABEL[seatWind]}
@@ -108,7 +111,7 @@ export default function PlayerArea({
       <KitaDisplay count={kitaCount} compact={compact} />
 
       {!compact ? (
-        <div className="rounded bg-foreground/[.03] p-1.5">
+        <div className="game-hand-surface rounded bg-foreground/[.03] p-1.5">
           {isSelf && hand ? (
             <Hand
               tiles={hand}

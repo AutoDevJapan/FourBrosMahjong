@@ -30,7 +30,7 @@ export default function TableInfo({ info }: TableInfoProps) {
   const roundLabel = `${ROUND_WIND_LABEL[roundWind]}${handNumber}局`;
 
   return (
-    <dl className="flex flex-wrap items-center justify-center gap-x-4 gap-y-1 text-center text-sm text-tile-face">
+    <dl className="game-table-info flex flex-wrap items-center justify-center gap-x-4 gap-y-1 text-center text-sm text-tile-face">
       <div className="flex items-baseline gap-1">
         <dt className="sr-only">場と局</dt>
         <dd className="text-base font-bold">{roundLabel}</dd>
