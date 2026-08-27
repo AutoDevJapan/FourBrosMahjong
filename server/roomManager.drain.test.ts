@@ -442,4 +442,98 @@ describe("RoomManager drain aggregates", () => {
     clock.set(0);
     expect(observer.snapshot().blockingDrainRooms).toBe(0);
   });
+
+  it("samples time once before a mutation and never leaves a partial frozen seat", () => {
+    const samples = [1_000, Number.NaN, 1_001];
+    const manager = new RoomManager({
+      monotonicNow: () => samples.shift() ?? 1_001,
+    });
+    const host = manager.create("ホスト");
+    const stateBefore = host.room.state;
+    const lastSeenBefore = host.player.lastSeenAt;
+    const lastActivityBefore = host.room.lastActivityAt;
+
+    expect(() => manager.disconnectDuringDrain(host.room, host.player)).toThrow(
+      RangeError,
+    );
+    expect(host.player).toMatchObject({
+      connected: true,
+      lastSeenAt: lastSeenBefore,
+    });
+    expect(host.room.state).toBe(stateBefore);
+    expect(host.room.lastActivityAt).toBe(lastActivityBefore);
+    expect(host.room.drainFrozenPlayerIds.size).toBe(0);
+
+    const guest = manager.join(host.room.code, "ゲスト");
+    expect(guest?.player.id).toBe("p1");
+    expect(host.room.state.humanPlayerIds).toEqual(["p0", "p1"]);
+    expect(host.room.state.pending?.playerId ?? "p0").toBe("p0");
+    expect(host.player.connected).toBe(true);
+  });
+
+  it("rejects invalid mutation timestamps before changing shared room state", () => {
+    const joinClock = fakeClock();
+    const joinManager = new RoomManager({ monotonicNow: joinClock.now });
+    const joinHost = joinManager.create("ホスト");
+    joinClock.set(Number.NaN);
+    expect(() => joinManager.join(joinHost.room.code, "ゲスト")).toThrow(
+      RangeError,
+    );
+    expect(joinHost.room.players.size).toBe(1);
+    expect(joinHost.room.state.humanPlayerIds).toEqual(["p0"]);
+
+    const resumeClock = fakeClock();
+    const resumeManager = new RoomManager({ monotonicNow: resumeClock.now });
+    const resumeHost = resumeManager.create("ホスト");
+    resumeManager.disconnect(resumeHost.room, resumeHost.player);
+    const resumeState = resumeHost.room.state;
+    const resumeVersion = resumeHost.room.version;
+    resumeClock.set(Number.NaN);
+    expect(() =>
+      resumeManager.resume(resumeHost.room.code, resumeHost.player.token),
+    ).toThrow(RangeError);
+    expect(resumeHost.player.connected).toBe(false);
+    expect(resumeHost.room.state).toBe(resumeState);
+    expect(resumeHost.room.version).toBe(resumeVersion);
+
+    const touchClock = fakeClock();
+    const touchManager = new RoomManager({ monotonicNow: touchClock.now });
+    const touchHost = touchManager.create("ホスト");
+    const touchSeenAt = touchHost.player.lastSeenAt;
+    const touchActivityAt = touchHost.room.lastActivityAt;
+    touchClock.set(Number.NaN);
+    expect(() => touchManager.touch(touchHost.room, touchHost.player)).toThrow(
+      RangeError,
+    );
+    expect(touchHost.player.lastSeenAt).toBe(touchSeenAt);
+    expect(touchHost.room.lastActivityAt).toBe(touchActivityAt);
+
+    const leaveClock = fakeClock();
+    const leaveManager = new RoomManager({ monotonicNow: leaveClock.now });
+    const leaveHost = leaveManager.create("ホスト");
+    leaveClock.set(Number.NaN);
+    expect(() => leaveManager.leave(leaveHost.room, leaveHost.player)).toThrow(
+      RangeError,
+    );
+    expect(leaveHost.player).toMatchObject({
+      connected: true,
+      resumable: true,
+    });
+    expect(leaveHost.room.reusableSeatIds.size).toBe(0);
+    expect(leaveHost.room.state.humanPlayerIds).toEqual(["p0"]);
+
+    const newGameClock = fakeClock();
+    const newGameManager = new RoomManager({ monotonicNow: newGameClock.now });
+    const newGameHost = newGameManager.create("ホスト");
+    newGameHost.room.state = walkToGameEnd(2024).state;
+    const finishedState = newGameHost.room.state;
+    const finishedVersion = newGameHost.room.version;
+    newGameClock.set(Number.NaN);
+    expect(() =>
+      newGameManager.newGame(newGameHost.room, newGameHost.player),
+    ).toThrow(RangeError);
+    expect(newGameHost.room.state).toBe(finishedState);
+    expect(newGameHost.room.version).toBe(finishedVersion);
+    expect(newGameHost.room.humanPlayerIds).toEqual(new Set(["p0"]));
+  });
 });

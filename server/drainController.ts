@@ -146,12 +146,19 @@ export class DrainController {
     if (this.phase === "terminating" || this.phase === "drained") {
       return { changed: false, status: this.status() };
     }
-    const previousPhase = this.phase;
     if (this.phase === "accepting") {
-      this.drainObserver = this.beginDrainObservation();
-      this.drainStartedMonotonicMs = this.now();
-      this.phase = "draining";
+      // Validate every fallible dependency before publishing a new epoch.
+      // Otherwise a bad clock/observer could leave an accepting controller
+      // holding private drain tracking from an epoch that never started.
+      const drainStartedMonotonicMs = this.now();
+      const drainObserver = this.beginDrainObservation();
+      const aggregate = drainObserver.snapshot(this.currentConnections());
+      this.drainObserver = drainObserver;
+      this.drainStartedMonotonicMs = drainStartedMonotonicMs;
+      this.phase = aggregate.blockingDrainRooms === 0 ? "drained" : "draining";
+      return { changed: true, status: this.makeStatus(aggregate) };
     }
+    const previousPhase = this.phase;
     const status = this.reevaluateDrain();
     return {
       changed: previousPhase !== status.phase,
@@ -176,10 +183,11 @@ export class DrainController {
     if (this.phase === "terminating" || this.phase === "accepting") {
       return { changed: false, status: this.status() };
     }
+    const aggregate = this.currentAggregate(this.currentConnections());
     this.phase = "accepting";
     this.drainStartedMonotonicMs = null;
     this.drainObserver = null;
-    return { changed: true, status: this.status() };
+    return { changed: true, status: this.makeStatus(aggregate) };
   }
 
   /** SIGTERM/SIGINT boundary: irreversible and idempotent. */

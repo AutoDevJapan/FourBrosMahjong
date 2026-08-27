@@ -310,6 +310,97 @@ describe("DrainController", () => {
     expect(Object.isFrozen(controller.status())).toBe(true);
   });
 
+  it("does not publish a drain epoch when clock or observer setup fails", () => {
+    const managerClock = fakeClock();
+    const controllerClock = fakeClock();
+    const manager = new RoomManager({ monotonicNow: managerClock.now });
+    manager.create("ホスト");
+    let observerShouldThrow = false;
+    const beginDrainObservation = vi.fn(() => {
+      if (observerShouldThrow) throw new Error("observer unavailable");
+      return manager.createDrainAggregateObserver(GRACE_MS);
+    });
+    const controller = new DrainController({
+      monotonicNow: controllerClock.now,
+      currentConnections: () => ({
+        webSocketConnections: 0,
+        attachedSessionConnections: 0,
+        pendingUpgrades: 0,
+      }),
+      currentAggregate: (connections) =>
+        manager.aggregateSnapshot(GRACE_MS, connections),
+      beginDrainObservation,
+    });
+
+    controllerClock.set(Number.NaN);
+    expect(() => controller.startDrain()).toThrow(RangeError);
+    expect(beginDrainObservation).not.toHaveBeenCalled();
+    controllerClock.set(5_001);
+    expect(controller.status()).toMatchObject({
+      phase: "accepting",
+      drainStartedMonotonicMs: null,
+      aggregate: { abandonedDuringDrainRooms: 0 },
+    });
+
+    observerShouldThrow = true;
+    expect(() => controller.startDrain()).toThrow("observer unavailable");
+    expect(beginDrainObservation).toHaveBeenCalledTimes(1);
+    expect(controller.status()).toMatchObject({
+      phase: "accepting",
+      drainStartedMonotonicMs: null,
+      aggregate: { abandonedDuringDrainRooms: 0 },
+    });
+
+    observerShouldThrow = false;
+    expect(controller.startDrain()).toMatchObject({
+      changed: true,
+      status: { phase: "draining", drainStartedMonotonicMs: 5_001 },
+    });
+  });
+
+  it("keeps start and release atomic when an aggregate provider fails", () => {
+    const clock = fakeClock();
+    const manager = new RoomManager({ monotonicNow: clock.now });
+    manager.create("ホスト");
+    let connectionsShouldThrow = true;
+    const controller = new DrainController({
+      monotonicNow: clock.now,
+      currentConnections: () => {
+        if (connectionsShouldThrow) throw new Error("counts unavailable");
+        return {
+          webSocketConnections: 1,
+          attachedSessionConnections: 1,
+          pendingUpgrades: 0,
+        };
+      },
+      currentAggregate: (connections) =>
+        manager.aggregateSnapshot(GRACE_MS, connections),
+      beginDrainObservation: () =>
+        manager.createDrainAggregateObserver(GRACE_MS),
+    });
+
+    expect(() => controller.startDrain()).toThrow("counts unavailable");
+    connectionsShouldThrow = false;
+    expect(controller.status()).toMatchObject({
+      phase: "accepting",
+      drainStartedMonotonicMs: null,
+      aggregate: { abandonedDuringDrainRooms: 0 },
+    });
+    expect(controller.startDrain()).toMatchObject({
+      changed: true,
+      status: { phase: "draining" },
+    });
+
+    connectionsShouldThrow = true;
+    expect(() => controller.releaseDrain()).toThrow("counts unavailable");
+    connectionsShouldThrow = false;
+    expect(controller.status().phase).toBe("draining");
+    expect(controller.releaseDrain()).toMatchObject({
+      changed: true,
+      status: { phase: "accepting" },
+    });
+  });
+
   it("seals through status when time alone expires the last blocker", () => {
     const clock = fakeClock();
     const manager = new RoomManager({ monotonicNow: clock.now });

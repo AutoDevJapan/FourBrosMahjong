@@ -429,6 +429,7 @@ export class RoomManager {
     let code = randomRoomCode();
     while (this.rooms.has(code)) code = randomRoomCode();
     const name = normalizePlayerName(nameValue, "ホスト");
+    const observedAt = this.now();
     const player: RoomPlayer = {
       id: "p0",
       token: randomToken(),
@@ -436,7 +437,7 @@ export class RoomManager {
       connected: true,
       resumable: true,
       explicitKita,
-      lastSeenAt: this.now(),
+      lastSeenAt: observedAt,
     };
     const room: Room = {
       code,
@@ -454,7 +455,7 @@ export class RoomManager {
       drainFrozenPlayerIds: new Set(),
       hostTransition: null,
       departureNotice: null,
-      lastActivityAt: this.now(),
+      lastActivityAt: observedAt,
     };
     this.rooms.set(code, room);
     return { room, player };
@@ -473,6 +474,7 @@ export class RoomManager {
       PLAYER_IDS.find((candidate) => room.reusableSeatIds.has(candidate)) ??
       PLAYER_IDS.find((candidate) => !room.players.has(candidate));
     if (!id) return null;
+    const observedAt = this.now();
     if (room.reusableSeatIds.delete(id)) room.players.delete(id);
     const player: RoomPlayer = {
       id,
@@ -481,7 +483,7 @@ export class RoomManager {
       connected: true,
       resumable: true,
       explicitKita,
-      lastSeenAt: this.now(),
+      lastSeenAt: observedAt,
     };
     room.players.set(id, player);
     room.state = playerNameChanged(room.state, id, player.name);
@@ -514,7 +516,7 @@ export class RoomManager {
         message: `ホストが不在のため、${player.name}さんへホスト権限を引き継ぎました。`,
       };
     }
-    room.lastActivityAt = this.now();
+    room.lastActivityAt = observedAt;
     return { room, player };
   }
 
@@ -549,7 +551,9 @@ export class RoomManager {
       ![...room.players.values()].some((player) => player.connected)
     ) {
       const expiresAt = reconnectGraceExpiresAt(room, reconnectGraceMs);
-      if (expiresAt === null || this.now() >= expiresAt) return null;
+      const observedAt = this.now();
+      if (expiresAt === null || observedAt >= expiresAt) return null;
+      return this.restoreResumeSession(session, explicitKita, observedAt);
     }
     return this.restoreResumeSession(session, explicitKita);
   }
@@ -572,12 +576,13 @@ export class RoomManager {
   private restoreResumeSession(
     session: RoomSession,
     explicitKita: boolean,
+    observedAt: number = this.now(),
   ): RoomSession {
     const { room, player } = session;
     room.drainFrozenPlayerIds.delete(player.id);
     player.connected = true;
     player.explicitKita ||= explicitKita;
-    player.lastSeenAt = this.now();
+    player.lastSeenAt = observedAt;
     // `newGame` snapshots connected seats into the current half-game roster.
     // Do not promote a seat that was omitted from that roster on resume: doing
     // so would turn a disconnected seat back into a blocking human pending
@@ -603,15 +608,16 @@ export class RoomManager {
       room.hostId = player.id;
       room.hostTransition = null;
     }
-    room.lastActivityAt = this.now();
+    room.lastActivityAt = observedAt;
     return session;
   }
 
   touch(room: Room, player: RoomPlayer): void {
     if (!isCurrentPlayer(room, player)) return;
+    const observedAt = this.now();
     player.connected = true;
-    player.lastSeenAt = this.now();
-    room.lastActivityAt = this.now();
+    player.lastSeenAt = observedAt;
+    room.lastActivityAt = observedAt;
   }
 
   disconnect(room: Room, player: RoomPlayer): void {
@@ -629,8 +635,9 @@ export class RoomManager {
     freezeLastPlayingSeat: boolean,
   ): void {
     if (!isCurrentPlayer(room, player)) return;
+    const observedAt = this.now();
     player.connected = false;
-    player.lastSeenAt = this.now();
+    player.lastSeenAt = observedAt;
     const shouldFreeze =
       freezeLastPlayingSeat &&
       isDrainBlockingPhase(room.state.phase) &&
@@ -646,16 +653,17 @@ export class RoomManager {
     if (room.hostId === player.id) {
       transferHost(room, player, "disconnected");
     }
-    room.lastActivityAt = this.now();
+    room.lastActivityAt = observedAt;
   }
 
   /** 明示退出。旧tokenを失効させ、退出席を現局のhuman rosterから解放する。 */
   leave(room: Room, player: RoomPlayer): void {
     if (!isCurrentPlayer(room, player)) return;
+    const observedAt = this.now();
     player.connected = false;
     player.resumable = false;
     room.drainFrozenPlayerIds.delete(player.id);
-    player.lastSeenAt = this.now();
+    player.lastSeenAt = observedAt;
     room.humanPlayerIds.delete(player.id);
     const before = room.state;
     room.state = removeHumanPlayerIds(room.state, [player.id]);
@@ -668,7 +676,7 @@ export class RoomManager {
     // seat for reuse regardless of whether the player was host. This is
     // important when a guest inherited host authority after a handoff.
     room.reusableSeatIds.add(player.id);
-    room.lastActivityAt = this.now();
+    room.lastActivityAt = observedAt;
   }
 
   apply(
@@ -739,6 +747,7 @@ export class RoomManager {
         error: "新しい半荘を始められるのは対局終了後です。",
         room,
       };
+    const observedAt = this.now();
     const connectedPlayerIds = [...room.players.values()]
       .filter((roomPlayer) => roomPlayer.connected)
       .map((roomPlayer) => roomPlayer.id);
@@ -760,7 +769,7 @@ export class RoomManager {
     });
     room.departureNotice = null;
     room.version += 1;
-    room.lastActivityAt = this.now();
+    room.lastActivityAt = observedAt;
     return { ok: true, stateChanged: true, room };
   }
 
