@@ -346,7 +346,9 @@ test.describe("戦績のローカル保存・閲覧(#293)", () => {
     await list.locator("summary").first().click();
     await expect(list.getByRole("table")).toBeVisible();
     await expect(
-      list.getByRole("heading", { name: "ソシー内訳(素点+ウマ+祝儀)" }),
+      list.getByRole("heading", {
+        name: "ソシー内訳（素点＋ウマ・オカ＋役満祝儀）",
+      }),
     ).toBeVisible();
     // v1保存JSONにplayerIdを追加せず、既存のp0→p3配列順から肖像を復元する。
     await expectCharacterPortraits(list, 2);

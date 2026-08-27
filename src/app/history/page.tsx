@@ -13,6 +13,7 @@ import Link from "next/link";
 import { socialMetadata } from "@/app/_lib/metadata";
 import MatchHistoryList from "@/components/history/MatchHistoryList";
 import ScreenNavigation from "@/components/layout/ScreenNavigation";
+import { SOSHII_BREAKDOWN_HEADING } from "@/components/result/resultLabels";
 
 const description =
   "四兄弟麻雀でこの端末に保存された半荘ごとの戦績(最終順位・ソシー内訳)を新しい順に閲覧できます。";
@@ -42,7 +43,8 @@ export default function HistoryPage() {
           </Link>
           <h1 className="text-xl font-bold sm:text-2xl">戦績</h1>
           <p className="text-sm/6 text-foreground/70">
-            半荘が終了するたびに、最終順位とソシー内訳(素点+ウマ+祝儀)がこの端末に自動で保存されます。
+            半荘が終了するたびに、最終順位と
+            {SOSHII_BREAKDOWN_HEADING}がこの端末に自動で保存されます。
           </p>
         </header>
 

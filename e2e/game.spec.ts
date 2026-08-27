@@ -384,7 +384,7 @@ test.describe("対局画面(/game)", () => {
     await expect(page).toHaveURL((url) => url.pathname === "/game/result");
     await expect(page).toHaveTitle("対局結果 | 四兄弟麻雀");
     await expect(
-      page.getByRole("heading", { level: 1, name: "対局結果" }),
+      page.getByRole("heading", { level: 1, name: "半荘終了" }),
     ).toBeVisible();
     await expect(page.getByRole("heading", { name: "最終順位" })).toBeVisible();
     // 順位表とソシー内訳カードの双方で固定人物と原本由来portraitを対応させる。
@@ -482,7 +482,7 @@ test.describe("対局画面(/game)", () => {
     expect(response?.status()).toBe(200);
     await expect(page).toHaveTitle("対局結果 | 四兄弟麻雀");
     await expect(
-      page.getByRole("heading", { level: 1, name: "対局結果" }),
+      page.getByRole("heading", { level: 1, name: "半荘終了" }),
     ).toBeVisible();
     await expect(
       page.getByText(/まだ半荘の結果が確定していません/),

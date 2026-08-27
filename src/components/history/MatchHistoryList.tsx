@@ -33,6 +33,7 @@ import {
   subscribeHistory,
 } from "@/components/game/matchHistory";
 import RankingTable from "@/components/result/RankingTable";
+import { SOSHII_BREAKDOWN_HEADING } from "@/components/result/resultLabels";
 import SoshiiBreakdown from "@/components/result/SoshiiBreakdown";
 import { formatSignedSoshii } from "@/components/result/soshiiFormat";
 import { CHARACTER_PLAYER_IDS } from "@/domain/game/characters";
@@ -124,7 +125,7 @@ function HistoryItem({ entry }: { entry: MatchHistoryEntry }) {
           aria-label={`${finishedAt}のソシー内訳`}
           className="flex flex-col gap-2"
         >
-          <h2 className="text-sm font-semibold">ソシー内訳(素点+ウマ+祝儀)</h2>
+          <h2 className="text-sm font-semibold">{SOSHII_BREAKDOWN_HEADING}</h2>
           <div className="grid gap-3 sm:grid-cols-2">
             {ordered.map((player) => (
               // 名前は重複し得る(#291)ため、一意な rank を key にする。

@@ -1,15 +1,70 @@
 "use client";
 
-import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useSyncExternalStore } from "react";
 import { useGame } from "@/components/game/GameProvider";
+import {
+  DesignLinkButton,
+  DesignPageShell,
+  DesignPanel,
+} from "@/components/layout/DesignSurface";
 import ScreenNavigation from "@/components/layout/ScreenNavigation";
 import RankingTable from "@/components/result/RankingTable";
+import { SOSHII_BREAKDOWN_HEADING } from "@/components/result/resultLabels";
 import SoshiiBreakdown from "@/components/result/SoshiiBreakdown";
 
+type HistorySaveStatus = ReturnType<typeof useGame>["historySaveStatus"];
+
+/** 保存の成否を結果本体と分離して可視・読み上げの双方へ伝える。 */
+function HistorySaveNotice({ status }: { status: HistorySaveStatus }) {
+  if (status === "idle") return null;
+
+  if (status === "pending") {
+    return (
+      <div
+        role="status"
+        data-save-status="pending"
+        className="result-save-notice result-save-notice--pending"
+      >
+        <strong>戦績を保存しています…</strong>
+        <span>結果はこのまま確認できます。</span>
+      </div>
+    );
+  }
+
+  if (status === "saved") {
+    return (
+      <div
+        role="status"
+        data-save-status="saved"
+        className="result-save-notice result-save-notice--saved"
+      >
+        <strong>戦績を保存しました。</strong>
+        <span>この端末の戦績画面から、あとで見返せます。</span>
+      </div>
+    );
+  }
+
+  return (
+    <div
+      role="status"
+      data-save-status="failed"
+      className="result-save-notice result-save-notice--failed"
+    >
+      <strong>この端末に今回の戦績を保存できませんでした。</strong>
+      <span>
+        この画面を閉じる前に結果を確認し、ブラウザのストレージ設定や空き容量を確認してください。対局結果の表示と対局の継続には影響ありません。
+      </span>
+    </div>
+  );
+}
+
 /** `GameProvider` の確定結果を読み、結果表示と対局後の操作を提供する Client Component。 */
-export default function ResultPageClient() {
+export default function ResultPageClient({
+  fontVariableClassName,
+}: {
+  readonly fontVariableClassName: string;
+}) {
   const { view, controls, historySaveStatus } = useGame();
   const router = useRouter();
   // sessionStorage はクライアントでのみ復元される。SSR は未確定状態を描くため、初回
@@ -35,115 +90,122 @@ export default function ResultPageClient() {
   };
 
   return (
-    <div className="mx-auto min-h-screen w-full max-w-3xl p-4 sm:p-6">
+    <DesignPageShell className={`result-page ${fontVariableClassName}`}>
       {/* 本文は単一の <main> に収める(スペック5 5.2.6)。読み込み中・未確定・確定の
           いずれの分岐でも本文がランドマーク外に取り残されないよう、分岐の外側で包む。
           ページヘッダー(<h1>)も内側に置く。外に出すと <header> が banner ランドマークに
           なり、ルートごとにランドマーク構成が割れる(#431)。 */}
-      <main className="flex flex-col gap-6">
-        <header className="flex items-center justify-between gap-4">
-          <h1 className="text-xl font-bold sm:text-2xl">対局結果</h1>
-          <Link
-            href="/"
-            className="inline-flex min-h-11 items-center rounded-full border border-control-border px-3 py-1.5 text-sm hover:bg-foreground/5"
-          >
+      <main className="result-main">
+        <header className="result-header">
+          <DesignLinkButton href="/" className="result-back-link">
+            <span aria-hidden="true">←</span>
             ロビーへ戻る
-          </Link>
+          </DesignLinkButton>
+          <div className="result-heading-copy">
+            <p className="result-kicker">対局結果</p>
+            <h1 className="result-title">半荘終了</h1>
+            <p className="result-introduction">
+              最終順位と、確定したソシー内訳を確認できます。
+            </p>
+          </div>
         </header>
-        <ScreenNavigation currentPath="/game/result" showGameLink={false} />
+        <div className="result-screen-navigation">
+          <ScreenNavigation currentPath="/game/result" showGameLink={false} />
+        </div>
 
-        {!mounted ? (
-          <div
-            role="status"
-            className="flex min-h-40 items-center justify-center rounded-lg border border-foreground/15 p-6 text-sm text-foreground/70"
-          >
-            対局結果を読み込んでいます…
-          </div>
-        ) : result === null ? (
-          // 半荘が終了していない/結果未確定のまま直接アクセスされた場合のフォールバック(スペック6 6.8)。
-          <div className="flex flex-col items-start gap-4 rounded-lg border border-foreground/15 p-6">
-            <p className="text-sm text-foreground/70">
-              まだ半荘の結果が確定していません。対局を進めると、ここに最終順位とソシー内訳が表示されます。
-            </p>
-            <Link
-              href="/game"
-              className="inline-flex min-h-11 items-center rounded-full border border-control-border px-4 py-2 text-sm hover:bg-foreground/5"
-            >
-              対局画面へ
-            </Link>
-          </div>
-        ) : (
-          <>
-            {/* hydration 後の復元完了を、巨大な順位表を丸ごと再読させず簡潔に通知する。 */}
-            <p role="status" className="sr-only">
-              対局結果を読み込みました。
-            </p>
-            <section
-              aria-labelledby="ranking-heading"
-              className="flex flex-col gap-3"
-            >
-              <h2 id="ranking-heading" className="text-lg font-semibold">
-                最終順位
-              </h2>
-              <RankingTable players={result.players} />
-            </section>
-
-            <section
-              aria-labelledby="soshii-heading"
-              className="flex flex-col gap-3"
-            >
-              <h2 id="soshii-heading" className="text-lg font-semibold">
-                ソシー内訳(素点+ウマ+祝儀)
-              </h2>
-              <div className="grid gap-3 sm:grid-cols-2">
-                {orderedPlayers.map((player) => (
-                  // 名前は重複し得る(#291)ため、一意な rank を key にする。
-                  <SoshiiBreakdown key={player.rank} player={player} />
-                ))}
+        <DesignPanel className="result-panel">
+          {!mounted ? (
+            <div role="status" className="result-state-card">
+              <span className="result-state-mark" aria-hidden="true">
+                ◇
+              </span>
+              <div>
+                <strong>対局結果を読み込んでいます…</strong>
+                <p>保存された対局状態を確認しています。</p>
               </div>
-            </section>
-
-            {historySaveStatus === "failed" ? (
-              <div
-                role="status"
-                className="rounded-lg border border-danger bg-danger/5 p-4 text-sm"
-              >
-                <p className="font-semibold">
-                  この端末に今回の戦績を保存できませんでした。
+            </div>
+          ) : result === null ? (
+            // 半荘が終了していない/結果未確定のまま直接アクセスされた場合のフォールバック(スペック6 6.8)。
+            <div className="result-state-card result-state-card--empty">
+              <span className="result-state-mark" aria-hidden="true">
+                ◇
+              </span>
+              <div className="result-state-copy">
+                <strong>まだ半荘の結果が確定していません。</strong>
+                <p>
+                  対局を進めると、ここに最終順位とソシー内訳が表示されます。
                 </p>
-                <p className="mt-1 text-foreground/70">
-                  この画面を閉じる前に結果を確認し、ブラウザのストレージ設定や空き容量を確認してください。対局結果の表示と対局の継続には影響ありません。
-                </p>
+                <DesignLinkButton href="/game" className="result-state-link">
+                  対局画面へ
+                </DesignLinkButton>
               </div>
-            ) : null}
+            </div>
+          ) : (
+            <div className="result-confirmed">
+              {/* hydration 後の復元完了を、巨大な順位表を丸ごと再読させず簡潔に通知する。 */}
+              <p role="status" className="sr-only">
+                対局結果を読み込みました。
+              </p>
+              <section
+                aria-labelledby="ranking-heading"
+                className="result-section result-ranking-section"
+              >
+                <div className="result-section-heading">
+                  <span aria-hidden="true">01</span>
+                  <h2 id="ranking-heading">最終順位</h2>
+                </div>
+                <RankingTable players={result.players} variant="result" />
+              </section>
 
-            <nav
-              aria-label="対局後の導線"
-              className="mt-2 flex flex-wrap gap-3 border-t border-foreground/15 pt-6"
-            >
-              <button
-                type="button"
-                onClick={startNewGame}
-                className="inline-flex min-h-11 items-center rounded-full bg-foreground px-5 py-2 text-sm font-medium text-background hover:opacity-90"
+              <div className="result-divider" aria-hidden="true" />
+
+              <section
+                aria-labelledby="soshii-heading"
+                className="result-section result-soshii-section"
               >
-                もう一半荘
-              </button>
-              <Link
-                href="/history"
-                className="inline-flex min-h-11 items-center rounded-full border border-control-border px-5 py-2 text-sm hover:bg-foreground/5"
-              >
-                戦績を見る
-              </Link>
-              <Link
-                href="/"
-                className="inline-flex min-h-11 items-center rounded-full border border-control-border px-5 py-2 text-sm hover:bg-foreground/5"
-              >
-                ロビーへ戻る
-              </Link>
-            </nav>
-          </>
-        )}
+                <div className="result-section-heading">
+                  <span aria-hidden="true">02</span>
+                  <h2 id="soshii-heading">{SOSHII_BREAKDOWN_HEADING}</h2>
+                </div>
+                <div className="result-breakdown-grid">
+                  {orderedPlayers.map((player) => (
+                    // 名前は重複し得る(#291)ため、一意な rank を key にする。
+                    <SoshiiBreakdown
+                      key={player.rank}
+                      player={player}
+                      variant="result"
+                    />
+                  ))}
+                </div>
+              </section>
+
+              <HistorySaveNotice status={historySaveStatus} />
+
+              <nav aria-label="対局後の導線" className="result-actions">
+                <button
+                  type="button"
+                  onClick={startNewGame}
+                  className="result-action result-action--primary"
+                >
+                  もう一半荘
+                </button>
+                <DesignLinkButton
+                  href="/history"
+                  className="result-action result-action--secondary"
+                >
+                  戦績を見る
+                </DesignLinkButton>
+                <DesignLinkButton
+                  href="/"
+                  className="result-action result-action--secondary"
+                >
+                  ロビーへ戻る
+                </DesignLinkButton>
+              </nav>
+            </div>
+          )}
+        </DesignPanel>
       </main>
-    </div>
+    </DesignPageShell>
   );
 }

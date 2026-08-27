@@ -1243,7 +1243,7 @@ describe("OnlineLobby の終局結果導線", () => {
     expect(
       screen.getByRole("heading", {
         level: 3,
-        name: "ソシー内訳(素点+ウマ+祝儀)",
+        name: "ソシー内訳（素点＋ウマ・オカ＋役満祝儀）",
       }),
     ).toBeInTheDocument();
     expect(
@@ -1252,6 +1252,9 @@ describe("OnlineLobby の終局結果導線", () => {
     expect(
       screen.getByRole("button", { name: "新しい半荘を開始" }),
     ).toBeEnabled();
+    expect(screen.queryByText("優勝")).not.toBeInTheDocument();
+    expect(document.querySelector(".result-ranking-row")).toBeNull();
+    expect(document.querySelector(".result-breakdown-card")).toBeNull();
     expect(screen.queryByTestId("game-board")).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "対局画面へ戻る" }));
