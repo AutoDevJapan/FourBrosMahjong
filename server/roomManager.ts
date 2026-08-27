@@ -27,11 +27,14 @@ import {
   ROOM_CODE_ALPHABET,
   ROOM_CODE_LENGTH,
 } from "../src/lib/roomCode";
+import { ONLINE_DRAIN_RECONNECT_GRACE_MS } from "./maintenanceLimits";
 
 export { normalizeRoomCode } from "../src/lib/roomCode";
 
 const ROOM_TTL_MS = 60 * 60 * 1000;
 const MAX_ROOMS = 1_000;
+
+export { ONLINE_DRAIN_RECONNECT_GRACE_MS } from "./maintenanceLimits";
 
 const PLAYER_IDS: readonly PlayerId[] = ["p0", "p1", "p2", "p3"];
 
@@ -85,6 +88,8 @@ interface Room {
   hostId: PlayerId | null;
   /** 現局で人間席だったか。切断時にAIへ解放してもresumeで復元する。 */
   readonly humanPlayerIds: Set<PlayerId>;
+  /** Drain中に最後の接続として入力を凍結したseat。外部snapshotには出さない。 */
+  readonly drainFrozenPlayerIds: Set<PlayerId>;
   hostTransition: HostTransition | null;
   departureNotice: OnlineDepartureNotice | null;
   lastActivityAt: number;
@@ -99,12 +104,101 @@ export interface RoomSession {
   readonly player: RoomPlayer;
 }
 
+export type MonotonicClock = () => number;
+
+export interface RoomManagerOptions {
+  /** Durations only; callers must not use this value as a wall-clock timestamp. */
+  readonly monotonicNow?: MonotonicClock;
+}
+
+export interface ConnectionAggregateCounts {
+  /** Established WebSockets, including sockets without an attached session. */
+  readonly webSocketConnections: number;
+  /** Attached sockets; replacement races may count the same seat twice. */
+  readonly attachedSessionConnections: number;
+  /** HTTP upgrades reserved before they become established WebSockets. */
+  readonly pendingUpgrades: number;
+}
+
+/**
+ * Privacy-safe process aggregate. It deliberately contains no room identity,
+ * player name, resume token, network address, tile, or action data.
+ */
+export interface RoomManagerAggregateSnapshot
+  extends ConnectionAggregateCounts {
+  readonly retainedRooms: number;
+  readonly connectedRooms: number;
+  readonly blockingDrainRooms: number;
+  readonly reconnectGraceRooms: number;
+  readonly completedConnectedRooms: number;
+  readonly abandonedDuringDrainRooms: number;
+  readonly uniqueConnectedSeats: number;
+}
+
+export interface DrainAggregateObserver {
+  snapshot(
+    connections?: ConnectionAggregateCounts,
+  ): RoomManagerAggregateSnapshot;
+}
+
+interface DrainAggregateTracker {
+  readonly graceCandidates: Set<Room>;
+  readonly alreadyAbandoned: WeakSet<Room>;
+  abandonedDuringDrainRooms: number;
+}
+
+const EMPTY_CONNECTION_COUNTS: ConnectionAggregateCounts = Object.freeze({
+  webSocketConnections: 0,
+  attachedSessionConnections: 0,
+  pendingUpgrades: 0,
+});
+
 function isCurrentPlayer(room: Room, player: RoomPlayer): boolean {
   return room.players.get(player.id) === player && player.connected;
 }
 
-function now(): number {
-  return Date.now();
+function validateReconnectGraceMs(value: number): void {
+  if (
+    !Number.isSafeInteger(value) ||
+    value < ONLINE_DRAIN_RECONNECT_GRACE_MS.min ||
+    value > ONLINE_DRAIN_RECONNECT_GRACE_MS.max
+  ) {
+    throw new RangeError(
+      `reconnect grace must be an integer from ${ONLINE_DRAIN_RECONNECT_GRACE_MS.min} to ${ONLINE_DRAIN_RECONNECT_GRACE_MS.max} milliseconds`,
+    );
+  }
+}
+
+function validatedConnectionCounts(
+  value: ConnectionAggregateCounts,
+): ConnectionAggregateCounts {
+  for (const count of [
+    value.webSocketConnections,
+    value.attachedSessionConnections,
+    value.pendingUpgrades,
+  ]) {
+    if (!Number.isSafeInteger(count) || count < 0) {
+      throw new RangeError(
+        "connection aggregate counts must be non-negative integers",
+      );
+    }
+  }
+  return value;
+}
+
+function isDrainBlockingPhase(phase: EngineState["phase"]): boolean {
+  return phase === "playing" || phase === "roundEnd";
+}
+
+function reconnectGraceExpiresAt(room: Room, graceMs: number): number | null {
+  let latestSeenAt = Number.NEGATIVE_INFINITY;
+  let hasResumableSeat = false;
+  for (const player of room.players.values()) {
+    if (!player.resumable) continue;
+    hasResumableSeat = true;
+    latestSeenAt = Math.max(latestSeenAt, player.lastSeenAt);
+  }
+  return hasResumableSeat ? latestSeenAt + graceMs : null;
 }
 
 function randomToken(): string {
@@ -308,6 +402,23 @@ export function parseGameAction(value: unknown): GameAction | null {
 
 export class RoomManager {
   private readonly rooms = new Map<string, Room>();
+  private readonly monotonicNow: MonotonicClock;
+  private lastMonotonicNow = Number.NEGATIVE_INFINITY;
+
+  constructor(options: RoomManagerOptions = {}) {
+    this.monotonicNow = options.monotonicNow ?? Date.now;
+  }
+
+  private now(): number {
+    const sampled = this.monotonicNow();
+    if (!Number.isFinite(sampled) || sampled < 0) {
+      throw new RangeError(
+        "monotonic clock must return a finite non-negative value",
+      );
+    }
+    this.lastMonotonicNow = Math.max(this.lastMonotonicNow, sampled);
+    return this.lastMonotonicNow;
+  }
 
   create(nameValue: unknown, explicitKita = false): RoomSession {
     if (this.rooms.size >= MAX_ROOMS) {
@@ -318,6 +429,7 @@ export class RoomManager {
     let code = randomRoomCode();
     while (this.rooms.has(code)) code = randomRoomCode();
     const name = normalizePlayerName(nameValue, "ホスト");
+    const observedAt = this.now();
     const player: RoomPlayer = {
       id: "p0",
       token: randomToken(),
@@ -325,7 +437,7 @@ export class RoomManager {
       connected: true,
       resumable: true,
       explicitKita,
-      lastSeenAt: now(),
+      lastSeenAt: observedAt,
     };
     const room: Room = {
       code,
@@ -340,9 +452,10 @@ export class RoomManager {
       reusableSeatIds: new Set(),
       hostId: "p0",
       humanPlayerIds: new Set(["p0"]),
+      drainFrozenPlayerIds: new Set(),
       hostTransition: null,
       departureNotice: null,
-      lastActivityAt: now(),
+      lastActivityAt: observedAt,
     };
     this.rooms.set(code, room);
     return { room, player };
@@ -361,6 +474,7 @@ export class RoomManager {
       PLAYER_IDS.find((candidate) => room.reusableSeatIds.has(candidate)) ??
       PLAYER_IDS.find((candidate) => !room.players.has(candidate));
     if (!id) return null;
+    const observedAt = this.now();
     if (room.reusableSeatIds.delete(id)) room.players.delete(id);
     const player: RoomPlayer = {
       id,
@@ -369,7 +483,7 @@ export class RoomManager {
       connected: true,
       resumable: true,
       explicitKita,
-      lastSeenAt: now(),
+      lastSeenAt: observedAt,
     };
     room.players.set(id, player);
     room.state = playerNameChanged(room.state, id, player.name);
@@ -377,6 +491,21 @@ export class RoomManager {
     // `room.players` also retains disconnected seats for resume. Only the
     // newly assigned seat joins this half-game's human-input roster.
     addHumanPlayer(room, player);
+    const frozenPlayerIds = [...room.drainFrozenPlayerIds].filter(
+      (playerId) => room.players.get(playerId)?.connected !== true,
+    );
+    if (frozenPlayerIds.length > 0) {
+      // `join` is accepted only outside maintenance. If this room was frozen
+      // after its last connection dropped, hand those stale inputs back to AI
+      // after adding the new guest, so play advances to a connected human
+      // instead of deadlocking on the disconnected seat.
+      const before = room.state;
+      room.state = removeHumanPlayerIds(room.state, frozenPlayerIds);
+      if (room.state !== before) room.version += 1;
+      for (const playerId of frozenPlayerIds) {
+        room.drainFrozenPlayerIds.delete(playerId);
+      }
+    }
     if (
       room.hostId === null ||
       room.players.get(room.hostId)?.connected !== true
@@ -387,7 +516,7 @@ export class RoomManager {
         message: `ホストが不在のため、${player.name}さんへホスト権限を引き継ぎました。`,
       };
     }
-    room.lastActivityAt = now();
+    room.lastActivityAt = observedAt;
     return { room, player };
   }
 
@@ -395,6 +524,43 @@ export class RoomManager {
     codeValue: unknown,
     token: unknown,
     explicitKita = false,
+  ): RoomSession | null {
+    const session = this.findResumeSession(codeValue, token);
+    return session === null
+      ? null
+      : this.restoreResumeSession(session, explicitKita);
+  }
+
+  /**
+   * Resume path for an unsealed drain. A fully disconnected playing/roundEnd
+   * room may resume only inside its remaining grace; normal `resume` keeps its
+   * pre-drain behavior for callers in the accepting state.
+   */
+  resumeDuringDrain(
+    codeValue: unknown,
+    token: unknown,
+    reconnectGraceMs: number = ONLINE_DRAIN_RECONNECT_GRACE_MS.default,
+    explicitKita = false,
+  ): RoomSession | null {
+    validateReconnectGraceMs(reconnectGraceMs);
+    const session = this.findResumeSession(codeValue, token);
+    if (session === null) return null;
+    const { room } = session;
+    if (
+      isDrainBlockingPhase(room.state.phase) &&
+      ![...room.players.values()].some((player) => player.connected)
+    ) {
+      const expiresAt = reconnectGraceExpiresAt(room, reconnectGraceMs);
+      const observedAt = this.now();
+      if (expiresAt === null || observedAt >= expiresAt) return null;
+      return this.restoreResumeSession(session, explicitKita, observedAt);
+    }
+    return this.restoreResumeSession(session, explicitKita);
+  }
+
+  private findResumeSession(
+    codeValue: unknown,
+    token: unknown,
   ): RoomSession | null {
     const code = normalizeRoomCode(codeValue);
     if (code === null || typeof token !== "string") return null;
@@ -404,9 +570,19 @@ export class RoomManager {
       (candidate) => candidate.resumable && candidate.token === token,
     );
     if (!player) return null;
+    return { room, player };
+  }
+
+  private restoreResumeSession(
+    session: RoomSession,
+    explicitKita: boolean,
+    observedAt: number = this.now(),
+  ): RoomSession {
+    const { room, player } = session;
+    room.drainFrozenPlayerIds.delete(player.id);
     player.connected = true;
     player.explicitKita ||= explicitKita;
-    player.lastSeenAt = now();
+    player.lastSeenAt = observedAt;
     // `newGame` snapshots connected seats into the current half-game roster.
     // Do not promote a seat that was omitted from that roster on resume: doing
     // so would turn a disconnected seat back into a blocking human pending
@@ -432,36 +608,62 @@ export class RoomManager {
       room.hostId = player.id;
       room.hostTransition = null;
     }
-    room.lastActivityAt = now();
-    return { room, player };
+    room.lastActivityAt = observedAt;
+    return session;
   }
 
   touch(room: Room, player: RoomPlayer): void {
     if (!isCurrentPlayer(room, player)) return;
+    const observedAt = this.now();
     player.connected = true;
-    player.lastSeenAt = now();
-    room.lastActivityAt = now();
+    player.lastSeenAt = observedAt;
+    room.lastActivityAt = observedAt;
   }
 
   disconnect(room: Room, player: RoomPlayer): void {
+    this.disconnectPlayer(room, player, false);
+  }
+
+  /** Drain-only disconnect path: freeze the last active hand for bounded resume. */
+  disconnectDuringDrain(room: Room, player: RoomPlayer): void {
+    this.disconnectPlayer(room, player, true);
+  }
+
+  private disconnectPlayer(
+    room: Room,
+    player: RoomPlayer,
+    freezeLastPlayingSeat: boolean,
+  ): void {
     if (!isCurrentPlayer(room, player)) return;
+    const observedAt = this.now();
     player.connected = false;
-    player.lastSeenAt = now();
-    const before = room.state;
-    room.state = removeHumanPlayerIds(room.state, [player.id]);
-    if (room.state !== before) room.version += 1;
+    player.lastSeenAt = observedAt;
+    const shouldFreeze =
+      freezeLastPlayingSeat &&
+      isDrainBlockingPhase(room.state.phase) &&
+      firstConnectedPlayer(room, player.id) === null;
+    if (shouldFreeze) {
+      room.drainFrozenPlayerIds.add(player.id);
+    } else {
+      room.drainFrozenPlayerIds.delete(player.id);
+      const before = room.state;
+      room.state = removeHumanPlayerIds(room.state, [player.id]);
+      if (room.state !== before) room.version += 1;
+    }
     if (room.hostId === player.id) {
       transferHost(room, player, "disconnected");
     }
-    room.lastActivityAt = now();
+    room.lastActivityAt = observedAt;
   }
 
   /** 明示退出。旧tokenを失効させ、退出席を現局のhuman rosterから解放する。 */
   leave(room: Room, player: RoomPlayer): void {
     if (!isCurrentPlayer(room, player)) return;
+    const observedAt = this.now();
     player.connected = false;
     player.resumable = false;
-    player.lastSeenAt = now();
+    room.drainFrozenPlayerIds.delete(player.id);
+    player.lastSeenAt = observedAt;
     room.humanPlayerIds.delete(player.id);
     const before = room.state;
     room.state = removeHumanPlayerIds(room.state, [player.id]);
@@ -474,7 +676,7 @@ export class RoomManager {
     // seat for reuse regardless of whether the player was host. This is
     // important when a guest inherited host authority after a handoff.
     room.reusableSeatIds.add(player.id);
-    room.lastActivityAt = now();
+    room.lastActivityAt = observedAt;
   }
 
   apply(
@@ -486,7 +688,7 @@ export class RoomManager {
     if (!isCurrentPlayer(room, player)) {
       return { ok: false, error: "ルーム接続が無効です。", room };
     }
-    room.lastActivityAt = now();
+    room.lastActivityAt = this.now();
     if (expectedVersion !== room.version) {
       return {
         ok: false,
@@ -545,6 +747,7 @@ export class RoomManager {
         error: "新しい半荘を始められるのは対局終了後です。",
         room,
       };
+    const observedAt = this.now();
     const connectedPlayerIds = [...room.players.values()]
       .filter((roomPlayer) => roomPlayer.connected)
       .map((roomPlayer) => roomPlayer.id);
@@ -566,7 +769,7 @@ export class RoomManager {
     });
     room.departureNotice = null;
     room.version += 1;
-    room.lastActivityAt = now();
+    room.lastActivityAt = observedAt;
     return { ok: true, stateChanged: true, room };
   }
 
@@ -604,8 +807,147 @@ export class RoomManager {
     };
   }
 
+  /** Current aggregate without a drain epoch; abandoned count is always zero. */
+  aggregateSnapshot(
+    reconnectGraceMs: number = ONLINE_DRAIN_RECONNECT_GRACE_MS.default,
+    connections: ConnectionAggregateCounts = EMPTY_CONNECTION_COUNTS,
+  ): RoomManagerAggregateSnapshot {
+    validateReconnectGraceMs(reconnectGraceMs);
+    return this.buildAggregateSnapshot(
+      reconnectGraceMs,
+      validatedConnectionCounts(connections),
+      null,
+    );
+  }
+
+  /**
+   * Starts one drain epoch. The returned closure privately remembers which
+   * rooms entered grace and therefore can report a cumulative abandonment
+   * count without exposing room identifiers or mutable room objects.
+   */
+  createDrainAggregateObserver(
+    reconnectGraceMs: number = ONLINE_DRAIN_RECONNECT_GRACE_MS.default,
+  ): DrainAggregateObserver {
+    validateReconnectGraceMs(reconnectGraceMs);
+    const tracker: DrainAggregateTracker = {
+      graceCandidates: new Set(),
+      alreadyAbandoned: new WeakSet(),
+      abandonedDuringDrainRooms: 0,
+    };
+    const observedAt = this.now();
+    for (const room of this.rooms.values()) {
+      if (!isDrainBlockingPhase(room.state.phase)) continue;
+      if ([...room.players.values()].some((player) => player.connected)) {
+        continue;
+      }
+      const expiresAt = reconnectGraceExpiresAt(room, reconnectGraceMs);
+      if (expiresAt === null) continue;
+      if (observedAt < expiresAt) tracker.graceCandidates.add(room);
+      else tracker.alreadyAbandoned.add(room);
+    }
+    return Object.freeze({
+      snapshot: (
+        connections: ConnectionAggregateCounts = EMPTY_CONNECTION_COUNTS,
+      ) =>
+        this.buildAggregateSnapshot(
+          reconnectGraceMs,
+          validatedConnectionCounts(connections),
+          tracker,
+        ),
+    });
+  }
+
+  private buildAggregateSnapshot(
+    reconnectGraceMs: number,
+    connections: ConnectionAggregateCounts,
+    tracker: DrainAggregateTracker | null,
+  ): RoomManagerAggregateSnapshot {
+    const observedAt = this.now();
+    const retainedRoomSet = new Set(this.rooms.values());
+    let connectedRooms = 0;
+    let blockingDrainRooms = 0;
+    let reconnectGraceRooms = 0;
+    let completedConnectedRooms = 0;
+    let uniqueConnectedSeats = 0;
+
+    if (tracker !== null) {
+      // A sweep can remove a grace candidate before the next timer/status
+      // tick. Reconcile the privately retained object first so expiry is still
+      // counted exactly once, then release the strong Set reference.
+      for (const room of tracker.graceCandidates) {
+        if (retainedRoomSet.has(room)) continue;
+        tracker.graceCandidates.delete(room);
+        const expiresAt = reconnectGraceExpiresAt(room, reconnectGraceMs);
+        if (
+          isDrainBlockingPhase(room.state.phase) &&
+          ![...room.players.values()].some((player) => player.connected) &&
+          expiresAt !== null &&
+          observedAt >= expiresAt &&
+          !tracker.alreadyAbandoned.has(room)
+        ) {
+          tracker.alreadyAbandoned.add(room);
+          tracker.abandonedDuringDrainRooms += 1;
+        }
+      }
+    }
+
+    for (const room of retainedRoomSet) {
+      const connectedSeats = [...room.players.values()].filter(
+        (player) => player.connected,
+      ).length;
+      const hasConnectedSeat = connectedSeats > 0;
+      uniqueConnectedSeats += connectedSeats;
+      if (hasConnectedSeat) connectedRooms += 1;
+      if (hasConnectedSeat && room.state.phase === "gameEnd") {
+        completedConnectedRooms += 1;
+      }
+
+      if (!isDrainBlockingPhase(room.state.phase)) {
+        tracker?.graceCandidates.delete(room);
+        continue;
+      }
+      if (hasConnectedSeat) {
+        blockingDrainRooms += 1;
+        tracker?.graceCandidates.delete(room);
+        continue;
+      }
+
+      const expiresAt = reconnectGraceExpiresAt(room, reconnectGraceMs);
+      if (expiresAt === null) {
+        tracker?.graceCandidates.delete(room);
+        continue;
+      }
+      if (observedAt < expiresAt) {
+        blockingDrainRooms += 1;
+        reconnectGraceRooms += 1;
+        tracker?.graceCandidates.add(room);
+        continue;
+      }
+      if (
+        tracker?.graceCandidates.delete(room) &&
+        !tracker.alreadyAbandoned.has(room)
+      ) {
+        tracker.alreadyAbandoned.add(room);
+        tracker.abandonedDuringDrainRooms += 1;
+      }
+    }
+
+    return Object.freeze({
+      retainedRooms: this.rooms.size,
+      connectedRooms,
+      blockingDrainRooms,
+      reconnectGraceRooms,
+      completedConnectedRooms,
+      abandonedDuringDrainRooms: tracker?.abandonedDuringDrainRooms ?? 0,
+      webSocketConnections: connections.webSocketConnections,
+      attachedSessionConnections: connections.attachedSessionConnections,
+      uniqueConnectedSeats,
+      pendingUpgrades: connections.pendingUpgrades,
+    });
+  }
+
   sweep(): void {
-    const cutoff = now() - ROOM_TTL_MS;
+    const cutoff = this.now() - ROOM_TTL_MS;
     for (const [code, room] of this.rooms) {
       if (room.lastActivityAt < cutoff) this.rooms.delete(code);
     }
