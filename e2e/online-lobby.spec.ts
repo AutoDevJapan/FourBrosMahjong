@@ -374,7 +374,7 @@ test.describe("オンラインロビーの接続失敗復帰", () => {
     await expect(
       page.getByRole("heading", {
         level: 3,
-        name: "ソシー内訳(素点+ウマ+祝儀)",
+        name: "ソシー内訳（素点＋ウマ・オカ＋役満祝儀）",
       }),
     ).toBeVisible();
     const resultA11y = await new AxeBuilder({ page }).include("main").analyze();

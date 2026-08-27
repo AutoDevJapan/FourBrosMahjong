@@ -118,8 +118,8 @@ export const SCREENS: readonly NonTextContrastScreen[] = [
   },
   {
     path: "/game/result",
-    name: "対局結果",
-    heading: "対局結果",
+    name: "半荘終了",
+    heading: "半荘終了",
     // `ResultPageClient` の hydration 後は「未確定」「確定」に割れるため、両分岐の目印を
     // `or` で束ねる(「読み込み中」プレースホルダにはどちらも現れない)。
     clientReady: (page) =>

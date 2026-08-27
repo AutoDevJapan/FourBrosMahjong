@@ -14,6 +14,7 @@ import { useGame } from "@/components/game/GameProvider";
 import type { GameResultView } from "@/components/game/types";
 import ScreenNavigation from "@/components/layout/ScreenNavigation";
 import RankingTable from "@/components/result/RankingTable";
+import { SOSHII_BREAKDOWN_HEADING } from "@/components/result/resultLabels";
 import SoshiiBreakdown from "@/components/result/SoshiiBreakdown";
 import {
   limitPlayerName,
@@ -351,7 +352,7 @@ function OnlineResultView({
       </section>
       <section aria-labelledby="online-result-soshii-heading">
         <h3 id="online-result-soshii-heading" className="text-lg font-semibold">
-          ソシー内訳(素点+ウマ+祝儀)
+          {SOSHII_BREAKDOWN_HEADING}
         </h3>
         <div className="grid gap-3 sm:grid-cols-2">
           {orderedPlayers.map((player) => (

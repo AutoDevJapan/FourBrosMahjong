@@ -1,14 +1,22 @@
-import { render, screen, within } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import { renderToString } from "react-dom/server";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { walkToGameEnd } from "@/components/game/finishedGameFixture";
-import { GameProvider } from "@/components/game/GameProvider";
+import {
+  GameContext,
+  type GameContextValue,
+  GameProvider,
+} from "@/components/game/GameProvider";
+import { selectView } from "@/components/game/gameView";
 import { createGame, type EngineState } from "@/domain/game/engine";
 import ResultPage from "./page";
+import ResultPageClient from "./ResultPageClient";
+
+const { routerReplace } = vi.hoisted(() => ({ routerReplace: vi.fn() }));
 
 // App Router の useRouter を jsdom 用にスタブ。
 vi.mock("next/navigation", () => ({
-  useRouter: () => ({ push: vi.fn() }),
+  useRouter: () => ({ push: vi.fn(), replace: routerReplace }),
 }));
 
 /** 実エンジンで1半荘を完走させ、確定結果を持つ状態を返す(決定的)。 */
@@ -16,7 +24,42 @@ function finishedGame(seed = 2024): EngineState {
   return walkToGameEnd(seed).state;
 }
 
+function resultContext(
+  historySaveStatus: GameContextValue["historySaveStatus"],
+  overrides: Partial<GameContextValue> = {},
+): GameContextValue {
+  const state = finishedGame();
+  const noop = vi.fn();
+  return {
+    playerId: "p0",
+    isHost: true,
+    view: selectView(state),
+    phase: state.phase,
+    pending: state.pending,
+    roundSummary: state.lastRound,
+    historySaveStatus,
+    controls: {
+      discard: noop,
+      tsumogiri: noop,
+      riichi: noop,
+      tsumo: noop,
+      ron: noop,
+      pon: noop,
+      kan: noop,
+      kita: noop,
+      ankan: noop,
+      kakan: noop,
+      passRon: noop,
+      nextRound: noop,
+      newGame: noop,
+    },
+    ...overrides,
+  };
+}
+
 describe("/game/result page (spec 6.2 / 6.6)", () => {
+  beforeEach(() => routerReplace.mockClear());
+
   it("SSR/hydration 待ちは未確定と誤案内せず、読み込み状態を表明する(issue #235)", () => {
     const html = renderToString(
       <GameProvider initialGame={finishedGame()}>
@@ -27,7 +70,7 @@ describe("/game/result page (spec 6.2 / 6.6)", () => {
     expect(html).toContain("対局結果を読み込んでいます…");
     expect(html).toContain('role="status"');
     expect(html).not.toContain("まだ半荘の結果が確定していません");
-    expect(html).not.toContain("最終順位");
+    expect(html).not.toContain('id="ranking-heading"');
   });
 
   it("GameProvider の確定結果(実精算)から順位表とソシー内訳を描画する", () => {
@@ -38,7 +81,13 @@ describe("/game/result page (spec 6.2 / 6.6)", () => {
     );
 
     expect(
-      screen.getByRole("heading", { name: "対局結果" }),
+      screen.getByRole("heading", { level: 1, name: "半荘終了" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("heading", {
+        level: 2,
+        name: "ソシー内訳（素点＋ウマ・オカ＋役満祝儀）",
+      }),
     ).toBeInTheDocument();
     expect(
       screen.getByRole("heading", { name: "最終順位" }),
@@ -50,7 +99,7 @@ describe("/game/result page (spec 6.2 / 6.6)", () => {
     expect(screen.getAllByText("1位").length).toBeGreaterThan(0);
     // ソシー内訳セクションは自家(粗悪品)のリージョンを持つ。
     expect(
-      screen.getByRole("region", { name: "粗悪品のソシー内訳" }),
+      screen.getByRole("region", { name: /粗悪品のソシー内訳$/ }),
     ).toBeInTheDocument();
   });
 
@@ -89,6 +138,70 @@ describe("/game/result page (spec 6.2 / 6.6)", () => {
     for (const link of lobbyLinks) {
       expect(link).toHaveAttribute("href", "/");
     }
+  });
+
+  it.each([
+    ["pending", "戦績を保存しています…"],
+    ["saved", "戦績を保存しました。"],
+    ["failed", "この端末に今回の戦績を保存できませんでした。"],
+  ] as const)(
+    "戦績の保存状態 %s を可視かつstatusとして表示する",
+    (status, message) => {
+      render(
+        <GameContext.Provider value={resultContext(status)}>
+          <ResultPageClient fontVariableClassName="test-font" />
+        </GameContext.Provider>,
+      );
+
+      const notice = screen.getByText(message).closest('[role="status"]');
+      expect(notice).toHaveAttribute("data-save-status", status);
+    },
+  );
+
+  it("もう一半荘は新規対局を作って履歴をreplaceする(#353)", () => {
+    const newGame = vi.fn();
+    const context = resultContext("saved");
+    render(
+      <GameContext.Provider
+        value={{
+          ...context,
+          controls: { ...context.controls, newGame },
+        }}
+      >
+        <ResultPageClient fontVariableClassName="test-font" />
+      </GameContext.Provider>,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "もう一半荘" }));
+    expect(newGame).toHaveBeenCalledOnce();
+    expect(routerReplace).toHaveBeenCalledWith("/game");
+  });
+
+  it("長い重複名でも4人の順位・ID対応を保持する", () => {
+    const context = resultContext("saved");
+    const duplicateName = "同名の長いプレイヤー名";
+    const players = context.view.result?.players.map((player) => ({
+      ...player,
+      name: duplicateName,
+    }));
+    if (players === undefined) throw new Error("確定結果がない");
+
+    render(
+      <GameContext.Provider
+        value={{
+          ...context,
+          view: { ...context.view, result: { players } },
+        }}
+      >
+        <ResultPageClient fontVariableClassName="test-font" />
+      </GameContext.Provider>,
+    );
+
+    expect(screen.getAllByText(duplicateName)).toHaveLength(8);
+    expect(document.querySelectorAll("[data-character-id]")).not.toHaveLength(
+      0,
+    );
+    expect(document.querySelectorAll("tr[data-rank]")).toHaveLength(4);
   });
 
   /**

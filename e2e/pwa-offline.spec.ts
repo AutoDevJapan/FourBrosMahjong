@@ -1,4 +1,5 @@
 import { expect, test } from "@playwright/test";
+import { walkToGameEnd } from "@/components/game/finishedGameFixture";
 import { visibleHand } from "./helpers/gameDriver";
 
 /**
@@ -16,7 +17,7 @@ test.describe("PWAオフライン動作(#292)", () => {
     "service worker は production ビルドのみ有効(E2E_PROD=1 で実行)",
   );
 
-  test("初回登録後に追加のオンライン再読込みなしで/game・/online・/rulesをオフライン起動できる(#506/#701/#712)", async ({
+  test("初回登録後に追加のオンライン再読込みなしで/game・/online・/rules・/game/resultをオフライン起動できる(#506/#701/#712)", async ({
     page,
     context,
   }) => {
@@ -99,6 +100,31 @@ test.describe("PWAオフライン動作(#292)", () => {
       "grid",
     );
     await offlineRulesPage.close();
+
+    // Result固有CSSもroute chunkのままprecacheされ、終局journalを復元して操作できる。
+    const offlineResultPage = await context.newPage();
+    await offlineResultPage.addInitScript(
+      (raw) => {
+        if (sessionStorage.getItem("four-bros-mahjong.game.v3") === null) {
+          sessionStorage.setItem("four-bros-mahjong.game.v3", raw);
+        }
+      },
+      JSON.stringify(walkToGameEnd(1).journal),
+    );
+    await offlineResultPage.goto("/game/result");
+    await expect(
+      offlineResultPage.getByRole("heading", { name: "半荘終了" }),
+    ).toBeVisible();
+    await expect(offlineResultPage.locator(".result-ranking-table")).toHaveCSS(
+      "table-layout",
+      "fixed",
+    );
+    await offlineResultPage.getByRole("button", { name: "もう一半荘" }).click();
+    await expect(offlineResultPage).toHaveURL(/\/game$/);
+    await expect(
+      offlineResultPage.locator('[data-phase="playing"]').first(),
+    ).toBeVisible();
+    await offlineResultPage.close();
 
     // SSR表示だけの偽陽性ではなく、hydrate済みのイベントハンドラと
     // sessionStorageジャーナルがオフラインでも実際に進行することを固定する。

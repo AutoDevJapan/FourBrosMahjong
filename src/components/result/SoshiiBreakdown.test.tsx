@@ -15,9 +15,12 @@ const player: ResultPlayerView = {
 describe("SoshiiBreakdown (spec 6.7 / 6.8)", () => {
   it("shows the three soshii line items (rawScore / uma / bonus) and the total", () => {
     render(<SoshiiBreakdown player={player} />);
-    expect(screen.getByText("素点")).toBeInTheDocument();
-    expect(screen.getByText("ウマ")).toBeInTheDocument();
-    expect(screen.getByText("祝儀")).toBeInTheDocument();
+    expect(
+      screen.getByText("素点（最終持ち点−返し40,000）"),
+    ).toBeInTheDocument();
+    expect(screen.getByText("ウマ・オカ")).toBeInTheDocument();
+    expect(screen.getByText("役満祝儀")).toBeInTheDocument();
+    expect(screen.getByText("（1位はオカ20,000を含む）")).toBeInTheDocument();
     expect(screen.getByText("ソシー合計")).toBeInTheDocument();
 
     expect(screen.getByText("+45,000")).toBeInTheDocument();
@@ -48,7 +51,19 @@ describe("SoshiiBreakdown (spec 6.7 / 6.8)", () => {
   it("labels the section by the player name for assistive tech", () => {
     render(<SoshiiBreakdown player={player} />);
     expect(
-      screen.getByRole("region", { name: "あなたのソシー内訳" }),
+      screen.getByRole("region", { name: "1位 あなたのソシー内訳" }),
+    ).toBeInTheDocument();
+  });
+
+  it("重複名でも順位を含む一意なlandmark名を持つ", () => {
+    const { rerender } = render(<SoshiiBreakdown player={player} />);
+    expect(
+      screen.getByRole("region", { name: "1位 あなたのソシー内訳" }),
+    ).toBeInTheDocument();
+
+    rerender(<SoshiiBreakdown player={{ ...player, rank: 2 }} />);
+    expect(
+      screen.getByRole("region", { name: "2位 あなたのソシー内訳" }),
     ).toBeInTheDocument();
   });
 });

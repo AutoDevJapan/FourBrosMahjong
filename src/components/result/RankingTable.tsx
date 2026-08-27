@@ -23,9 +23,9 @@ export default function RankingTable({ players }: RankingTableProps) {
   const ordered = [...players].sort((a, b) => a.rank - b.rank);
 
   return (
-    <table className="w-full border-collapse text-left text-sm">
+    <table className="result-ranking-table w-full border-collapse text-left text-sm">
       <caption className="sr-only">最終順位とソシー合計</caption>
-      <thead>
+      <thead className="result-ranking-head">
         <tr className="border-b border-foreground/20 text-foreground/70">
           <th scope="col" className="py-2 pr-3 font-medium">
             順位
@@ -46,29 +46,31 @@ export default function RankingTable({ players }: RankingTableProps) {
             // 対局者名はユーザー設定で重複し得る(#291)ため一意な rank を key にする。
             <tr
               key={player.rank}
+              data-rank={player.rank}
               data-character-id={player.playerId}
               style={
                 player.playerId
                   ? characterAccentStyle(player.playerId)
                   : undefined
               }
-              className="border-b border-foreground/10"
+              className={`result-ranking-row border-b border-foreground/10${isTop ? " result-ranking-row--winner" : ""}`}
             >
               <th
                 scope="row"
-                className="py-2 pr-3 font-normal whitespace-nowrap"
+                className="result-ranking-rank py-2 pr-3 font-normal whitespace-nowrap"
               >
-                <span className="inline-flex items-center gap-1">
+                <span className="result-rank-group inline-flex items-center gap-1">
+                  <span className="result-rank-medal" aria-hidden="true">
+                    {player.rank}
+                  </span>
+                  <span className="result-rank-text">{player.rank}位</span>
                   {isTop ? (
-                    <span aria-hidden="true" title="トップ">
-                      👑
-                    </span>
+                    <span className="result-winner-label">優勝</span>
                   ) : null}
-                  <span>{player.rank}位</span>
                 </span>
               </th>
-              <td className="py-2 pr-3">
-                <span className="inline-flex items-center gap-2">
+              <td className="result-ranking-player py-2 pr-3">
+                <span className="result-ranking-player-inner inline-flex items-center gap-2">
                   {player.playerId ? (
                     <CharacterPortrait playerId={player.playerId} />
                   ) : null}
@@ -77,7 +79,7 @@ export default function RankingTable({ players }: RankingTableProps) {
                   </span>
                 </span>
               </td>
-              <td className="py-2 text-right font-mono tabular-nums">
+              <td className="result-ranking-total py-2 text-right font-mono tabular-nums">
                 <span aria-hidden="true">{total.display}</span>
                 <span className="sr-only">{total.srLabel}</span>
               </td>

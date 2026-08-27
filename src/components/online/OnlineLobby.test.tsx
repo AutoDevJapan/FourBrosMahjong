@@ -1243,7 +1243,7 @@ describe("OnlineLobby の終局結果導線", () => {
     expect(
       screen.getByRole("heading", {
         level: 3,
-        name: "ソシー内訳(素点+ウマ+祝儀)",
+        name: "ソシー内訳（素点＋ウマ・オカ＋役満祝儀）",
       }),
     ).toBeInTheDocument();
     expect(

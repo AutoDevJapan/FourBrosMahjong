@@ -6,8 +6,18 @@
  * ブラウザタブや履歴でも結果画面を一意に識別できる(issue #166)。
  */
 import type { Metadata } from "next";
+import { Yuji_Syuku } from "next/font/google";
 import { socialMetadata } from "@/app/_lib/metadata";
 import ResultPageClient from "./ResultPageClient";
+
+// Phase B5画面だけに筆文字を配信し、対局本体や他routeのfont payloadへ波及させない。
+const yujiSyuku = Yuji_Syuku({
+  variable: "--font-yuji-syuku",
+  weight: "400",
+  subsets: ["latin"],
+  display: "swap",
+  preload: false,
+});
 
 const description =
   "四兄弟麻雀の半荘終了後に、最終順位とソシー内訳を確認する対局結果画面です。";
@@ -23,5 +33,5 @@ export const metadata: Metadata = {
 };
 
 export default function ResultPage() {
-  return <ResultPageClient />;
+  return <ResultPageClient fontVariableClassName={yujiSyuku.variable} />;
 }

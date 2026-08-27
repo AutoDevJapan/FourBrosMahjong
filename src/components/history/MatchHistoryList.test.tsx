@@ -124,7 +124,7 @@ describe("MatchHistoryList (#293)", () => {
     const opened = within(items[0] as HTMLElement);
     expect(opened.getByRole("table")).toBeInTheDocument();
     expect(
-      opened.getByRole("region", { name: "四郎のソシー内訳" }),
+      opened.getByRole("region", { name: /四郎のソシー内訳$/ }),
     ).toBeInTheDocument();
   });
 

@@ -8,6 +8,7 @@ describe("Issue #712 design route scope", () => {
     const settingsPage = readFileSync("src/app/settings/page.tsx", "utf8");
     const rulesPage = readFileSync("src/app/rules/page.tsx", "utf8");
     const gamePage = readFileSync("src/app/game/page.tsx", "utf8");
+    const resultPage = readFileSync("src/app/game/result/page.tsx", "utf8");
 
     expect(rootLayout).not.toContain("Yuji_Syuku");
     expect(rootLayout).not.toContain("--font-yuji-syuku");
@@ -34,6 +35,13 @@ describe("Issue #712 design route scope", () => {
     expect(gamePage).toContain('weight: "400"');
     expect(gamePage).toContain("preload: false");
     expect(gamePage).toContain("${yujiSyuku.variable}");
+    expect(resultPage).toContain(
+      'import { Yuji_Syuku } from "next/font/google"',
+    );
+    expect(resultPage).toContain('variable: "--font-yuji-syuku"');
+    expect(resultPage).toContain('weight: "400"');
+    expect(resultPage).toContain("preload: false");
+    expect(resultPage).toContain("fontVariableClassName={yujiSyuku.variable}");
   });
 
   it("settings固有styleをroot stylesheetへ載せず、settings routeだけから読む", () => {

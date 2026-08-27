@@ -35,6 +35,7 @@ describe("RankingTable (spec 6.7)", () => {
   it("renders each player's rank as text (not color-only) and the soshii total", () => {
     render(<RankingTable players={players} />);
     expect(screen.getByText("1位")).toBeInTheDocument();
+    expect(screen.getByText("優勝")).toBeInTheDocument();
     expect(screen.getByText("3位")).toBeInTheDocument();
     expect(screen.getByText("4位")).toBeInTheDocument();
     // 首位のソシー合計(符号付き)。
