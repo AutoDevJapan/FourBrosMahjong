@@ -196,9 +196,18 @@ async function probeHealth(baseUrl, timeoutMs) {
  * Deliberately do not call `socket.write()` or WebSocket APIs: no application
  * frame (including a Close frame) is sent to the target.
  */
-async function probeUpgrade(baseUrl, origin, timeoutMs) {
-  const target = new URL("/ws", baseUrl);
+function createUpgradeRequest(target, options) {
   const request = target.protocol === "https:" ? httpsRequest : httpRequest;
+  return request(options);
+}
+
+export async function probeUpgrade(
+  baseUrl,
+  origin,
+  timeoutMs,
+  requestFactory = createUpgradeRequest,
+) {
+  const target = new URL("/ws", baseUrl);
   const startedAt = new Date().toISOString();
 
   return new Promise((resolveProbe) => {
@@ -217,7 +226,7 @@ async function probeUpgrade(baseUrl, origin, timeoutMs) {
       "Sec-WebSocket-Version": "13",
       ...(origin === undefined ? {} : { Origin: origin }),
     };
-    const upgradeRequest = request({
+    const upgradeRequest = requestFactory(target, {
       protocol: target.protocol,
       hostname: target.hostname,
       port: target.port,
@@ -228,7 +237,7 @@ async function probeUpgrade(baseUrl, origin, timeoutMs) {
     });
     timer = setTimeout(() => {
       settle({ statusCode: null, error: "timeout" });
-      upgradeRequest.destroy();
+      upgradeRequest.destroy(new Error("probe timeout"));
     }, timeoutMs);
     upgradeRequest.once("upgrade", (response, socket) => {
       const statusCode = response.statusCode ?? 101;

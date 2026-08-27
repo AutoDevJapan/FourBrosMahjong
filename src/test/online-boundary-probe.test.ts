@@ -1,9 +1,12 @@
+import { EventEmitter } from "node:events";
+import type { ClientRequest } from "node:http";
 import { createServer, type Server } from "node:http";
 import type { Socket } from "node:net";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   main,
   parseProbeArguments,
+  probeUpgrade,
   runBoundaryProbe,
 } from "../../scripts/probe-online-boundary.mjs";
 
@@ -288,5 +291,23 @@ describe("online boundary probe", () => {
       statusCode: null,
       error: "timeout",
     });
+  });
+
+  it("destroys a timed-out request transport before returning evidence", async () => {
+    const transport = new EventEmitter() as ClientRequest;
+    transport.end = vi.fn();
+    transport.destroy = vi.fn();
+
+    const evidence = await probeUpgrade(
+      "http://online.local",
+      ALLOWED_ORIGIN,
+      100,
+      () => transport,
+    );
+
+    expect(evidence).toMatchObject({ statusCode: null, error: "timeout" });
+    expect(transport.end).toHaveBeenCalledOnce();
+    expect(transport.destroy).toHaveBeenCalledOnce();
+    expect(transport.destroy).toHaveBeenCalledWith(expect.any(Error));
   });
 });
