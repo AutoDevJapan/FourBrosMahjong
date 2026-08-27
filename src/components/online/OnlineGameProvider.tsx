@@ -38,6 +38,7 @@ interface OnlineGameProviderProps {
   readonly children: React.ReactNode;
   readonly socket: WebSocket | null;
   readonly snapshot: OnlineSnapshot;
+  readonly newGameDisabled?: boolean;
   readonly onSendError?: (message: string) => void;
 }
 
@@ -58,6 +59,7 @@ export default function OnlineGameProvider({
   children,
   socket,
   snapshot,
+  newGameDisabled = false,
   onSendError,
 }: OnlineGameProviderProps) {
   const { playerId, isHost } = useMemo(
@@ -120,7 +122,7 @@ export default function OnlineGameProvider({
         sendPlayerAction({ type: "nextRound" }, playerId);
       },
       newGame: () => {
-        if (!isHost) return;
+        if (!isHost || newGameDisabled) return;
         if (socket?.readyState !== WebSocket.OPEN) {
           onSendError?.(
             "オンラインサーバーとの接続が切れています。再接続を待っています。",
@@ -132,6 +134,7 @@ export default function OnlineGameProvider({
     }),
     [
       isHost,
+      newGameDisabled,
       onSendError,
       playerId,
       sendPlayerAction,

@@ -9,6 +9,7 @@ interface OnlineTestSocket {
   fail(): void;
   open(): void;
   message(value: unknown): void;
+  serverClose(code: number, reason?: string): void;
 }
 
 export interface OnlineTestWindow extends Window {
@@ -85,9 +86,16 @@ export async function installWebSocketStub(page: Page): Promise<void> {
       }
 
       close(): void {
+        this.serverClose(1000);
+      }
+
+      serverClose(code: number, reason = ""): void {
         if (this.readyState === TestWebSocket.CLOSED) return;
         this.readyState = TestWebSocket.CLOSED;
-        this.dispatch("close");
+        this.dispatch(
+          "close",
+          new CloseEvent("close", { code, reason, wasClean: true }),
+        );
       }
 
       fail(): void {

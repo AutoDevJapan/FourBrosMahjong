@@ -142,6 +142,37 @@ describe("OnlineGameProvider", () => {
     expect(send).not.toHaveBeenCalled();
   });
 
+  it("maintenance中はhostのnewGameだけを送信せず、現在の半荘のactionとnextRoundを維持する", async () => {
+    const send = vi.fn();
+    const socket = { readyState: 1, send } as unknown as WebSocket;
+    render(
+      <OnlineGameProvider
+        socket={socket}
+        snapshot={snapshotFixture()}
+        newGameDisabled
+      >
+        <ActionProbe />
+        <PermissionProbe />
+      </OnlineGameProvider>,
+    );
+
+    await userEvent.click(screen.getByRole("button", { name: "打牌" }));
+    await userEvent.click(screen.getByRole("button", { name: "次の局へ" }));
+    await userEvent.click(
+      screen.getByRole("button", { name: "新しい半荘を開始" }),
+    );
+
+    expect(send).toHaveBeenCalledTimes(2);
+    expect(JSON.parse(send.mock.calls[0][0] as string)).toMatchObject({
+      type: "action",
+      action: { type: "discard" },
+    });
+    expect(JSON.parse(send.mock.calls[1][0] as string)).toMatchObject({
+      type: "action",
+      action: { type: "nextRound" },
+    });
+  });
+
   it("uses the shared safe normalizer for configured WebSocket URLs", () => {
     vi.stubEnv(
       "NEXT_PUBLIC_ONLINE_WS_URL",
