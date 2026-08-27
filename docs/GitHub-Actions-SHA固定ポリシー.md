@@ -1,6 +1,6 @@
 # GitHub Actions SHA 固定ポリシー
 
-Issue #663 の受け入れ条件に基づき、外部 Action と reusable workflow は immutable な完全 commit SHA で固定します。リポジトリ内の local Action / reusable workflow (`./...`) は、呼び出し元と同じ commit の内容を使用するため例外です。Docker Action を追加する場合は tag ではなく `sha256` digest で固定します。
+Issue #663 の受け入れ条件に基づき、外部 Action と reusable workflow は immutable な完全 commit SHA で固定します。リポジトリ内の local reusable workflow (`./...`) は caller commit の内容を使用します。一方、local Action (`./...`) は checkout 済み workspace を実行するため、同じ job で先行する完全 SHA 固定の `actions/checkout` があり、`ref` 未指定または `${{ github.sha }}` の場合だけ許可します。Docker Action を追加する場合は tag ではなく `sha256` digest で固定します。
 
 ## Repository policy
 
@@ -48,13 +48,13 @@ Issue #663 の受け入れ条件に基づき、外部 Action と reusable workfl
 - `gitleaks-version-check.yml`
 - `release.yml`
 
-参照元は `actions/checkout`、`pnpm/action-setup`、`actions/setup-node`、`actions/cache/restore`、`actions/cache/save`、`actions/upload-artifact`、`softprops/action-gh-release` です。`src/test/actions-sha-pinning.test.ts` は全 `.yml` / `.yaml` workflow を再帰的に走査するため、job-level reusable workflow も検査対象です。
+参照元は `actions/checkout`、`pnpm/action-setup`、`actions/setup-node`、`actions/cache/restore`、`actions/cache/save`、`actions/upload-artifact`、`softprops/action-gh-release` です。`src/test/actions-sha-pinning.test.ts` は全 `.yml` / `.yaml` workflow の `jobs.*.uses` と `jobs.*.steps[*].uses` を検査します。local reusable workflow と local composite Action の manifest も再帰走査し、存在しない参照・循環・composite 内の未固定外部参照を fail closed にします。`env.uses`、`with.uses`、コメント、block string など、workflow schema 上で実行参照ではない値は対象外です。
 
 ## Runtime evidence
 
 policy 有効後に、既存の Actions 実行で次を確認しています。監査のための workflow dispatch、tag、release は追加していません。
 
-- CI: main push [run 33070424801](https://github.com/AutoDevJapan/FourBrosMahjong/actions/runs/33070424801) success
+- CI: main push [run 33070424801](https://github.com/AutoDevJapan/FourBrosMahjong/actions/runs/33070424801) success。ただし変更 path の scope 判定による gate run で、lint / test / build / E2E 等の主要検証は skip されています。完全な補助証拠は [PR #716 の required checks](https://github.com/AutoDevJapan/FourBrosMahjong/pull/716/checks) で確認します。
 - CodeQL: main dynamic [run 33070424352](https://github.com/AutoDevJapan/FourBrosMahjong/actions/runs/33070424352) success
 - gitleaks: main push [run 33070424819](https://github.com/AutoDevJapan/FourBrosMahjong/actions/runs/33070424819) success
 - gitleaks version updater: [run 32103672464](https://github.com/AutoDevJapan/FourBrosMahjong/actions/runs/32103672464) success
