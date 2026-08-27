@@ -90,11 +90,13 @@ export default function ActionPanel({
     <div
       role="group"
       aria-label="操作パネル"
-      className="flex flex-col items-center gap-2"
+      className="game-action-panel flex flex-col items-center gap-2"
     >
-      {hint ? <p className="text-xs text-foreground/70">{hint}</p> : null}
+      {hint ? (
+        <p className="game-action-hint text-xs text-foreground/70">{hint}</p>
+      ) : null}
       {orderedActions.length > 0 ? (
-        <div className="flex flex-wrap items-center justify-center gap-2">
+        <div className="game-action-list flex flex-wrap items-center justify-center gap-2">
           {orderedActions.map(
             ({
               key,
@@ -124,7 +126,7 @@ export default function ActionPanel({
                     event.preventDefault();
                   }
                 }}
-                className={`inline-flex min-h-11 items-center gap-1.5 rounded-lg border px-4 py-2 text-sm font-medium transition-colors motion-reduce:transition-none disabled:cursor-not-allowed disabled:opacity-40 ${
+                className={`game-action-button inline-flex min-h-11 items-center gap-1.5 rounded-lg border px-4 py-2 text-sm font-medium transition-colors motion-reduce:transition-none disabled:cursor-not-allowed disabled:opacity-40 ${
                   primary
                     ? "border-turn-highlight bg-turn-highlight/10 text-turn-highlight-strong hover:bg-turn-highlight/20"
                     : "border-control-border hover:bg-foreground/5"

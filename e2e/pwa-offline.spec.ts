@@ -65,6 +65,13 @@ test.describe("PWAオフライン動作(#292)", () => {
       "playing",
     );
     await expect(visibleHand(offlinePage).getByRole("option")).toHaveCount(14);
+    // Game固有CSSもexact page chunkへ分離されている。SSR/共通globalsだけでの
+    // 見かけ上の起動を合格にせず、未訪問offlineでも盤面装飾までhydrateする。
+    await expect(
+      offlinePage
+        .locator('[data-board-layout="cross"]')
+        .filter({ visible: true }),
+    ).toHaveCSS("isolation", "isolate");
 
     // 後から追加されたユーザー向けrouteもApp shellへ含める。未登録だと
     // offline navigationが `/` fallbackを返し、オンライン画面の接続不能案内や

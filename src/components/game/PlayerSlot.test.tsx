@@ -21,6 +21,9 @@ describe("PlayerSlot (seated / bench switch, spec 6.4.1)", () => {
       },
     };
     render(<PlayerSlot position="self" content={content} />);
+    expect(
+      screen.getByRole("region", { name: "あなた(あなた・東家)" }),
+    ).toHaveAttribute("data-player-role", "self");
     // Self hand is the interactive listbox.
     expect(
       screen.getByRole("listbox", { name: "自家の手牌" }),
@@ -57,6 +60,23 @@ describe("PlayerSlot (seated / bench switch, spec 6.4.1)", () => {
     expect(screen.getByText("抜け番")).toBeInTheDocument();
     // フルサイズ(非 compact)では「この局は休み」の補足文を出す。
     expect(screen.getByText("この局は休み")).toBeInTheDocument();
+    expect(screen.queryByText("あなた")).not.toBeInTheDocument();
+  });
+
+  it("自分が抜け番へ回っても可視・accessibleな自己識別を維持する", () => {
+    const content: SlotContent = {
+      kind: "bench",
+      player: { playerId: "p1", name: "竜二", points: 35000 },
+    };
+
+    render(<PlayerSlot position="self" content={content} />);
+
+    const selfBench = screen.getByRole("region", {
+      name: "竜二(あなた・抜け番)",
+    });
+    expect(selfBench).toHaveAttribute("data-player-role", "self");
+    expect(screen.getByText("あなた")).toBeVisible();
+    expect(screen.getByText("抜け番")).toBeVisible();
   });
 
   it("collapses the bench slot to a compact band matching seated opponents (issue #150)", () => {

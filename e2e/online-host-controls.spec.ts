@@ -96,6 +96,13 @@ test.describe("オンライン host-only 操作(#678)", () => {
   }) => {
     await openOnlineSnapshot(page, onlineSnapshot(firstRoundEndGame(), "p1"));
 
+    const self = page
+      .locator('[data-player-role="self"]')
+      .filter({ visible: true })
+      .first();
+    await expect(self).toHaveAccessibleName(/竜二\(あなた・/);
+    await expect(self.getByText("あなた", { exact: true })).toBeVisible();
+
     const panel = visibleActionPanel(page);
     await expect(panel.getByRole("button", { name: "次の局へ" })).toHaveCount(
       0,

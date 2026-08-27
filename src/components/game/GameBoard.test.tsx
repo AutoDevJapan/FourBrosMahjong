@@ -60,6 +60,22 @@ function firstRoundEndGame(seed = 2024): EngineState {
   });
 }
 
+/** n回目の`nextRound`適用直後をjournalから決定的に復元する。 */
+function gameAfterNextRound(seed: number, count: number): EngineState {
+  const { journal } = walkToGameEnd(seed);
+  const nextRoundIndexes = journal.actions.flatMap((action, index) =>
+    action.type === "nextRound" ? [index] : [],
+  );
+  const target = nextRoundIndexes[count - 1];
+  if (target === undefined) {
+    throw new Error(`${count}回目のnextRoundを通過しないjournal`);
+  }
+  return replayJournal({
+    ...journal,
+    actions: journal.actions.slice(0, target + 1),
+  });
+}
+
 function onlineSnapshot(
   state: EngineState,
   you: "p0" | "p1",
@@ -185,6 +201,68 @@ function renderBoardWithKita() {
 }
 
 describe("GameBoard (spec 6.6 client island / engine-driven)", () => {
+  it("各盤面variantは常に4物理枠だけを持ち、3着席+1抜け番を同じ枠内に表示する(#712)", () => {
+    const { container } = renderBoard();
+
+    for (const layout of ["cross", "focus"] as const) {
+      const board = container.querySelector(`[data-board-layout="${layout}"]`);
+      expect(board).not.toBeNull();
+      const slots = board?.querySelectorAll("[data-slot-position]") ?? [];
+      expect(slots).toHaveLength(4);
+      expect(
+        [...slots]
+          .map((slot) => slot.getAttribute("data-slot-position"))
+          .sort(),
+      ).toEqual(["across", "left", "right", "self"]);
+      expect(
+        board?.querySelectorAll('[data-player-kind="seated"]'),
+      ).toHaveLength(3);
+      expect(
+        board?.querySelectorAll('[data-player-kind="bench"]'),
+      ).toHaveLength(1);
+    }
+
+    // 抜け番を卓の外へ独立した5枠目として描かない。
+    for (const bench of container.querySelectorAll(
+      '[data-player-kind="bench"]',
+    )) {
+      expect(bench.closest("[data-slot-position]")).not.toBeNull();
+    }
+  });
+
+  it("オンラインの自分IDも物理self枠へstate駆動で写像し、4枠契約を維持する", () => {
+    const { container } = renderOnlineBoard(createGame({ seed: 4 }), "p1");
+    const cross = container.querySelector('[data-board-layout="cross"]');
+    expect(cross?.querySelectorAll("[data-slot-position]")).toHaveLength(4);
+    const self = cross?.querySelector(
+      '[data-slot-position="self"] [data-character-id="p1"][data-player-role="self"]',
+    );
+    expect(self).not.toBeNull();
+    expect(self).toHaveAttribute("aria-label", "竜二(あなた・南家)");
+    expect(self?.querySelector(".game-self-badge")).toHaveTextContent("あなた");
+    expect(cross?.querySelectorAll('[data-player-kind="seated"]')).toHaveLength(
+      3,
+    );
+    expect(cross?.querySelectorAll('[data-player-kind="bench"]')).toHaveLength(
+      1,
+    );
+  });
+
+  it("onlineの自分p1が抜け番へ回ってもself枠の可視・accessible識別を維持する", () => {
+    // 東3局ではp1が抜け番。journal由来の実stateでseat rotationを固定する。
+    const { container } = renderOnlineBoard(gameAfterNextRound(2024, 2), "p1");
+    const cross = container.querySelector('[data-board-layout="cross"]');
+    const selfBench = cross?.querySelector(
+      '[data-slot-position="self"] [data-character-id="p1"][data-player-kind="bench"][data-player-role="self"]',
+    );
+
+    expect(selfBench).not.toBeNull();
+    expect(selfBench).toHaveAttribute("aria-label", "竜二(あなた・抜け番)");
+    expect(selfBench?.querySelector(".game-self-badge")).toHaveTextContent(
+      "あなた",
+    );
+  });
+
   it("実エンジン状態から卓情報・自家手牌・抜け番スロット・操作パネルを描画する", () => {
     renderBoard();
     // レスポンシブで md/base の両ツリーが jsdom には出るため getAll で検証。
@@ -264,7 +342,9 @@ describe("GameBoard (spec 6.6 client island / engine-driven)", () => {
   it("復元済みの抜き北は表示するが、mount時に過去の北抜きを再通知しない", () => {
     renderBoardWithKita();
 
-    const self = screen.getAllByRole("region", { name: "粗悪品(東家)" });
+    const self = screen.getAllByRole("region", {
+      name: "粗悪品(あなた・東家)",
+    });
     expect(self.some((region) => region.textContent?.includes("ガリ2"))).toBe(
       true,
     );
@@ -295,7 +375,7 @@ describe("GameBoard (spec 6.6 client island / engine-driven)", () => {
     await user.click(screen.getAllByRole("button", { name: "北抜" })[0]);
 
     const selfAfterOne = screen.getAllByRole("region", {
-      name: "粗悪品(東家)",
+      name: "粗悪品(あなた・東家)",
     });
     expect(
       selfAfterOne.some((region) => region.textContent?.includes("ガリ1")),
@@ -316,7 +396,7 @@ describe("GameBoard (spec 6.6 client island / engine-driven)", () => {
       screen.queryByRole("button", { name: "北抜" }),
     ).not.toBeInTheDocument();
     const selfAfterTwo = screen.getAllByRole("region", {
-      name: "粗悪品(東家)",
+      name: "粗悪品(あなた・東家)",
     });
     expect(
       selfAfterTwo.some((region) => region.textContent?.includes("ガリ2")),

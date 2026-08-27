@@ -1,0 +1,490 @@
+/* Issue #712 Phase B4: `/game` 固有。オンライン共有盤面の既存fallbackは変えない。 */
+.game-page,
+.game-full-board-modal {
+  --game-surface: color-mix(in srgb, var(--ui-surface) 94%, transparent);
+  --game-surface-strong: color-mix(
+    in srgb,
+    var(--ui-surface-raised) 92%,
+    transparent
+  );
+  --game-felt-edge: color-mix(
+    in srgb,
+    var(--table-felt) 78%,
+    var(--ui-gold-decoration)
+  );
+  --game-card-border: color-mix(
+    in srgb,
+    var(--ui-frame) 82%,
+    var(--character-accent, var(--ui-frame))
+  );
+  min-width: 0;
+}
+
+.game-page .game-main {
+  display: flex;
+  width: 100%;
+  max-width: 90rem;
+  min-width: 0;
+  min-height: 100svh;
+  margin-inline: auto;
+  padding: clamp(0.5rem, 2vw, 1.75rem);
+  flex-direction: column;
+  gap: clamp(0.75rem, 1.8vw, 1.25rem);
+}
+
+.game-page .game-header {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.game-page .game-heading-copy {
+  min-width: 0;
+}
+
+.game-page .game-kicker {
+  color: var(--ui-gold-text);
+  font-size: clamp(0.6875rem, 1.5vw, 0.8125rem);
+  font-weight: 700;
+  letter-spacing: 0.14em;
+}
+
+.game-page .game-title {
+  color: var(--ui-text);
+  font-family:
+    var(--font-yuji-syuku), "Yu Mincho", "Hiragino Mincho ProN", serif;
+  font-size: clamp(1.75rem, 4vw, 3.25rem);
+  font-weight: 400;
+  font-synthesis: none;
+  line-height: 1.1;
+  letter-spacing: 0.08em;
+}
+
+.game-page .game-back-link {
+  flex: none;
+  padding: 0.55rem 0.9rem;
+  gap: 0.4rem;
+}
+
+.game-page .game-board-panel {
+  position: relative;
+  min-width: 0;
+  padding: clamp(0rem, 1.2vw, 1rem);
+  border-radius: clamp(0.75rem, 2vw, 1.25rem);
+  background: linear-gradient(
+    135deg,
+    color-mix(in srgb, var(--ui-surface) 96%, transparent),
+    color-mix(in srgb, var(--ui-surface-raised) 88%, transparent)
+  );
+}
+
+.game-page .game-board-panel::before {
+  position: absolute;
+  inset: 0;
+  content: "";
+  pointer-events: none;
+  opacity: calc(var(--ui-pattern-opacity) * 0.48);
+  background-image: repeating-linear-gradient(
+    45deg,
+    transparent 0 1.1rem,
+    color-mix(in srgb, var(--ui-gold-decoration) 8%, transparent) 1.1rem
+      calc(1.1rem + 1px)
+  );
+}
+
+.game-page .game-board,
+.game-page .game-board-loading {
+  position: relative;
+  z-index: 1;
+  min-width: 0;
+}
+
+.game-page .game-board-cross,
+.game-full-board-modal .game-board-cross {
+  position: relative;
+  isolation: isolate;
+  align-items: stretch;
+  padding: clamp(0.35rem, 1vw, 0.75rem);
+  border: 1px solid color-mix(in srgb, var(--ui-frame) 70%, transparent);
+  border-radius: clamp(0.65rem, 1.6vw, 1rem);
+  background: color-mix(in srgb, var(--ui-surface) 68%, transparent);
+  box-shadow:
+    0 1rem 2.5rem color-mix(in srgb, var(--ui-shadow) 28%, transparent),
+    inset 0 0 0 1px
+    color-mix(in srgb, var(--ui-gold-decoration) 10%, transparent);
+}
+
+.game-page .game-board-cross::before,
+.game-full-board-modal .game-board-cross::before {
+  position: absolute;
+  z-index: -1;
+  inset: clamp(3.5rem, 11%, 7rem) clamp(0.75rem, 7%, 4rem)
+    clamp(5.5rem, 19%, 10rem);
+  border: 1px solid var(--game-felt-edge);
+  border-radius: 1rem;
+  content: "";
+  pointer-events: none;
+  background:
+    radial-gradient(
+      circle at 50% 48%,
+      color-mix(in srgb, var(--table-felt) 88%, black),
+      var(--table-felt) 72%
+    ),
+    repeating-linear-gradient(
+      25deg,
+      transparent 0 0.6rem,
+      rgb(255 255 255 / 3%) 0.6rem calc(0.6rem + 1px)
+    );
+  box-shadow:
+    inset 0 0 2rem rgb(0 0 0 / 28%),
+    0 0.5rem 1.2rem rgb(0 0 0 / 18%);
+}
+
+.game-page .game-slot,
+.game-page .game-table-cell,
+.game-page .game-actions-region,
+.game-full-board-modal .game-slot,
+.game-full-board-modal .game-table-cell {
+  min-width: 0;
+}
+
+.game-page .game-slot > *,
+.game-full-board-modal .game-slot > * {
+  height: 100%;
+}
+
+.game-page .game-player-area,
+.game-page .game-bench-area,
+.game-full-board-modal .game-player-area,
+.game-full-board-modal .game-bench-area {
+  min-width: 0;
+  border-color: var(--game-card-border, var(--ui-frame));
+  color: var(--ui-text);
+  background: color-mix(in srgb, var(--ui-surface) 93%, transparent);
+  box-shadow:
+    inset 0 0 0 1px color-mix(in srgb, var(--character-accent) 14%, transparent),
+    0 0.35rem 0.9rem rgb(0 0 0 / 12%);
+}
+
+.game-page .game-player-area[data-player-role="self"],
+.game-full-board-modal .game-player-area[data-player-role="self"] {
+  padding: clamp(0.55rem, 1.5vw, 0.9rem);
+  border-width: 2px;
+  background: color-mix(
+    in srgb,
+    var(--ui-surface) 91%,
+    var(--character-accent) 9%
+  );
+}
+
+.game-page .game-self-badge,
+.game-full-board-modal .game-self-badge {
+  align-self: flex-start;
+  margin-bottom: -0.25rem;
+  padding: 0.12rem 0.45rem;
+  border: 1px solid var(--character-accent);
+  border-radius: 999px;
+  color: var(--ui-text);
+  background: var(--ui-surface);
+  font-size: 0.6875rem;
+  font-weight: 700;
+}
+
+.game-page
+  .game-player-area[data-player-role="self"]:has(
+    [data-testid="status-badge-highlight"]
+  ),
+.game-full-board-modal
+  .game-player-area[data-player-role="self"]:has(
+    [data-testid="status-badge-highlight"]
+  ) {
+  border-color: var(--turn-highlight);
+  box-shadow:
+    0 0 0 2px color-mix(in srgb, var(--turn-highlight) 28%, transparent),
+    inset 0 0 0 1px color-mix(in srgb, var(--turn-highlight) 20%, transparent);
+}
+
+.game-page .game-player-header,
+.game-full-board-modal .game-player-header {
+  min-width: 0;
+}
+
+.game-page .character-name,
+.game-full-board-modal .character-name {
+  min-width: 0;
+  color: var(--character-accent);
+  font-weight: 800;
+  overflow-wrap: anywhere;
+}
+
+.game-page .character-portrait,
+.game-full-board-modal .character-portrait {
+  border: 1px solid var(--character-accent);
+  border-radius: 0.65rem;
+  background: color-mix(in srgb, var(--ui-surface-raised) 88%, transparent);
+  box-shadow: 0 0 0 2px
+    color-mix(in srgb, var(--character-accent) 14%, transparent);
+}
+
+.game-page .game-hand-surface,
+.game-full-board-modal .game-hand-surface {
+  min-width: 0;
+  border: 1px solid color-mix(in srgb, var(--ui-frame) 58%, transparent);
+  /* 牌の既存border tokenとlight themeでも3:1を保つ淡いfelt。 */
+  background: color-mix(in srgb, var(--table-felt) 8%, var(--ui-surface));
+  box-shadow: inset 0 0 0 1px rgb(255 255 255 / 4%);
+}
+
+.game-page .game-table,
+.game-full-board-modal .game-table {
+  min-width: 0;
+  min-height: clamp(8rem, 17vw, 13rem);
+  border: 1px solid var(--game-felt-edge, var(--ui-frame));
+  border-radius: 0.9rem;
+  color: var(--tile-face);
+  background: radial-gradient(
+    circle at 50% 42%,
+    color-mix(in srgb, var(--table-felt) 78%, white 8%),
+    var(--table-felt) 72%
+  );
+  box-shadow:
+    inset 0 0 2rem rgb(0 0 0 / 34%),
+    0 0.4rem 1rem rgb(0 0 0 / 18%);
+}
+
+.game-page .game-table-info,
+.game-full-board-modal .game-table-info {
+  width: 100%;
+  max-width: 23rem;
+  padding: 0.55rem 0.65rem;
+  border: 1px solid color-mix(in srgb, var(--tile-face) 28%, transparent);
+  border-radius: 0.65rem;
+  background: rgb(4 12 8 / 68%);
+}
+
+.game-page .game-table button {
+  border-color: var(--control-border);
+}
+
+.game-page .game-river,
+.game-full-board-modal .game-river {
+  border-radius: 0.35rem;
+  background: color-mix(in srgb, var(--table-felt) 11%, transparent);
+}
+
+.game-page .game-opponent-hand,
+.game-full-board-modal .game-opponent-hand {
+  align-items: center;
+}
+
+.game-page .game-actions-region {
+  display: flex;
+  min-width: 0;
+  padding-top: clamp(0.25rem, 0.8vw, 0.65rem);
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.game-page .game-action-panel {
+  min-width: 0;
+  padding: clamp(0.55rem, 1.4vw, 0.9rem);
+  border: 1px solid var(--ui-frame);
+  border-radius: 0.85rem;
+  background: color-mix(in srgb, var(--ui-surface) 92%, transparent);
+  box-shadow: inset 0 0 0 1px
+    color-mix(in srgb, var(--ui-gold-decoration) 10%, transparent);
+}
+
+.game-page .game-action-hint {
+  width: 100%;
+  color: var(--ui-muted);
+  font-size: 0.75rem;
+  line-height: 1.6;
+  text-align: center;
+  text-wrap: pretty;
+}
+
+.game-page .game-action-list {
+  width: 100%;
+}
+
+.game-page .game-action-button {
+  min-width: clamp(5.75rem, 11vw, 9rem);
+  min-height: 2.75rem;
+  justify-content: center;
+  border-color: var(--control-border);
+  color: var(--ui-text);
+  background: var(--game-surface-strong);
+  box-shadow: inset 0 0 0 1px
+    color-mix(in srgb, var(--ui-gold-decoration) 8%, transparent);
+}
+
+.game-page .game-action-button[data-action-key="ron"],
+.game-page .game-action-button[data-action-key="tsumo"],
+.game-page .game-action-button[data-action-key="result"],
+.game-page .game-action-button[data-action-key="next"] {
+  border-color: var(--turn-highlight);
+}
+
+.game-page .game-action-button[data-action-key="riichi"] {
+  border-color: var(--danger);
+}
+
+.game-page .game-action-button[data-action-key="kita"] {
+  border-color: var(--ui-frame);
+  background: color-mix(
+    in srgb,
+    var(--ui-gold-decoration) 18%,
+    var(--ui-surface)
+  );
+}
+
+.game-page .game-action-button:disabled {
+  border-style: dashed;
+}
+
+.game-page .game-focus-board {
+  min-width: 0;
+}
+
+.game-page .game-focus-toolbar {
+  padding: 0.5rem;
+  border: 1px solid var(--ui-frame);
+  border-radius: 0.75rem;
+  background: var(--game-surface);
+}
+
+.game-page .game-focus-description {
+  color: var(--ui-muted);
+}
+
+.game-page .game-full-board-button {
+  border-color: var(--control-border);
+  color: var(--ui-text);
+  background: var(--ui-surface-raised);
+}
+
+.game-page .game-focus-self {
+  min-width: 0;
+}
+
+.game-page .game-focus-opponents {
+  min-width: 0;
+}
+
+.game-page .game-focus-opponents > [data-slot-position] {
+  min-width: 0;
+}
+
+.game-page .game-kita-announcement {
+  border-color: var(--ui-frame);
+  color: var(--ui-text);
+  background: var(--ui-surface);
+}
+
+@container (max-width: 359px) {
+  .game-page .game-table {
+    min-height: auto;
+    padding: 0.65rem;
+  }
+
+  .game-page .game-action-list {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .game-page .game-action-button {
+    width: 100%;
+    min-width: 0;
+    padding-inline: 0.5rem;
+  }
+
+  /* 320pxのdialogで3列を潰すと文字が縦1字になるため、全情報を1列で閲覧可能にする。 */
+  .game-full-board-modal .game-board-cross {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .game-full-board-modal .game-slot,
+  .game-full-board-modal .game-table-cell {
+    grid-column: 1;
+    grid-row: auto;
+  }
+
+  .game-full-board-modal .game-board-cross::before {
+    display: none;
+  }
+}
+
+@media (max-width: 30rem) {
+  .game-page .game-header {
+    align-items: flex-start;
+  }
+
+  .game-page .game-kicker {
+    max-width: 10rem;
+    line-height: 1.5;
+  }
+
+  .game-page .game-back-link {
+    max-width: 7.5rem;
+    padding-inline: 0.65rem;
+    font-size: 0.75rem;
+  }
+
+  .game-page .game-board-panel {
+    padding: 0;
+    border-radius: 0.85rem;
+  }
+}
+
+@media (min-width: 48rem) {
+  .game-page .game-board-panel {
+    padding: 1rem;
+  }
+
+  .game-page .game-board-cross {
+    padding: 0.9rem;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .game-page .game-action-button,
+  .game-page .game-full-board-button {
+    transition: none;
+  }
+}
+
+@media (forced-colors: active) {
+  .game-page .game-board-panel,
+  .game-page .game-board-cross,
+  .game-page .game-player-area,
+  .game-page .game-bench-area,
+  .game-page .game-table,
+  .game-page .game-action-panel,
+  .game-page .game-action-button,
+  .game-page .game-focus-toolbar,
+  .game-full-board-modal .game-player-area,
+  .game-full-board-modal .game-bench-area,
+  .game-full-board-modal .game-table {
+    background: Canvas;
+  }
+
+  .game-page .game-board-cross::before,
+  .game-full-board-modal .game-board-cross::before,
+  .game-page .game-board-panel::before {
+    display: none;
+  }
+
+  .game-page .game-player-area,
+  .game-page .game-bench-area,
+  .game-page .game-table,
+  .game-page .game-action-panel,
+  .game-page .game-action-button,
+  .game-full-board-modal .game-player-area,
+  .game-full-board-modal .game-bench-area,
+  .game-full-board-modal .game-table {
+    border-color: CanvasText;
+  }
+}

@@ -15,6 +15,10 @@ import { LANDMARK_SCREENS, NOT_FOUND_SCREEN_NAME } from "../../e2e/screens";
 import { appRoutes } from "./appRoutes";
 import { bannerLandmarks, describeElement } from "./bannerLandmarks";
 
+// `/game` は `/game/result` へstyleを漏らさないようexact page境界でCSSを読む。
+// このcomponent testはsemantic DOMだけを監査するため、Next route CSSを空moduleへ置換する。
+vi.mock("@/app/game/game.css", () => ({}));
+
 /**
  * `<h1>`・ページヘッダーの配置規約(spec 5.2.6 / #431)を全ルートで固定する。
  *

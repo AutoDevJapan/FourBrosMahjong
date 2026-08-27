@@ -78,18 +78,36 @@ test.describe("対局者名の設定 (#291)", () => {
   }) => {
     await saveNames(page, NAMES, DEFAULT_NAMES);
 
+    await page.setViewportSize({ width: 320, height: 800 });
     await page.goto("/game?seed=0");
     for (const name of NAMES) {
       await expect(
-        page.getByText(name, { exact: false }).first(),
+        page
+          .getByText(name, { exact: false })
+          .filter({ visible: true })
+          .first(),
         `盤面に「${name}」が表示される`,
       ).toBeVisible();
     }
+    const focusBoard = page
+      .locator('[data-board-layout="focus"]')
+      .filter({ visible: true });
+    await expect(focusBoard.locator("[data-slot-position]")).toHaveCount(4);
+    expect(
+      await page.evaluate(
+        () =>
+          document.documentElement.scrollWidth -
+          document.documentElement.clientWidth,
+      ),
+    ).toBeLessThanOrEqual(1);
 
     await page.reload();
     for (const name of NAMES) {
       await expect(
-        page.getByText(name, { exact: false }).first(),
+        page
+          .getByText(name, { exact: false })
+          .filter({ visible: true })
+          .first(),
       ).toBeVisible();
     }
   });

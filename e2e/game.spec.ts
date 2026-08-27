@@ -4,6 +4,82 @@ import { expectCharacterPortraits } from "./helpers/characters";
 import { advanceUntil, armRiichi, visibleHand } from "./helpers/gameDriver";
 import { LANDMARK_RULES } from "./screens";
 
+const GAME_VISUAL_STYLE = "e2e/visual-screenshot.css";
+
+async function prepareGameVisual(
+  page: Page,
+  options: {
+    width: number;
+    height: number;
+    theme: "light" | "dark";
+    seed: number;
+  },
+): Promise<void> {
+  await page.setViewportSize(options);
+  await page.addInitScript(
+    (theme) => localStorage.setItem("theme", theme),
+    options.theme,
+  );
+  await page.goto(`/game?seed=${options.seed}`);
+  await expect(page.locator("html")).toHaveAttribute(
+    "data-theme",
+    options.theme,
+  );
+  await expect(
+    page.getByRole("heading", { level: 1, name: "対局画面" }),
+  ).toBeVisible();
+  await page.evaluate(() => document.fonts.ready);
+  const visibleImages = page
+    .locator(".game-page img")
+    .filter({ visible: true });
+  await expect.poll(() => visibleImages.count()).toBeGreaterThan(0);
+  await expect
+    .poll(() =>
+      visibleImages.evaluateAll((images) =>
+        images.every(
+          (image) =>
+            image instanceof HTMLImageElement &&
+            image.complete &&
+            image.naturalWidth > 0,
+        ),
+      ),
+    )
+    .toBe(true);
+}
+
+async function expectVisibleFourSlotBoard(
+  page: Page,
+  layout: "cross" | "focus",
+): Promise<void> {
+  const board = page
+    .locator(`[data-board-layout="${layout}"]`)
+    .filter({ visible: true });
+  await expect(board).toHaveCount(1);
+  await expect(board.locator("[data-slot-position]"), "4物理枠").toHaveCount(4);
+  await expect(board.locator('[data-player-kind="seated"]')).toHaveCount(3);
+  await expect(board.locator('[data-player-kind="bench"]')).toHaveCount(1);
+  expect(
+    await page.evaluate(
+      () =>
+        document.documentElement.scrollWidth -
+        document.documentElement.clientWidth,
+    ),
+  ).toBeLessThanOrEqual(1);
+}
+
+async function expectGamePageScreenshot(page: Page, name: string) {
+  await page.addStyleTag({
+    content: "nextjs-portal { display: none !important; }",
+  });
+  await expect(page.locator("nextjs-portal")).toBeHidden();
+  await expect(page).toHaveScreenshot(name, {
+    fullPage: true,
+    animations: "disabled",
+    maxDiffPixelRatio: 0.005,
+    stylePath: GAME_VISUAL_STYLE,
+  });
+}
+
 /**
  * wheel を送った後、スクロール適用が終わるまで 2 フレーム進める。
  *
@@ -106,7 +182,7 @@ test.describe("対局画面(/game)", () => {
 
     // 4スロット: 着席3人(粗悪品=東家 / 竜二=南家 / マサキ=西家)+ 抜け番(糸瓜)。
     await expect(
-      page.getByRole("region", { name: "粗悪品(東家)" }),
+      page.getByRole("region", { name: "粗悪品(あなた・東家)" }),
     ).toBeVisible();
     await expect(
       page.getByRole("region", { name: "竜二(南家)" }),
@@ -119,7 +195,7 @@ test.describe("対局画面(/game)", () => {
     ).toBeVisible();
     for (const character of [
       {
-        region: "粗悪品(東家)",
+        region: "粗悪品(あなた・東家)",
         playerId: "p0",
         portrait: "/characters/p0-soakuhin-portrait.avif",
       },
@@ -164,7 +240,7 @@ test.describe("対局画面(/game)", () => {
       page.getByRole("listbox", { name: "自家の手牌" }).first(),
     ).toBeVisible();
     await expect(
-      page.getByRole("region", { name: "粗悪品(東家)" }),
+      page.getByRole("region", { name: "粗悪品(あなた・東家)" }),
     ).toContainText("35,000");
 
     // 操作パネル(role=group)。開始直後は自家の打牌待ちで「ツモ」ボタンが現れる。
@@ -291,7 +367,7 @@ test.describe("対局画面(/game)", () => {
     });
     await page.getByRole("button", { name: "次の局へ" }).first().click();
     const rotatedBench = page
-      .getByRole("region", { name: "粗悪品(抜け番)" })
+      .getByRole("region", { name: "粗悪品(あなた・抜け番)" })
       .filter({ visible: true })
       .first();
     await expect(rotatedBench).toHaveAttribute("data-character-id", "p0");
@@ -436,7 +512,9 @@ test.describe("対局画面(/game)", () => {
     await page.setViewportSize({ width: 320, height: 800 });
     await page.goto("/game?seed=1");
 
-    const self = page.getByRole("region", { name: "粗悪品(東家)" });
+    const self = page.getByRole("region", {
+      name: "粗悪品(あなた・東家)",
+    });
     const kita = page
       .getByRole("button", { name: "北抜" })
       .filter({ visible: true })
@@ -478,7 +556,7 @@ test.describe("対局画面(/game)", () => {
     const dialog = page.getByRole("dialog", { name: "全体盤面" });
     await expect(
       dialog
-        .getByRole("region", { name: "粗悪品(東家)" })
+        .getByRole("region", { name: "粗悪品(あなた・東家)" })
         .getByTestId("kita-display"),
     ).toContainText("ガリ2");
   });
@@ -1360,5 +1438,120 @@ test.describe("対局画面(/game)", () => {
     await expect
       .poll(() => page.evaluate(() => window.scrollY))
       .toBe(scrollBefore);
+  });
+
+  test("Phase B4 desktop初期局面のdark visualと4物理枠を保つ", async ({
+    page,
+  }) => {
+    await prepareGameVisual(page, {
+      width: 1440,
+      height: 900,
+      theme: "dark",
+      seed: 0,
+    });
+    await expectVisibleFourSlotBoard(page, "cross");
+    await expectGamePageScreenshot(page, "desktop-1440-dark-game.png");
+  });
+
+  test("Phase B4 phone 393pxのlight visualと4物理枠を保つ", async ({
+    page,
+  }) => {
+    await prepareGameVisual(page, {
+      width: 393,
+      height: 852,
+      theme: "light",
+      seed: 0,
+    });
+    await expectVisibleFourSlotBoard(page, "cross");
+    await expectGamePageScreenshot(page, "phone-393-light-game.png");
+  });
+
+  test("Phase B4 phone 320pxのself-priority visualと4物理枠を保つ", async ({
+    page,
+  }) => {
+    await prepareGameVisual(page, {
+      width: 320,
+      height: 800,
+      theme: "dark",
+      seed: 0,
+    });
+    await expectVisibleFourSlotBoard(page, "focus");
+    await expect(page.getByRole("button", { name: "全体盤面" })).toBeVisible();
+    await expectGamePageScreenshot(page, "phone-320-dark-game.png");
+  });
+
+  test("Phase B4 phone 320pxの全体盤面modalに4物理枠を表示する", async ({
+    page,
+  }) => {
+    await prepareGameVisual(page, {
+      width: 320,
+      height: 800,
+      theme: "dark",
+      seed: 0,
+    });
+    await page.getByRole("button", { name: "全体盤面" }).click();
+    const dialog = page.getByRole("dialog", { name: "全体盤面" });
+    await expect(dialog).toBeVisible();
+    await expect(dialog.locator("[data-slot-position]"), "4物理枠").toHaveCount(
+      4,
+    );
+    await expect(dialog.locator('[data-player-kind="seated"]')).toHaveCount(3);
+    await expect(dialog.locator('[data-player-kind="bench"]')).toHaveCount(1);
+    expect(
+      await dialog.evaluate(
+        (element) => element.scrollWidth - element.clientWidth,
+      ),
+    ).toBeLessThanOrEqual(1);
+    await expect(dialog).toHaveScreenshot(
+      "phone-320-dark-full-board-modal.png",
+      {
+        animations: "disabled",
+        maxDiffPixelRatio: 0.005,
+        stylePath: GAME_VISUAL_STYLE,
+      },
+    );
+  });
+
+  test("Phase B4 seat rotation後もstate-drivenの4物理枠visualを保つ", async ({
+    page,
+  }) => {
+    test.setTimeout(60_000);
+    await prepareGameVisual(page, {
+      width: 768,
+      height: 1024,
+      theme: "dark",
+      seed: 106,
+    });
+    await advanceUntil(page, (state) => state?.phase === "roundEnd", {
+      maxSteps: 100,
+      onRoundEnd: "stop",
+    });
+    await page.getByRole("button", { name: "次の局へ" }).first().click();
+    await expectVisibleFourSlotBoard(page, "cross");
+    await expect(
+      page
+        .locator('[data-player-kind="bench"][data-character-id="p0"]')
+        .filter({ visible: true }),
+    ).toHaveCount(1);
+    await expectGamePageScreenshot(page, "tablet-768-dark-rotated-game.png");
+  });
+
+  test("Phase B4 gameEndの和了内訳と最終局面visualを保つ", async ({ page }) => {
+    test.setTimeout(90_000);
+    await prepareGameVisual(page, {
+      width: 1280,
+      height: 900,
+      theme: "dark",
+      seed: 60,
+    });
+    await advanceUntil(page, (state) => state?.phase === "gameEnd", {
+      maxSteps: 400,
+      onGameEnd: "stop",
+    });
+    await expectVisibleFourSlotBoard(page, "cross");
+    await expect(
+      page.getByRole("heading", { name: "和了内訳" }).first(),
+    ).toBeVisible();
+    await expectGamePageScreenshot(page, "desktop-dark-game-end.png");
   });
 });

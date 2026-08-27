@@ -15,7 +15,7 @@
  *   クロス配置(自家=下 / 上家=左 / 対面=上 / 下家=右)を維持する。
  * - **段階②(フォーカス表示切替)**: 卓の描画幅が 360px を下回ったら(`@min-[360px]` 未満)、
  *   自家の手牌・操作パネルをフルサイズ表示し、他家3人は河直近+得点+状態のコンパクト帯に縮小する。
- *   コンパクト化で隠れた全体盤面は「全体盤面」ボタンのモーダル(`Modal`)でいつでも確認できる。
+ *   コンパクト化で隠れた4物理枠は「全体盤面」ボタンのモーダル(`Modal`)でいつでも確認できる。
  * いずれの段階も横スクロールで成立させない。
  */
 import { useRouter } from "next/navigation";
@@ -569,21 +569,34 @@ export default function GameBoard({
       confirmTouchSelectionMode: HandProps["confirmTouchSelectionMode"] = "discard",
     ) => (
       <div
-        className={`board-cross mx-auto w-full max-w-4xl grid-cols-[minmax(0,1fr)_minmax(0,1.5fr)_minmax(0,1fr)] gap-[var(--board-gap)] ${visibilityClass}`}
+        className={`board-cross game-board-cross mx-auto w-full max-w-4xl grid-cols-[minmax(0,1fr)_minmax(0,1.5fr)_minmax(0,1fr)] gap-[var(--board-gap)] ${visibilityClass}`}
+        data-board-layout="cross"
       >
-        <div className="col-start-2 row-start-1">
+        <div
+          className="game-slot game-slot--across col-start-2 row-start-1"
+          data-slot-position="across"
+        >
           {renderSlot("across", false)}
         </div>
-        <div className="col-start-1 row-start-2">
+        <div
+          className="game-slot game-slot--left col-start-1 row-start-2"
+          data-slot-position="left"
+        >
           {renderSlot("left", false)}
         </div>
-        <div className="col-start-2 row-start-2">
+        <div className="game-table-cell col-start-2 row-start-2">
           <Table info={tableInfo} dora={dora} showGlossary={withActions} />
         </div>
-        <div className="col-start-3 row-start-2">
+        <div
+          className="game-slot game-slot--right col-start-3 row-start-2"
+          data-slot-position="right"
+        >
           {renderSlot("right", false)}
         </div>
-        <div className="col-span-3 col-start-1 row-start-3">
+        <div
+          className="game-slot game-slot--self col-span-3 col-start-1 row-start-3"
+          data-slot-position="self"
+        >
           {renderSlot(
             "self",
             false,
@@ -594,7 +607,7 @@ export default function GameBoard({
           )}
         </div>
         {withActions ? (
-          <div className="col-span-3 col-start-1 row-start-4">
+          <div className="game-actions-region col-span-3 col-start-1 row-start-4">
             {/* 局終了(roundEnd)に加え、半荘を終える局は gameEnd へ直行するため、
                 gameEnd でも最終局の和了内訳を表示する(#277)。 */}
             {(phase === "roundEnd" || phase === "gameEnd") && roundSummary ? (
@@ -624,7 +637,7 @@ export default function GameBoard({
   if (!mounted) {
     return (
       <div
-        className="flex min-h-[12rem] w-full items-center justify-center rounded-xl border border-foreground/10 text-sm text-foreground/60"
+        className="game-board-loading flex min-h-[12rem] w-full items-center justify-center rounded-xl border border-foreground/10 text-sm text-foreground/60"
         aria-live="polite"
       >
         対局を準備しています…
@@ -643,7 +656,7 @@ export default function GameBoard({
       // スペック5 5.2.2 が持つ(#405)。
       role="group"
       aria-label="対局盤面"
-      className="@container w-full"
+      className="game-board @container w-full"
       data-phase={phase}
       data-pending={pending?.kind ?? "none"}
       data-round-kind={roundSummary?.kind ?? "none"}
@@ -667,12 +680,15 @@ export default function GameBoard({
         )}
 
         {/* 段階②: 卓幅 < 360px は自家フォーカス表示。他家はコンパクト帯へ縮小。 */}
-        <div className="flex flex-col gap-3 @min-[360px]:hidden">
-          <div className="flex items-start justify-between gap-2">
+        <div
+          className="game-focus-board flex flex-col gap-3 @min-[360px]:hidden"
+          data-board-layout="focus"
+        >
+          <div className="game-focus-toolbar flex items-start justify-between gap-2">
             <p
               id={narrowBoardDescriptionId}
               data-testid="narrow-board-description"
-              className="min-w-0 flex-1 text-xs leading-5 text-foreground/70"
+              className="game-focus-description min-w-0 flex-1 text-xs leading-5 text-foreground/70"
             >
               狭い画面のため、自分の手牌を自動で優先表示しています。
             </p>
@@ -681,26 +697,22 @@ export default function GameBoard({
               type="button"
               onClick={() => setBoardOpen(true)}
               aria-describedby={narrowBoardDescriptionId}
-              className="inline-flex min-h-11 shrink-0 items-center gap-1.5 rounded-lg border border-control-border px-3 py-1.5 text-xs font-medium hover:bg-foreground/5"
+              className="game-full-board-button inline-flex min-h-11 shrink-0 items-center gap-1.5 rounded-lg border border-control-border px-3 py-1.5 text-xs font-medium hover:bg-foreground/5"
             >
               <span aria-hidden="true">▦</span>
               全体盤面
             </button>
           </div>
-          <Table info={tableInfo} dora={dora} />
-          <div className="grid grid-cols-1 gap-2">
-            {renderSlot("left", true)}
-            {renderSlot("across", true)}
-            {renderSlot("right", true)}
+          <div className="game-focus-self" data-slot-position="self">
+            {renderSlot(
+              "self",
+              false,
+              handleSelectTile,
+              !handInteractive,
+              handInteractive,
+              riichiArmed ? "riichi" : "discard",
+            )}
           </div>
-          {renderSlot(
-            "self",
-            false,
-            handleSelectTile,
-            !handInteractive,
-            handInteractive,
-            riichiArmed ? "riichi" : "discard",
-          )}
           {(phase === "roundEnd" || phase === "gameEnd") && roundSummary ? (
             <WinDetails summary={roundSummary} />
           ) : null}
@@ -709,10 +721,16 @@ export default function GameBoard({
             hint={hint}
             disabled={interactionDisabled}
           />
+          <Table info={tableInfo} dora={dora} />
+          <div className="game-focus-opponents grid grid-cols-1 gap-2">
+            <div data-slot-position="left">{renderSlot("left", true)}</div>
+            <div data-slot-position="across">{renderSlot("across", true)}</div>
+            <div data-slot-position="right">{renderSlot("right", true)}</div>
+          </div>
         </div>
       </div>
 
-      {/* 全体盤面モーダル(段階②の補完): クロス配置を閲覧専用で再表示。フォーカストラップ/Escape は Modal が担保。 */}
+      {/* 全体盤面モーダル(段階②の補完): 4物理枠を閲覧専用で再表示。狭幅では読み順に1列化し、フォーカストラップ/Escape は Modal が担保。 */}
       {boardOpen ? (
         <Modal
           title="全体盤面"
@@ -720,7 +738,7 @@ export default function GameBoard({
           returnFocusRef={boardOpenerRef}
           fallbackFocusRef={boardRootRef}
         >
-          <div className="@container">
+          <div className="game-full-board-modal @container">
             {crossBoard("grid", undefined, false, true)}
           </div>
         </Modal>
@@ -731,7 +749,7 @@ export default function GameBoard({
           role="status"
           aria-live="polite"
           aria-atomic="true"
-          className="mx-auto mt-2 max-w-2xl rounded-lg border border-emerald-300/50 bg-emerald-950/85 px-3 py-2 text-center text-sm font-semibold text-emerald-50 shadow-lg"
+          className="game-kita-announcement mx-auto mt-2 max-w-2xl rounded-lg border border-emerald-300/50 bg-emerald-950/85 px-3 py-2 text-center text-sm font-semibold text-emerald-50 shadow-lg"
         >
           {kitaAnnouncement}
         </p>

@@ -25,7 +25,7 @@ export default function Discards({ tiles, limit }: DiscardsProps) {
       // 列幅を牌1枚ぶんの固定幅にして密に並べる(#258)。列数はスロット幅に入るぶんだけ
       // 作られ上限 6 列(#387: 6 列固定だと狭いスロットでページが横スクロールしていた)。
       // グリッド定義は `.river-grid`(globals.css)— 牌寸法と列幅の定義元を一本化するため。
-      className="river-grid"
+      className="game-river river-grid"
     >
       {shown.map((tile, i) => (
         // 河は同一牌が複数並ぶため index を key に含める(捨て順の同一性は保持不要)。
