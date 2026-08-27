@@ -16,7 +16,7 @@ test.describe("PWAオフライン動作(#292)", () => {
     "service worker は production ビルドのみ有効(E2E_PROD=1 で実行)",
   );
 
-  test("初回登録後に追加のオンライン再読込みなしで/gameをオフライン起動・hydrateできる(#506)", async ({
+  test("初回登録後に追加のオンライン再読込みなしで/gameと/onlineをオフライン起動・hydrateできる(#506/#701)", async ({
     page,
     context,
   }) => {
@@ -66,6 +66,17 @@ test.describe("PWAオフライン動作(#292)", () => {
     );
     await expect(visibleHand(offlinePage).getByRole("option")).toHaveCount(14);
 
+    // 後から追加されたユーザー向けrouteもApp shellへ含める。未登録だと
+    // offline navigationが `/` fallbackを返し、オンライン画面の接続不能案内や
+    // ルーム入力UIへ到達できない。
+    const offlineOnlinePage = await context.newPage();
+    await offlineOnlinePage.goto("/online");
+    await expect(
+      offlineOnlinePage.getByRole("heading", { name: "オンライン対戦" }),
+    ).toBeVisible();
+    await expect(offlineOnlinePage.getByLabel("表示名")).toBeVisible();
+    await offlineOnlinePage.close();
+
     // SSR表示だけの偽陽性ではなく、hydrate済みのイベントハンドラと
     // sessionStorageジャーナルがオフラインでも実際に進行することを固定する。
     const playableTile = visibleHand(offlinePage)
@@ -80,7 +91,13 @@ test.describe("PWAオフライン動作(#292)", () => {
         }),
       )
       .toBeGreaterThan(0);
-    await expect(visibleHand(offlinePage).getByRole("option")).toHaveCount(14);
+    // 打牌直後はAI手番へ移り、自家手牌が一時的に read-only list になる場合がある。
+    // 操作可能な option 数ではなく、盤面が対局中のまま更新されたことを確認する。
+    await expect(offlinePage.locator("[data-phase]").first()).toHaveAttribute(
+      "data-phase",
+      "playing",
+    );
+
     await context.setOffline(false);
   });
 
@@ -103,7 +120,7 @@ test.describe("PWAオフライン動作(#292)", () => {
       () => navigator.serviceWorker?.controller != null,
     );
 
-    // プリキャッシュ(App シェル 6 ルート + アイコン + 牌素材)の完了を確認する。
+    // プリキャッシュ(App シェル 7 ルート + アイコン + 牌素材)の完了を確認する。
     const cacheKeys = await page.evaluate(() => caches.keys());
     expect(cacheKeys.some((key) => key.startsWith("fbm-precache-"))).toBe(true);
     const precached = await page.evaluate(async () => {
@@ -120,6 +137,7 @@ test.describe("PWAオフライン動作(#292)", () => {
       "/rules",
       "/settings",
       "/history",
+      "/online",
       "/game",
       "/game/result",
     ]) {
