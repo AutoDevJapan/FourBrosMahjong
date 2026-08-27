@@ -19,6 +19,9 @@
 import Link from "next/link";
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { localStorageOrNull } from "@/components/common/browserStorage";
+import CharacterPortrait, {
+  characterAccentStyle,
+} from "@/components/game/CharacterPortrait";
 import {
   clearHistoryAcrossTabs,
   getHistorySnapshot,
@@ -80,9 +83,14 @@ function HistoryItem({ entry }: { entry: MatchHistoryEntry }) {
   const topTotal = formatSignedSoshii(top.soshiiTotal);
 
   return (
-    <details className="group rounded-lg border border-control-border">
+    <details
+      data-character-id={top.playerId}
+      style={top.playerId ? characterAccentStyle(top.playerId) : undefined}
+      className="character-accent-edge group rounded-lg border border-control-border"
+    >
       <summary className="flex cursor-pointer flex-wrap items-baseline gap-x-3 gap-y-1 rounded-lg p-4 text-sm hover:bg-foreground/5">
         <span className="font-medium">{finishedAt}</span>
+        {top.playerId ? <CharacterPortrait playerId={top.playerId} /> : null}
         <span className="text-foreground/70">
           1位 {top.name}(<span aria-hidden="true">{topTotal.display}</span>
           <span className="sr-only">{topTotal.srLabel}</span>)

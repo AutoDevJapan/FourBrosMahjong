@@ -173,6 +173,7 @@ async function recordFinishedGame(
     seed,
     finishedAt: Date.now(),
     players: engine.result.map((r) => ({
+      playerId: r.playerId,
       name: r.name,
       rank: r.rank,
       rawScore: r.rawScore,

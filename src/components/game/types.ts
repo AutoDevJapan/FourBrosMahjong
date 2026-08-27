@@ -10,6 +10,7 @@
  * UI 表示に必要な最小限に絞った表示用ビューモデルとする。
  */
 
+import type { PlayerId } from "@/domain/game/engine";
 import type { FuritenReason } from "@/domain/hand/furiten";
 
 /** 牌のスート(スペック4 `Suit`)。字牌は `honor`。 */
@@ -59,6 +60,7 @@ interface PlayerStatus {
  * (スペック6 6.4.2)。どちらを使うかは `PlayerArea` が `isSelf` で切り替える。
  */
 export interface SeatedPlayerView {
+  readonly playerId: PlayerId;
   readonly name: string;
   /** 持ち点(素点)。ソシー換算は結果画面の責務(スペック6 6.4.2)。 */
   readonly points: number;
@@ -93,6 +95,7 @@ export interface MeldView {
 
 /** 抜け番(休み)プレイヤーの表示データ(スペック4 `Round.benchWarmer`)。 */
 export interface BenchPlayerView {
+  readonly playerId: PlayerId;
   readonly name: string;
   /** 抜け番中は変化しない持ち点(スペック4 不変条件)。 */
   readonly points: number;
@@ -155,6 +158,8 @@ export interface DoraData {
  * これらの値は将来ドメイン層(スペック3/4)が算出し、確定済みの結果として流し込む(スペック6 6.8)。
  */
 export interface ResultPlayerView {
+  /** 旧版の保存済み戦績には存在しない。新規結果では固定キャラクターの識別に使う。 */
+  readonly playerId?: PlayerId;
   readonly name: string;
   /** 最終順位(1〜)。順位決定ロジックは含めず、与えられた値を表示するのみ。 */
   readonly rank: number;

@@ -220,7 +220,7 @@ describe("engine 残存供託リーチ棒の帰属(Q15 = 1位取得 / #130・Q20
     // 帰属記録(表示・検算用スナップショット)。
     expect(end.lastRound?.residualSticks).toEqual({
       recipientId: "p0",
-      recipientName: "あなた",
+      recipientName: "粗悪品",
       sticks: 2,
       points: 2000,
     });

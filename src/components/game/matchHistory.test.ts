@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { CHARACTER_PLAYER_IDS } from "@/domain/game/characters";
 import { createLockRequest } from "@/test/webLocksStub";
 import {
   appendHistory,
@@ -526,6 +527,24 @@ describe("match history persistence (#293)", () => {
 
     it("妥当な保存文字列を受理する", () => {
       expect(parseHistory(JSON.stringify(valid()))).toEqual([entry(1)]);
+    });
+
+    it("旧履歴の名前を変えず、新規履歴では固定playerIdも往復する(issue #711)", () => {
+      const legacy = entry(1);
+      const current = {
+        ...entry(2),
+        players: entry(2).players.map((player, index) => ({
+          ...player,
+          playerId: CHARACTER_PLAYER_IDS[index],
+        })),
+      };
+
+      expect(
+        parseHistory(JSON.stringify({ version: 1, entries: [legacy] })),
+      ).toEqual([legacy]);
+      expect(
+        parseHistory(JSON.stringify({ version: 1, entries: [current] })),
+      ).toEqual([current]);
     });
 
     it("12書記素の名前を受理する(1書記素が複数code unitでも / #484)", () => {

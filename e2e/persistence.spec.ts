@@ -50,7 +50,7 @@ test.describe("対局状態のsession復元(#190)", () => {
     await declareRiichi(page);
 
     const badge = page
-      .getByRole("region", { name: /^あなた/ })
+      .getByRole("region", { name: /^粗悪品/ })
       .getByTestId("status-badge-riichi");
     await expect(badge).toBeVisible();
     const declaredHand = await hand.getByRole("option").allTextContents();

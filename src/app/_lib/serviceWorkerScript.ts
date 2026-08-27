@@ -24,6 +24,11 @@
  * 偽の ServiceWorkerGlobalScope を注入してハンドラの挙動を検証できるようにするため)。
  */
 import { TILE_ASSET_URLS } from "@/components/common/tileImage";
+import { CHARACTER_PROFILES } from "@/domain/game/characters";
+
+const CHARACTER_ASSET_URLS = Object.values(CHARACTER_PROFILES).map(
+  ({ portraitSrc }) => portraitSrc,
+);
 
 /** オフライン起動対象の全ルート(App Router のユーザー向け画面)。 */
 export const PRECACHE_ROUTES: readonly string[] = [
@@ -44,6 +49,7 @@ export const PRECACHE_ASSETS: readonly string[] = [
   "/icon.svg",
   "/icons/icon-192",
   "/icons/icon-512",
+  ...CHARACTER_ASSET_URLS,
   ...TILE_ASSET_URLS,
 ];
 
@@ -225,6 +231,7 @@ function isImmutableAsset(pathname) {
   return (
     pathname.startsWith("/_next/static/") ||
     pathname.startsWith("/tiles/") ||
+    pathname.startsWith("/characters/") ||
     pathname.startsWith("/icons/") ||
     pathname === "/icon.svg"
   );

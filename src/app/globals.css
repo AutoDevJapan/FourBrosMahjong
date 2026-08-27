@@ -123,6 +123,11 @@
    * border-foreground/<α> のままとし、「どちらの意図か」がクラス名から読めるようにする。
    */
   --control-border: #858585;
+  /* 四兄弟の固定識別色。黄はライト背景でも文字・境界が4.5:1以上になる濃い黄土色を使う。 */
+  --character-red: #991b1b;
+  --character-blue: #1e40af;
+  --character-yellow: #713f12;
+  --character-green: #166534;
 
   /*
    * 牌サイズの基準ユニット(スペック5 5.3.2 段階①)。すべての牌サイズはこの --u の倍数で
@@ -164,6 +169,10 @@
   --focus-ring: #60a5fa;
   /* ダークは暗い地に対して 3:1 を満たす明るめのグレー(#388)。 */
   --control-border: #6e6e6e;
+  --character-red: #fca5a5;
+  --character-blue: #93c5fd;
+  --character-yellow: #fde047;
+  --character-green: #86efac;
 }
 
 /* ユーザーが明示選択していない場合のみ OS のダーク設定に追従する。 */
@@ -187,6 +196,10 @@
     --focus-ring: #60a5fa;
     /* ダークは暗い地に対して 3:1 を満たす明るめのグレー(#388)。 */
     --control-border: #6e6e6e;
+    --character-red: #fca5a5;
+    --character-blue: #93c5fd;
+    --character-yellow: #fde047;
+    --character-green: #86efac;
   }
 }
 
@@ -229,6 +242,29 @@ body {
   color: var(--foreground);
   /* Issue #72: Arial ハードコードを廃し、@theme の --font-sans(Geist + Noto Sans JP)を参照する。 */
   font-family: var(--font-sans);
+}
+
+.character-surface {
+  border-color: var(--character-accent, var(--control-border));
+  background-color: color-mix(
+    in srgb,
+    var(--character-accent, transparent) 7%,
+    transparent
+  );
+}
+
+.character-accent-edge {
+  border-inline-start-color: var(--character-accent, var(--control-border));
+  border-inline-start-width: 4px;
+}
+
+.character-name {
+  color: var(--character-accent, currentColor);
+}
+
+.character-portrait {
+  border: 2px solid var(--character-accent, var(--control-border));
+  background: #f4f4f4;
 }
 
 /*

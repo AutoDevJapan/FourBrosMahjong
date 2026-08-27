@@ -120,6 +120,7 @@ function RenderPhaseWitness({ log }: { log: number[] }) {
 const fixture = walkToGameEnd(1);
 if (fixture.state.result === null) throw new Error("終局結果がない");
 const expectedPlayers = fixture.state.result.map((r) => ({
+  playerId: r.playerId,
   name: r.name,
   rank: r.rank,
   rawScore: r.rawScore,

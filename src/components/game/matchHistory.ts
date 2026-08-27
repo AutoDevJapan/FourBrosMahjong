@@ -10,6 +10,8 @@
  * 形状を厳密検証し、件数・容量に上限を設けて巨大入力や破損データから防御する。
  */
 import { localStorageOrNull } from "@/components/common/browserStorage";
+import { isCharacterPlayerId } from "@/domain/game/characters";
+import type { PlayerId } from "@/domain/game/engine";
 import { hasOnlyKeys } from "./gamePersistence";
 
 /** `localStorage` の保存キー。形式変更時は version を上げて別キーにする。 */
@@ -26,6 +28,8 @@ export const MAX_HISTORY_BYTES = 128 * 1024;
 
 /** 4兄弟のうち1人分の確定済みソシー内訳(`ResultPlayerView` と同形の保存用スナップショット)。 */
 interface MatchHistoryPlayer {
+  /** v1初期の保存済み戦績には無い。新規記録の固定キャラクター識別子。 */
+  readonly playerId?: PlayerId;
   readonly name: string;
   /** 最終順位(1〜4)。 */
   readonly rank: number;
@@ -80,8 +84,10 @@ const MAX_TIMESTAMP = 8_640_000_000_000_000;
 function isPlayer(value: unknown): value is MatchHistoryPlayer {
   if (!value || typeof value !== "object") return false;
   const player = value as Record<string, unknown>;
+  const hasPlayerId = "playerId" in player;
   return (
     hasOnlyKeys(player, [
+      ...(hasPlayerId ? ["playerId"] : []),
       "name",
       "rank",
       "rawScore",
@@ -89,6 +95,7 @@ function isPlayer(value: unknown): value is MatchHistoryPlayer {
       "bonus",
       "soshiiTotal",
     ]) &&
+    (!hasPlayerId || isCharacterPlayerId(player.playerId)) &&
     typeof player.name === "string" &&
     player.name.length > 0 &&
     player.name.length <= MAX_NAME_LENGTH &&

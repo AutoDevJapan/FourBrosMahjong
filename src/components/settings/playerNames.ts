@@ -9,12 +9,12 @@
  * 保存範囲は同一ブラウザの `localStorage` のみで、バックエンド/複数デバイス同期は行わない
  * (`documents/spec/screen-design-and-routing.md` 6.2 の `/settings` 責務に沿う)。
  *
- * 実在人物名は既定値にもプレースホルダにも**埋め込まない**。本作は非公式ファンメイドであり、
- * 番組メンバー名を出荷物へ同梱するかは未確定(`質問リスト.md` Q28)のため、案内は
- * 「四人回しの4人を設定できる」という汎用文言に留め、実名の入力はユーザーに委ねる。
+ * 既定値はオーナー指定のもじり名(issue #711)。保存済みカスタム名は同じstorage keyから
+ * そのまま読み、新しい既定値で上書きしない。
  */
 
 import { localStorageOrNull } from "@/components/common/browserStorage";
+import { CHARACTER_PROFILES } from "@/domain/game/characters";
 import { DEFAULT_NAMES, type PlayerNames } from "@/domain/game/engine";
 import { sanitizePlayerName } from "@/lib/playerName";
 
@@ -34,10 +34,10 @@ export const PLAYER_NAMES_STORAGE_KEY = "four-bros-mahjong.playerNames.v1";
 
 /** 入力欄のラベル(index 0 = 自家)。 */
 export const PLAYER_NAME_LABELS: readonly [string, string, string, string] = [
-  "あなた(自家)",
-  "対局者2",
-  "対局者3",
-  "対局者4",
+  `${CHARACTER_PROFILES.p0.defaultName}(自家)`,
+  CHARACTER_PROFILES.p1.defaultName,
+  CHARACTER_PROFILES.p2.defaultName,
+  CHARACTER_PROFILES.p3.defaultName,
 ];
 
 export { DEFAULT_NAMES };

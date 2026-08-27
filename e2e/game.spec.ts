@@ -45,7 +45,7 @@ function normalizeColor(color: string): string {
  * 「1半荘を実プレイして `/game/result` に到達する」ループ(スペック2 2.1・2.6・2.8 / スペック6 6.3)を検証する。
  *
  * 盤面の牌はクライアントで乱数生成されるため、値そのものではなく role/aria-label ベースで安定検証する。
- * 席割りは起家=自家 p0 固定(engine)のため、東1 の席(あなた=東家 / 抜け番=三郎)は決定的。
+ * 席割りは起家=自家 p0 固定(engine)のため、東1 の席(粗悪品=東家 / 抜け番=糸瓜)は決定的。
  */
 test.describe("対局画面(/game)", () => {
   test("自家の捨て牌フリテンを色だけでなく理由付きバッジで表示する(#408)", async ({
@@ -53,7 +53,7 @@ test.describe("対局画面(/game)", () => {
   }) => {
     await page.goto("/game?seed=255");
     const furiten = page
-      .getByRole("region", { name: /^あなた/ })
+      .getByRole("region", { name: /^粗悪品/ })
       .filter({ visible: true })
       .getByTestId("status-badge-furiten");
 
@@ -103,26 +103,58 @@ test.describe("対局画面(/game)", () => {
     // ドラ表示。
     await expect(page.getByRole("region", { name: "ドラ表示" })).toBeVisible();
 
-    // 4スロット: 着席3人(あなた=東家 / 一郎=南家 / 二郎=西家)+ 抜け番(三郎)。
+    // 4スロット: 着席3人(粗悪品=東家 / 竜二=南家 / マサキ=西家)+ 抜け番(糸瓜)。
     await expect(
-      page.getByRole("region", { name: "あなた(東家)" }),
+      page.getByRole("region", { name: "粗悪品(東家)" }),
     ).toBeVisible();
     await expect(
-      page.getByRole("region", { name: "一郎(南家)" }),
+      page.getByRole("region", { name: "竜二(南家)" }),
     ).toBeVisible();
     await expect(
-      page.getByRole("region", { name: "二郎(西家)" }),
+      page.getByRole("region", { name: "マサキ(西家)" }),
     ).toBeVisible();
     await expect(
-      page.getByRole("region", { name: "三郎(抜け番)" }),
+      page.getByRole("region", { name: "糸瓜(抜け番)" }),
     ).toBeVisible();
+    for (const character of [
+      {
+        region: "粗悪品(東家)",
+        playerId: "p0",
+        portrait: "/characters/p0-soakuhin-portrait.avif",
+      },
+      {
+        region: "竜二(南家)",
+        playerId: "p1",
+        portrait: "/characters/p1-ryuji-portrait.avif",
+      },
+      {
+        region: "マサキ(西家)",
+        playerId: "p2",
+        portrait: "/characters/p2-masaki-portrait.avif",
+      },
+      {
+        region: "糸瓜(抜け番)",
+        playerId: "p3",
+        portrait: "/characters/p3-hechima-portrait.avif",
+      },
+    ] as const) {
+      const region = page.getByRole("region", { name: character.region });
+      await expect(region).toHaveAttribute(
+        "data-character-id",
+        character.playerId,
+      );
+      await expect(
+        region.locator(`img[src="${character.portrait}"]`),
+      ).toBeVisible();
+    }
+    await expect(page.getByText("へちま", { exact: true })).toHaveCount(0);
 
     // 抜け番の状態はテキストでも伝わる(色のみ依存禁止 / スペック5 5.2.1)。
     // バッジの特定は安定したテスト用アンカー(#162)で行い、その上でテキスト併記を検証する
     // (テキスト部分一致でのバッジ特定に依存せず、色非依存の可視ラベルは引き続き担保)。
     await expect(
       page
-        .getByRole("region", { name: "三郎(抜け番)" })
+        .getByRole("region", { name: "糸瓜(抜け番)" })
         .getByTestId("status-badge-bench"),
     ).toContainText("抜け番");
 
@@ -131,7 +163,7 @@ test.describe("対局画面(/game)", () => {
       page.getByRole("listbox", { name: "自家の手牌" }).first(),
     ).toBeVisible();
     await expect(
-      page.getByRole("region", { name: "あなた(東家)" }),
+      page.getByRole("region", { name: "粗悪品(東家)" }),
     ).toContainText("35,000");
 
     // 操作パネル(role=group)。開始直後は自家の打牌待ちで「ツモ」ボタンが現れる。
@@ -337,7 +369,7 @@ test.describe("対局画面(/game)", () => {
     await page.goto("/game");
 
     const ownDiscards = page
-      .getByRole("region", { name: /^あなた/ })
+      .getByRole("region", { name: /^粗悪品/ })
       .getByRole("list", { name: "捨て牌" })
       .first()
       .getByRole("listitem");
@@ -388,7 +420,7 @@ test.describe("対局画面(/game)", () => {
     await page.setViewportSize({ width: 700, height: 900 });
     await page.goto("/game?seed=1");
 
-    const self = page.getByRole("region", { name: "あなた(東家)" });
+    const self = page.getByRole("region", { name: "粗悪品(東家)" });
     await expect(self.getByTestId("kita-display")).toContainText("ガリ2");
     await expect(
       self.getByTestId("kita-display").locator('[data-face="Pei"]'),
@@ -407,7 +439,7 @@ test.describe("対局画面(/game)", () => {
     const dialog = page.getByRole("dialog", { name: "全体盤面" });
     await expect(
       dialog
-        .getByRole("region", { name: "あなた(東家)" })
+        .getByRole("region", { name: "粗悪品(東家)" })
         .getByTestId("kita-display"),
     ).toContainText("ガリ2");
   });
@@ -680,7 +712,7 @@ test.describe("対局画面(/game)", () => {
     // 自家の河(段階①のクロス配置側)。空の `ul` は高さ 0 で「不可視」判定になるため、
     // `filter({ visible: true })` ではなく席の region から一意に取る。
     const ownRiver = page
-      .getByRole("region", { name: /^あなた/ })
+      .getByRole("region", { name: /^粗悪品/ })
       .getByRole("list", { name: "捨て牌" })
       .first();
 
@@ -840,7 +872,7 @@ test.describe("対局画面(/game)", () => {
     const box = await firstTile.boundingBox();
     expect(box).not.toBeNull();
     const self = page
-      .getByRole("region", { name: /^あなた/ })
+      .getByRole("region", { name: /^粗悪品/ })
       .filter({ visible: true })
       .first();
     const discards = self
@@ -873,7 +905,7 @@ test.describe("対局画面(/game)", () => {
     const hand = visibleHand(page);
     const firstTile = hand.getByRole("option").first();
     const self = page
-      .getByRole("region", { name: /^あなた/ })
+      .getByRole("region", { name: /^粗悪品/ })
       .filter({ visible: true })
       .first();
     const discards = self
@@ -931,7 +963,7 @@ test.describe("対局画面(/game)", () => {
         expect(box?.height).toBeGreaterThanOrEqual(44);
 
         const self = page
-          .getByRole("region", { name: /^あなた/ })
+          .getByRole("region", { name: /^粗悪品/ })
           .filter({ visible: true })
           .first();
         const discards = self
@@ -1141,7 +1173,7 @@ test.describe("対局画面(/game)", () => {
     await eligible.first().click();
     await expect(
       page
-        .getByRole("region", { name: /^あなた/ })
+        .getByRole("region", { name: /^粗悪品/ })
         .getByTestId("status-badge-riichi"),
     ).toBeVisible();
   });
