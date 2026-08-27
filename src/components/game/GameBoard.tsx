@@ -339,6 +339,7 @@ export default function GameBoard({
           label: "ポン",
           icon: "碰",
           onClick: controls.pon,
+          standardOrder: "pon",
         });
       }
       if (pending.canKan) {
@@ -347,6 +348,7 @@ export default function GameBoard({
           label: "カン",
           icon: "槓",
           onClick: controls.kan,
+          standardOrder: "kan",
         });
       }
       items.push({
@@ -357,7 +359,7 @@ export default function GameBoard({
       });
       return items;
     }
-    // 自家の打牌待ち(ツモ / リーチ / 暗槓 / 加槓 / ツモ切り)。
+    // 自家の打牌待ち(ツモ / 暗槓 / 加槓 / リーチ / ツモ切り)。
     if (pending?.kind === "humanDiscard") {
       const items: ActionItem[] = [
         {
@@ -396,6 +398,7 @@ export default function GameBoard({
             setRiichiArmed((armed) => !armed);
           },
           primary: riichiArmed,
+          standardOrder: "riichi",
         });
       }
       for (const tile of pending.ankanTiles) {
@@ -404,6 +407,7 @@ export default function GameBoard({
           label: `暗槓 ${tileLabel(tile)}`,
           icon: "槓",
           onClick: () => controls.ankan(tile),
+          standardOrder: "kan",
         });
       }
       for (const tile of pending.kakanTiles) {
@@ -412,6 +416,7 @@ export default function GameBoard({
           label: `加槓 ${tileLabel(tile)}`,
           icon: "槓",
           onClick: () => controls.kakan(tile),
+          standardOrder: "kan",
         });
       }
       return items;

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   createGame,
+  DEFAULT_NAMES,
   type EngineState,
   finishRound,
   type PlayerId,
@@ -8,6 +9,7 @@ import {
   seatOfPlayer,
 } from "@/domain/game/engine";
 import { parseTiles } from "@/domain/hand/notation";
+import { type RoundNumber, seatingOf } from "@/domain/round/round";
 import { walkToGameEnd } from "./finishedGameFixture";
 import { selectView, toTile } from "./gameView";
 
@@ -28,6 +30,51 @@ describe("toTile 赤5規約の正規化(#379)", () => {
       rank: 5,
       isRed: false,
     });
+  });
+});
+
+describe("selectView 固定キャラクター対応(issue #711)", () => {
+  it("席・抜け番が回転してもplayerIdに対応する名前を維持する", () => {
+    const base = createGame({ seed: 711 });
+    if (base.hand === null) throw new Error("hand must exist");
+
+    for (const roundNumber of [
+      1, 2, 3, 4,
+    ] as const satisfies readonly RoundNumber[]) {
+      const round = { ...base.round, roundNumber };
+      const state = {
+        ...base,
+        round,
+        hand: { ...base.hand, seating: seatingOf(round) },
+      };
+      const players = Object.values(selectView(state).slots).map(
+        ({ player }) => player,
+      );
+
+      expect(new Set(players.map(({ playerId }) => playerId))).toEqual(
+        new Set(["p0", "p1", "p2", "p3"]),
+      );
+      for (const player of players) {
+        const index = Number(player.playerId.slice(1));
+        expect(player.name).toBe(DEFAULT_NAMES[index]);
+      }
+    }
+  });
+
+  it("半荘結果にも固定playerIdを残す", () => {
+    const { state } = walkToGameEnd(2024);
+    const players = selectView(state).result?.players;
+
+    expect(players?.map(({ playerId }) => playerId).sort()).toEqual([
+      "p0",
+      "p1",
+      "p2",
+      "p3",
+    ]);
+    for (const player of players ?? []) {
+      const index = Number(player.playerId?.slice(1));
+      expect(player.name).toBe(DEFAULT_NAMES[index]);
+    }
   });
 });
 

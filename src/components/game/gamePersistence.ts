@@ -4,7 +4,6 @@ import {
 } from "@/components/settings/playerNames";
 import {
   createGame,
-  DEFAULT_NAMES,
   declareAnkan,
   declareKakan,
   declareKan,
@@ -28,6 +27,8 @@ const GAME_SESSION_KEY = "four-bros-mahjong.game.v1";
 // 設定側(`localStorage`)を再生時に読み直さず、ジャーナル自身に保存する。
 // v1 の記録は既定名を補って v2 として受け入れる(`namesOfVersion`)。
 const VERSION = 2;
+/** v1ジャーナル作成当時の表示名。既存の進行中半荘をデプロイで改名しない。 */
+const LEGACY_V1_DEFAULT_NAMES: PlayerNames = ["あなた", "一郎", "二郎", "三郎"];
 // engine は最大32局で終了し、完走fixtureも5,000遷移を安全ガードにしている。
 // これを超える履歴は正規の対局から生成されないものとして、再生前に拒否する。
 export const MAX_JOURNAL_ACTIONS = 5_000;
@@ -136,7 +137,7 @@ function isNames(value: unknown): value is PlayerNames {
 /**
  * 版ごとに許される key と対局者名を検証し、v2 の `names` へ正規化する。
  *
- * v1(`names` 無し)は既定名を補って受け入れる。デプロイをまたいで開いたままのタブが
+ * v1(`names` 無し)は当時の既定名を補って受け入れる。デプロイをまたいで開いたままのタブが
  * 進行中の半荘を失わないための移行措置(`names` は表示名だけを決めるので、既定名を
  * 補っても Wall/RNG・操作列の再生結果は一切変わらない)。
  *
@@ -147,7 +148,7 @@ function isNames(value: unknown): value is PlayerNames {
 function namesOfVersion(value: Record<string, unknown>): PlayerNames | null {
   if (value.version === 1) {
     return hasOnlyKeys(value, ["version", "seed", "actions"])
-      ? DEFAULT_NAMES
+      ? LEGACY_V1_DEFAULT_NAMES
       : null;
   }
   if (value.version !== VERSION) return null;

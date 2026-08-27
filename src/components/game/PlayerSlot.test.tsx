@@ -8,6 +8,7 @@ describe("PlayerSlot (seated / bench switch, spec 6.4.1)", () => {
     const content: SlotContent = {
       kind: "seated",
       player: {
+        playerId: "p0",
         name: "あなた",
         points: 35000,
         seatWind: "east",
@@ -30,6 +31,7 @@ describe("PlayerSlot (seated / bench switch, spec 6.4.1)", () => {
     const content: SlotContent = {
       kind: "seated",
       player: {
+        playerId: "p1",
         name: "下家",
         points: 25000,
         seatWind: "west",
@@ -46,7 +48,7 @@ describe("PlayerSlot (seated / bench switch, spec 6.4.1)", () => {
   it("renders a bench area with a non-color 抜け番 label when benched", () => {
     const content: SlotContent = {
       kind: "bench",
-      player: { name: "対面", points: 32000 },
+      player: { playerId: "p2", name: "対面", points: 32000 },
     };
     render(<PlayerSlot position="across" content={content} />);
     expect(
@@ -60,7 +62,7 @@ describe("PlayerSlot (seated / bench switch, spec 6.4.1)", () => {
   it("collapses the bench slot to a compact band matching seated opponents (issue #150)", () => {
     const content: SlotContent = {
       kind: "bench",
-      player: { name: "対面", points: 32000 },
+      player: { playerId: "p2", name: "対面", points: 32000 },
     };
     render(<PlayerSlot position="across" content={content} compact />);
     // 名前・持ち点・抜け番バッジは残す。

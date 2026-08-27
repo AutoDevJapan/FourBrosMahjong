@@ -23,6 +23,10 @@
 
 import { useId, useRef, useState, useSyncExternalStore } from "react";
 import { localStorageOrNull } from "@/components/common/browserStorage";
+import CharacterPortrait, {
+  characterAccentStyle,
+} from "@/components/game/CharacterPortrait";
+import { CHARACTER_PLAYER_IDS } from "@/domain/game/characters";
 import {
   DEFAULT_NAMES,
   getPlayerNamesSnapshot,
@@ -95,7 +99,7 @@ export function PlayerNamesForm() {
           対局者の名前(四人回しの4人)
         </legend>
         <p id={hintId} className="text-sm/6 text-foreground/70">
-          先頭が自家(あなた)で、残り3人が他家です。空欄のまま保存すると既定名(
+          粗悪品が自家で、残り3人が他家です。空欄のまま保存すると既定名(
           {DEFAULT_NAMES.join("・")})に戻ります。1人あたり
           {MAX_PLAYER_NAME_LENGTH}
           文字(絵文字や結合文字は見た目の1文字として数えます)までです。変更は次に開始する半荘から反映されます。
@@ -104,40 +108,52 @@ export function PlayerNamesForm() {
         <div className="flex flex-col gap-3">
           {PLAYER_NAME_LABELS.map((label, index) => {
             const inputId = `${fieldId}-${index}`;
+            const playerId = CHARACTER_PLAYER_IDS[index];
             return (
-              <div key={label} className="flex flex-col gap-1">
-                <label htmlFor={inputId} className="text-sm font-medium">
-                  {label}
-                </label>
-                <input
-                  id={inputId}
-                  type="text"
-                  value={values[index]}
-                  autoComplete="off"
-                  aria-describedby={hintId}
-                  onCompositionStart={() => {
-                    composingIndex.current = index;
-                  }}
-                  onCompositionEnd={(event) => {
-                    composingIndex.current = null;
-                    updateAt(index, event.currentTarget.value, false);
-                  }}
-                  // `compositionend` を落とす IME(一部の Android)でも、
-                  // フォーカスが外れた時点で上限を復帰させる。
-                  onBlur={(event) => {
-                    if (composingIndex.current === null) return;
-                    composingIndex.current = null;
-                    updateAt(index, event.currentTarget.value, false);
-                  }}
-                  onChange={(event) =>
-                    updateAt(
-                      index,
-                      event.target.value,
-                      composingIndex.current === index,
-                    )
-                  }
-                  className="min-h-11 w-full rounded-lg border border-control-border bg-transparent px-3 py-2 text-base"
-                />
+              <div
+                key={label}
+                data-character-id={playerId}
+                style={characterAccentStyle(playerId)}
+                className="character-surface flex gap-3 rounded-lg border p-3"
+              >
+                <CharacterPortrait playerId={playerId} />
+                <div className="min-w-0 flex-1">
+                  <label
+                    htmlFor={inputId}
+                    className="character-name text-sm font-medium"
+                  >
+                    {label}
+                  </label>
+                  <input
+                    id={inputId}
+                    type="text"
+                    value={values[index]}
+                    autoComplete="off"
+                    aria-describedby={hintId}
+                    onCompositionStart={() => {
+                      composingIndex.current = index;
+                    }}
+                    onCompositionEnd={(event) => {
+                      composingIndex.current = null;
+                      updateAt(index, event.currentTarget.value, false);
+                    }}
+                    // `compositionend` を落とす IME(一部の Android)でも、
+                    // フォーカスが外れた時点で上限を復帰させる。
+                    onBlur={(event) => {
+                      if (composingIndex.current === null) return;
+                      composingIndex.current = null;
+                      updateAt(index, event.currentTarget.value, false);
+                    }}
+                    onChange={(event) =>
+                      updateAt(
+                        index,
+                        event.target.value,
+                        composingIndex.current === index,
+                      )
+                    }
+                    className="min-h-11 w-full rounded-lg border border-control-border bg-transparent px-3 py-2 text-base"
+                  />
+                </div>
               </div>
             );
           })}
