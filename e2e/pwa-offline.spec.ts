@@ -16,7 +16,7 @@ test.describe("PWAオフライン動作(#292)", () => {
     "service worker は production ビルドのみ有効(E2E_PROD=1 で実行)",
   );
 
-  test("初回登録後に追加のオンライン再読込みなしで/gameと/onlineをオフライン起動・hydrateできる(#506/#701)", async ({
+  test("初回登録後に追加のオンライン再読込みなしで/game・/online・/rulesをオフライン起動できる(#506/#701/#712)", async ({
     page,
     context,
   }) => {
@@ -76,6 +76,22 @@ test.describe("PWAオフライン動作(#292)", () => {
     ).toBeVisible();
     await expect(offlineOnlinePage.getByLabel("表示名")).toBeVisible();
     await offlineOnlinePage.close();
+
+    // Rules固有CSSをroute chunkへ分離しても、install時に全routeのbuild assetを
+    // 抽出する契約により、初回オンライン表示なしで閲覧・操作できる。
+    const offlineRulesPage = await context.newPage();
+    await offlineRulesPage.goto("/rules");
+    await expect(
+      offlineRulesPage.getByRole("heading", { name: "ルール説明" }),
+    ).toBeVisible();
+    await expect(
+      offlineRulesPage.getByRole("navigation", { name: "ルールの目次" }),
+    ).toBeVisible();
+    await expect(offlineRulesPage.locator(".rules-layout")).toHaveCSS(
+      "display",
+      "grid",
+    );
+    await offlineRulesPage.close();
 
     // SSR表示だけの偽陽性ではなく、hydrate済みのイベントハンドラと
     // sessionStorageジャーナルがオフラインでも実際に進行することを固定する。
