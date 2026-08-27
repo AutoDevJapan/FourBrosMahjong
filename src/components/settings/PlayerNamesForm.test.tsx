@@ -21,7 +21,7 @@ describe("PlayerNamesForm", () => {
   it("未設定時は既定名を初期表示する(後方互換)", () => {
     render(<PlayerNamesForm />);
 
-    expect(inputFor("粗悪品")).toHaveValue(DEFAULT_NAMES[0]);
+    expect(inputFor("粗悪品（あなた）")).toHaveValue(DEFAULT_NAMES[0]);
     expect(inputFor("竜二")).toHaveValue(DEFAULT_NAMES[1]);
   });
 
@@ -33,7 +33,7 @@ describe("PlayerNamesForm", () => {
 
     render(<PlayerNamesForm />);
 
-    expect(inputFor("粗悪品")).toHaveValue("自分");
+    expect(inputFor("粗悪品（あなた）")).toHaveValue("自分");
     expect(inputFor("糸瓜")).toHaveValue("翔生");
   });
 
@@ -79,7 +79,7 @@ describe("PlayerNamesForm", () => {
 
     await user.click(screen.getByRole("button", { name: "既定名に戻す" }));
 
-    expect(inputFor("粗悪品")).toHaveValue(DEFAULT_NAMES[0]);
+    expect(inputFor("粗悪品（あなた）")).toHaveValue(DEFAULT_NAMES[0]);
     expect(loadPlayerNames(window.localStorage)).toEqual(DEFAULT_NAMES);
   });
 
@@ -172,7 +172,7 @@ describe("PlayerNamesForm", () => {
     expect(
       screen.getByRole("group", { name: /四兄弟の名前/ }),
     ).toBeInTheDocument();
-    for (const label of ["粗悪品", "竜二", "マサキ", "糸瓜"]) {
+    for (const label of ["粗悪品（あなた）", "竜二", "マサキ", "糸瓜"]) {
       expect(screen.getByLabelText(label)).toHaveAccessibleDescription(
         /空欄のまま保存すると既定名/,
       );
@@ -183,7 +183,7 @@ describe("PlayerNamesForm", () => {
     const user = userEvent.setup();
     render(<PlayerNamesForm />);
 
-    for (const label of ["粗悪品", "竜二", "マサキ", "糸瓜"]) {
+    for (const label of ["粗悪品（あなた）", "竜二", "マサキ", "糸瓜"]) {
       await user.clear(inputFor(label));
       await user.type(inputFor(label), "同名");
     }
@@ -211,7 +211,7 @@ describe("PlayerNamesForm", () => {
       }),
     );
 
-    await waitFor(() => expect(inputFor("粗悪品")).toHaveValue("A"));
+    await waitFor(() => expect(inputFor("粗悪品（あなた）")).toHaveValue("A"));
     expect(inputFor("糸瓜")).toHaveValue("D");
   });
 

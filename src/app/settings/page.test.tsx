@@ -67,8 +67,6 @@ describe("Issue #712 Phase B2 設定", () => {
       "南家",
       "西家",
       "北家",
-      "自家",
-      "他家",
       "サウンド",
       "音量",
       "その他",
@@ -78,6 +76,8 @@ describe("Issue #712 Phase B2 設定", () => {
         screen.queryByText(text, { exact: false }),
       ).not.toBeInTheDocument();
     }
+    expect(screen.getByLabelText("粗悪品（あなた）")).toHaveValue("粗悪品");
+    expect(screen.getByLabelText("糸瓜")).not.toHaveAccessibleName(/あなた/);
     for (const image of container.querySelectorAll("img")) {
       expect(image.getAttribute("src")).not.toContain("ui-refresh");
       expect(image.getAttribute("src")).not.toContain("settings.png");

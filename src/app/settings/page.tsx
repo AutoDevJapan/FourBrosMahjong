@@ -17,6 +17,7 @@
  */
 
 import type { Metadata } from "next";
+import { Yuji_Syuku } from "next/font/google";
 import { socialMetadata } from "@/app/_lib/metadata";
 import {
   DesignLinkButton,
@@ -26,6 +27,16 @@ import {
 import ScreenNavigation from "@/components/layout/ScreenNavigation";
 import { ThemeToggle } from "@/components/layout/ThemeToggle";
 import { PlayerNamesForm } from "@/components/settings/PlayerNamesForm";
+
+// Phase B2画面だけで読み込む筆文字。ロビーと同じfallback契約を使い、
+// root layoutや他routeのfont payloadへ波及させない。
+const yujiSyuku = Yuji_Syuku({
+  variable: "--font-yuji-syuku",
+  weight: "400",
+  subsets: ["latin"],
+  display: "swap",
+  preload: false,
+});
 
 const description =
   "四兄弟麻雀の設定。テーマ(システム設定に従う / ライト / ダーク)の手動切替と、四人回しの対局者4人の表示名を変更できます。";
@@ -44,7 +55,7 @@ export const metadata: Metadata = {
 
 export default function SettingsPage() {
   return (
-    <DesignPageShell className="settings-page">
+    <DesignPageShell className={`settings-page ${yujiSyuku.variable}`}>
       <main className="settings-main">
         <header className="settings-header">
           <DesignLinkButton href="/" className="settings-back-link">

@@ -62,7 +62,11 @@ test.describe("Issue #712 Phase B2 設定デザイン", () => {
     for (const [index, id] of CHARACTER_IDS.entries()) {
       const card = cards.nth(index);
       await expect(card).toHaveAttribute("data-character-id", id);
-      await expect(card.getByLabel(DEFAULT_NAMES[index])).toHaveValue(
+      const accessibleLabel =
+        index === 0
+          ? `${DEFAULT_NAMES[index]}（あなた）`
+          : DEFAULT_NAMES[index];
+      await expect(card.getByLabel(accessibleLabel)).toHaveValue(
         DEFAULT_NAMES[index],
       );
       await expect(card.locator("img")).toHaveAttribute("alt", "");
@@ -79,8 +83,6 @@ test.describe("Issue #712 Phase B2 設定デザイン", () => {
       "南家",
       "西家",
       "北家",
-      "自家",
-      "他家",
       "サウンド",
       "音量",
       "その他",
@@ -88,6 +90,8 @@ test.describe("Issue #712 Phase B2 設定デザイン", () => {
     ]) {
       await expect(page.getByText(forbidden, { exact: false })).toHaveCount(0);
     }
+    await expect(cards.nth(0)).toContainText("粗悪品（あなた）");
+    await expect(cards.nth(3)).not.toContainText("あなた");
     await expect(
       page.getByRole("link", { name: "ロビーへ戻る" }),
     ).toHaveAttribute("href", "/");
@@ -183,7 +187,7 @@ test.describe("Issue #712 Phase B2 設定デザイン", () => {
       );
     });
     await page.goto("/settings");
-    await expect(page.getByLabel("粗悪品")).toHaveValue(
+    await expect(page.getByLabel("粗悪品（あなた）")).toHaveValue(
       "１２３４５６７８９０１２",
     );
 

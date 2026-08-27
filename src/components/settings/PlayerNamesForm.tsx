@@ -121,6 +121,9 @@ export function PlayerNamesForm() {
                     className="character-name settings-name-label"
                   >
                     {label}
+                    {index === 0 && (
+                      <span className="settings-self-badge">（あなた）</span>
+                    )}
                   </label>
                   <input
                     id={inputId}

@@ -664,8 +664,11 @@ body {
 .settings-title {
   margin-top: 0.2rem;
   color: var(--ui-text);
+  font-family:
+    var(--font-yuji-syuku), "Yu Mincho", "Hiragino Mincho ProN", serif;
   font-size: clamp(2rem, 7vw, 3.5rem);
-  font-weight: 800;
+  font-weight: 400;
+  font-synthesis: none;
   line-height: 1.1;
   letter-spacing: 0.08em;
 }
@@ -869,12 +872,24 @@ body {
 }
 
 .settings-name-label {
+  display: flex;
   width: fit-content;
   max-width: 100%;
+  align-items: center;
+  gap: 0.35rem;
   font-size: 0.8125rem;
   font-weight: 800;
   line-height: 1.35;
   overflow-wrap: anywhere;
+}
+
+.settings-self-badge {
+  padding: 0.1rem 0.35rem;
+  border: 1px solid currentColor;
+  border-radius: 999px;
+  font-size: 0.6875rem;
+  line-height: 1.2;
+  white-space: nowrap;
 }
 
 .settings-name-input {
