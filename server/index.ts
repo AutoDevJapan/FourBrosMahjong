@@ -20,6 +20,7 @@ import {
 } from "./connectionState";
 import { startHandshakeTimeout } from "./handshake";
 import { runHeartbeat, SERVER_HEARTBEAT_INTERVAL_MS } from "./heartbeat";
+import { requestPath } from "./requestPath";
 import {
   normalizePlayerName,
   normalizeRoomCode,
@@ -402,6 +403,11 @@ function writeJson(
 }
 
 const httpServer = createServer((request, response) => {
+  const path = requestPath(request.url);
+  if (path === null) {
+    writeJson(response, 400, { ok: false, error: "bad_request" });
+    return;
+  }
   if (request.method === "OPTIONS") {
     response.writeHead(204, {
       "access-control-allow-origin": "*",
@@ -411,7 +417,6 @@ const httpServer = createServer((request, response) => {
     response.end();
     return;
   }
-  const path = new URL(request.url ?? "/", "http://localhost").pathname;
   if (path === "/healthz") {
     writeJson(response, 200, { ok: true, service: "four-bros-mahjong-online" });
     return;
@@ -487,7 +492,11 @@ websocketServer.on("connection", (socket, request) => {
 });
 
 httpServer.on("upgrade", (request: IncomingMessage, socket: Socket, head) => {
-  const path = new URL(request.url ?? "/", "http://localhost").pathname;
+  const path = requestPath(request.url);
+  if (path === null) {
+    socket.end("HTTP/1.1 400 Bad Request\r\nConnection: close\r\n\r\n");
+    return;
+  }
   if (path !== "/ws" || !originAllowed(request.headers.origin)) {
     socket.write("HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\n");
     socket.destroy();
