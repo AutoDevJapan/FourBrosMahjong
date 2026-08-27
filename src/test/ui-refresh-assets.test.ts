@@ -189,7 +189,9 @@ describe("Issue #712 design-reference originals", () => {
   it("rejects a missing registered asset", () => {
     withFixture(({ manifestPath, originalsPath }) => {
       unlinkSync(join(originalsPath, "lobby.png"));
-      expect(() => verifyUiRefreshAssets(manifestPath)).toThrow();
+      expect(() => verifyUiRefreshAssets(manifestPath)).toThrow(
+        "originals/ inventory must exactly match the regular files in the manifest",
+      );
     });
   });
 
@@ -199,7 +201,7 @@ describe("Issue #712 design-reference originals", () => {
       unlinkSync(lobbyPath);
       symlinkSync(new URL("originals/lobby.png", ASSET_DIRECTORY), lobbyPath);
       expect(() => verifyUiRefreshAssets(manifestPath)).toThrow(
-        "asset must be a regular file under originals/: lobby",
+        "originals/ inventory must exactly match the regular files in the manifest",
       );
     });
   });
@@ -209,7 +211,9 @@ describe("Issue #712 design-reference originals", () => {
       const lobbyPath = join(originalsPath, "lobby.png");
       unlinkSync(lobbyPath);
       symlinkSync(join(originalsPath, "missing.png"), lobbyPath);
-      expect(() => verifyUiRefreshAssets(manifestPath)).toThrow();
+      expect(() => verifyUiRefreshAssets(manifestPath)).toThrow(
+        "originals/ inventory must exactly match the regular files in the manifest",
+      );
     });
   });
 

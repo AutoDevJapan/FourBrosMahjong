@@ -100,7 +100,6 @@ export function verifyUiRefreshAssets(manifestPath = DEFAULT_MANIFEST) {
   const ids = new Set();
   const files = new Set();
   const routes = new Set();
-  let totalBytes = 0;
 
   for (const asset of manifest.assets) {
     if (!isRecord(asset)) throw new Error("asset entry must be an object");
@@ -129,6 +128,41 @@ export function verifyUiRefreshAssets(manifestPath = DEFAULT_MANIFEST) {
       throw new Error(`asset SHA-256 is invalid: ${asset.id}`);
     }
 
+    ids.add(asset.id);
+    files.add(asset.file);
+    routes.add(asset.route);
+  }
+
+  const expectedRoutes = [
+    "/",
+    "/game",
+    "/game/result",
+    "/history",
+    "/rules",
+    "/settings",
+  ];
+  if (JSON.stringify([...routes].sort()) !== JSON.stringify(expectedRoutes)) {
+    throw new Error("manifest routes do not match the six UI refresh screens");
+  }
+
+  const expectedInventory = [...files].map((file) => basename(file)).sort();
+  const actualInventory = readdirSync(originalsDirectory, {
+    withFileTypes: true,
+  });
+  if (
+    actualInventory.some(
+      (entry) => entry.isSymbolicLink() || !entry.isFile(),
+    ) ||
+    JSON.stringify(actualInventory.map((entry) => entry.name).sort()) !==
+      JSON.stringify(expectedInventory)
+  ) {
+    throw new Error(
+      "originals/ inventory must exactly match the regular files in the manifest",
+    );
+  }
+
+  let totalBytes = 0;
+  for (const asset of manifest.assets) {
     const requestedPath = resolve(manifestDirectory, asset.file);
     const actualPath = realpathSync(requestedPath);
     const pathWithinOriginals = relative(originalsDirectory, actualPath);
@@ -160,38 +194,7 @@ export function verifyUiRefreshAssets(manifestPath = DEFAULT_MANIFEST) {
       throw new Error(`asset SHA-256 does not match manifest: ${asset.id}`);
     }
 
-    ids.add(asset.id);
-    files.add(asset.file);
-    routes.add(asset.route);
     totalBytes += buffer.length;
-  }
-
-  const expectedRoutes = [
-    "/",
-    "/game",
-    "/game/result",
-    "/history",
-    "/rules",
-    "/settings",
-  ];
-  if (JSON.stringify([...routes].sort()) !== JSON.stringify(expectedRoutes)) {
-    throw new Error("manifest routes do not match the six UI refresh screens");
-  }
-
-  const expectedInventory = [...files].map((file) => basename(file)).sort();
-  const actualInventory = readdirSync(originalsDirectory, {
-    withFileTypes: true,
-  });
-  if (
-    actualInventory.some(
-      (entry) => entry.isSymbolicLink() || !entry.isFile(),
-    ) ||
-    JSON.stringify(actualInventory.map((entry) => entry.name).sort()) !==
-      JSON.stringify(expectedInventory)
-  ) {
-    throw new Error(
-      "originals/ inventory must exactly match the regular files in the manifest",
-    );
   }
 
   return { assetCount: manifest.assets.length, totalBytes };
