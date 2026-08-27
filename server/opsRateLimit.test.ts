@@ -102,6 +102,19 @@ describe("ops authentication rate limiter", () => {
     });
   });
 
+  it.each([Number.NaN, Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY, -1])(
+    "fails closed before consuming an invalid clock sample: %s",
+    (now) => {
+      const limiter = new OpsAuthRateLimiter(() => now);
+
+      expect(() => limiter.consume("source")).toThrow(
+        "ops authentication clock must return a finite non-negative value",
+      );
+      expect(() => limiter.cleanup()).toThrow(RangeError);
+      expect(limiter.trackedSourceCount).toBe(0);
+    },
+  );
+
   it("removes expired source state without growing the tracked map", () => {
     let now = 0;
     const limiter = new OpsAuthRateLimiter(() => now);

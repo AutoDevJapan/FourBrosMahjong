@@ -78,8 +78,7 @@ export class OpsAuthRateLimiter {
   constructor(private readonly clock: () => number = Date.now) {}
 
   consume(source: string): OpsAuthRateLimitRejection | null {
-    const now = Math.max(this.#lastNow, this.clock());
-    this.#lastNow = now;
+    const now = this.sampleNow();
     const globalRetryAfterMs = this.#global.consume(now);
     const sourceRetryAfterMs = this.sourceWindowFor(source, now).consume(now);
 
@@ -93,8 +92,7 @@ export class OpsAuthRateLimiter {
   }
 
   cleanup(): void {
-    const now = Math.max(this.#lastNow, this.clock());
-    this.#lastNow = now;
+    const now = this.sampleNow();
     for (const [source, window] of this.#sources) {
       if (window.isIdle(now)) this.#sources.delete(source);
     }
@@ -102,6 +100,17 @@ export class OpsAuthRateLimiter {
 
   get trackedSourceCount(): number {
     return this.#sources.size;
+  }
+
+  private sampleNow(): number {
+    const sampled = this.clock();
+    if (!Number.isFinite(sampled) || sampled < 0) {
+      throw new RangeError(
+        "ops authentication clock must return a finite non-negative value",
+      );
+    }
+    this.#lastNow = Math.max(this.#lastNow, sampled);
+    return this.#lastNow;
   }
 
   private sourceWindowFor(source: string, now: number): SlidingWindow {
