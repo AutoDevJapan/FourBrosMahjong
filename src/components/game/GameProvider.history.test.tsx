@@ -25,7 +25,7 @@ import {
   subscribeHistory,
 } from "./matchHistory";
 
-const GAME_SESSION_KEY = "four-bros-mahjong.game.v1";
+const GAME_SESSION_KEY = "four-bros-mahjong.game.v3";
 
 const originalLocalStorageDescriptor = Object.getOwnPropertyDescriptor(
   window,
@@ -69,6 +69,8 @@ function LastActionProbe({ action }: { action: GameAction }) {
         return controls.pon();
       case "kan":
         return controls.kan();
+      case "kita":
+        return controls.kita();
       case "passRon":
         return controls.passRon();
       case "nextRound":

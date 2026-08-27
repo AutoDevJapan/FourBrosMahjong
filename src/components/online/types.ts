@@ -32,6 +32,8 @@ export interface OnlineSnapshot {
   readonly code: string;
   readonly version: number;
   readonly you: PlayerId;
+  /** 欠落する旧serverは自動ガリ。trueの席だけ明示的な北抜きを送信する。 */
+  readonly explicitKita?: boolean;
   /** 現在のhost席。host退出直後など、従来の固定p0から変わり得る。 */
   readonly hostId: PlayerId | null;
   readonly phase: GamePhase;

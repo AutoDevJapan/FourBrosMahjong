@@ -58,7 +58,7 @@ test.describe("対局状態のsession復元(#190)", () => {
       .poll(() =>
         page.evaluate(() =>
           JSON.parse(
-            sessionStorage.getItem("four-bros-mahjong.game.v1") ?? "null",
+            sessionStorage.getItem("four-bros-mahjong.game.v3") ?? "null",
           )?.actions.some(
             (action: { type: string }) => action.type === "riichi",
           ),
@@ -110,7 +110,7 @@ test.describe("終局後の /game の出口(#206 / #207)", () => {
   }) => {
     await page.addInitScript(
       (raw) => {
-        sessionStorage.setItem("four-bros-mahjong.game.v1", raw);
+        sessionStorage.setItem("four-bros-mahjong.game.v3", raw);
       },
       JSON.stringify(walkToGameEnd(1).journal),
     );
@@ -155,7 +155,7 @@ test.describe("終局後の /game の出口(#206 / #207)", () => {
     // タブ状態(終局 journal が sessionStorage に残存)を UI 打ち切りなしに再現する(#207)。
     await page.addInitScript(
       (raw) => {
-        sessionStorage.setItem("four-bros-mahjong.game.v1", raw);
+        sessionStorage.setItem("four-bros-mahjong.game.v3", raw);
       },
       JSON.stringify(walkToGameEnd(1).journal),
     );

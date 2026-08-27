@@ -152,11 +152,12 @@ export default function GameBoard({
   const selfKitaCount =
     slots.self.kind === "seated" ? slots.self.player.kitaCount : 0;
   const roundKey = `${tableInfo.roundWind}-${tableInfo.handNumber}-${tableInfo.honba}`;
-  // 自動北抜きは engine 遷移内で完了するため、公開枚数の増加を UI イベントとして保持する。
-  // 初期配牌で抜いた場合も 0→N として通知し、局替わりの N→0 では通知を消す。
+  // 北抜きは engine 遷移内で完了するため、公開枚数の増加を UI イベントとして保持する。
+  // mount時点の公開枚数は既知の状態として基準にし、reload/resumeで過去の北抜きを再通知しない。
+  // 同じmount中の局替わりでは0枚を起点として、新しい局の北抜きだけを通知する。
   const [kitaObservation, setKitaObservation] = useState<KitaObservation>({
     roundKey,
-    count: 0,
+    count: selfKitaCount,
   });
   const [kitaAnnouncement, setKitaAnnouncement] = useState("");
   if (
@@ -371,6 +372,14 @@ export default function GameBoard({
           primary: pending.canTsumo,
         },
       ];
+      if (pending.canKita) {
+        items.push({
+          key: "kita",
+          label: "北抜",
+          icon: "北",
+          onClick: controls.kita,
+        });
+      }
       // リーチ後は手牌選択が固定されるため、ツモ切りボタンを提供する。
       if (pending.locked) {
         items.push({
@@ -465,12 +474,19 @@ export default function GameBoard({
     }
     if (pending?.kind === "humanDiscard") {
       if (pending.locked) {
-        return "リーチ中です。ツモ和了かツモ切りを選んでください(北抜きは自動)。";
+        const choices = [
+          pending.canTsumo ? "ツモ和了" : null,
+          pending.canKita ? "北抜" : null,
+          "ツモ切り",
+        ].filter((choice): choice is string => choice !== null);
+        return `リーチ中です。${choices.join("、")}を選べます。`;
       }
       if (riichiArmed) {
         return "リーチ宣言牌を選んでください(テンパイを保つ牌のみ有効)。";
       }
-      return "牌を選んで打牌してください(北抜きは自動)。";
+      return pending.canKita
+        ? "北抜を選ぶか、牌を選んで打牌してください。"
+        : "牌を選んで打牌してください。";
     }
     return "";
   }, [
@@ -485,7 +501,11 @@ export default function GameBoard({
 
   const announcement = useMemo(() => {
     if (tileFeedback.message) return tileFeedback.message;
-    if (pending?.kind === "humanDiscard") return "あなたの手番です。";
+    if (pending?.kind === "humanDiscard") {
+      return pending.canKita
+        ? "あなたの手番です。北抜できます。"
+        : "あなたの手番です。";
+    }
     if (pending?.kind === "humanReact") {
       if (pending.chankan !== undefined) return "槍槓ロンできます。";
       return pending.canRon ? "ロンできます。" : "鳴きできます。";
@@ -706,10 +726,20 @@ export default function GameBoard({
         </Modal>
       ) : null}
 
+      {kitaAnnouncement ? (
+        <p
+          role="status"
+          aria-live="polite"
+          aria-atomic="true"
+          className="mx-auto mt-2 max-w-2xl rounded-lg border border-emerald-300/50 bg-emerald-950/85 px-3 py-2 text-center text-sm font-semibold text-emerald-50 shadow-lg"
+        >
+          {kitaAnnouncement}
+        </p>
+      ) : null}
+
       <LiveRegion
         politeMessage={announcement}
         politeMessageKey={tileFeedback.eventId}
-        secondaryPoliteMessage={kitaAnnouncement}
         assertiveMessage={assertive}
       />
     </div>

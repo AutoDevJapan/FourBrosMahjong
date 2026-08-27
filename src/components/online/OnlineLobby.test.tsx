@@ -237,6 +237,7 @@ describe("OnlineLobby (#605)", () => {
       type: "resume",
       code: "ABC234",
       token: "t".repeat(16),
+      explicitKita: true,
     });
 
     act(() => sockets[0]?.close());
@@ -370,6 +371,7 @@ describe("OnlineLobby のキーボード送信", () => {
     expect(JSON.parse(sockets[0]?.sent[0] ?? "{}")).toEqual({
       type: "create",
       name: "たろう",
+      explicitKita: true,
     });
   });
 
@@ -388,6 +390,7 @@ describe("OnlineLobby のキーボード送信", () => {
       type: "join",
       code: "ABC234",
       name: "たろう",
+      explicitKita: true,
     });
   });
 
@@ -406,6 +409,7 @@ describe("OnlineLobby のキーボード送信", () => {
     expect(JSON.parse(sockets[0]?.sent[0] ?? "{}")).toEqual({
       type: "create",
       name: "たろう",
+      explicitKita: true,
     });
   });
 
@@ -428,6 +432,7 @@ describe("OnlineLobby のキーボード送信", () => {
       type: "join",
       code: "ABC234",
       name: "たろう",
+      explicitKita: true,
     });
   });
 
@@ -1077,6 +1082,7 @@ describe("OnlineLobby connection recovery", () => {
       type: "join",
       code: "ABC234",
       name: "たろう",
+      explicitKita: true,
     });
 
     const focusCallsBeforeSession = focus.mock.calls.length;

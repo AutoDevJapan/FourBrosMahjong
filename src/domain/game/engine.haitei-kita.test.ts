@@ -5,6 +5,7 @@ import { sameKind } from "@/domain/hand/tile-identity";
 import { HONOR, type Tile } from "@/domain/tiles/tile";
 import {
   createGame,
+  declareKita,
   declareRon,
   declareTsumo,
   discard,
@@ -26,11 +27,10 @@ import {
  * ## Q33 との関係
  *
  * 「海底(ライブ牌 0)で北を抜けるか / 王牌が 14 → 13 枚に減るのを許すか」は
- * `質問リスト.md` **Q33 が未回答**でスコープ外。そこで主となる回帰テストは
+ * `質問リスト.md` **Q33 が未回答**。そこで主となる回帰テストは
  * **ライブ牌が残っている状態で北を引く**局面(嶺上補充がライブ最後の1枚を吸って
  * `remainingLiveTiles` が 0 になる / 王牌は 14 枚のまま)に置いた。この局面は
- * Q33 がどちらに裁定されても成立し続ける。海底ちょうどで北を引くケースは
- * Q33 依存として別に持つ。
+ * その境界に依存しない局面に置き、現行挙動を固定する海底ケースも別に持つ。
  */
 
 /** 和了者の副露: 白のポン。これで役(役牌)が必ず1つ付き、非門前になる。 */
@@ -264,7 +264,12 @@ describe("engine: 北抜きの嶺上ツモと海底摸月(#396)", () => {
       winner: "east",
     });
 
-    const after = discard(state, discardTile);
+    const beforeKita = discard(state, discardTile);
+    expect(beforeKita.pending).toMatchObject({
+      kind: "humanDiscard",
+      canKita: true,
+    });
+    const after = declareKita(beforeKita);
 
     // 前提: 自家の手番に戻り、ツモ和了が提示されている(空振り防止)。
     expect(after.phase).toBe("playing");
@@ -293,7 +298,12 @@ describe("engine: 北抜きの嶺上ツモと海底摸月(#396)", () => {
       meld: "plain",
     });
 
-    const after = discard(state, discardTile);
+    const beforeKita = discard(state, discardTile);
+    expect(beforeKita.pending).toMatchObject({
+      kind: "humanDiscard",
+      canKita: true,
+    });
+    const after = declareKita(beforeKita);
 
     // 前提: 自家が北を抜いて嶺上牌をツモしている(空振り防止)。
     expect(after.phase).toBe("playing");
@@ -307,10 +317,9 @@ describe("engine: 北抜きの嶺上ツモと海底摸月(#396)", () => {
     expect(declareTsumo(after).phase).toBe("playing");
   });
 
-  it("海底ちょうどで北を抜いた嶺上ツモにも海底摸月は付かない(Q33 依存の局面)", () => {
+  it("海底ちょうどで北を抜いた嶺上ツモにも海底摸月は付かない(Q33 現行挙動)", () => {
     // ライブ牌1枚で南が北を引く。嶺上補充の補填ができず王牌が 14 → 13 枚に減る。
-    // この局面が起こり得るか自体は Q33 未回答(現状は起こり得る)。
-    // Q33 が「海底では北を抜かない」に裁定されたら本ケースは削除してよい。
+    // Q33 は未回答だが、現状は補充可能な限り北を抜ける。
     const { state, discardTile, winTile } = armKitaWin(48, {
       liveTiles: 1,
       winner: "south",

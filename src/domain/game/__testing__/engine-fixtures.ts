@@ -6,6 +6,7 @@ import {
   declareAnkan,
   declareKakan,
   declareKan,
+  declareKita,
   declarePon,
   declareRiichi,
   declareRon,
@@ -28,6 +29,7 @@ export type DriverActionKind =
   | "declareRiichi"
   | "declarePon"
   | "declareKan"
+  | "declareKita"
   | "declareAnkan"
   | "declareKakan"
   | "declareTsumo"
@@ -94,6 +96,8 @@ export function advanceEngine(
   if (pending?.kind === "humanDiscard") {
     if (pending.canTsumo)
       return { next: declareTsumo(state), action: "declareTsumo" };
+    if (pending.canKita)
+      return { next: declareKita(state), action: "declareKita" };
     if (pending.locked) return { next: tsumogiri(state), action: "tsumogiri" };
 
     if (policy !== "passive") {

@@ -62,6 +62,20 @@ function DuplicateTileDoubleActionProbe() {
   );
 }
 
+function KitaPersistenceProbe() {
+  const { controls, view } = useGame();
+  const self = view.slots.self;
+  if (self.kind !== "seated") throw new Error("human seat is missing");
+  return (
+    <>
+      <button type="button" onClick={controls.kita}>
+        北抜
+      </button>
+      <output data-testid="kita-count">{self.player.kitaCount}</output>
+    </>
+  );
+}
+
 describe("GameProvider concurrent controls (#230)", () => {
   beforeEach(() => {
     window.sessionStorage.clear();
@@ -90,6 +104,29 @@ describe("GameProvider concurrent controls (#230)", () => {
     // 1回目のaccepted transitionからcommitまで、Providerが追加操作を拒否する。
     expect(journal?.actions).toHaveLength(1);
     expect(liveView).toEqual(selectView(replayJournal(journal!)));
+  });
+
+  it("明示北抜きをjournalへ保存し、リロード相当の再描画で同じガリ枚数へ復元する", async () => {
+    const user = userEvent.setup();
+    const first = render(
+      <GameProvider>
+        <KitaPersistenceProbe />
+      </GameProvider>,
+    );
+
+    await user.click(screen.getByRole("button", { name: "北抜" }));
+    expect(loadJournal(window.sessionStorage)?.actions).toEqual([
+      { type: "kita" },
+    ]);
+    expect(screen.getByTestId("kita-count")).toHaveTextContent("1");
+
+    first.unmount();
+    render(
+      <GameProvider>
+        <KitaPersistenceProbe />
+      </GameProvider>,
+    );
+    expect(screen.getByTestId("kita-count")).toHaveTextContent("1");
   });
 
   it("同種牌が次の手番にも残っていても画面更新前の連続操作を二巡目へ適用しない", () => {

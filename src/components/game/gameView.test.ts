@@ -322,10 +322,10 @@ describe("selectView kita projection", () => {
 });
 
 describe("selectView remaining wall projection(#189)", () => {
-  it("配牌北の自動補充後の残り山をengineからそのまま写像する", () => {
+  it("人間の配牌北を保持した残り山をengineからそのまま写像する", () => {
     const game = createGame({ seed: 0 });
-    expect(game.hand?.wall.remainingLiveTiles).toBe(52);
-    expect(selectView(game).tableInfo.remainingLiveTiles).toBe(52);
+    expect(game.hand?.wall.remainingLiveTiles).toBe(53);
+    expect(selectView(game).tableInfo.remainingLiveTiles).toBe(53);
   });
 
   it("通常ツモとカン/北抜きの嶺上補充による減少を反映する", () => {

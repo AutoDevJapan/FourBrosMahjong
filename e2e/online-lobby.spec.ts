@@ -306,6 +306,7 @@ test.describe("オンラインロビーの接続失敗復帰", () => {
       type: "join",
       code: "ABC234",
       name: "たろう",
+      explicitKita: true,
     });
 
     await page.evaluate((snapshot) => {

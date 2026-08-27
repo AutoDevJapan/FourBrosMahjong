@@ -66,6 +66,8 @@ export interface GameControls {
   readonly pon: () => void;
   /** 自家の明槓(大明槓・直前の他家打牌に対して)。 */
   readonly kan: () => void;
+  /** 自家の北抜き(自ツモ番・手牌またはツモ牌の北1枚)。 */
+  readonly kita: () => void;
   /** 自家の暗槓(自ツモ番・指定牌種)。 */
   readonly ankan: (tile: TileData) => void;
   /** 自家の加槓(自ツモ番・既存ポンに4枚目)。 */
@@ -212,7 +214,9 @@ function newJournal(
   seed: number,
   names: PlayerNames,
 ): GameJournal | null {
-  return storage === null ? null : { version: 2, seed, names, actions: [] };
+  return storage === null
+    ? null
+    : { version: 3, seed, names, explicitKita: true, actions: [] };
 }
 
 function initialSession(initialGame?: EngineState): {
@@ -229,6 +233,8 @@ function initialSession(initialGame?: EngineState): {
   if (stored && (urlSeed === null || stored.seed === urlSeed)) {
     try {
       const engine = replayJournal(stored);
+      // v1/v2からの移行も新keyへだけ保存する。旧keyは旧client/rollback用に保持する。
+      if (storage !== null) saveJournal(storage, stored);
       // 復元時の戦績追記(終局時の保存失敗の補完)はマウント効果側で行う(#310)。
       return {
         engine,
@@ -379,6 +385,7 @@ export function GameProvider({ children, initialGame }: GameProviderProps) {
       ron: () => commit({ type: "ron" }),
       pon: () => commit({ type: "pon" }),
       kan: () => commit({ type: "kan" }),
+      kita: () => commit({ type: "kita" }),
       ankan: (tile) => tileAction("ankan", toTile(tile)),
       kakan: (tile) => tileAction("kakan", toTile(tile)),
       passRon: () => commit({ type: "passRon" }),

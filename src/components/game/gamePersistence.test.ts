@@ -6,6 +6,7 @@ import {
   declareAnkan,
   declareKakan,
   declareKan,
+  declareKita,
   declarePon,
   declareRiichi,
   declareRon,
@@ -19,7 +20,9 @@ import {
 import { walkToGameEnd } from "./finishedGameFixture";
 import {
   applyGameAction,
+  GAME_SESSION_KEY,
   type GameJournal,
+  LEGACY_GAME_SESSION_KEY,
   loadJournal,
   MAX_JOURNAL_ACTIONS,
   MAX_JOURNAL_BYTES,
@@ -54,9 +57,10 @@ class MemoryStorage implements Storage {
 describe("game persistence journal", () => {
   it("seedと操作列からWall/RNGを含む同一局面を復元する", () => {
     const start: GameJournal = {
-      version: 2,
+      version: 3,
       seed: 0,
       names: DEFAULT_NAMES,
+      explicitKita: true,
       actions: [],
     };
     const initial = replayJournal(start);
@@ -85,7 +89,7 @@ describe("game persistence journal", () => {
       [10, "kan"],
       [9, "ankan"],
       [84, "ron"],
-      [146, "tsumo"],
+      [127, "tsumo"],
       [342, "tsumogiri"],
     ] as const);
     for (const [seed, target] of targets) {
@@ -118,6 +122,9 @@ describe("game persistence journal", () => {
           if (pending.canTsumo) {
             action = { type: "tsumo" };
             direct = declareTsumo(direct);
+          } else if (pending.canKita) {
+            action = { type: "kita" };
+            direct = declareKita(direct);
           } else if (pending.locked) {
             action = { type: "tsumogiri" };
             direct = tsumogiri(direct);
@@ -164,7 +171,13 @@ describe("game persistence journal", () => {
       ).toBe(true);
       expect(
         selectView(
-          replayJournal({ version: 2, seed, names: DEFAULT_NAMES, actions }),
+          replayJournal({
+            version: 3,
+            seed,
+            names: DEFAULT_NAMES,
+            explicitKita: true,
+            actions,
+          }),
         ),
         `seed=${seed}`,
       ).toEqual(selectView(direct));
@@ -179,6 +192,7 @@ describe("game persistence journal", () => {
         "ron",
         "pon",
         "kan",
+        "kita",
         "ankan",
         "kakan",
         "passRon",
@@ -190,9 +204,10 @@ describe("game persistence journal", () => {
   it("保存して読み戻せる", () => {
     const storage = new MemoryStorage();
     const journal: GameJournal = {
-      version: 2,
+      version: 3,
       seed: 42,
       names: DEFAULT_NAMES,
+      explicitKita: true,
       actions: [],
     };
     saveJournal(storage, journal);
@@ -201,18 +216,19 @@ describe("game persistence journal", () => {
 
   it.each([
     {
-      label: "手牌に存在しない北の打牌",
+      label: "手牌に存在しない五萬の打牌",
       action: {
         type: "discard",
-        tile: { suit: "honor", rank: 4, isRed: false },
+        tile: { suit: "man", rank: 5, isRed: false },
       },
     },
     { label: "playing中の次局開始", action: { type: "nextRound" } },
   ] as const)("局面上不正な操作を破損として拒否する: $label", ({ action }) => {
     const journal: GameJournal = {
-      version: 2,
+      version: 3,
       seed: 0,
       names: DEFAULT_NAMES,
+      explicitKita: true,
       actions: [action],
     };
 
@@ -350,13 +366,14 @@ describe("game persistence journal", () => {
     expect(parseJournal(JSON.stringify(journal))).toBeNull();
   });
 
-  it("v1の記録は当時の既定名を保ったままv2として受け入れる (#291/#711)", () => {
+  it("v1の記録は当時の既定名と旧自動ガリを保ったままv3へ移行する (#291/#711)", () => {
     const v1 = { version: 1, seed: 3, actions: [{ type: "tsumogiri" }] };
 
     expect(parseJournal(JSON.stringify(v1))).toEqual({
-      version: 2,
+      version: 3,
       seed: 3,
       names: ["あなた", "一郎", "二郎", "三郎"],
+      explicitKita: false,
       actions: [{ type: "tsumogiri" }],
     });
   });
@@ -427,7 +444,13 @@ describe("game persistence journal", () => {
 
   it("設定した対局者名を保持して読み戻す (#291)", () => {
     const names = ["自分", "龍二", "下ちゃん", "翔生"] as const;
-    const journal: GameJournal = { version: 2, seed: 7, names, actions: [] };
+    const journal: GameJournal = {
+      version: 3,
+      seed: 7,
+      names,
+      explicitKita: true,
+      actions: [],
+    };
 
     expect(parseJournal(JSON.stringify(journal))).toEqual(journal);
     expect(replayJournal(journal).players.map((p) => p.name)).toEqual([
@@ -435,10 +458,179 @@ describe("game persistence journal", () => {
     ]);
   });
 
-  it("破損記録はload時に削除する", () => {
+  it("破損した旧記録も旧client/rollback用keyから削除しない", () => {
     const storage = new MemoryStorage();
-    storage.setItem("four-bros-mahjong.game.v1", "broken");
+    storage.setItem(LEGACY_GAME_SESSION_KEY, "broken");
     expect(loadJournal(storage)).toBeNull();
-    expect(storage.length).toBe(0);
+    expect(storage.getItem(LEGACY_GAME_SESSION_KEY)).toBe("broken");
+  });
+
+  it("v1/v2は旧engineの自動ガリ局面・山・操作位置を同一に再生する", () => {
+    const seed = 1;
+    const fixture = createGame({ seed, explicitKitaPlayerIds: [] });
+    const drawn = fixture.hand?.drawn?.tile;
+    if (drawn === undefined) throw new Error("legacy draw expected");
+
+    for (const raw of [
+      { version: 1, seed, actions: [{ type: "discard", tile: drawn }] },
+      {
+        version: 2,
+        seed,
+        names: DEFAULT_NAMES,
+        actions: [{ type: "discard", tile: drawn }],
+      },
+    ]) {
+      const journal = parseJournal(JSON.stringify(raw));
+      expect(journal?.explicitKita).toBe(false);
+      if (journal === null) throw new Error("legacy journal expected");
+      const expected = discard(
+        createGame({
+          seed,
+          names: journal.names,
+          explicitKitaPlayerIds: [],
+        }),
+        drawn,
+      );
+      const replayed = replayJournal(journal);
+      expect(selectView(replayed)).toEqual(selectView(expected));
+      expect(replayed.hand?.wall.liveWall).toEqual(
+        expected.hand?.wall.liveWall,
+      );
+      expect(replayed.hand?.wall.deadWall).toEqual(
+        expected.hand?.wall.deadWall,
+      );
+      expect(replayed.hand?.kita).toEqual(expected.hand?.kita);
+      expect(replayed.pending).toEqual(expected.pending);
+    }
+  });
+
+  it("旧versionのaction streamへ新しいkita actionを混入できない", () => {
+    expect(
+      parseJournal(
+        JSON.stringify({
+          version: 2,
+          seed: 1,
+          names: DEFAULT_NAMES,
+          actions: [{ type: "kita" }],
+        }),
+      ),
+    ).toBeNull();
+  });
+
+  it("v3保存は旧keyを上書きせず、旧client相当parserで読める旧記録を保つ", () => {
+    const storage = new MemoryStorage();
+    const legacy = JSON.stringify({
+      version: 2,
+      seed: 1,
+      names: DEFAULT_NAMES,
+      actions: [],
+    });
+    storage.setItem(LEGACY_GAME_SESSION_KEY, legacy);
+    const loadLikeOldClient = () => {
+      const raw = storage.getItem(LEGACY_GAME_SESSION_KEY);
+      if (raw === null) return null;
+      const value = JSON.parse(raw) as { actions?: { type?: string }[] };
+      const known = new Set([
+        "discard",
+        "tsumogiri",
+        "riichi",
+        "tsumo",
+        "ron",
+        "pon",
+        "kan",
+        "ankan",
+        "kakan",
+        "passRon",
+        "nextRound",
+      ]);
+      if (!value.actions?.every((action) => known.has(action.type ?? ""))) {
+        storage.removeItem(LEGACY_GAME_SESSION_KEY);
+        return null;
+      }
+      return value;
+    };
+    expect(loadLikeOldClient()).not.toBeNull();
+    const journal: GameJournal = {
+      version: 3,
+      seed: 1,
+      names: DEFAULT_NAMES,
+      explicitKita: true,
+      actions: [{ type: "kita" }],
+    };
+
+    saveJournal(storage, journal);
+
+    expect(storage.getItem(LEGACY_GAME_SESSION_KEY)).toBe(legacy);
+    expect(
+      JSON.parse(storage.getItem(LEGACY_GAME_SESSION_KEY) ?? "null"),
+    ).toEqual(JSON.parse(legacy));
+    expect(loadLikeOldClient()).not.toBeNull();
+    expect(loadJournal(storage)).toEqual(journal);
+  });
+
+  it("v3破損時はv3だけを削除して旧keyへfallbackする", () => {
+    const storage = new MemoryStorage();
+    const legacy = JSON.stringify({
+      version: 2,
+      seed: 2,
+      names: DEFAULT_NAMES,
+      actions: [],
+    });
+    storage.setItem(GAME_SESSION_KEY, "broken");
+    storage.setItem(LEGACY_GAME_SESSION_KEY, legacy);
+
+    expect(loadJournal(storage)).toMatchObject({
+      version: 3,
+      seed: 2,
+      explicitKita: false,
+    });
+    expect(storage.getItem(GAME_SESSION_KEY)).toBeNull();
+    expect(storage.getItem(LEGACY_GAME_SESSION_KEY)).toBe(legacy);
+  });
+
+  it("parse可能なv3のreplay失敗でも旧keyを削除・上書きしない", () => {
+    const storage = new MemoryStorage();
+    const legacy = JSON.stringify({ version: 1, seed: 4, actions: [] });
+    storage.setItem(LEGACY_GAME_SESSION_KEY, legacy);
+    storage.setItem(
+      GAME_SESSION_KEY,
+      JSON.stringify({
+        version: 3,
+        seed: 4,
+        names: DEFAULT_NAMES,
+        explicitKita: true,
+        actions: [
+          {
+            type: "discard",
+            tile: { suit: "man", rank: 5, isRed: false },
+          },
+        ],
+      }),
+    );
+
+    const loaded = loadJournal(storage);
+    if (loaded === null) throw new Error("v3 journal expected");
+    expect(() => replayJournal(loaded)).toThrow("Invalid game journal action");
+    expect(storage.getItem(LEGACY_GAME_SESSION_KEY)).toBe(legacy);
+  });
+
+  it("v3のatomic setItem失敗でも旧keyを削除・上書きしない", () => {
+    const storage = new MemoryStorage();
+    const legacy = JSON.stringify({ version: 1, seed: 1, actions: [] });
+    storage.setItem(LEGACY_GAME_SESSION_KEY, legacy);
+    vi.spyOn(storage, "setItem").mockImplementation(() => {
+      throw new Error("quota");
+    });
+
+    saveJournal(storage, {
+      version: 3,
+      seed: 1,
+      names: DEFAULT_NAMES,
+      explicitKita: true,
+      actions: [],
+    });
+
+    expect(storage.getItem(LEGACY_GAME_SESSION_KEY)).toBe(legacy);
+    expect(storage.getItem(GAME_SESSION_KEY)).toBeNull();
   });
 });

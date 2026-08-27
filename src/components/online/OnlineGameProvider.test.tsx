@@ -13,12 +13,17 @@ import type { OnlineSnapshot } from "./types";
 function ActionProbe() {
   const { controls } = useGame();
   return (
-    <button
-      type="button"
-      onClick={() => controls.discard({ suit: "man", rank: 1, isRed: false })}
-    >
-      打牌
-    </button>
+    <>
+      <button
+        type="button"
+        onClick={() => controls.discard({ suit: "man", rank: 1, isRed: false })}
+      >
+        打牌
+      </button>
+      <button type="button" onClick={controls.kita}>
+        北抜
+      </button>
+    </>
   );
 }
 
@@ -44,6 +49,7 @@ function snapshotFixture(): OnlineSnapshot {
     code: "ABC234",
     version: 3,
     you: "p0",
+    explicitKita: true,
     hostId: "p0",
     phase: engine.phase,
     view: selectView(engine, "p0"),
@@ -166,6 +172,40 @@ describe("OnlineGameProvider", () => {
       version: 3,
       action: { type: "discard" },
     });
+  });
+
+  it("sends the explicit kita action for the local player", async () => {
+    const send = vi.fn();
+    const socket = { readyState: 1, send } as unknown as WebSocket;
+    render(
+      <OnlineGameProvider socket={socket} snapshot={snapshotFixture()}>
+        <ActionProbe />
+      </OnlineGameProvider>,
+    );
+
+    await userEvent.click(screen.getByRole("button", { name: "北抜" }));
+
+    expect(JSON.parse(send.mock.calls[0][0] as string)).toMatchObject({
+      type: "action",
+      version: 3,
+      action: { type: "kita" },
+    });
+  });
+
+  it("capability欠落の旧server snapshotではkita actionを送らない", async () => {
+    const send = vi.fn();
+    const socket = { readyState: 1, send } as unknown as WebSocket;
+    const { explicitKita, ...legacySnapshot } = snapshotFixture();
+    expect(explicitKita).toBe(true);
+    render(
+      <OnlineGameProvider socket={socket} snapshot={legacySnapshot}>
+        <ActionProbe />
+      </OnlineGameProvider>,
+    );
+
+    await userEvent.click(screen.getByRole("button", { name: "北抜" }));
+
+    expect(send).not.toHaveBeenCalled();
   });
 
   it("does not send a stale action while the socket is unavailable", async () => {

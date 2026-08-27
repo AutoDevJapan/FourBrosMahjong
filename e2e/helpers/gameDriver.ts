@@ -176,6 +176,17 @@ export async function advanceUntil(
       continue;
     }
     if (state.pending === "humanDiscard") {
+      // 明示北抜に対応した席では、従来の自動ガリと同じ標準進行を再現するため、合法なら
+      // 打牌・ツモ切りより先に北を抜く。旧 v1/v2 journal の互換再生は engine 側の fixture
+      // が担保し、この UI ドライバーは新規対局の人間操作だけを扱う。
+      const kita = page
+        .getByRole("button", { name: "北抜" })
+        .filter({ visible: true })
+        .first();
+      if (await kita.isVisible()) {
+        await kita.click();
+        continue;
+      }
       // リーチ後の自手番は打牌がロックされ、手牌クリックは no-op になる(「ツモ切り」ボタンは
       // ロック中のみ描画される)。ツモ和了できれば「ツモ」、できなければ「ツモ切り」で進める。
       const tsumogiri = page.getByRole("button", { name: "ツモ切り" });

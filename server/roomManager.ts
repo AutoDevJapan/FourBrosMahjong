@@ -18,6 +18,7 @@ import {
   type PlayerId,
   type PlayerNames,
   removeHumanPlayerIds,
+  setExplicitKitaPlayerIds,
   setHumanPlayerIds,
 } from "../src/domain/game/engine";
 import { sanitizePlayerName } from "../src/lib/playerName";
@@ -45,6 +46,7 @@ export interface RoomSnapshot {
   readonly code: string;
   readonly version: number;
   readonly you: PlayerId;
+  readonly explicitKita: boolean;
   readonly hostId: PlayerId | null;
   readonly phase: EngineState["phase"];
   readonly view: GameViewState;
@@ -63,6 +65,7 @@ interface RoomPlayer {
   name: string;
   connected: boolean;
   resumable: boolean;
+  explicitKita: boolean;
   lastSeenAt: number;
 }
 
@@ -154,8 +157,15 @@ function playerNameChanged(
 }
 
 /** 現半荘の人間入力 roster に新規 seat だけを追加する。 */
-function addHumanPlayer(room: Room, playerId: PlayerId): void {
+function addHumanPlayer(room: Room, player: RoomPlayer): void {
+  const playerId = player.id;
   room.humanPlayerIds.add(playerId);
+  if (player.explicitKita) {
+    room.state = setExplicitKitaPlayerIds(room.state, [
+      ...(room.state.explicitKitaPlayerIds ?? []),
+      playerId,
+    ]);
+  }
   room.state = setHumanPlayerIds(room.state, [
     ...(room.state.humanPlayerIds ?? ["p0"]),
     playerId,
@@ -285,6 +295,7 @@ export function parseGameAction(value: unknown): GameAction | null {
     "ron",
     "pon",
     "kan",
+    "kita",
     "passRon",
     "nextRound",
   ]);
@@ -298,7 +309,7 @@ export function parseGameAction(value: unknown): GameAction | null {
 export class RoomManager {
   private readonly rooms = new Map<string, Room>();
 
-  create(nameValue: unknown): RoomSession {
+  create(nameValue: unknown, explicitKita = false): RoomSession {
     if (this.rooms.size >= MAX_ROOMS) {
       throw new Error(
         "現在ルームが混み合っています。少し待ってから再試行してください。",
@@ -313,6 +324,7 @@ export class RoomManager {
       name,
       connected: true,
       resumable: true,
+      explicitKita,
       lastSeenAt: now(),
     };
     const room: Room = {
@@ -321,6 +333,7 @@ export class RoomManager {
         seed: randomSeed(),
         names: [name, "ゲスト2", "ゲスト3", "ゲスト4"],
         humanPlayerIds: ["p0"],
+        explicitKitaPlayerIds: explicitKita ? ["p0"] : [],
       }),
       version: 0,
       players: new Map([[player.id, player]]),
@@ -335,7 +348,11 @@ export class RoomManager {
     return { room, player };
   }
 
-  join(codeValue: unknown, nameValue: unknown): RoomSession | null {
+  join(
+    codeValue: unknown,
+    nameValue: unknown,
+    explicitKita = false,
+  ): RoomSession | null {
     const code = normalizeRoomCode(codeValue);
     if (code === null) return null;
     const room = this.rooms.get(code);
@@ -351,6 +368,7 @@ export class RoomManager {
       name: normalizePlayerName(nameValue),
       connected: true,
       resumable: true,
+      explicitKita,
       lastSeenAt: now(),
     };
     room.players.set(id, player);
@@ -358,7 +376,7 @@ export class RoomManager {
     room.departureNotice = null;
     // `room.players` also retains disconnected seats for resume. Only the
     // newly assigned seat joins this half-game's human-input roster.
-    addHumanPlayer(room, id);
+    addHumanPlayer(room, player);
     if (
       room.hostId === null ||
       room.players.get(room.hostId)?.connected !== true
@@ -373,7 +391,11 @@ export class RoomManager {
     return { room, player };
   }
 
-  resume(codeValue: unknown, token: unknown): RoomSession | null {
+  resume(
+    codeValue: unknown,
+    token: unknown,
+    explicitKita = false,
+  ): RoomSession | null {
     const code = normalizeRoomCode(codeValue);
     if (code === null || typeof token !== "string") return null;
     const room = this.rooms.get(code);
@@ -383,6 +405,7 @@ export class RoomManager {
     );
     if (!player) return null;
     player.connected = true;
+    player.explicitKita ||= explicitKita;
     player.lastSeenAt = now();
     // `newGame` snapshots connected seats into the current half-game roster.
     // Do not promote a seat that was omitted from that roster on resume: doing
@@ -390,6 +413,12 @@ export class RoomManager {
     // during the same half-game. A seat that was already human remains so.
     const before = room.state;
     if (room.humanPlayerIds.has(player.id)) {
+      if (player.explicitKita) {
+        room.state = setExplicitKitaPlayerIds(room.state, [
+          ...(room.state.explicitKitaPlayerIds ?? []),
+          player.id,
+        ]);
+      }
       room.state = setHumanPlayerIds(room.state, [
         ...(room.state.humanPlayerIds ?? ["p0"]),
         player.id,
@@ -418,11 +447,11 @@ export class RoomManager {
     if (!isCurrentPlayer(room, player)) return;
     player.connected = false;
     player.lastSeenAt = now();
+    const before = room.state;
+    room.state = removeHumanPlayerIds(room.state, [player.id]);
+    if (room.state !== before) room.version += 1;
     if (room.hostId === player.id) {
       transferHost(room, player, "disconnected");
-      const before = room.state;
-      room.state = removeHumanPlayerIds(room.state, [player.id]);
-      if (room.state !== before) room.version += 1;
     }
     room.lastActivityAt = now();
   }
@@ -472,6 +501,13 @@ export class RoomManager {
         room,
       };
     }
+    if (action.type === "kita" && !player.explicitKita) {
+      return {
+        ok: false,
+        error: "この接続では北抜きは自動処理されます。",
+        room,
+      };
+    }
     const pendingPlayer = playerIdForPending(room.state);
     if (action.type !== "nextRound" && pendingPlayer !== player.id) {
       return { ok: false, error: "現在はあなたの操作順ではありません。", room };
@@ -512,6 +548,9 @@ export class RoomManager {
     const connectedPlayerIds = [...room.players.values()]
       .filter((roomPlayer) => roomPlayer.connected)
       .map((roomPlayer) => roomPlayer.id);
+    const explicitKitaPlayerIds = [...room.players.values()]
+      .filter((roomPlayer) => roomPlayer.connected && roomPlayer.explicitKita)
+      .map((roomPlayer) => roomPlayer.id);
     room.humanPlayerIds.clear();
     for (const playerId of connectedPlayerIds) {
       room.humanPlayerIds.add(playerId);
@@ -523,6 +562,7 @@ export class RoomManager {
       // that is still disconnected into a fresh half-game. Otherwise the new
       // game stops at that seat's pending input with no connected actor.
       humanPlayerIds: connectedPlayerIds,
+      explicitKitaPlayerIds,
     });
     room.departureNotice = null;
     room.version += 1;
@@ -535,6 +575,7 @@ export class RoomManager {
       code: room.code,
       version: room.version,
       you: player.id,
+      explicitKita: player.explicitKita,
       hostId: room.hostId,
       phase: room.state.phase,
       view: selectView(room.state, player.id),

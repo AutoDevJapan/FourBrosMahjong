@@ -1,7 +1,7 @@
 import { randomBytes } from "node:crypto";
 import { describe, expect, it, vi } from "vitest";
 import { walkToGameEnd } from "../src/components/game/finishedGameFixture";
-import { createGame } from "../src/domain/game/engine";
+import { createGame, discard, seatOfPlayer } from "../src/domain/game/engine";
 import { MAX_PLAYER_NAME_LENGTH } from "../src/lib/playerName";
 import {
   normalizePlayerName,
@@ -524,6 +524,7 @@ describe("online room manager", () => {
   });
 
   it("validates action tiles before the engine sees them", () => {
+    expect(parseGameAction({ type: "kita" })).toEqual({ type: "kita" });
     for (const rank of [1, 2, 3, 4, 5, 6, 7, 8, 9]) {
       expect(
         parseGameAction({
@@ -550,5 +551,236 @@ describe("online room manager", () => {
       type: "discard",
       tile: { suit: "pin", rank: 5, isRed: true },
     });
+  });
+
+  it("旧席は自動ガリ、新capability席だけ明示北抜きとして混在できる", () => {
+    const manager = new RoomManager();
+    const host = manager.create("旧ホスト");
+    const guest = manager.join(host.room.code, "新ゲスト", true);
+    if (!guest) throw new Error("guest should join");
+
+    host.room.state = createGame({
+      seed: 1,
+      names: ["旧ホスト", "新ゲスト", "AI2", "AI3"],
+      humanPlayerIds: ["p0", "p1"],
+      explicitKitaPlayerIds: ["p1"],
+    });
+
+    expect(manager.snapshot(host.room, host.player).explicitKita).toBe(false);
+    expect(manager.snapshot(guest.room, guest.player).explicitKita).toBe(true);
+    expect(host.room.state.hand?.kita.east).toBe(2);
+    expect(host.room.state.pending).toMatchObject({ canKita: false });
+    expect(
+      manager.apply(
+        guest.room,
+        guest.player,
+        { type: "kita" },
+        host.room.version,
+      ),
+    ).toMatchObject({
+      ok: false,
+      error: "現在はあなたの操作順ではありません。",
+    });
+    expect(
+      manager.apply(
+        guest.room,
+        guest.player,
+        { type: "kita" },
+        host.room.version + 1,
+      ),
+    ).toMatchObject({
+      ok: false,
+      error: "対局状態が更新されています。最新状態を受信しました。",
+    });
+    expect(
+      manager.apply(
+        host.room,
+        host.player,
+        { type: "kita" },
+        host.room.version,
+      ),
+    ).toMatchObject({
+      ok: false,
+      error: "この接続では北抜きは自動処理されます。",
+    });
+  });
+
+  it("新capability guestは混在roomで北抜きし、同じ手番を継続する", () => {
+    const manager = new RoomManager();
+    const host = manager.create("旧ホスト");
+    const guest = manager.join(host.room.code, "新ゲスト", true);
+    if (!guest) throw new Error("guest should join");
+
+    // seed=4は旧p0の最初の打牌後、新p1が北を保持した打牌待ちになる決定的fixture。
+    host.room.state = createGame({
+      seed: 4,
+      names: ["旧ホスト", "新ゲスト", "AI2", "AI3"],
+      humanPlayerIds: ["p0", "p1"],
+      explicitKitaPlayerIds: ["p1"],
+    });
+    const hostDraw = host.room.state.hand?.drawn?.tile;
+    if (hostDraw === undefined) throw new Error("host draw expected");
+    expect(
+      manager.apply(
+        host.room,
+        host.player,
+        { type: "discard", tile: hostDraw },
+        host.room.version,
+      ),
+    ).toMatchObject({ ok: true, stateChanged: true });
+
+    const before = manager.snapshot(guest.room, guest.player);
+    expect(before.explicitKita).toBe(true);
+    expect(before.currentTurn).toBe("p1");
+    expect(before.pending).toMatchObject({
+      kind: "humanDiscard",
+      playerId: "p1",
+      canKita: true,
+    });
+    const hand = host.room.state.hand;
+    const seat = hand ? seatOfPlayer(hand.seating, "p1") : null;
+    if (hand === null || seat === null) throw new Error("guest seat expected");
+    const kitaBefore = hand.kita[seat];
+
+    expect(
+      manager.apply(guest.room, guest.player, { type: "kita" }, before.version),
+    ).toMatchObject({ ok: true, stateChanged: true });
+
+    const after = manager.snapshot(guest.room, guest.player);
+    expect(after.version).toBe(before.version + 1);
+    expect(host.room.state.hand?.kita[seat]).toBe(kitaBefore + 1);
+    expect(after.currentTurn).toBe("p1");
+    expect(after.pending).toMatchObject({
+      kind: "humanDiscard",
+      playerId: "p1",
+    });
+  });
+
+  it("明示北抜きguestの切断で保持北を即時にAIガリし、resume後もcapabilityを保持する", () => {
+    let fixtureSeed = 0;
+    for (let seed = 1; seed <= 1_000; seed += 1) {
+      const start = createGame({
+        seed,
+        humanPlayerIds: ["p0", "p1"],
+        explicitKitaPlayerIds: ["p1"],
+      });
+      const drawn = start.hand?.drawn?.tile;
+      if (drawn === undefined) continue;
+      const afterHost = discard(start, drawn);
+      if (
+        afterHost.pending?.kind === "humanDiscard" &&
+        afterHost.pending.playerId === "p1" &&
+        afterHost.pending.canKita
+      ) {
+        fixtureSeed = seed;
+        break;
+      }
+    }
+    expect(fixtureSeed).toBeGreaterThan(0);
+
+    const manager = new RoomManager();
+    const host = manager.create("旧ホスト");
+    const guest = manager.join(host.room.code, "新ゲスト", true);
+    if (!guest) throw new Error("guest should join");
+    host.room.state = createGame({
+      seed: fixtureSeed,
+      humanPlayerIds: ["p0", "p1"],
+      explicitKitaPlayerIds: ["p1"],
+    });
+    const hostDraw = host.room.state.hand?.drawn?.tile;
+    if (hostDraw === undefined) throw new Error("host draw expected");
+    expect(
+      manager.apply(
+        host.room,
+        host.player,
+        { type: "discard", tile: hostDraw },
+        host.room.version,
+      ),
+    ).toMatchObject({ ok: true });
+    const hand = host.room.state.hand;
+    const seat = hand ? seatOfPlayer(hand.seating, "p1") : null;
+    if (hand === null || seat === null) throw new Error("guest seat expected");
+    const kitaBefore = hand.kita[seat];
+    expect(host.room.state.pending).toMatchObject({
+      playerId: "p1",
+      canKita: true,
+    });
+
+    manager.disconnect(guest.room, guest.player);
+
+    expect(host.room.state.hand?.kita[seat]).toBeGreaterThan(kitaBefore);
+    expect(
+      host.room.state.hand?.hands[seat].some(
+        (tile) => tile.suit === "honor" && tile.rank === 4,
+      ),
+    ).toBe(false);
+    const resumed = manager.resume(host.room.code, guest.player.token);
+    expect(resumed?.player.id).toBe("p1");
+    if (!resumed) throw new Error("resume expected");
+    expect(manager.snapshot(resumed.room, resumed.player).explicitKita).toBe(
+      true,
+    );
+    expect(host.room.state.explicitKitaPlayerIds).toContain("p1");
+  });
+
+  it("明示北抜きguestの退出でも保持北を即時にAIガリして手番を解放する", () => {
+    let fixtureSeed = 0;
+    for (let seed = 1; seed <= 1_000; seed += 1) {
+      const start = createGame({
+        seed,
+        humanPlayerIds: ["p0", "p1"],
+        explicitKitaPlayerIds: ["p1"],
+      });
+      const drawn = start.hand?.drawn?.tile;
+      if (drawn === undefined) continue;
+      const afterHost = discard(start, drawn);
+      if (
+        afterHost.pending?.kind === "humanDiscard" &&
+        afterHost.pending.playerId === "p1" &&
+        afterHost.pending.canKita
+      ) {
+        fixtureSeed = seed;
+        break;
+      }
+    }
+    const manager = new RoomManager();
+    const host = manager.create("旧ホスト");
+    const guest = manager.join(host.room.code, "新ゲスト", true);
+    if (!guest || fixtureSeed === 0) throw new Error("guest fixture expected");
+    host.room.state = createGame({
+      seed: fixtureSeed,
+      humanPlayerIds: ["p0", "p1"],
+      explicitKitaPlayerIds: ["p1"],
+    });
+    const hostDraw = host.room.state.hand?.drawn?.tile;
+    if (hostDraw === undefined) throw new Error("host draw expected");
+    manager.apply(
+      host.room,
+      host.player,
+      { type: "discard", tile: hostDraw },
+      host.room.version,
+    );
+    const hand = host.room.state.hand;
+    const seat = hand ? seatOfPlayer(hand.seating, "p1") : null;
+    if (hand === null || seat === null) throw new Error("guest seat expected");
+    const kitaBefore = hand.kita[seat];
+
+    manager.leave(guest.room, guest.player);
+
+    expect(host.room.state.hand?.kita[seat]).toBeGreaterThan(kitaBefore);
+    expect(host.room.state.pending?.playerId).not.toBe("p1");
+    expect(manager.resume(host.room.code, guest.player.token)).toBeNull();
+  });
+
+  it("newGameは接続中席の北抜きcapability rosterを維持する", () => {
+    const manager = new RoomManager();
+    const host = manager.create("ホスト", true);
+    const guest = manager.join(host.room.code, "ゲスト", true);
+    if (!guest) throw new Error("guest should join");
+    host.room.state = walkToGameEnd(2024).state;
+
+    expect(manager.newGame(host.room, host.player)).toMatchObject({ ok: true });
+    expect(host.room.state.humanPlayerIds).toEqual(["p0", "p1"]);
+    expect(host.room.state.explicitKitaPlayerIds).toEqual(["p0", "p1"]);
   });
 });

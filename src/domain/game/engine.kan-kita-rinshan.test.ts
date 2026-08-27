@@ -4,6 +4,7 @@ import { createTile, HONOR, type Suit, type Tile } from "@/domain/tiles/tile";
 import {
   createGame,
   declareAnkan,
+  declareKita,
   declareTsumo,
   type EngineState,
   type Pending,
@@ -33,7 +34,7 @@ function discardPending(ankanTile: Tile): Pending {
 }
 
 /**
- * 暗槓 → 北の嶺上牌を自動で抜く → その次の嶺上牌で単騎和了、を組む。
+ * 暗槓 → 北の嶺上牌を明示的に抜く → その次の嶺上牌で単騎和了、を組む。
  * `Wall.drawReplacement` は王牌末尾から引くため末尾が北、その1枚前が和了牌の seed を使う。
  */
 function setupKanKitaRinshan(): {
@@ -113,24 +114,37 @@ describe("engine: カン→ガリ→再嶺上の役判定(#437 / Q36)", () => {
 
     const afterKan = declareAnkan(state, ankanTile);
     expect(afterKan.hand?.wall.remainingLiveTiles).toBe(0);
+    expect(afterKan.hand?.wall.remainingReplacements).toBe(replacementBefore);
+    expect(afterKan.hand?.wall.deadWall.length).toBe(deadWallBefore);
+    expect(afterKan.hand?.kita[seat]).toBe(kitaBefore);
+    expect(afterKan.hand?.drawn?.source).toBe("kanReplacement");
+    expect(afterKan.hand?.drawn && isNorth(afterKan.hand.drawn.tile)).toBe(
+      true,
+    );
+    expect(afterKan.pending).toMatchObject({
+      kind: "humanDiscard",
+      canKita: true,
+    });
+
+    const afterKita = declareKita(afterKan);
     // 2回引いて1回だけライブ補填できるため、嶺上供給領域は1枚だけ減る。
     // ドラ表示牌の確保領域へ食い込ませず、王牌は14→13枚になる(#386)。
-    expect(afterKan.hand?.wall.remainingReplacements).toBe(
+    expect(afterKita.hand?.wall.remainingReplacements).toBe(
       replacementBefore - 1,
     );
-    expect(afterKan.hand?.wall.deadWall.length).toBe(deadWallBefore - 1);
-    expect(afterKan.hand?.kita[seat]).toBe(kitaBefore + 1);
-    expect(afterKan.hand?.drawn?.source).toBe("kanReplacement");
+    expect(afterKita.hand?.wall.deadWall.length).toBe(deadWallBefore - 1);
+    expect(afterKita.hand?.kita[seat]).toBe(kitaBefore + 1);
+    expect(afterKita.hand?.drawn?.source).toBe("kanReplacement");
     expect(
-      afterKan.hand?.drawn && sameKind(afterKan.hand.drawn.tile, winningTile),
+      afterKita.hand?.drawn && sameKind(afterKita.hand.drawn.tile, winningTile),
     ).toBe(true);
-    expect(afterKan.hand?.paoResponsible).toEqual({});
-    expect(afterKan.pending).toMatchObject({
+    expect(afterKita.hand?.paoResponsible).toEqual({});
+    expect(afterKita.pending).toMatchObject({
       kind: "humanDiscard",
       canTsumo: true,
     });
 
-    const won = declareTsumo(afterKan);
+    const won = declareTsumo(afterKita);
     const yaku = won.lastRound?.winDetails?.yaku.map((item) => item.name) ?? [];
     expect(yaku).toContain("嶺上開花");
     expect(yaku).not.toContain("海底摸月");

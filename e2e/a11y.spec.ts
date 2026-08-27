@@ -504,7 +504,7 @@ test.describe("状態駆動 a11y 監査(リーチ/鳴き/和了アラート/ト�
  *
  * seed 選定: gameDriver.ts 記載の標準戦略に「リーチ後はツモ和了優先・不可ならツモ切り、
  * 他家打牌へはロン優先(ronOrPass)」を加えた同一戦略で engine をオフライン走査して選定した。
- * seed=180 は1局目の数手で自家リーチ→ツモ和了に決定的到達する。engine/AI 変更で到達しなく
+ * seed=180 は1局目の数手で自家リーチ→ロン和了に決定的到達する。engine/AI 変更で到達しなく
  * なった場合は同一戦略のオフライン走査で再選定すること(到達失敗は advanceUntil の明示エラー
  * か末尾のアサーションで顕在化し、誤 pass にはならない)。
  *
@@ -515,7 +515,7 @@ test.describe("状態駆動 a11y 監査(裏ドラ開示 / #261)", () => {
   const gameScreen = SCREENS.find((s) => s.path === "/game");
   if (gameScreen === undefined) throw new Error("SCREENS に /game がない");
 
-  // 自家(起家)が1局目の序盤でリーチ宣言し、そのままツモ和了する半荘(オフライン走査で選定)。
+  // 自家(起家)が1局目の序盤でリーチ宣言し、そのままロン和了する半荘(オフライン走査で選定)。
   const SEED_URA_WIN = 180;
 
   for (const theme of STATE_DRIVEN_THEMES) {
@@ -525,7 +525,7 @@ test.describe("状態駆動 a11y 監査(裏ドラ開示 / #261)", () => {
       await openScreen(page, gameScreen, theme, `?seed=${SEED_URA_WIN}`);
 
       // 標準戦略で進めてリーチ宣言し、以降はドライバのリーチ後分岐(ツモ和了優先/ツモ切り)と
-      // ロン優先(ronOrPass)で局終了まで進める。seed=180 は自家リーチ→ツモ和了に決定的到達する。
+      // ロン優先(ronOrPass)で局終了まで進める。seed=180 は自家リーチ→ロン和了に決定的到達する。
       await declareRiichi(page);
       // predicate は各 step 冒頭で評価されるため、roundEnd 到達時点で停止する
       // (onRoundEnd 指定は不要 — 「次の局へ」を押す分岐には到達しない)。
@@ -534,13 +534,13 @@ test.describe("状態駆動 a11y 監査(裏ドラ開示 / #261)", () => {
         onHumanReact: "ronOrPass",
       });
 
-      // 自家リーチ和了(ツモ)で局が終わり、裏ドラが開示されている。決着種別まで固定することで、
-      // engine 変更で seed=180 が別決着(ロン等)へ変わった場合にコメントごと陳腐化せず検知できる。
+      // 自家リーチ和了(ロン)で局が終わり、裏ドラが開示されている。決着種別まで固定することで、
+      // engine 変更で seed=180 が別決着(ツモ等)へ変わった場合にコメントごと陳腐化せず検知できる。
       const board = page.locator("[data-phase]").first();
       await expect(board).toHaveAttribute("data-phase", "roundEnd");
       await expect(board).toHaveAttribute("data-round-kind", "win");
       await expect(page.getByRole("alert").first()).toContainText(
-        "粗悪品のツモ",
+        "粗悪品のロン",
       );
       await expect(page.getByText("裏ドラ開示").first()).toBeVisible();
 
@@ -669,8 +669,8 @@ test.describe("キーボードのみ操作(a11y 補強)", () => {
   test("/game は手番をライブリージョンで通知し、打牌をキーボードのみで実行でき、復帰先の着地点が名前を持つ(5.2.2 / 5.2.3 / #405)", async ({
     page,
   }) => {
-    // 上と同じ理由で seed を固定する(実盤面を触るテストは配牌を固定する)。
-    await page.goto("/game?seed=0");
+    // seed=4 は開始時に北抜候補がなく、通常の手番通知を決定的に検証できる。
+    await page.goto("/game?seed=4");
 
     // 進行通知(色非依存)は polite ライブリージョンへ反映される(sr-only だが DOM 常駐)。
     await expect(page.locator('[aria-live="polite"]').first()).toHaveText(

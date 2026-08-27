@@ -753,7 +753,7 @@ export default function OnlineLobby() {
           CLIENT_HEARTBEAT_INTERVAL_MS,
         );
         try {
-          next.send(JSON.stringify(request));
+          next.send(JSON.stringify({ ...request, explicitKita: true }));
         } catch {
           clearHeartbeat();
           handleTransportFailure(next);
