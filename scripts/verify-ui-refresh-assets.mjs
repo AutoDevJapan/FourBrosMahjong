@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
-import { lstatSync, readFileSync, realpathSync } from "node:fs";
-import { dirname, relative, resolve, sep } from "node:path";
+import { lstatSync, readdirSync, readFileSync, realpathSync } from "node:fs";
+import { basename, dirname, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const SCRIPT_DIRECTORY = dirname(fileURLToPath(import.meta.url));
@@ -31,11 +31,21 @@ function readPngDimensions(buffer) {
 }
 
 export function verifyUiRefreshAssets(manifestPath = DEFAULT_MANIFEST) {
+  const manifestStats = lstatSync(manifestPath);
+  if (manifestStats.isSymbolicLink() || !manifestStats.isFile()) {
+    throw new Error("manifest must be a non-symlink regular file");
+  }
   const absoluteManifest = realpathSync(manifestPath);
   const manifestDirectory = dirname(absoluteManifest);
-  const originalsDirectory = realpathSync(
-    resolve(manifestDirectory, "originals"),
-  );
+  const requestedOriginalsDirectory = resolve(manifestDirectory, "originals");
+  const originalsDirectoryStats = lstatSync(requestedOriginalsDirectory);
+  if (
+    originalsDirectoryStats.isSymbolicLink() ||
+    !originalsDirectoryStats.isDirectory()
+  ) {
+    throw new Error("originals/ must be a non-symlink directory");
+  }
+  const originalsDirectory = realpathSync(requestedOriginalsDirectory);
   const manifest = JSON.parse(readFileSync(absoluteManifest, "utf8"));
 
   if (!isRecord(manifest) || manifest.version !== 1) {
@@ -48,9 +58,28 @@ export function verifyUiRefreshAssets(manifestPath = DEFAULT_MANIFEST) {
     "legalRightsHolderVerified",
     "providerAuthorityToLicenseVerified",
     "redistributionPermissionVerifiedIndependently",
+    "requestIsRightsOrLicenseEvidence",
+    "sha256IsPermissionEvidence",
   ]) {
     if (manifest.provenance[field] !== false) {
       throw new Error(`provenance.${field} must explicitly be false`);
+    }
+  }
+  for (const field of [
+    "publicDistributionRequiresWrittenRightsConfirmation",
+    "commercialUseRequiresWrittenRightsConfirmation",
+    "removeOriginalsAndDerivativesIfRightsRemainUnverified",
+  ]) {
+    if (manifest.provenance[field] !== true) {
+      throw new Error(`provenance.${field} must explicitly be true`);
+    }
+  }
+  for (const field of ["inclusionRequestRecord", "rightsNotice"]) {
+    if (
+      typeof manifest.provenance[field] !== "string" ||
+      manifest.provenance[field].trim() === ""
+    ) {
+      throw new Error(`provenance.${field} must be documented`);
     }
   }
   if (!isRecord(manifest.usage)) throw new Error("manifest usage is missing");
@@ -147,6 +176,22 @@ export function verifyUiRefreshAssets(manifestPath = DEFAULT_MANIFEST) {
   ];
   if (JSON.stringify([...routes].sort()) !== JSON.stringify(expectedRoutes)) {
     throw new Error("manifest routes do not match the six UI refresh screens");
+  }
+
+  const expectedInventory = [...files].map((file) => basename(file)).sort();
+  const actualInventory = readdirSync(originalsDirectory, {
+    withFileTypes: true,
+  });
+  if (
+    actualInventory.some(
+      (entry) => entry.isSymbolicLink() || !entry.isFile(),
+    ) ||
+    JSON.stringify(actualInventory.map((entry) => entry.name).sort()) !==
+      JSON.stringify(expectedInventory)
+  ) {
+    throw new Error(
+      "originals/ inventory must exactly match the regular files in the manifest",
+    );
   }
 
   return { assetCount: manifest.assets.length, totalBytes };

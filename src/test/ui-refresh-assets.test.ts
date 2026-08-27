@@ -1,6 +1,59 @@
+import {
+  copyFileSync,
+  cpSync,
+  mkdirSync,
+  mkdtempSync,
+  rmSync,
+  symlinkSync,
+  unlinkSync,
+  writeFileSync,
+} from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import manifest from "../../documents/assets/ui-refresh/manifest.json";
 import { verifyUiRefreshAssets } from "../../scripts/verify-ui-refresh-assets.mjs";
+
+const ASSET_DIRECTORY = new URL(
+  "../../documents/assets/ui-refresh/",
+  import.meta.url,
+);
+
+function createFixture({
+  symlinkManifest = false,
+  symlinkOriginals = false,
+} = {}) {
+  const fixtureDirectory = mkdtempSync(join(tmpdir(), "ui-refresh-assets-"));
+  const manifestPath = join(fixtureDirectory, "manifest.json");
+  if (symlinkManifest) {
+    symlinkSync(new URL("manifest.json", ASSET_DIRECTORY), manifestPath);
+  } else {
+    copyFileSync(new URL("manifest.json", ASSET_DIRECTORY), manifestPath);
+  }
+
+  const originalsPath = join(fixtureDirectory, "originals");
+  if (symlinkOriginals) {
+    symlinkSync(new URL("originals/", ASSET_DIRECTORY), originalsPath, "dir");
+  } else {
+    cpSync(new URL("originals/", ASSET_DIRECTORY), originalsPath, {
+      recursive: true,
+    });
+  }
+
+  return { fixtureDirectory, manifestPath, originalsPath };
+}
+
+function withFixture(
+  callback: (fixture: ReturnType<typeof createFixture>) => void,
+  options?: Parameters<typeof createFixture>[0],
+) {
+  const fixture = createFixture(options);
+  try {
+    callback(fixture);
+  } finally {
+    rmSync(fixture.fixtureDirectory, { force: true, recursive: true });
+  }
+}
 
 const EXPECTED_ASSETS = [
   {
@@ -75,5 +128,119 @@ describe("Issue #712 design-reference originals", () => {
 
   it("pins the Issue #712 paths, dimensions, byte counts, and SHA-256 values", () => {
     expect(manifest.assets).toEqual(EXPECTED_ASSETS);
+  });
+
+  it("records the rights state without treating the request or hashes as permission", () => {
+    expect(manifest.provenance).toMatchObject({
+      inclusionRequestRecord: expect.any(String),
+      legalRightsHolderVerified: false,
+      providerAuthorityToLicenseVerified: false,
+      redistributionPermissionVerifiedIndependently: false,
+      requestIsRightsOrLicenseEvidence: false,
+      sha256IsPermissionEvidence: false,
+      publicDistributionRequiresWrittenRightsConfirmation: true,
+      commercialUseRequiresWrittenRightsConfirmation: true,
+      removeOriginalsAndDerivativesIfRightsRemainUnverified: true,
+      rightsNotice: expect.any(String),
+    });
+    expect(manifest.provenance).not.toHaveProperty("useAndRedistributionBasis");
+  });
+
+  it("rejects a manifest symlink", () => {
+    withFixture(
+      ({ manifestPath }) => {
+        expect(() => verifyUiRefreshAssets(manifestPath)).toThrow(
+          "manifest must be a non-symlink regular file",
+        );
+      },
+      { symlinkManifest: true },
+    );
+  });
+
+  it("rejects an originals directory symlink", () => {
+    withFixture(
+      ({ manifestPath }) => {
+        expect(() => verifyUiRefreshAssets(manifestPath)).toThrow(
+          "originals/ must be a non-symlink directory",
+        );
+      },
+      { symlinkOriginals: true },
+    );
+  });
+
+  it("rejects files that are not registered in the manifest", () => {
+    withFixture(({ manifestPath, originalsPath }) => {
+      writeFileSync(join(originalsPath, "unregistered.png"), "not registered");
+      expect(() => verifyUiRefreshAssets(manifestPath)).toThrow(
+        "originals/ inventory must exactly match the regular files in the manifest",
+      );
+    });
+  });
+
+  it("rejects unregistered directories in originals", () => {
+    withFixture(({ manifestPath, originalsPath }) => {
+      mkdirSync(join(originalsPath, "unregistered"));
+      expect(() => verifyUiRefreshAssets(manifestPath)).toThrow(
+        "originals/ inventory must exactly match the regular files in the manifest",
+      );
+    });
+  });
+
+  it("rejects a missing registered asset", () => {
+    withFixture(({ manifestPath, originalsPath }) => {
+      unlinkSync(join(originalsPath, "lobby.png"));
+      expect(() => verifyUiRefreshAssets(manifestPath)).toThrow();
+    });
+  });
+
+  it("rejects an individual asset symlink", () => {
+    withFixture(({ manifestPath, originalsPath }) => {
+      const lobbyPath = join(originalsPath, "lobby.png");
+      unlinkSync(lobbyPath);
+      symlinkSync(new URL("originals/lobby.png", ASSET_DIRECTORY), lobbyPath);
+      expect(() => verifyUiRefreshAssets(manifestPath)).toThrow(
+        "asset must be a regular file under originals/: lobby",
+      );
+    });
+  });
+
+  it("rejects a dangling asset symlink", () => {
+    withFixture(({ manifestPath, originalsPath }) => {
+      const lobbyPath = join(originalsPath, "lobby.png");
+      unlinkSync(lobbyPath);
+      symlinkSync(join(originalsPath, "missing.png"), lobbyPath);
+      expect(() => verifyUiRefreshAssets(manifestPath)).toThrow();
+    });
+  });
+
+  it.each([
+    ["traversal", "originals/../manifest.json"],
+    ["absolute", "/tmp/lobby.png"],
+  ])("rejects an %s asset path", (_label, invalidPath) => {
+    withFixture(({ manifestPath }) => {
+      const tamperedManifest = structuredClone(manifest);
+      tamperedManifest.assets[0].file = invalidPath;
+      writeFileSync(manifestPath, JSON.stringify(tamperedManifest));
+      expect(() => verifyUiRefreshAssets(manifestPath)).toThrow(
+        "asset file is invalid or duplicated",
+      );
+    });
+  });
+
+  it("fails closed when the manifest parent path cannot be read", () => {
+    withFixture(({ fixtureDirectory }) => {
+      expect(() =>
+        verifyUiRefreshAssets(
+          join(fixtureDirectory, "missing", "manifest.json"),
+        ),
+      ).toThrow();
+    });
+  });
+
+  it("fails closed when originals cannot be read", () => {
+    withFixture(({ manifestPath, originalsPath }) => {
+      rmSync(originalsPath, { recursive: true });
+      expect(() => verifyUiRefreshAssets(manifestPath)).toThrow();
+    });
   });
 });

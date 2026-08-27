@@ -5,10 +5,16 @@
   "provenance": {
     "providedBy": "Project owner",
     "sourceAtIngest": "Project owner's local Downloads directory",
-    "useAndRedistributionBasis": "Explicit project-owner request to adopt these files into the repository",
+    "inclusionRequestRecord": "The project owner explicitly requested repository inclusion; this records the inclusion decision only and is not evidence of ownership or a redistribution license",
     "legalRightsHolderVerified": false,
     "providerAuthorityToLicenseVerified": false,
     "redistributionPermissionVerifiedIndependently": false,
+    "requestIsRightsOrLicenseEvidence": false,
+    "sha256IsPermissionEvidence": false,
+    "publicDistributionRequiresWrittenRightsConfirmation": true,
+    "commercialUseRequiresWrittenRightsConfirmation": true,
+    "removeOriginalsAndDerivativesIfRightsRemainUnverified": true,
+    "rightsNotice": "Before public distribution or commercial use, maintainers must obtain written confirmation of the rights holder and redistribution terms; if that cannot be confirmed, remove the originals and derivatives from the repository and distributions",
     "license": "Not independently identified"
   },
   "usage": {
