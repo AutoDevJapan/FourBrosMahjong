@@ -72,6 +72,16 @@ describe("online room manager", () => {
     const guest = manager.join(host.room.code, "ゲスト");
     if (!guest) throw new Error("guest should join");
 
+    // Room creation uses a crypto seed in production. Pin only this test's
+    // game state so the first discard deterministically hands control to p1;
+    // some valid seeds let an AI call and return control to p0 instead.
+    host.room.state = createGame({
+      seed: 0,
+      names: ["ホスト", "ゲスト", "ゲスト3", "ゲスト4"],
+      humanPlayerIds: ["p0", "p1"],
+      explicitKitaPlayerIds: [],
+    });
+
     expect(manager.snapshot(host.room, host.player).you).toBe("p0");
     expect(manager.snapshot(guest.room, guest.player).you).toBe("p1");
     expect(manager.snapshot(guest.room, guest.player).pending).toBeNull();
@@ -169,8 +179,9 @@ describe("online room manager", () => {
     // stopping at a random ron/call response with no drawn tile.
     host.room.state = createGame({
       seed: 0,
-      names: ["ホスト", "ゲスト", "ゲスト2", "ゲスト3"],
+      names: ["ホスト", "ゲスト", "ゲスト3", "ゲスト4"],
       humanPlayerIds: ["p0", "p1"],
+      explicitKitaPlayerIds: [],
     });
 
     manager.disconnect(host.room, host.player);
