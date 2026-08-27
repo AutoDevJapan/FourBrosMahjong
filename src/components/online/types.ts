@@ -84,6 +84,11 @@ export interface OnlineMaintenanceNotice {
   readonly deadline?: string;
 }
 
+export interface OnlineMaintenanceAcceptingNotice {
+  readonly type: "maintenance";
+  readonly phase: "accepting";
+}
+
 export type OnlineConnectionStatus =
   | "idle"
   | "connecting"
@@ -100,4 +105,5 @@ export type OnlineServerMessage =
   | { readonly type: "snapshot"; readonly snapshot: OnlineSnapshot }
   | OnlineServerError
   | OnlineMaintenanceNotice
+  | OnlineMaintenanceAcceptingNotice
   | { readonly type: "pong" };

@@ -122,8 +122,33 @@ describe("parseOnlineServerMessage", () => {
     },
   );
 
+  it("parses an additive accepting notice without maintenance timing fields", () => {
+    expect(
+      parseOnlineServerMessage({
+        type: "maintenance",
+        phase: "accepting",
+        futureAdditiveField: true,
+      }),
+    ).toEqual({ type: "maintenance", phase: "accepting" });
+  });
+
   it.each([
-    { phase: "accepting" },
+    { retryAfterMs: 0 },
+    { retryAfterMs: null },
+    { retryAfterMs: 1_000 },
+    { deadline: null },
+    { deadline: "2026-08-28T06:00:00.000Z" },
+  ])("rejects accepting with a timing field: %o", (payload) => {
+    expect(
+      parseOnlineServerMessage({
+        type: "maintenance",
+        phase: "accepting",
+        ...payload,
+      }),
+    ).toBeNull();
+  });
+
+  it.each([
     { phase: "draining", retryAfterMs: -1 },
     { phase: "draining", retryAfterMs: 1.5 },
     {
