@@ -178,16 +178,17 @@ export function ThemeToggle() {
       : preference;
 
   return (
-    <fieldset className="flex flex-col gap-3">
-      <legend className="text-sm font-medium">テーマ(表示モード)</legend>
+    <fieldset className="settings-theme-fieldset">
+      <legend>テーマ(表示モード)</legend>
 
-      <div className="flex flex-col gap-2">
+      <div className="settings-theme-options">
         {OPTIONS.map((option) => {
           const checked = preference === option.value;
           return (
             <label
               key={option.value}
-              className="flex cursor-pointer items-center gap-3 rounded-lg border border-control-border px-4 py-3"
+              className="settings-theme-option"
+              data-selected={checked ? "true" : "false"}
             >
               <input
                 type="radio"
@@ -195,19 +196,15 @@ export function ThemeToggle() {
                 value={option.value}
                 checked={checked}
                 onChange={() => handleSelect(option.value)}
-                className="size-4 accent-foreground"
+                className="settings-theme-radio"
               />
-              <span
-                className={checked ? "font-semibold" : "text-foreground/80"}
-              >
-                {option.label}
-              </span>
+              <span className="settings-theme-label">{option.label}</span>
             </label>
           );
         })}
       </div>
 
-      <p aria-live="polite" className="text-sm text-foreground/70">
+      <p aria-live="polite" className="settings-theme-status">
         現在の表示: {EFFECTIVE_LABEL[effective]}
         {preference === "system" ? "(システム設定に追従中)" : "(手動で固定中)"}
       </p>

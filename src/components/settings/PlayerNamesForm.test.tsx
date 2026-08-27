@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it } from "vitest";
 import { DEFAULT_NAMES } from "@/domain/game/engine";
@@ -21,7 +21,7 @@ describe("PlayerNamesForm", () => {
   it("未設定時は既定名を初期表示する(後方互換)", () => {
     render(<PlayerNamesForm />);
 
-    expect(inputFor("粗悪品(自家)")).toHaveValue(DEFAULT_NAMES[0]);
+    expect(inputFor("粗悪品（あなた）")).toHaveValue(DEFAULT_NAMES[0]);
     expect(inputFor("竜二")).toHaveValue(DEFAULT_NAMES[1]);
   });
 
@@ -33,7 +33,7 @@ describe("PlayerNamesForm", () => {
 
     render(<PlayerNamesForm />);
 
-    expect(inputFor("粗悪品(自家)")).toHaveValue("自分");
+    expect(inputFor("粗悪品（あなた）")).toHaveValue("自分");
     expect(inputFor("糸瓜")).toHaveValue("翔生");
   });
 
@@ -79,7 +79,7 @@ describe("PlayerNamesForm", () => {
 
     await user.click(screen.getByRole("button", { name: "既定名に戻す" }));
 
-    expect(inputFor("粗悪品(自家)")).toHaveValue(DEFAULT_NAMES[0]);
+    expect(inputFor("粗悪品（あなた）")).toHaveValue(DEFAULT_NAMES[0]);
     expect(loadPlayerNames(window.localStorage)).toEqual(DEFAULT_NAMES);
   });
 
@@ -170,13 +170,49 @@ describe("PlayerNamesForm", () => {
     render(<PlayerNamesForm />);
 
     expect(
-      screen.getByRole("group", { name: /対局者の名前/ }),
+      screen.getByRole("group", { name: /四兄弟の名前/ }),
     ).toBeInTheDocument();
-    for (const label of ["粗悪品(自家)", "竜二", "マサキ", "糸瓜"]) {
+    for (const label of ["粗悪品（あなた）", "竜二", "マサキ", "糸瓜"]) {
       expect(screen.getByLabelText(label)).toHaveAccessibleDescription(
         /空欄のまま保存すると既定名/,
       );
     }
+  });
+
+  it("同じ表示名を4人に保存できる", async () => {
+    const user = userEvent.setup();
+    render(<PlayerNamesForm />);
+
+    for (const label of ["粗悪品（あなた）", "竜二", "マサキ", "糸瓜"]) {
+      await user.clear(inputFor(label));
+      await user.type(inputFor(label), "同名");
+    }
+    await user.click(screen.getByRole("button", { name: "名前を保存" }));
+
+    expect(loadPlayerNames(window.localStorage)).toEqual([
+      "同名",
+      "同名",
+      "同名",
+      "同名",
+    ]);
+  });
+
+  it("別タブの保存をstorageイベントで入力欄へ反映する", async () => {
+    render(<PlayerNamesForm />);
+    const names = ["A", "B", "C", "D"];
+    window.localStorage.setItem(
+      PLAYER_NAMES_STORAGE_KEY,
+      JSON.stringify(names),
+    );
+    window.dispatchEvent(
+      new StorageEvent("storage", {
+        key: PLAYER_NAMES_STORAGE_KEY,
+        newValue: JSON.stringify(names),
+      }),
+    );
+
+    await waitFor(() => expect(inputFor("粗悪品（あなた）")).toHaveValue("A"));
+    expect(inputFor("糸瓜")).toHaveValue("D");
   });
 
   it("localStorageが使えない環境では保存失敗を色に依存せず通知する", async () => {

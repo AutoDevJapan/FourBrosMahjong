@@ -3,7 +3,7 @@
 /**
  * 対局者名の設定フォーム(issue #291 / スペック6 6.2)。
  *
- * 四人回しの4人(自家＋他家3人)の表示名を入力し `localStorage` に保存する。
+ * 四人回しの4人(p0-p3)の表示名を入力し `localStorage` に保存する。
  * 保存値は次の対局開始時に `createGame({ names })` へ渡され、盤面・結果画面・読み上げに反映される
  * (進行中の半荘の名前は途中で変わらない。半荘の名前は開始時にジャーナルへ固定される)。
  *
@@ -93,19 +93,17 @@ export function PlayerNamesForm() {
   };
 
   return (
-    <form onSubmit={handleSubmit} className="flex flex-col gap-4">
-      <fieldset className="flex flex-col gap-3">
-        <legend className="text-sm font-medium">
-          対局者の名前(四人回しの4人)
-        </legend>
-        <p id={hintId} className="text-sm/6 text-foreground/70">
-          粗悪品が自家で、残り3人が他家です。空欄のまま保存すると既定名(
+    <form onSubmit={handleSubmit} className="settings-names-form">
+      <fieldset className="settings-names-fieldset">
+        <legend>四兄弟の名前</legend>
+        <p id={hintId} className="settings-form-hint">
+          空欄のまま保存すると既定名(
           {DEFAULT_NAMES.join("・")})に戻ります。1人あたり
           {MAX_PLAYER_NAME_LENGTH}
-          文字(絵文字や結合文字は見た目の1文字として数えます)までです。変更は次に開始する半荘から反映されます。
+          文字(絵文字や結合文字は見た目の1文字として数えます)までです。同じ名前も使用できます。変更は次に開始する半荘から反映されます。
         </p>
 
-        <div className="flex flex-col gap-3">
+        <div className="settings-name-grid">
           {PLAYER_NAME_LABELS.map((label, index) => {
             const inputId = `${fieldId}-${index}`;
             const playerId = CHARACTER_PLAYER_IDS[index];
@@ -114,15 +112,18 @@ export function PlayerNamesForm() {
                 key={label}
                 data-character-id={playerId}
                 style={characterAccentStyle(playerId)}
-                className="character-surface flex gap-3 rounded-lg border p-3"
+                className="character-surface settings-name-card"
               >
                 <CharacterPortrait playerId={playerId} />
-                <div className="min-w-0 flex-1">
+                <div className="settings-name-control">
                   <label
                     htmlFor={inputId}
-                    className="character-name text-sm font-medium"
+                    className="character-name settings-name-label"
                   >
                     {label}
+                    {index === 0 && (
+                      <span className="settings-self-badge">（あなた）</span>
+                    )}
                   </label>
                   <input
                     id={inputId}
@@ -151,7 +152,7 @@ export function PlayerNamesForm() {
                         composingIndex.current === index,
                       )
                     }
-                    className="min-h-11 w-full rounded-lg border border-control-border bg-transparent px-3 py-2 text-base"
+                    className="settings-name-input"
                   />
                 </div>
               </div>
@@ -160,23 +161,20 @@ export function PlayerNamesForm() {
         </div>
       </fieldset>
 
-      <div className="flex flex-wrap gap-3">
-        <button
-          type="submit"
-          className="min-h-11 rounded-lg border border-control-border px-4 py-2 text-sm font-semibold hover:bg-foreground/5"
-        >
+      <div className="settings-form-actions">
+        <button type="submit" className="settings-save-button">
           名前を保存
         </button>
         <button
           type="button"
           onClick={handleReset}
-          className="min-h-11 rounded-lg border border-control-border px-4 py-2 text-sm text-foreground/80 hover:bg-foreground/5"
+          className="settings-reset-button"
         >
           既定名に戻す
         </button>
       </div>
 
-      <p aria-live="polite" className="text-sm text-foreground/70">
+      <p aria-live="polite" className="settings-save-status">
         {status.kind === "saved" && "保存しました。次の半荘から反映されます。"}
         {status.kind === "failed" &&
           "保存できませんでした。ブラウザの設定でデータ保存が制限されている可能性があります。"}

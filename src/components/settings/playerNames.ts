@@ -32,9 +32,9 @@ export type { PlayerNames };
 /** `localStorage` の保存キー。スキーマ変更時は末尾の版番号を上げる。 */
 export const PLAYER_NAMES_STORAGE_KEY = "four-bros-mahjong.playerNames.v1";
 
-/** 入力欄のラベル(index 0 = 自家)。 */
+/** 入力欄のラベル。固定席を示さず、キャラクターSSOTのp0-p3順を使う。 */
 export const PLAYER_NAME_LABELS: readonly [string, string, string, string] = [
-  `${CHARACTER_PROFILES.p0.defaultName}(自家)`,
+  CHARACTER_PROFILES.p0.defaultName,
   CHARACTER_PROFILES.p1.defaultName,
   CHARACTER_PROFILES.p2.defaultName,
   CHARACTER_PROFILES.p3.defaultName,

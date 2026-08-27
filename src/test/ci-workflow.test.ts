@@ -83,6 +83,8 @@ const PRODUCTION_E2E_EXCLUDED_SPECS = [
   "e2e/online-lobby.spec.ts",
   "e2e/player-names.spec.ts",
   "e2e/rules-navigation.spec.ts",
+  // settingsのproduction/offline parityはpwa-offline.spec.tsが担い、platform別VRTはdev E2Eで行う。
+  "e2e/settings.spec.ts",
 ] as const;
 
 function readPackageJson(): { scripts?: Record<string, string> } {

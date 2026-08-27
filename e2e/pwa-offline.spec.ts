@@ -230,6 +230,34 @@ test.describe("PWAオフライン動作(#292)", () => {
     await context.setOffline(false);
   });
 
+  test("初回install後はオフラインでも/settingsをhydrateしテーマと名前を保存できる", async ({
+    page,
+    context,
+  }) => {
+    await page.goto("/settings");
+    await page.waitForFunction(
+      async () => (await navigator.serviceWorker?.ready) != null,
+    );
+    await page.reload();
+    await page.waitForFunction(
+      () => navigator.serviceWorker?.controller != null,
+    );
+
+    await context.setOffline(true);
+    await page.reload();
+    const dark = page.getByRole("radio", { name: "ダーク" });
+    await expect(dark).toBeVisible();
+    await dark.check();
+    await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
+
+    await page.getByLabel("竜二").fill("オフライン名");
+    await page.getByRole("button", { name: "名前を保存" }).click();
+    await expect(page.getByText(/保存しました/)).toBeVisible();
+    await page.reload();
+    await expect(page.getByLabel("竜二")).toHaveValue("オフライン名");
+    await context.setOffline(false);
+  });
+
   test("RSC取得後もHTML cacheを汚染せず、オフラインで/gameを再読込できる(#355)", async ({
     page,
     context,

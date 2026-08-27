@@ -184,6 +184,15 @@ describe("resolvePlayerNames", () => {
   it("すべて空欄なら既定名に一致する(後方互換)", () => {
     expect(resolvePlayerNames(["", "", "", ""])).toEqual(DEFAULT_NAMES);
   });
+
+  it("重複名を区別せずp0-p3順のまま保持する", () => {
+    expect(resolvePlayerNames(["同名", "同名", "同名", "同名"])).toEqual([
+      "同名",
+      "同名",
+      "同名",
+      "同名",
+    ]);
+  });
 });
 
 describe("parsePlayerNames", () => {
