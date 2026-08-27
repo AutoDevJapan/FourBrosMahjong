@@ -1,0 +1,669 @@
+/* Issue #712 Phase B6: `/history` 専用。共有componentも必ずhistory-main内でscopeする。 */
+.history-main {
+  --history-control-border: #7c7167;
+  display: flex;
+  width: 100%;
+  max-width: 64rem;
+  min-width: 0;
+  min-height: 100svh;
+  margin-inline: auto;
+  padding: clamp(0.75rem, 3vw, 2.5rem);
+  flex-direction: column;
+  justify-content: center;
+  gap: 1rem;
+}
+
+.history-main .history-header {
+  display: grid;
+  min-width: 0;
+  align-items: end;
+  gap: 1rem;
+}
+
+.history-main .history-back-link {
+  display: inline-flex;
+  width: fit-content;
+  min-height: 2.75rem;
+  padding: 0.55rem 0.85rem;
+  align-items: center;
+  gap: 0.35rem;
+  border: 1px solid var(--history-control-border);
+  border-radius: 0.75rem;
+  color: var(--ui-text);
+  background: color-mix(in srgb, var(--ui-surface) 92%, transparent);
+  font-size: 0.875rem;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.history-main .history-heading-copy {
+  min-width: 0;
+  text-align: center;
+}
+
+.history-main .history-kicker {
+  color: var(--ui-gold-text);
+  font-size: 0.75rem;
+  font-weight: 800;
+  letter-spacing: 0.18em;
+}
+
+.history-main .history-title {
+  margin-top: 0.15rem;
+  color: var(--ui-gold-text);
+  font-family:
+    var(--font-yuji-syuku), "Yu Mincho", "Hiragino Mincho ProN", serif;
+  font-size: clamp(2.5rem, 10vw, 4.5rem);
+  font-weight: 400;
+  font-synthesis: none;
+  line-height: 1.08;
+  letter-spacing: 0.12em;
+  text-shadow: 0 2px 0
+    color-mix(in srgb, var(--ui-gold-decoration) 16%, transparent);
+}
+
+.history-main .history-introduction {
+  max-width: 46rem;
+  margin: 0.4rem auto 0;
+  color: var(--ui-muted);
+  font-size: 0.875rem;
+  line-height: 1.7;
+  overflow-wrap: anywhere;
+}
+
+.history-main .history-screen-navigation {
+  color: var(--ui-text);
+}
+
+.history-main .history-screen-navigation details,
+.history-main .history-screen-navigation summary,
+.history-main .history-screen-navigation a {
+  border-color: var(--ui-frame);
+}
+
+.history-main .history-panel {
+  position: relative;
+  overflow: hidden;
+  min-width: 0;
+  padding: clamp(0.75rem, 3vw, 2rem);
+}
+
+.history-main .history-panel::before {
+  position: absolute;
+  inset: 0;
+  content: "";
+  pointer-events: none;
+  opacity: calc(var(--ui-pattern-opacity) * 0.3);
+  background-image:
+    linear-gradient(
+      135deg,
+      transparent 0 47%,
+      color-mix(in srgb, var(--ui-gold-decoration) 10%, transparent) 48% 50%,
+      transparent 51%
+    ),
+    linear-gradient(
+      45deg,
+      transparent 0 47%,
+      color-mix(in srgb, var(--ui-gold-decoration) 7%, transparent) 48% 50%,
+      transparent 51%
+    );
+  background-size: 3rem 3rem;
+  mask-image: linear-gradient(to bottom, black, transparent 50%);
+}
+
+.history-main .history-panel > * {
+  position: relative;
+}
+
+.history-main .history-content {
+  min-width: 0;
+  gap: clamp(1rem, 3vw, 1.5rem);
+}
+
+.history-main .history-list-introduction {
+  color: var(--ui-muted);
+  line-height: 1.65;
+}
+
+.history-main .history-entry-list {
+  min-width: 0;
+  gap: 0.75rem;
+}
+
+.history-main .history-entry {
+  min-width: 0;
+  border-color: var(--ui-frame);
+  border-radius: 0.75rem;
+  color: var(--ui-text);
+  background: color-mix(in srgb, var(--ui-surface-raised) 86%, transparent);
+  box-shadow: inset 0.2rem 0 var(--character-accent, var(--ui-frame));
+}
+
+.history-main .history-entry-summary {
+  display: grid;
+  min-width: 0;
+  min-height: 5.5rem;
+  padding: 0.8rem 1rem;
+  grid-template-columns: minmax(8rem, 1fr) auto minmax(10rem, 1.15fr) auto;
+  align-items: center;
+  gap: 0.8rem;
+  border-radius: 0;
+  color: var(--ui-text);
+  background: transparent;
+  list-style: none;
+}
+
+.history-main .history-entry-summary::-webkit-details-marker {
+  display: none;
+}
+
+.history-main .history-entry-summary:hover {
+  background: color-mix(
+    in srgb,
+    var(--character-accent, var(--ui-gold-decoration)) 7%,
+    transparent
+  );
+}
+
+.history-main .history-entry-time,
+.history-main .history-entry-winner-copy {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+
+.history-main .history-entry-date {
+  color: var(--ui-text);
+  font-weight: 750;
+  line-height: 1.4;
+}
+
+.history-main .history-entry-kind {
+  color: var(--ui-muted);
+  font-size: 0.75rem;
+}
+
+.history-main .history-placement-list {
+  display: inline-flex;
+  flex: none;
+  gap: 0.35rem;
+}
+
+.history-main .history-placement-chip {
+  display: inline-grid;
+  width: 2rem;
+  height: 2rem;
+  place-items: center;
+  border: 1px solid var(--character-accent, var(--ui-frame));
+  border-radius: 999px;
+  color: var(--ui-text);
+  background: color-mix(
+    in srgb,
+    var(--character-accent, var(--ui-frame)) 18%,
+    var(--ui-surface)
+  );
+  font-size: 0.8rem;
+  font-weight: 900;
+  box-shadow: inset 0 0 0 2px
+    color-mix(
+      in srgb,
+      var(--character-accent, var(--ui-frame)) 13%,
+      transparent
+    );
+}
+
+.history-main .history-entry-winner {
+  display: inline-flex;
+  min-width: 0;
+  align-items: center;
+  gap: 0.55rem;
+  color: var(--ui-text);
+}
+
+.history-main .history-entry-winner .character-portrait {
+  width: 2rem;
+  height: 2.65rem;
+  flex: none;
+}
+
+.history-main .history-entry-winner-name {
+  color: var(--character-accent, var(--ui-text));
+  font-weight: 800;
+  overflow-wrap: anywhere;
+}
+
+.history-main .history-entry-total {
+  font-family: var(--font-geist-mono), monospace;
+  font-size: 0.9rem;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+}
+
+.history-main .history-entry-arrow {
+  margin-left: 0;
+  color: var(--ui-gold-text);
+  font-size: 1.8rem;
+  line-height: 1;
+}
+
+.history-main .history-entry-details {
+  min-width: 0;
+  padding: clamp(0.75rem, 3vw, 1.25rem);
+  border-top-color: var(--ui-frame);
+  background: color-mix(in srgb, var(--ui-surface) 84%, transparent);
+}
+
+.history-main .history-detail-section {
+  min-width: 0;
+}
+
+.history-main .history-detail-section > h2 {
+  color: var(--ui-text);
+  font-size: 0.95rem;
+  line-height: 1.5;
+}
+
+.history-main .history-breakdown-grid {
+  min-width: 0;
+}
+
+/* History presentationを明示的に選んだ共有表示componentだけをroute内で整える。 */
+.history-main .history-ranking-table {
+  width: 100%;
+  table-layout: fixed;
+  overflow: hidden;
+  border: 1px solid var(--ui-frame);
+  border-radius: 0.7rem;
+  border-collapse: separate;
+  border-spacing: 0;
+  color: var(--ui-text);
+  background: var(--ui-surface-raised);
+}
+
+.history-main .history-ranking-head {
+  color: var(--ui-muted);
+  background: var(--ui-surface);
+}
+
+.history-main .history-ranking-head th,
+.history-main .history-ranking-row > * {
+  padding: 0.55rem 0.65rem;
+}
+
+.history-main .history-ranking-head th:first-child {
+  width: 6.5rem;
+}
+
+.history-main .history-ranking-head th:last-child {
+  width: 7rem;
+}
+
+.history-main .history-ranking-row {
+  background: color-mix(
+    in srgb,
+    var(--character-accent, var(--ui-frame)) 7%,
+    var(--ui-surface-raised)
+  );
+  box-shadow: inset 0.18rem 0 var(--character-accent, var(--ui-frame));
+}
+
+.history-main .history-ranking-row > * {
+  border-bottom: 1px solid color-mix(in srgb, var(--ui-frame) 55%, transparent);
+}
+
+.history-main .history-ranking-row:last-child > * {
+  border-bottom: 0;
+}
+
+.history-main .history-rank-medal {
+  display: inline-grid;
+  width: 1.7rem;
+  height: 1.7rem;
+  place-items: center;
+  border: 1px solid var(--ui-frame);
+  border-radius: 999px;
+  font-weight: 900;
+}
+
+.history-main .history-winner-label {
+  display: inline-flex;
+  min-height: 1.35rem;
+  padding-inline: 0.4rem;
+  align-items: center;
+  border: 1px solid var(--ui-gold-decoration);
+  border-radius: 999px;
+  color: var(--ui-gold-text);
+  font-size: 0.64rem;
+  font-weight: 900;
+}
+
+.history-main .history-ranking-player-inner,
+.history-main .history-breakdown-heading {
+  min-width: 0;
+  flex-wrap: wrap;
+}
+
+.history-main .history-ranking-player .character-portrait,
+.history-main .history-breakdown-heading .character-portrait {
+  width: 1.75rem;
+  height: 2.25rem;
+  flex: none;
+}
+
+.history-main .history-ranking-player .character-name,
+.history-main .history-breakdown-name {
+  min-width: 0;
+  color: var(--character-accent, var(--ui-text));
+  overflow-wrap: anywhere;
+}
+
+.history-main .history-ranking-total {
+  white-space: nowrap;
+}
+
+.history-main .history-breakdown-card {
+  min-width: 0;
+  border-color: var(--character-accent, var(--ui-frame));
+  color: var(--ui-text);
+  background: color-mix(
+    in srgb,
+    var(--character-accent, var(--ui-frame)) 6%,
+    var(--ui-surface-raised)
+  );
+  box-shadow: inset 0.2rem 0 var(--character-accent, var(--ui-frame));
+}
+
+.history-main .history-breakdown-list,
+.history-main .history-breakdown-line,
+.history-main .history-breakdown-total {
+  min-width: 0;
+}
+
+.history-main .history-breakdown-line dt {
+  min-width: 0;
+  color: var(--ui-muted);
+  overflow-wrap: anywhere;
+}
+
+.history-main .history-breakdown-line dd,
+.history-main .history-breakdown-total dd {
+  flex: none;
+  white-space: nowrap;
+}
+
+.history-main .history-oka-note {
+  display: block;
+  margin-top: 0.1rem;
+  color: var(--ui-muted);
+  font-size: 0.68rem;
+}
+
+.history-main .history-clear-section {
+  min-width: 0;
+  padding-top: 1rem;
+  border-top-color: var(--ui-frame);
+}
+
+.history-main .history-clear-section > h2 {
+  color: var(--ui-text);
+  font-size: 0.95rem;
+}
+
+.history-main .history-clear-confirmation {
+  width: 100%;
+  min-width: 0;
+  padding: 1rem;
+  border: 1px solid color-mix(in srgb, var(--danger) 70%, var(--ui-frame));
+  border-radius: 0.75rem;
+  color: var(--ui-text);
+  background: color-mix(in srgb, var(--danger) 5%, var(--ui-surface-raised));
+}
+
+.history-main .history-clear-confirmation > p {
+  color: var(--ui-muted);
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}
+
+.history-main .history-clear-actions {
+  width: 100%;
+}
+
+.history-main .history-clear-trigger,
+.history-main .history-clear-button,
+.history-main .history-empty-link {
+  display: inline-flex;
+  min-height: 2.75rem;
+  padding: 0.65rem 1rem;
+  align-items: center;
+  justify-content: center;
+  border-color: var(--history-control-border);
+  border-radius: 0.7rem;
+  font-weight: 800;
+}
+
+.history-main .history-clear-trigger {
+  color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 4%, transparent);
+}
+
+.history-main .history-clear-button--danger {
+  border-color: var(--danger);
+}
+
+.history-main .history-clear-button--cancel,
+.history-main .history-empty-link--secondary {
+  color: var(--ui-text);
+  background: var(--ui-surface-raised);
+}
+
+.history-main .history-status {
+  border-color: var(--ui-frame);
+  color: var(--ui-text);
+  background: var(--ui-surface-raised);
+  line-height: 1.6;
+}
+
+.history-main .history-state-card {
+  min-width: 0;
+  border-color: var(--ui-frame);
+  color: var(--ui-text);
+  background: color-mix(in srgb, var(--ui-surface-raised) 90%, transparent);
+}
+
+.history-main .history-state-card:focus {
+  outline: 3px solid var(--focus-ring);
+  outline-offset: 3px;
+}
+
+.history-main .history-empty-copy {
+  color: var(--ui-muted);
+  line-height: 1.65;
+}
+
+.history-main .history-read-error {
+  border-color: color-mix(in srgb, var(--danger) 65%, var(--ui-frame));
+  box-shadow: inset 0.2rem 0 var(--danger);
+}
+
+.history-main .history-read-error-copy {
+  color: var(--ui-text);
+}
+
+.history-main .history-read-error-copy p {
+  color: var(--ui-muted);
+  line-height: 1.65;
+  overflow-wrap: anywhere;
+}
+
+.history-main .history-read-error-actions {
+  width: 100%;
+}
+
+.history-main .history-empty-action-card {
+  min-height: 9rem;
+  border-color: var(--history-control-border);
+  background: var(--ui-surface-raised);
+}
+
+.history-main .history-empty-action-card p {
+  color: var(--ui-muted);
+  overflow-wrap: anywhere;
+}
+
+.history-main .history-empty-link--primary {
+  color: var(--ui-accent-foreground);
+  background: var(--ui-accent);
+}
+
+.history-main .history-entry-summary:focus-visible,
+.history-main .history-back-link:focus-visible,
+.history-main .history-clear-trigger:focus-visible,
+.history-main .history-empty-link:focus-visible {
+  outline: 3px solid var(--focus-ring);
+  outline-offset: 3px;
+}
+
+/* 確認開始・削除失敗で自動focusするCancelは、マウス起点でも現在地を可視化する。 */
+.history-main .history-clear-button:focus {
+  outline: 3px solid var(--focus-ring);
+  outline-offset: 3px;
+  box-shadow: 0 0 0 3px var(--focus-ring);
+}
+
+:root[data-theme="dark"] .history-main {
+  --history-control-border: #848484;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme]) .history-main {
+    --history-control-border: #848484;
+  }
+}
+
+@media (min-width: 40rem) {
+  .history-main .history-header {
+    grid-template-columns: minmax(8rem, 1fr) minmax(0, 46rem) minmax(8rem, 1fr);
+  }
+
+  .history-main .history-back-link {
+    grid-column: 1;
+    grid-row: 1;
+    justify-self: start;
+  }
+
+  .history-main .history-heading-copy {
+    grid-column: 2;
+    grid-row: 1;
+  }
+}
+
+@media (max-width: 47.99rem) {
+  .history-main .history-entry-summary {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  .history-main .history-entry-time {
+    grid-column: 1;
+    grid-row: 1;
+  }
+
+  .history-main .history-entry-arrow {
+    grid-column: 2;
+    grid-row: 1 / span 2;
+  }
+
+  .history-main .history-placement-list {
+    grid-column: 1;
+    grid-row: 2;
+  }
+
+  .history-main .history-entry-winner {
+    grid-column: 1 / -1;
+    grid-row: 3;
+  }
+}
+
+@media (max-width: 27rem) {
+  .history-main .history-panel {
+    padding: 0.7rem;
+    border-radius: 0.9rem;
+  }
+
+  .history-main .history-entry-summary {
+    padding: 0.75rem;
+  }
+
+  .history-main .history-placement-chip {
+    width: 1.8rem;
+    height: 1.8rem;
+  }
+
+  .history-main .history-ranking-table {
+    font-size: 0.7rem;
+  }
+
+  .history-main .history-ranking-head th,
+  .history-main .history-ranking-row > * {
+    padding: 0.5rem 0.35rem;
+  }
+
+  .history-main .history-ranking-head th:first-child {
+    width: 5.15rem;
+  }
+
+  .history-main .history-ranking-head th:last-child {
+    width: 5.75rem;
+  }
+
+  .history-main .history-ranking-player-inner {
+    gap: 0.3rem;
+  }
+
+  .history-main .history-ranking-player .character-portrait {
+    width: 1.55rem;
+    height: 2rem;
+  }
+
+  .history-main .history-breakdown-card {
+    padding: 0.75rem;
+  }
+
+  .history-main .history-breakdown-line,
+  .history-main .history-breakdown-total {
+    gap: 0.45rem;
+  }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .history-main .history-entry-arrow,
+  .history-main .history-entry-summary {
+    transition:
+      transform 160ms ease,
+      background-color 160ms ease;
+  }
+}
+
+@media (forced-colors: active) {
+  .history-main .history-panel::before {
+    display: none;
+  }
+
+  .history-main .history-entry,
+  .history-main .history-ranking-row,
+  .history-main .history-breakdown-card,
+  .history-main .history-clear-confirmation {
+    box-shadow: none;
+  }
+
+  .history-main .history-placement-chip,
+  .history-main .history-winner-label,
+  .history-main .history-entry-summary,
+  .history-main .history-back-link,
+  .history-main .history-clear-trigger,
+  .history-main .history-clear-button,
+  .history-main .history-empty-link {
+    forced-color-adjust: auto;
+  }
+}

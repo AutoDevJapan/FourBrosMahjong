@@ -51,6 +51,16 @@ describe("RankingTable (spec 6.7)", () => {
     expect(container.querySelector(".result-rank-medal")).not.toBeNull();
   });
 
+  it("history variantはResult classを漏らさず戦績画面用classを追加する", () => {
+    const { container } = render(
+      <RankingTable players={players} variant="history" />,
+    );
+    expect(screen.getByText("優勝")).toBeInTheDocument();
+    expect(container.querySelector(".history-ranking-table")).not.toBeNull();
+    expect(container.querySelector(".history-rank-medal")).not.toBeNull();
+    expect(container.querySelector(".result-ranking-table")).toBeNull();
+  });
+
   it("orders rows by rank ascending regardless of input order", () => {
     render(<RankingTable players={players} />);
     const rows = screen.getAllByRole("row");

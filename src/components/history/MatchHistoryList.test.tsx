@@ -7,11 +7,13 @@ import {
   waitFor,
   within,
 } from "@testing-library/react";
+import { StrictMode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   appendHistory,
   MATCH_HISTORY_KEY,
   type MatchHistoryEntry,
+  retryHistoryViewSnapshot,
 } from "@/components/game/matchHistory";
 import { restoreWebLocks, stubWebLocks } from "@/test/webLocksStub";
 import MatchHistoryList from "./MatchHistoryList";
@@ -58,9 +60,10 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  window.localStorage.clear();
   // スパイの復元をテスト本体末尾に置くと、手前の expect が落ちた際に次のテストへ漏れる。
   vi.restoreAllMocks();
+  window.localStorage.clear();
+  retryHistoryViewSnapshot();
   restoreWebLocks(originalLocksDescriptor);
 });
 
@@ -108,6 +111,13 @@ describe("MatchHistoryList (#293)", () => {
     expect(items[0]).toHaveTextContent(formatted(1_753_100_000_000));
     expect(items[0]).toHaveTextContent("1位 四郎");
     expect(items[1]).toHaveTextContent("1位 三郎");
+    const placements = within(items[0] as HTMLElement).getByRole("group", {
+      name: "四兄弟の最終順位",
+    });
+    expect(within(placements).getAllByRole("img")).toHaveLength(4);
+    expect(
+      within(placements).getByRole("img", { name: "四郎 1位" }),
+    ).toHaveAttribute("data-player-id", "p0");
     expect(
       screen.queryByRole("link", { name: "対局を開始" }),
     ).not.toBeInTheDocument();
@@ -126,9 +136,11 @@ describe("MatchHistoryList (#293)", () => {
     expect(
       opened.getByRole("region", { name: /四郎のソシー内訳$/ }),
     ).toBeInTheDocument();
-    expect(opened.queryByText("優勝")).not.toBeInTheDocument();
+    expect(opened.getAllByText("優勝")).toHaveLength(2);
     expect(items[0].querySelector(".result-ranking-row")).toBeNull();
     expect(items[0].querySelector(".result-breakdown-card")).toBeNull();
+    expect(items[0].querySelector(".history-ranking-row")).not.toBeNull();
+    expect(items[0].querySelector(".history-breakdown-card")).not.toBeNull();
   });
 
   it("2段階確認つきで全件削除でき、キャンセルもできる", async () => {
@@ -141,7 +153,12 @@ describe("MatchHistoryList (#293)", () => {
 
     // キャンセル: 保存は残る。
     fireEvent.click(clearButton);
-    fireEvent.click(screen.getByRole("button", { name: "キャンセル" }));
+    const cancelButton = screen.getByRole("button", { name: "キャンセル" });
+    expect(cancelButton).toHaveFocus();
+    fireEvent.click(cancelButton);
+    expect(
+      screen.getByRole("button", { name: "戦績をすべて削除" }),
+    ).toHaveFocus();
     expect(window.localStorage.getItem(MATCH_HISTORY_KEY)).not.toBeNull();
     expect(
       screen.getByRole("list", { name: "保存された半荘結果" }),
@@ -170,19 +187,81 @@ describe("MatchHistoryList (#293)", () => {
     );
   });
 
-  it("破損データは空状態で描画し、次回以降のために削除する(#302)", async () => {
+  it("破損データはStrictModeでもcleanup事実を保ち、再読み込みで復帰する(#302)", async () => {
     window.localStorage.setItem(
       MATCH_HISTORY_KEY,
       '{"version":1,"entries":[{}]}',
     );
 
-    render(<MatchHistoryList />);
+    render(
+      <StrictMode>
+        <MatchHistoryList />
+      </StrictMode>,
+    );
 
+    expect(
+      await screen.findByRole("alert", {
+        name: "保存された戦績データが壊れていました",
+      }),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/保存された戦績はまだ/)).not.toBeInTheDocument();
+    expect(screen.getByText(/安全のため削除しました/)).toBeVisible();
+    // 削除は描画中(getSnapshot)ではなく購読(効果)側で行われる。
+    expect(window.localStorage.getItem(MATCH_HISTORY_KEY)).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "もう一度読み込む" }));
     expect(
       await screen.findByText(/保存された戦績はまだありません/),
     ).toBeInTheDocument();
-    // 削除は描画中(getSnapshot)ではなく購読(効果)側で行われる。
-    expect(window.localStorage.getItem(MATCH_HISTORY_KEY)).toBeNull();
+  });
+
+  it("破損データを自動削除できなければ保存keyを残して事実を案内する", async () => {
+    const corrupted = '{"version":1,"entries":[{}]}';
+    window.localStorage.setItem(MATCH_HISTORY_KEY, corrupted);
+    vi.spyOn(Storage.prototype, "removeItem").mockImplementation(() => {
+      throw new DOMException("Storage is read-only", "SecurityError");
+    });
+
+    render(<MatchHistoryList />);
+
+    expect(
+      await screen.findByRole("alert", {
+        name: "保存された戦績データが壊れていました",
+      }),
+    ).toBeInTheDocument();
+    expect(screen.getByText(/自動削除できなかった/)).toBeVisible();
+    expect(window.localStorage.getItem(MATCH_HISTORY_KEY)).toBe(corrupted);
+  });
+
+  it("localStorageの読み込み失敗を空状態と区別し、storage event後に復帰する", async () => {
+    const originalGetItem = Storage.prototype.getItem;
+    let blocked = true;
+    const getItem = vi
+      .spyOn(Storage.prototype, "getItem")
+      .mockImplementation(function (this: Storage, key: string) {
+        if (!blocked || key !== MATCH_HISTORY_KEY) {
+          return originalGetItem.call(this, key);
+        }
+        throw new DOMException("Storage is disabled", "SecurityError");
+      });
+
+    render(<MatchHistoryList />);
+
+    expect(
+      await screen.findByRole("alert", { name: /戦績を読み込めません/ }),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/保存された戦績はまだ/)).not.toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "もう一度読み込む" }),
+    ).toBeVisible();
+    expect(screen.getByRole("link", { name: "ロビーへ戻る" })).toBeVisible();
+
+    appendHistory(window.localStorage, entry(9, 1_753_200_000_000, "二郎"));
+    blocked = false;
+    fireEvent(window, new StorageEvent("storage", { key: MATCH_HISTORY_KEY }));
+    expect(
+      await screen.findByRole("list", { name: "保存された半荘結果" }),
+    ).toHaveTextContent("1位 二郎");
+    getItem.mockRestore();
   });
 
   it("別タブでの保存変更を storage イベントで取り込む(#302)", async () => {
@@ -223,9 +302,9 @@ describe("MatchHistoryList (#293)", () => {
     expect(
       await screen.findByText(/この端末のストレージを操作できず/),
     ).toBeInTheDocument();
-    // 確認UIは畳まない。畳むと押したボタンが消え、フォーカスが body へ落ちる。
+    // 確認UIは畳まず、安全側のキャンセルへフォーカスを戻す。
     expect(confirmButton).toBeInTheDocument();
-    expect(confirmButton).toHaveFocus();
+    expect(screen.getByRole("button", { name: "キャンセル" })).toHaveFocus();
     expect(document.body).not.toHaveFocus();
   });
 
@@ -279,8 +358,8 @@ describe("MatchHistoryList (#293)", () => {
     expect(
       screen.queryByText("保存されていた戦績をすべて削除しました。"),
     ).not.toBeInTheDocument();
-    // 成功時と同じフォーカス契約 ─ 確認UIは畳まず、body へ落とさない。
-    expect(confirmButton).toHaveFocus();
+    // 確認UIは畳まず、安全側のキャンセルへ戻してbodyへ落とさない。
+    expect(screen.getByRole("button", { name: "キャンセル" })).toHaveFocus();
   });
 
   it("削除の待機中は進行中を伝え、連打しても要求を積み上げない(#488)", async () => {

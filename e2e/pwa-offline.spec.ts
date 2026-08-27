@@ -17,7 +17,7 @@ test.describe("PWAオフライン動作(#292)", () => {
     "service worker は production ビルドのみ有効(E2E_PROD=1 で実行)",
   );
 
-  test("初回登録後に追加のオンライン再読込みなしで/game・/online・/rules・/game/resultをオフライン起動できる(#506/#701/#712)", async ({
+  test("初回登録後に追加のオンライン再読込みなしで/game・/online・/rules・/history・/game/resultをオフライン起動できる(#506/#701/#712)", async ({
     page,
     context,
   }) => {
@@ -100,6 +100,24 @@ test.describe("PWAオフライン動作(#292)", () => {
       "grid",
     );
     await offlineRulesPage.close();
+
+    // History固有CSSもroute chunkのままprecacheし、空状態のClient Componentまで
+    // hydrateしてキーボード導線を利用できる。
+    const offlineHistoryPage = await context.newPage();
+    await offlineHistoryPage.goto("/history");
+    await expect(
+      offlineHistoryPage.getByRole("heading", { name: "戦績" }),
+    ).toBeVisible();
+    await expect(offlineHistoryPage.locator(".history-panel")).toHaveCSS(
+      "overflow",
+      "hidden",
+    );
+    const offlineHistoryAction = offlineHistoryPage.getByRole("link", {
+      name: "対局を開始",
+    });
+    await offlineHistoryAction.focus();
+    await expect(offlineHistoryAction).toBeFocused();
+    await offlineHistoryPage.close();
 
     // Result固有CSSもroute chunkのままprecacheされ、終局journalを復元して操作できる。
     const offlineResultPage = await context.newPage();

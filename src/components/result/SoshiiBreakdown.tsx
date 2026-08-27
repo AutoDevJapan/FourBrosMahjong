@@ -22,8 +22,8 @@ import { formatSignedSoshii } from "./soshiiFormat";
 export interface SoshiiBreakdownProps {
   /** 1プレイヤー分の確定済みソシー内訳(表示専用)。 */
   player: ResultPlayerView;
-  /** `/game/result` だけで使うカード装飾。共有先は従来の簡素な内訳を保つ。 */
-  variant?: "default" | "result";
+  /** routeが明示的に選ぶ表示presentation。未指定は従来の簡素な内訳。 */
+  variant?: "default" | "result" | "history";
 }
 
 /** 符号付き行(素点・ウマ・祝儀)の値セル。色は補助、符号+スクリーンリーダー文で増減を伝える。 */
@@ -45,7 +45,9 @@ export default function SoshiiBreakdown({
 }: SoshiiBreakdownProps) {
   const { playerId, name, rank, rawScore, uma, bonus, soshiiTotal } = player;
   const total = formatSignedSoshii(soshiiTotal);
-  const isResultPresentation = variant === "result";
+  const presentation = variant === "default" ? null : variant;
+  const presentationClass = (suffix: string) =>
+    presentation === null ? undefined : `${presentation}-${suffix}`;
 
   return (
     <section
@@ -53,34 +55,34 @@ export default function SoshiiBreakdown({
       data-character-id={playerId}
       style={playerId ? characterAccentStyle(playerId) : undefined}
       className={
-        isResultPresentation
-          ? `result-breakdown-card character-surface rounded-lg border p-4${rank === 1 ? " result-breakdown-card--winner" : ""}`
+        presentation
+          ? `${presentationClass("breakdown-card")} character-surface rounded-lg border p-4${rank === 1 ? ` ${presentationClass("breakdown-card--winner")}` : ""}`
           : "character-surface rounded-lg border p-4"
       }
     >
       <h3
-        className={`${isResultPresentation ? "result-breakdown-heading " : ""}flex items-center gap-2 text-sm font-semibold`}
+        className={`${presentationClass("breakdown-heading") ?? ""}${presentation ? " " : ""}flex items-center gap-2 text-sm font-semibold`}
       >
         {playerId ? <CharacterPortrait playerId={playerId} /> : null}
         <span
-          className={`${isResultPresentation ? "result-breakdown-rank " : ""}text-foreground/70`}
+          className={`${presentationClass("breakdown-rank") ?? ""}${presentation ? " " : ""}text-foreground/70`}
         >
           {rank}位
         </span>
         <span
-          className={`${isResultPresentation ? "result-breakdown-name " : ""}character-name`}
+          className={`${presentationClass("breakdown-name") ?? ""}${presentation ? " " : ""}character-name`}
         >
           {name}
         </span>
-        {isResultPresentation && rank === 1 ? (
-          <span className="result-winner-label">優勝</span>
+        {presentation && rank === 1 ? (
+          <span className={presentationClass("winner-label")}>優勝</span>
         ) : null}
       </h3>
       <dl
-        className={`${isResultPresentation ? "result-breakdown-list " : ""}mt-3 flex flex-col gap-1.5 text-sm`}
+        className={`${presentationClass("breakdown-list") ?? ""}${presentation ? " " : ""}mt-3 flex flex-col gap-1.5 text-sm`}
       >
         <div
-          className={`${isResultPresentation ? "result-breakdown-line " : ""}flex items-baseline justify-between gap-4`}
+          className={`${presentationClass("breakdown-line") ?? ""}${presentation ? " " : ""}flex items-baseline justify-between gap-4`}
         >
           <dt className="text-foreground/70">{RAW_SCORE_LABEL}</dt>
           <dd>
@@ -90,14 +92,12 @@ export default function SoshiiBreakdown({
           </dd>
         </div>
         <div
-          className={`${isResultPresentation ? "result-breakdown-line " : ""}flex items-baseline justify-between gap-4`}
+          className={`${presentationClass("breakdown-line") ?? ""}${presentation ? " " : ""}flex items-baseline justify-between gap-4`}
         >
           <dt className="text-foreground/70">
             {UMA_OKA_LABEL}
             {rank === 1 ? (
-              <small
-                className={isResultPresentation ? "result-oka-note" : undefined}
-              >
+              <small className={presentationClass("oka-note")}>
                 （{TOP_OKA_NOTE}）
               </small>
             ) : null}
@@ -107,7 +107,7 @@ export default function SoshiiBreakdown({
           </dd>
         </div>
         <div
-          className={`${isResultPresentation ? "result-breakdown-line " : ""}flex items-baseline justify-between gap-4`}
+          className={`${presentationClass("breakdown-line") ?? ""}${presentation ? " " : ""}flex items-baseline justify-between gap-4`}
         >
           <dt className="text-foreground/70">{YAKUMAN_BONUS_LABEL}</dt>
           <dd>
@@ -115,7 +115,7 @@ export default function SoshiiBreakdown({
           </dd>
         </div>
         <div
-          className={`${isResultPresentation ? "result-breakdown-total " : ""}mt-1 flex items-baseline justify-between gap-4 border-t border-foreground/15 pt-2 font-semibold`}
+          className={`${presentationClass("breakdown-total") ?? ""}${presentation ? " " : ""}mt-1 flex items-baseline justify-between gap-4 border-t border-foreground/15 pt-2 font-semibold`}
         >
           <dt>ソシー合計</dt>
           <dd className="font-mono tabular-nums">
