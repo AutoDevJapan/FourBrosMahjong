@@ -2,10 +2,11 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
 describe("Issue #712 design route scope", () => {
-  it("Yuji Syukuをroot layoutへ載せず、ロビーと設定routeだけで定義する", () => {
+  it("Yuji Syukuをroot layoutへ載せず、ロビー・設定・ルールrouteだけで定義する", () => {
     const rootLayout = readFileSync("src/app/layout.tsx", "utf8");
     const lobbyPage = readFileSync("src/app/page.tsx", "utf8");
     const settingsPage = readFileSync("src/app/settings/page.tsx", "utf8");
+    const rulesPage = readFileSync("src/app/rules/page.tsx", "utf8");
 
     expect(rootLayout).not.toContain("Yuji_Syuku");
     expect(rootLayout).not.toContain("--font-yuji-syuku");
@@ -20,6 +21,13 @@ describe("Issue #712 design route scope", () => {
     expect(settingsPage).toContain('variable: "--font-yuji-syuku"');
     expect(settingsPage).toContain("preload: false");
     expect(settingsPage).toContain("${yujiSyuku.variable}");
+    expect(rulesPage).toContain(
+      'import { Yuji_Syuku } from "next/font/google"',
+    );
+    expect(rulesPage).toContain('variable: "--font-yuji-syuku"');
+    expect(rulesPage).toContain('weight: "400"');
+    expect(rulesPage).toContain("preload: false");
+    expect(rulesPage).toContain("fontVariableClassName={yujiSyuku.variable}");
   });
 
   it("settings固有styleをroot stylesheetへ載せず、settings routeだけから読む", () => {

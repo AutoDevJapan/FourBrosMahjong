@@ -1,6 +1,10 @@
 import { render, screen, within } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import {
+  RULE_ITEM_COUNT,
+  RULE_SECTIONS,
+} from "@/components/rules/rulesContent";
+import {
   OKA,
   RETURN_POINTS,
   STARTING_POINTS,
@@ -76,8 +80,8 @@ describe("RulesPage (/rules)", () => {
 
   it("折りたたみセクションを details/summary で提供する", () => {
     const { container } = render(<RulesPage />);
-    const sections = container.querySelectorAll("details");
-    expect(sections.length).toBeGreaterThan(0);
+    const sections = container.querySelectorAll("details[id^='rule-']");
+    expect(sections).toHaveLength(6);
     // 各 details には開閉トリガ(summary)がある。
     for (const section of sections) {
       expect(section.querySelector("summary")).not.toBeNull();
@@ -119,6 +123,47 @@ describe("RulesPage (/rules)", () => {
       expect(summary).not.toBeNull();
       expect(summary).toHaveAttribute("id", `${section.id}-summary`);
     }
+  });
+
+  it("6セクション・29項目と一意な安定IDを欠落なく描画する", () => {
+    const { container } = render(<RulesPage />);
+    const sections = [
+      ...container.querySelectorAll<HTMLElement>("details[id^='rule-']"),
+    ];
+    const items = [
+      ...container.querySelectorAll<HTMLElement>("li[id^='rule-']"),
+    ];
+    const ids = [...sections, ...items].map((element) => element.id);
+
+    expect(sections).toHaveLength(RULE_SECTIONS.length);
+    expect(items).toHaveLength(RULE_ITEM_COUNT);
+    expect(new Set(ids).size).toBe(ids.length);
+    expect(screen.getByText("全6カテゴリ・29項目")).toBeInTheDocument();
+  });
+
+  it("モバイル目次と各カテゴリをnative details/summaryで提供する", () => {
+    const { container } = render(<RulesPage />);
+    const toc = screen.getByRole("navigation", { name: "ルールの目次" });
+    const tocDisclosure = toc.querySelector("details");
+
+    expect(tocDisclosure).toHaveAttribute("open");
+    expect(tocDisclosure?.querySelector("summary")).toHaveTextContent(
+      "ルールの目次",
+    );
+    expect(
+      container.querySelectorAll("details[id^='rule-'] > summary"),
+    ).toHaveLength(6);
+  });
+
+  it("非公式の出典・免責とmetadataの前提文言を保持する", () => {
+    render(<RulesPage />);
+
+    expect(screen.getByText(/非公式ファンメイド作品/)).toBeInTheDocument();
+    const source = screen.getByRole("complementary", {
+      name: "出典と注意事項",
+    });
+    expect(source).toHaveTextContent("docs/四兄弟麻雀ルール.md");
+    expect(source).toHaveTextContent("収録回によって細部が変わる可能性");
   });
 
   it("実装定数と一致する配給原点・返し・オカとソシー精算を説明する(#196)", () => {

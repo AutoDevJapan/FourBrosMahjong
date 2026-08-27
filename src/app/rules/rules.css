@@ -1,0 +1,380 @@
+/* Issue #712 Phase B3: `/rules` 固有。共通foundationを変えずSettings並走時の競合を限定する。 */
+.rules-page {
+  min-width: 0;
+}
+.rules-main {
+  display: flex;
+  width: 100%;
+  max-width: 76rem;
+  min-width: 0;
+  margin-inline: auto;
+  padding: clamp(0.75rem, 2.5vw, 2rem);
+  flex-direction: column;
+  gap: clamp(1rem, 2.5vw, 1.75rem);
+}
+
+.rules-topbar {
+  display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.rules-back-link {
+  width: fit-content;
+  padding: 0.55rem 0.9rem;
+  gap: 0.45rem;
+}
+
+.rules-header {
+  display: flex;
+  max-width: 52rem;
+  margin-inline: auto;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.65rem;
+  text-align: center;
+}
+
+.rules-kicker {
+  color: var(--ui-gold-text);
+  font-size: 0.8125rem;
+  font-weight: 700;
+  letter-spacing: 0.16em;
+}
+
+.rules-title {
+  color: var(--ui-text);
+  font-family:
+    var(--font-yuji-syuku), "Yu Mincho", "Hiragino Mincho ProN", serif;
+  font-size: clamp(2.25rem, 7vw, 4.5rem);
+  font-weight: 400;
+  font-synthesis: none;
+  line-height: 1.1;
+  letter-spacing: 0.08em;
+  text-wrap: balance;
+}
+
+.rules-introduction {
+  max-width: 46rem;
+  color: var(--ui-muted);
+  font-size: clamp(0.875rem, 2vw, 1rem);
+  line-height: 1.8;
+  text-wrap: pretty;
+}
+
+.rules-disclaimer {
+  width: 100%;
+  margin-top: 0.35rem;
+  padding: 0.8rem 1rem;
+  border: 1px solid var(--ui-frame);
+  border-radius: 0.75rem;
+  color: var(--ui-muted);
+  background: color-mix(in srgb, var(--ui-surface) 86%, transparent);
+  font-size: 0.75rem;
+  line-height: 1.65;
+  text-wrap: pretty;
+}
+
+.rules-panel {
+  overflow: clip;
+}
+
+.rules-layout {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.rules-toc-column,
+.rules-content {
+  min-width: 0;
+}
+
+.rules-toc-column {
+  border-bottom: 1px solid var(--ui-frame);
+  background: color-mix(in srgb, var(--ui-surface-raised) 72%, transparent);
+}
+
+.rules-toc-disclosure {
+  min-width: 0;
+}
+
+.rules-toc-summary {
+  display: flex;
+  min-height: 2.75rem;
+  padding: 0.75rem 1rem;
+  align-items: center;
+  justify-content: space-between;
+  color: var(--ui-gold-text);
+  cursor: pointer;
+  font-weight: 700;
+  list-style-position: inside;
+}
+
+.rules-toc-body {
+  min-width: 0;
+  padding: 0 0.75rem 0.75rem;
+}
+
+.rules-toc-heading {
+  display: none;
+}
+
+.rules-toc-list {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: 1fr;
+  gap: 0.45rem;
+}
+
+.rules-toc-link {
+  display: flex;
+  min-width: 0;
+  min-height: 2.75rem;
+  padding: 0.65rem 0.75rem;
+  align-items: center;
+  border: 1px solid transparent;
+  border-radius: 0.65rem;
+  color: var(--ui-text);
+  background: color-mix(in srgb, var(--ui-surface) 72%, transparent);
+  font-size: 0.875rem;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+  text-decoration: none;
+  transition:
+    border-color 160ms ease,
+    background-color 160ms ease,
+    color 160ms ease;
+}
+
+.rules-toc-link:hover {
+  border-color: var(--ui-frame);
+  color: var(--ui-gold-text);
+  background: var(--ui-surface-raised);
+}
+
+.rules-content {
+  padding: clamp(0.75rem, 2.5vw, 1.5rem);
+  background: color-mix(in srgb, var(--ui-surface) 97%, transparent);
+}
+
+.rules-content-header {
+  display: flex;
+  min-width: 0;
+  margin-bottom: 1rem;
+  padding-bottom: 0.8rem;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.75rem;
+  border-bottom: 1px solid var(--ui-frame);
+}
+
+.rules-content-title {
+  font-family: "Yu Mincho", "Hiragino Mincho ProN", serif;
+  font-size: clamp(1.25rem, 3vw, 1.75rem);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+}
+
+.rules-content-meta {
+  flex: none;
+  color: var(--ui-muted);
+  font-size: 0.75rem;
+}
+
+.rules-sections {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.rules-section {
+  min-width: 0;
+  scroll-margin-top: 1rem;
+  border: 1px solid var(--ui-frame);
+  border-radius: 0.8rem;
+  background: color-mix(in srgb, var(--ui-surface-raised) 42%, transparent);
+  box-shadow: inset 0 0 0 1px
+    color-mix(in srgb, var(--ui-gold-decoration) 9%, transparent);
+}
+
+.rules-section:target {
+  border-color: var(--focus-ring);
+  box-shadow:
+    0 0 0 2px var(--focus-ring),
+    inset 0 0 0 1px
+    color-mix(in srgb, var(--ui-gold-decoration) 18%, transparent);
+}
+
+.rules-section-summary {
+  display: flex;
+  min-width: 0;
+  min-height: 2.75rem;
+  padding: 0.8rem 1rem;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  border-radius: 0.8rem;
+  color: var(--ui-text);
+  cursor: pointer;
+  font-size: clamp(0.9375rem, 2vw, 1.0625rem);
+  font-weight: 700;
+  line-height: 1.4;
+  list-style: none;
+}
+
+.rules-section-summary::-webkit-details-marker {
+  display: none;
+}
+
+.rules-summary-mark {
+  flex: none;
+  color: var(--ui-gold-text);
+  font-size: 1.25rem;
+  line-height: 1;
+}
+
+.rules-summary-mark::before {
+  content: "＋";
+}
+
+.rules-section[open] .rules-summary-mark::before {
+  content: "−";
+}
+
+.rules-item-list {
+  display: grid;
+  min-width: 0;
+  padding: 0 1rem 1rem;
+  gap: 0.8rem;
+}
+
+.rules-item {
+  display: grid;
+  min-width: 0;
+  scroll-margin-top: 1rem;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 0.6rem;
+  color: var(--ui-muted);
+  font-size: 0.875rem;
+  line-height: 1.75;
+  overflow-wrap: anywhere;
+}
+
+.rules-item-mark {
+  padding-top: 0.12em;
+  color: var(--ui-gold-text);
+  font-size: 0.65rem;
+}
+
+.rules-item-label {
+  color: var(--ui-text);
+  font-weight: 700;
+}
+
+.rules-source-note {
+  display: flex;
+  min-width: 0;
+  padding: 0.75rem 1rem;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 0.4rem 1rem;
+  border: 1px solid var(--ui-frame);
+  border-radius: 0.75rem;
+  color: var(--ui-muted);
+  background: color-mix(in srgb, var(--ui-surface) 88%, transparent);
+  font-size: 0.75rem;
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}
+
+.rules-source-note code {
+  color: var(--ui-text);
+  font-family: var(--font-mono);
+}
+
+.rules-footer {
+  display: flex;
+  justify-content: center;
+  padding-bottom: 0.5rem;
+}
+
+.rules-footer-link {
+  display: inline-flex;
+  min-height: 2.75rem;
+  padding: 0.55rem 0.9rem;
+  align-items: center;
+  gap: 0.45rem;
+  border-radius: 0.5rem;
+  color: var(--ui-muted);
+  text-decoration: underline;
+  text-underline-offset: 0.25em;
+}
+
+.rules-footer-link:hover {
+  color: var(--ui-text);
+}
+
+@media (min-width: 48rem) {
+  .rules-layout {
+    grid-template-columns: minmax(13rem, 16rem) minmax(0, 1fr);
+  }
+
+  .rules-toc-column {
+    border-right: 1px solid var(--ui-frame);
+    border-bottom: 0;
+  }
+
+  .rules-toc-disclosure {
+    position: sticky;
+    top: 1rem;
+    max-height: calc(100svh - 2rem);
+    overflow-y: auto;
+  }
+
+  .rules-toc-summary {
+    display: none;
+  }
+
+  .rules-toc-disclosure:not([open]) > .rules-toc-body,
+  .rules-toc-body {
+    display: block;
+    padding: 1.25rem 1rem;
+  }
+
+  .rules-toc-heading {
+    display: block;
+    margin-bottom: 0.85rem;
+    color: var(--ui-gold-text);
+    font-size: 0.8125rem;
+    font-weight: 700;
+    letter-spacing: 0.12em;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .rules-toc-link {
+    transition: none;
+  }
+}
+
+@media (forced-colors: active) {
+  .rules-disclaimer,
+  .rules-panel,
+  .rules-toc-column,
+  .rules-toc-link,
+  .rules-content,
+  .rules-section,
+  .rules-source-note {
+    background: Canvas;
+  }
+
+  .rules-section:target {
+    outline: 2px solid Highlight;
+    outline-offset: 2px;
+  }
+}
