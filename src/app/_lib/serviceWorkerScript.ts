@@ -32,6 +32,8 @@ export const PRECACHE_ROUTES: readonly string[] = [
   "/settings",
   // 戦績は localStorage 完結でオフラインでも中身を表示できる(issue #293)。
   "/history",
+  // 通信自体はオンライン必須だが、オフライン時も接続不能案内と再試行UIを正しいrouteで示す。
+  "/online",
   "/game",
   "/game/result",
 ];
