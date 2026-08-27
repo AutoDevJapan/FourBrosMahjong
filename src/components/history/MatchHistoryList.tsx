@@ -19,6 +19,9 @@
 import Link from "next/link";
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { localStorageOrNull } from "@/components/common/browserStorage";
+import CharacterPortrait, {
+  characterAccentStyle,
+} from "@/components/game/CharacterPortrait";
 import {
   clearHistoryAcrossTabs,
   getHistorySnapshot,
@@ -32,6 +35,7 @@ import {
 import RankingTable from "@/components/result/RankingTable";
 import SoshiiBreakdown from "@/components/result/SoshiiBreakdown";
 import { formatSignedSoshii } from "@/components/result/soshiiFormat";
+import { CHARACTER_PLAYER_IDS } from "@/domain/game/characters";
 
 /**
  * 終了日時の表示フォーマット(例: 2026/07/20 14:05)。
@@ -75,14 +79,26 @@ const CLEAR_PROGRESS_DELAY_MS = 150;
 /** 半荘1件の見出し+展開内訳。 */
 function HistoryItem({ entry }: { entry: MatchHistoryEntry }) {
   const finishedAt = finishedAtFormat.format(new Date(entry.finishedAt));
-  const ordered = [...entry.players].sort((a, b) => a.rank - b.rank);
+  // 保存JSONは旧クライアントと同じv1形状を維持する。engineが保存してきた固定配列順
+  // p0→p3から表示モデルにだけIDを付け、旧戦績にも現在の肖像を対応させる。
+  const ordered = entry.players
+    .map((player, index) => ({
+      ...player,
+      playerId: CHARACTER_PLAYER_IDS[index],
+    }))
+    .sort((a, b) => a.rank - b.rank);
   const top = ordered[0];
   const topTotal = formatSignedSoshii(top.soshiiTotal);
 
   return (
-    <details className="group rounded-lg border border-control-border">
+    <details
+      data-character-id={top.playerId}
+      style={top.playerId ? characterAccentStyle(top.playerId) : undefined}
+      className="character-accent-edge group rounded-lg border border-control-border"
+    >
       <summary className="flex cursor-pointer flex-wrap items-baseline gap-x-3 gap-y-1 rounded-lg p-4 text-sm hover:bg-foreground/5">
         <span className="font-medium">{finishedAt}</span>
+        {top.playerId ? <CharacterPortrait playerId={top.playerId} /> : null}
         <span className="text-foreground/70">
           1位 {top.name}(<span aria-hidden="true">{topTotal.display}</span>
           <span className="sr-only">{topTotal.srLabel}</span>)

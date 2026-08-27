@@ -4,6 +4,7 @@ import PlayerArea from "./PlayerArea";
 import type { SeatedPlayerView } from "./types";
 
 const PLAYER: SeatedPlayerView = {
+  playerId: "p0",
   name: "あなた",
   points: 35000,
   seatWind: "east",

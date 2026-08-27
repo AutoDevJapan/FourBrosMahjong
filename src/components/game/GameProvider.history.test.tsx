@@ -12,6 +12,7 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { useSyncExternalStore } from "react";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { CHARACTER_PLAYER_IDS } from "@/domain/game/characters";
 import { restoreWebLocks, stubWebLocks } from "@/test/webLocksStub";
 import { walkToGameEnd } from "./finishedGameFixture";
 import { GameProvider, useGame } from "./GameProvider";
@@ -149,6 +150,12 @@ afterEach(() => {
 describe("GameProvider match history recording (#293)", () => {
   beforeEach(() => {
     stubWebLocks();
+  });
+
+  it("確定結果は履歴表示がIDを復元する固定順p0→p3を維持する(issue #711)", () => {
+    expect(fixture.state.result?.map((player) => player.playerId)).toEqual(
+      CHARACTER_PLAYER_IDS,
+    );
   });
 
   it("終局する最終操作の後に確定結果を戦績へ保存する", async () => {

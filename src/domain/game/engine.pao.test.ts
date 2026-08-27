@@ -160,8 +160,8 @@ describe("engine: パオ(責任払い)の結線(#284 / スペック3 3.3)", () =
       p3: 35000,
     });
     expect(after.lastRound?.winDetails?.payments).toEqual([
-      { name: "一郎", amount: 24000 },
-      { name: "二郎", amount: 24000 },
+      { name: "竜二", amount: 24000 },
+      { name: "マサキ", amount: 24000 },
     ]);
   });
 
@@ -193,7 +193,7 @@ describe("engine: パオ(責任払い)の結線(#284 / スペック3 3.3)", () =
       p3: 0,
     });
     expect(after.lastRound?.winDetails?.payments).toEqual([
-      { name: "一郎", amount: 48000 },
+      { name: "竜二", amount: 48000 },
     ]);
   });
 
@@ -334,8 +334,8 @@ describe("engine: パオ(責任払い)の結線(#284 / スペック3 3.3)", () =
       p3: 0,
     });
     expect(after.lastRound?.winDetails?.payments).toEqual([
-      { name: "一郎", amount: 48000 },
-      { name: "二郎", amount: 48000 },
+      { name: "竜二", amount: 48000 },
+      { name: "マサキ", amount: 48000 },
     ]);
     // 祝儀はパオ責任者へ寄せず、和了者以外の3兄弟から各1,000を維持する。
     expect(after.bonus).toEqual({ p0: 3000, p1: -1000, p2: -1000, p3: -1000 });
@@ -519,7 +519,7 @@ describe("engine: パオ(責任払い)の結線(#284 / スペック3 3.3)", () =
       p3: 0,
     });
     expect(after.lastRound?.winDetails?.payments).toEqual([
-      { name: "あなた", amount: 32000 },
+      { name: "粗悪品", amount: 32000 },
     ]);
   });
 });

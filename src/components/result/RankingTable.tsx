@@ -6,6 +6,10 @@
  * (スペック6 6.8)。順位は色ではなく「N位」テキストで示し、首位のみ記号+読み上げ文で補助する
  * (スペック5 5.2.1: 色のみに依存しない)。
  */
+
+import CharacterPortrait, {
+  characterAccentStyle,
+} from "@/components/game/CharacterPortrait";
 import type { ResultPlayerView } from "@/components/game/types";
 import { formatSignedSoshii } from "./soshiiFormat";
 
@@ -40,7 +44,16 @@ export default function RankingTable({ players }: RankingTableProps) {
           const isTop = player.rank === 1;
           return (
             // 対局者名はユーザー設定で重複し得る(#291)ため一意な rank を key にする。
-            <tr key={player.rank} className="border-b border-foreground/10">
+            <tr
+              key={player.rank}
+              data-character-id={player.playerId}
+              style={
+                player.playerId
+                  ? characterAccentStyle(player.playerId)
+                  : undefined
+              }
+              className="border-b border-foreground/10"
+            >
               <th
                 scope="row"
                 className="py-2 pr-3 font-normal whitespace-nowrap"
@@ -54,7 +67,16 @@ export default function RankingTable({ players }: RankingTableProps) {
                   <span>{player.rank}位</span>
                 </span>
               </th>
-              <td className="py-2 pr-3">{player.name}</td>
+              <td className="py-2 pr-3">
+                <span className="inline-flex items-center gap-2">
+                  {player.playerId ? (
+                    <CharacterPortrait playerId={player.playerId} />
+                  ) : null}
+                  <span className="character-name font-medium">
+                    {player.name}
+                  </span>
+                </span>
+              </td>
               <td className="py-2 text-right font-mono tabular-nums">
                 <span aria-hidden="true">{total.display}</span>
                 <span className="sr-only">{total.srLabel}</span>

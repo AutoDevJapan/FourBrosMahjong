@@ -91,9 +91,15 @@ import {
 } from "@/domain/scoring/win-payment";
 import { HONOR, type PlayableWind, type Tile } from "@/domain/tiles/tile";
 import { buildWall, type Wall, WallEmptyError } from "@/domain/wall/wall";
+import {
+  CHARACTER_DEFAULT_NAMES,
+  CHARACTER_PLAYER_IDS,
+  type CharacterPlayerId,
+  type CharacterPlayerNames,
+} from "./characters";
 
 /** プレイヤー識別子(4兄弟)。後方互換の通常対局では `p0` が自家。 */
-export type PlayerId = "p0" | "p1" | "p2" | "p3";
+export type PlayerId = CharacterPlayerId;
 
 /** 自家(人間プレイヤー)のID。 */
 export const HUMAN_ID: PlayerId = "p0";
@@ -422,7 +428,7 @@ export interface EngineState {
 }
 
 /** 四人回しの4人の表示名(index 0 = 自家)。 */
-export type PlayerNames = readonly [string, string, string, string];
+export type PlayerNames = CharacterPlayerNames;
 
 /** `createGame` のオプション。 */
 export interface CreateGameOptions {
@@ -435,14 +441,11 @@ export interface CreateGameOptions {
 }
 
 /**
- * 表示名の既定値(未設定時の後方互換値)。
- *
- * 実在人物名は含めない。本作は非公式ファンメイドであり、番組メンバー名を出荷物へ
- * 同梱してよいかは未確定(`質問リスト.md` Q28)。実名は `/settings` からユーザーが入力する。
+ * 表示名の既定値。固定キャラクター定義(issue #711)から導出する。
  */
-export const DEFAULT_NAMES: PlayerNames = ["あなた", "一郎", "二郎", "三郎"];
+export const DEFAULT_NAMES: PlayerNames = CHARACTER_DEFAULT_NAMES;
 
-const ALL_IDS: PlayerRing<PlayerId> = ["p0", "p1", "p2", "p3"];
+const ALL_IDS: PlayerRing<PlayerId> = CHARACTER_PLAYER_IDS;
 const DEFAULT_HUMAN_PLAYER_IDS: readonly PlayerId[] = [HUMAN_ID];
 
 // ---------------------------------------------------------------------------

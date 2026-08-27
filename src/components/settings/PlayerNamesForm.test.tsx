@@ -21,8 +21,8 @@ describe("PlayerNamesForm", () => {
   it("未設定時は既定名を初期表示する(後方互換)", () => {
     render(<PlayerNamesForm />);
 
-    expect(inputFor("あなた(自家)")).toHaveValue(DEFAULT_NAMES[0]);
-    expect(inputFor("対局者2")).toHaveValue(DEFAULT_NAMES[1]);
+    expect(inputFor("粗悪品(自家)")).toHaveValue(DEFAULT_NAMES[0]);
+    expect(inputFor("竜二")).toHaveValue(DEFAULT_NAMES[1]);
   });
 
   it("保存済みの名前をマウント後に読み込んで表示する", () => {
@@ -33,15 +33,15 @@ describe("PlayerNamesForm", () => {
 
     render(<PlayerNamesForm />);
 
-    expect(inputFor("あなた(自家)")).toHaveValue("自分");
-    expect(inputFor("対局者4")).toHaveValue("翔生");
+    expect(inputFor("粗悪品(自家)")).toHaveValue("自分");
+    expect(inputFor("糸瓜")).toHaveValue("翔生");
   });
 
   it("入力した名前をlocalStorageへ保存し、完了を通知する", async () => {
     const user = userEvent.setup();
     render(<PlayerNamesForm />);
 
-    const input = inputFor("対局者2");
+    const input = inputFor("竜二");
     await user.clear(input);
     await user.type(input, "龍二");
     await user.click(screen.getByRole("button", { name: "名前を保存" }));
@@ -61,11 +61,11 @@ describe("PlayerNamesForm", () => {
     const user = userEvent.setup();
     render(<PlayerNamesForm />);
 
-    const input = inputFor("対局者3");
+    const input = inputFor("マサキ");
     await user.clear(input);
     await user.click(screen.getByRole("button", { name: "名前を保存" }));
 
-    expect(inputFor("対局者3")).toHaveValue(DEFAULT_NAMES[2]);
+    expect(inputFor("マサキ")).toHaveValue(DEFAULT_NAMES[2]);
     expect(loadPlayerNames(window.localStorage)).toEqual(DEFAULT_NAMES);
   });
 
@@ -79,7 +79,7 @@ describe("PlayerNamesForm", () => {
 
     await user.click(screen.getByRole("button", { name: "既定名に戻す" }));
 
-    expect(inputFor("あなた(自家)")).toHaveValue(DEFAULT_NAMES[0]);
+    expect(inputFor("粗悪品(自家)")).toHaveValue(DEFAULT_NAMES[0]);
     expect(loadPlayerNames(window.localStorage)).toEqual(DEFAULT_NAMES);
   });
 
@@ -87,7 +87,7 @@ describe("PlayerNamesForm", () => {
     const user = userEvent.setup();
     render(<PlayerNamesForm />);
 
-    const input = inputFor("対局者2");
+    const input = inputFor("竜二");
     await user.clear(input);
     await user.type(input, "あ".repeat(MAX_PLAYER_NAME_LENGTH + 5));
 
@@ -97,7 +97,7 @@ describe("PlayerNamesForm", () => {
   it("入力欄も保存処理と同じ書記素単位で絵文字を制限する(#484)", async () => {
     const user = userEvent.setup();
     render(<PlayerNamesForm />);
-    const input = inputFor("対局者2");
+    const input = inputFor("竜二");
     const withinLimit = `${"あ".repeat(11)}😀`;
 
     // 貼り付けで検証する。`fireEvent.change` はネイティブの `maxlength` を素通しするため、
@@ -112,7 +112,7 @@ describe("PlayerNamesForm", () => {
 
   it("IME変換中は上限で切り詰めず、確定時に適用する(#484)", () => {
     render(<PlayerNamesForm />);
-    const input = inputFor("対局者2");
+    const input = inputFor("竜二");
     // 確定後は8書記素でも、読みは13書記素ある。変換中に切り詰めると変換が壊れる。
     const reading = "にほんごにゅうりょくてすと";
     const converted = "日本語入力テスト";
@@ -128,11 +128,11 @@ describe("PlayerNamesForm", () => {
 
   it("変換中でも他の入力欄には上限が効く(#484)", () => {
     render(<PlayerNamesForm />);
-    const composingInput = inputFor("対局者2");
-    const otherInput = inputFor("対局者3");
+    const composingInput = inputFor("竜二");
+    const otherInput = inputFor("マサキ");
     const tooLong = "あ".repeat(MAX_PLAYER_NAME_LENGTH + 3);
 
-    // 「対局者2」を変換中のまま「対局者3」へ入力しても、上限が外れてはいけない。
+    // 竜二欄を変換中のままマサキ欄へ入力しても、上限が外れてはいけない。
     fireEvent.compositionStart(composingInput);
     fireEvent.change(composingInput, { target: { value: tooLong } });
     fireEvent.change(otherInput, { target: { value: tooLong } });
@@ -143,7 +143,7 @@ describe("PlayerNamesForm", () => {
 
   it("compositionEndが来なくてもフォーカスアウトで上限が復帰する(#484)", () => {
     render(<PlayerNamesForm />);
-    const input = inputFor("対局者2");
+    const input = inputFor("竜二");
     const tooLong = "あ".repeat(MAX_PLAYER_NAME_LENGTH + 3);
 
     // 一部のAndroid IMEは compositionend を発火しない。blur で確定扱いにする。
@@ -156,7 +156,7 @@ describe("PlayerNamesForm", () => {
 
   it("変換確定後に上限を超えた文字列は切り詰める(#484)", () => {
     render(<PlayerNamesForm />);
-    const input = inputFor("対局者2");
+    const input = inputFor("竜二");
     const tooLong = "あ".repeat(MAX_PLAYER_NAME_LENGTH + 3);
 
     fireEvent.compositionStart(input);
@@ -172,7 +172,7 @@ describe("PlayerNamesForm", () => {
     expect(
       screen.getByRole("group", { name: /対局者の名前/ }),
     ).toBeInTheDocument();
-    for (const label of ["あなた(自家)", "対局者2", "対局者3", "対局者4"]) {
+    for (const label of ["粗悪品(自家)", "竜二", "マサキ", "糸瓜"]) {
       expect(screen.getByLabelText(label)).toHaveAccessibleDescription(
         /空欄のまま保存すると既定名/,
       );

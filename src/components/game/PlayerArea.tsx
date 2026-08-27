@@ -6,6 +6,7 @@
  * どのプレイヤーが自家/他家/親かの決定(Q10)には関与せず、与えられた割り当てを描くだけ。
  */
 
+import CharacterPortrait, { characterAccentStyle } from "./CharacterPortrait";
 import Discards from "./Discards";
 import Hand, { type HandProps, type HandTileState } from "./Hand";
 import KitaDisplay from "./KitaDisplay";
@@ -72,17 +73,20 @@ export default function PlayerArea({
   return (
     <section
       aria-label={`${name}(${SEAT_WIND_LABEL[seatWind]})`}
-      className={`flex flex-col gap-2 rounded-lg border p-2 ${
+      data-character-id={player.playerId}
+      style={characterAccentStyle(player.playerId)}
+      className={`character-accent-edge flex flex-col gap-2 rounded-lg border p-2 ${
         status?.isCurrentTurn
           ? "border-turn-highlight bg-turn-highlight/5"
           : "border-foreground/15"
       }`}
     >
       <header className="flex flex-wrap items-center gap-x-2 gap-y-1">
+        <CharacterPortrait playerId={player.playerId} />
         <span className="rounded bg-foreground/10 px-1.5 py-0.5 text-xs font-semibold">
           {SEAT_WIND_LABEL[seatWind]}
         </span>
-        <span className="font-medium">{name}</span>
+        <span className="character-name font-medium">{name}</span>
         {status?.isDealer ? <StatusBadge icon="◆" label="親" /> : null}
         {status?.isCurrentTurn ? (
           <StatusBadge icon="▶" label="手番" variant="highlight" />

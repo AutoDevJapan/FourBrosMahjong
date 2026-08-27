@@ -49,7 +49,12 @@ export interface MatchHistoryEntry {
   readonly seed: number;
   /** 半荘終了日時(epoch ミリ秒)。 */
   readonly finishedAt: number;
-  /** 4兄弟全員の確定内訳。 */
+  /**
+   * 4兄弟全員の確定内訳。配列順は engine の固定順 p0→p3。
+   *
+   * v1 を読む旧クライアントとの共存・rollback互換のため playerId は保存しない。
+   * 表示時だけこの既存順序から固定IDを復元する。
+   */
   readonly players: readonly MatchHistoryPlayer[];
 }
 

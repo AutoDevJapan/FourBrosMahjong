@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { CHARACTER_PLAYER_IDS } from "@/domain/game/characters";
 import { createLockRequest } from "@/test/webLocksStub";
 import {
   appendHistory,
@@ -526,6 +527,80 @@ describe("match history persistence (#293)", () => {
 
     it("妥当な保存文字列を受理する", () => {
       expect(parseHistory(JSON.stringify(valid()))).toEqual([entry(1)]);
+    });
+
+    it("旧履歴の名前とv1保存形状を変えずに往復する(issue #711)", () => {
+      const legacy = entry(1);
+
+      expect(
+        parseHistory(JSON.stringify({ version: 1, entries: [legacy] })),
+      ).toEqual([legacy]);
+      expect(JSON.stringify(legacy)).not.toContain("playerId");
+    });
+
+    it("playerId付きの全員・partial・重複IDはいずれもv1として受理しない", () => {
+      const withIds = (ids: readonly (string | undefined)[]) => ({
+        ...entry(1),
+        players: entry(1).players.map((player, index) => ({
+          ...player,
+          ...(ids[index] === undefined ? {} : { playerId: ids[index] }),
+        })),
+      });
+
+      for (const ids of [
+        CHARACTER_PLAYER_IDS,
+        ["p0", undefined, undefined, undefined],
+        ["p0", "p0", "p2", "p3"],
+      ] as const) {
+        expect(
+          parseHistory(JSON.stringify({ version: 1, entries: [withIds(ids)] })),
+        ).toBeNull();
+      }
+    });
+
+    it("新clientの追記を旧client相当parserが受理し、storage通知やrollbackでも履歴を削除しない", () => {
+      const storage = new MemoryStorage();
+      appendHistory(storage, entry(1));
+
+      /** #711前のv1 clientが持つ、未知keyを拒否するplayer検証の最小再現。 */
+      const oldClientLoad = (): unknown[] => {
+        const raw = storage.getItem(MATCH_HISTORY_KEY);
+        if (raw === null) return [];
+        const value = JSON.parse(raw) as {
+          version?: unknown;
+          entries?: Array<{ players?: Array<Record<string, unknown>> }>;
+        };
+        const playerKeys = [
+          "bonus",
+          "name",
+          "rank",
+          "rawScore",
+          "soshiiTotal",
+          "uma",
+        ];
+        const accepted =
+          value.version === 1 &&
+          Array.isArray(value.entries) &&
+          value.entries.every(
+            (savedEntry) =>
+              Array.isArray(savedEntry.players) &&
+              savedEntry.players.every(
+                (player) =>
+                  Object.keys(player).sort().join(",") === playerKeys.join(","),
+              ),
+          );
+        if (!accepted) {
+          // 旧 loadHistory は破損と判断すると同じkeyを削除していた。
+          storage.removeItem(MATCH_HISTORY_KEY);
+          return [];
+        }
+        return value.entries ?? [];
+      };
+
+      // 新タブの書込をstorage eventで知った旧タブ、および旧版へのrollbackを再現する。
+      expect(oldClientLoad()).toHaveLength(1);
+      expect(storage.getItem(MATCH_HISTORY_KEY)).not.toBeNull();
+      expect(loadHistory(storage)).toEqual([entry(1)]);
     });
 
     it("12書記素の名前を受理する(1書記素が複数code unitでも / #484)", () => {

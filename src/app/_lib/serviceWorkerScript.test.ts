@@ -186,9 +186,11 @@ function staticAssetResponse(pathname: string, body = "asset"): Response {
   const contentType =
     pathname === "/manifest.webmanifest"
       ? "application/manifest+json"
-      : pathname === "/icons/icon-192" || pathname === "/icons/icon-512"
-        ? "image/png"
-        : "image/svg+xml";
+      : pathname.endsWith(".avif")
+        ? "image/avif"
+        : pathname === "/icons/icon-192" || pathname === "/icons/icon-512"
+          ? "image/png"
+          : "image/svg+xml";
   return new Response(body, { headers: { "Content-Type": contentType } });
 }
 
@@ -226,6 +228,7 @@ describe("buildServiceWorkerScript", () => {
     expect(PRECACHE_ASSETS).toContain("/tiles/Pin5-Dora.svg");
     expect(PRECACHE_ASSETS).toContain("/tiles/Back.svg");
     expect(PRECACHE_ASSETS).toContain("/manifest.webmanifest");
+    expect(PRECACHE_ASSETS).toContain("/characters/p3-hechima-portrait.avif");
   });
 
   it("installでプリキャッシュし、旧タブ保護のため即時activateしない(#349)", async () => {
