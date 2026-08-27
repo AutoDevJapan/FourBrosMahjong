@@ -29,6 +29,10 @@ if (usePrebuiltProdServer && !useProdServer) {
 
 export default defineConfig({
   testDir: "./e2e",
+  // next/fontの同じwoff2でもSkiaの字形antialiasはOSで異なる。プロダクト差分を
+  // 大きな許容率で隠さず、CI(Linux)とlocal(macOS)を各platform baselineで比較する。
+  snapshotPathTemplate:
+    "{testDir}/{testFilePath}-snapshots/{platform}/{arg}{ext}",
   fullyParallel: true,
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 2 : 0,

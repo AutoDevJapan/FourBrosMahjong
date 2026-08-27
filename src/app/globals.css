@@ -133,6 +133,21 @@
   --character-yellow: #713f12;
   --character-green: #166534;
 
+  /* Issue #712: UI刷新画面専用。既存game tokenを上書きせず、lightでも和紙調の設計言語を保つ。 */
+  --ui-canvas: #f5f0e6;
+  --ui-surface: #fffdf7;
+  --ui-surface-raised: #eee4d2;
+  --ui-text: #211b12;
+  --ui-muted: #62594b;
+  --ui-frame: #8b6b2f;
+  --ui-gold-text: #725414;
+  --ui-gold-decoration: #c49a42;
+  --ui-accent: #68490b;
+  --ui-accent-hover: #4f3608;
+  --ui-accent-foreground: #fffdf7;
+  --ui-shadow: #5a4318;
+  --ui-pattern-opacity: 0.55;
+
   /*
    * 牌サイズの基準ユニット(スペック5 5.3.2 段階①)。すべての牌サイズはこの --u の倍数で
    * 表現し、卓(.board-cross)内では --u をコンテナ幅(cqi)連動の clamp() に差し替えることで
@@ -177,6 +192,20 @@
   --character-blue: #93c5fd;
   --character-yellow: #fde047;
   --character-green: #86efac;
+
+  --ui-canvas: #080a09;
+  --ui-surface: #141815;
+  --ui-surface-raised: #20251f;
+  --ui-text: #f5f0e6;
+  --ui-muted: #c5bcaa;
+  --ui-frame: #92763e;
+  --ui-gold-text: #e6bd61;
+  --ui-gold-decoration: #d7ae53;
+  --ui-accent: #7a5712;
+  --ui-accent-hover: #68490b;
+  --ui-accent-foreground: #fffdf7;
+  --ui-shadow: #000000;
+  --ui-pattern-opacity: 0.42;
 }
 
 /* ユーザーが明示選択していない場合のみ OS のダーク設定に追従する。 */
@@ -204,6 +233,20 @@
     --character-blue: #93c5fd;
     --character-yellow: #fde047;
     --character-green: #86efac;
+
+    --ui-canvas: #080a09;
+    --ui-surface: #141815;
+    --ui-surface-raised: #20251f;
+    --ui-text: #f5f0e6;
+    --ui-muted: #c5bcaa;
+    --ui-frame: #92763e;
+    --ui-gold-text: #e6bd61;
+    --ui-gold-decoration: #d7ae53;
+    --ui-accent: #7a5712;
+    --ui-accent-hover: #68490b;
+    --ui-accent-foreground: #fffdf7;
+    --ui-shadow: #000000;
+    --ui-pattern-opacity: 0.42;
   }
 }
 
@@ -239,6 +282,12 @@
   --color-positive: var(--positive);
   --color-focus-ring: var(--focus-ring);
   --color-control-border: var(--control-border);
+  --color-ui-canvas: var(--ui-canvas);
+  --color-ui-surface: var(--ui-surface);
+  --color-ui-text: var(--ui-text);
+  --color-ui-muted: var(--ui-muted);
+  --color-ui-frame: var(--ui-frame);
+  --color-ui-accent: var(--ui-accent);
 }
 
 body {
@@ -246,6 +295,341 @@ body {
   color: var(--foreground);
   /* Issue #72: Arial ハードコードを廃し、@theme の --font-sans(Geist + Noto Sans JP)を参照する。 */
   font-family: var(--font-sans);
+}
+
+/* Issue #712 Phase B1: lobbyから段階導入する共通design foundation。 */
+.design-page-shell {
+  min-width: 0;
+  min-height: 100svh;
+  color: var(--ui-text);
+  background-color: var(--ui-canvas);
+  background-image:
+    linear-gradient(
+      135deg,
+      transparent 0 46%,
+      color-mix(in srgb, var(--ui-gold-decoration) 5%, transparent) 47% 49%,
+      transparent 50% 100%
+    ),
+    radial-gradient(
+      circle at 50% -10%,
+      color-mix(in srgb, var(--ui-gold-decoration) 10%, transparent),
+      transparent 48%
+    );
+  background-size:
+    2.5rem 2.5rem,
+    auto;
+}
+
+.design-panel {
+  min-width: 0;
+  border: 1px solid var(--ui-frame);
+  border-radius: 1.25rem;
+  background: color-mix(in srgb, var(--ui-surface) 96%, transparent);
+  box-shadow:
+    0 1.25rem 4rem color-mix(in srgb, var(--ui-shadow) 32%, transparent),
+    inset 0 0 0 1px
+    color-mix(in srgb, var(--ui-gold-decoration) 12%, transparent);
+}
+
+.design-link-button {
+  display: flex;
+  min-width: 0;
+  min-height: 2.75rem;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--ui-frame);
+  border-radius: 0.75rem;
+  overflow-wrap: anywhere;
+  text-align: center;
+  transition:
+    background-color 160ms ease,
+    border-color 160ms ease,
+    color 160ms ease,
+    transform 160ms ease;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .design-link-button:hover {
+    transform: translateY(-1px);
+  }
+}
+
+.design-link-button--primary {
+  border-color: var(--ui-frame);
+  color: var(--ui-accent-foreground);
+  background: var(--ui-accent);
+  box-shadow: inset 0 0 0 1px
+    color-mix(in srgb, var(--ui-accent-foreground) 18%, transparent);
+}
+
+.design-link-button--primary:hover {
+  background: var(--ui-accent-hover);
+}
+
+.design-link-button--secondary {
+  color: var(--ui-text);
+  background: var(--ui-surface-raised);
+}
+
+.design-link-button--secondary:hover {
+  background: color-mix(
+    in srgb,
+    var(--ui-surface-raised) 86%,
+    var(--ui-gold-decoration)
+  );
+}
+
+.lobby-main {
+  display: flex;
+  width: 100%;
+  max-width: 76rem;
+  min-width: 0;
+  min-height: 100svh;
+  margin-inline: auto;
+  padding: clamp(0.75rem, 2.5vw, 2rem);
+  flex-direction: column;
+  justify-content: center;
+  gap: 1rem;
+}
+
+.lobby-hero {
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
+  padding: clamp(1rem, 3.5vw, 2.75rem);
+}
+
+.lobby-hero::before {
+  position: absolute;
+  z-index: -1;
+  inset: 0;
+  content: "";
+  pointer-events: none;
+  opacity: var(--ui-pattern-opacity);
+  background-image:
+    radial-gradient(
+      circle at 50% 100%,
+      transparent 0 40%,
+      color-mix(in srgb, var(--ui-gold-decoration) 8%, transparent) 41% 43%,
+      transparent 44%
+    ),
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--ui-gold-decoration) 4%, transparent),
+      transparent 38%
+    );
+  background-size:
+    4rem 2rem,
+    auto;
+}
+
+.lobby-header {
+  display: flex;
+  max-width: 48rem;
+  margin-inline: auto;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.5rem;
+  text-align: center;
+}
+
+.lobby-kicker {
+  color: var(--ui-gold-text);
+  font-size: clamp(0.75rem, 2vw, 0.875rem);
+  font-weight: 700;
+  letter-spacing: 0.18em;
+}
+
+.lobby-title {
+  color: var(--ui-text);
+  font-family:
+    var(--font-yuji-syuku), "Yu Mincho", "Hiragino Mincho ProN", serif;
+  font-size: clamp(2.5rem, 8vw, 5.25rem);
+  font-weight: 400;
+  font-synthesis: none;
+  line-height: 1.05;
+  letter-spacing: 0.08em;
+  text-wrap: balance;
+  text-shadow: 0 2px 0
+    color-mix(in srgb, var(--ui-gold-decoration) 14%, transparent);
+}
+
+.lobby-introduction {
+  max-width: 44rem;
+  color: var(--ui-muted);
+  font-size: clamp(0.875rem, 2vw, 1rem);
+  line-height: 1.8;
+  text-wrap: pretty;
+}
+
+.lobby-characters {
+  display: grid;
+  margin-top: clamp(1rem, 3vw, 2rem);
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: clamp(0.5rem, 2vw, 1.25rem);
+}
+
+.lobby-character-card {
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid var(--character-accent);
+  border-radius: 0.875rem;
+  background: color-mix(
+    in srgb,
+    var(--character-accent) 8%,
+    var(--ui-surface-raised)
+  );
+  box-shadow: inset 0 0 0 1px
+    color-mix(in srgb, var(--character-accent) 15%, transparent);
+}
+
+.lobby-character-image-frame {
+  position: relative;
+  height: clamp(9.75rem, 38vw, 23rem);
+  overflow: hidden;
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--character-accent) 10%, var(--ui-surface)),
+    var(--ui-surface-raised)
+  );
+}
+
+.lobby-character-image-frame::after {
+  position: absolute;
+  inset: auto 0 0;
+  height: 35%;
+  content: "";
+  pointer-events: none;
+  background: linear-gradient(transparent, var(--ui-surface-raised));
+}
+
+.lobby-character-image {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  object-position: top center;
+}
+
+.lobby-character-name {
+  position: relative;
+  z-index: 1;
+  margin-top: -0.25rem;
+  padding: 0.7rem 0.25rem 0.85rem;
+  color: var(--character-accent);
+  font-family:
+    var(--font-yuji-syuku), "Yu Mincho", "Hiragino Mincho ProN", serif;
+  font-size: clamp(1rem, 3.5vw, 1.5rem);
+  font-weight: 400;
+  font-synthesis: none;
+  line-height: 1.15;
+  text-align: center;
+  overflow-wrap: anywhere;
+}
+
+.lobby-menu {
+  display: flex;
+  max-width: 58rem;
+  min-width: 0;
+  margin: clamp(1.25rem, 3vw, 2.25rem) auto 0;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.lobby-primary-action {
+  min-height: 4.5rem;
+  padding: 0.75rem 1rem;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+
+.lobby-primary-label {
+  font-family:
+    var(--font-yuji-syuku), "Yu Mincho", "Hiragino Mincho ProN", serif;
+  font-size: clamp(1.25rem, 3vw, 1.75rem);
+  font-weight: 400;
+  font-synthesis: none;
+  letter-spacing: 0.08em;
+}
+
+.lobby-primary-description {
+  color: color-mix(in srgb, var(--ui-accent-foreground) 82%, transparent);
+  font-size: 0.75rem;
+}
+
+.lobby-secondary-menu {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: 1fr;
+  gap: 0.625rem;
+}
+
+.lobby-secondary-action {
+  width: 100%;
+  min-height: 4rem;
+  padding: 0.625rem 0.75rem;
+  justify-content: space-between;
+  gap: 0.75rem;
+  text-align: start;
+}
+
+.lobby-secondary-label,
+.lobby-secondary-description {
+  display: block;
+}
+
+.lobby-secondary-label {
+  font-size: 0.9375rem;
+  font-weight: 700;
+}
+
+.lobby-secondary-description {
+  margin-top: 0.15rem;
+  color: var(--ui-muted);
+  font-size: 0.75rem;
+  line-height: 1.4;
+}
+
+.lobby-action-arrow {
+  flex: none;
+  color: var(--ui-gold-text);
+  font-size: 1.125rem;
+}
+
+.lobby-footer {
+  max-width: 44rem;
+  margin-inline: auto;
+  color: var(--ui-muted);
+  font-size: 0.75rem;
+  line-height: 1.6;
+  text-align: center;
+  text-wrap: pretty;
+}
+
+@media (min-width: 30rem) {
+  .lobby-secondary-menu {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (min-width: 48rem) {
+  .lobby-characters {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+
+  .lobby-character-image-frame {
+    height: clamp(17rem, 31vw, 23rem);
+  }
+}
+
+/* Windows High Contrastでは装飾patternを消し、system色とfocus outlineを優先する。 */
+@media (forced-colors: active) {
+  .design-page-shell {
+    background-image: none;
+  }
+
+  .lobby-hero::before {
+    display: none;
+  }
 }
 
 .character-surface {

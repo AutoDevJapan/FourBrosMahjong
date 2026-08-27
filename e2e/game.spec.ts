@@ -66,12 +66,12 @@ test.describe("対局画面(/game)", () => {
     await expect(furiten).toHaveText("禁フリテン（捨て牌）");
   });
 
-  test("ロビーの「対局を開始」導線から /game へ遷移できる(スペック6 6.3)", async ({
+  test("ロビーの「対局を始める」導線から /game へ遷移できる(スペック6 6.3)", async ({
     page,
   }) => {
     await page.goto("/");
 
-    await page.getByRole("link", { name: /対局を開始/ }).click();
+    await page.getByRole("link", { name: /対局を始める/ }).click();
 
     await expect(page).toHaveURL(/\/game$/);
     await expect(page).toHaveTitle("対局 | 四兄弟麻雀");

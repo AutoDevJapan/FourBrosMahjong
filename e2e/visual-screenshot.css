@@ -1,0 +1,4 @@
+/* Next dev診断UIはproduct visual baselineの対象外。stylePathはshadow DOMにも適用される。 */
+nextjs-portal {
+  display: none !important;
+}

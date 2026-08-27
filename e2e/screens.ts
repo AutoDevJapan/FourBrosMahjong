@@ -65,8 +65,8 @@ export const SCREENS: readonly NonTextContrastScreen[] = [
     path: "/",
     name: "ロビー",
     heading: "四兄弟麻雀",
-    clientReady: (page) => page.getByRole("link", { name: /対局を開始/ }),
-    nonTextContrastMinMeasured: 4,
+    clientReady: (page) => page.getByRole("link", { name: /対局を始める/ }),
+    nonTextContrastMinMeasured: 5,
   },
   {
     path: "/online",
