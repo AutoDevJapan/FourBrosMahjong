@@ -277,7 +277,53 @@ describe("GameBoard (spec 6.6 client island / engine-driven)", () => {
         "北を2枚抜きました。嶺上牌を補充しました。ガリは合計2枚です。",
       ),
     ).toBeInTheDocument();
-    expect(screen.getByText("あなたの手番です。")).toBeInTheDocument();
+    expect(
+      screen.getByText("あなたの手番です。北抜できます。"),
+    ).toBeInTheDocument();
+  });
+
+  it("北を持つ自手番では北抜を明示選択でき、補充・ガリ表示・同一手番を更新する", async () => {
+    const user = userEvent.setup();
+    renderBoard(1);
+
+    expect(
+      screen.getAllByRole("button", { name: "北抜" }).length,
+    ).toBeGreaterThan(0);
+    expect(
+      screen.queryByRole("button", { name: "チー" }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.getAllByText("北抜を選ぶか、牌を選んで打牌してください。").length,
+    ).toBeGreaterThan(0);
+
+    await user.click(screen.getAllByRole("button", { name: "北抜" })[0]);
+
+    const selfAfterOne = screen.getAllByRole("region", {
+      name: "あなた(東家)",
+    });
+    expect(
+      selfAfterOne.some((region) => region.textContent?.includes("ガリ1")),
+    ).toBe(true);
+    expect(
+      screen.getByText(
+        "北を抜きました。嶺上牌を補充しました。ガリは合計1枚です。",
+      ),
+    ).toBeInTheDocument();
+    // seed=1 は配牌と第1ツモの2枚が北。1枚抜いた後も同じ手番で再度選べる。
+    expect(
+      screen.getAllByRole("button", { name: "北抜" }).length,
+    ).toBeGreaterThan(0);
+
+    await user.click(screen.getAllByRole("button", { name: "北抜" })[0]);
+    expect(
+      screen.queryByRole("button", { name: "北抜" }),
+    ).not.toBeInTheDocument();
+    const selfAfterTwo = screen.getAllByRole("region", {
+      name: "あなた(東家)",
+    });
+    expect(
+      selfAfterTwo.some((region) => region.textContent?.includes("ガリ2")),
+    ).toBe(true);
   });
 
   it("同じガリ枚数でも局キーが変われば新しい北抜きとして検知する", () => {
@@ -837,9 +883,7 @@ describe("GameBoard 対話 a11y 経路(#285)", () => {
     ).toBe(true);
     // 次の自手番はロック中: hint とツモ切りボタンで導線を提示。
     expect(
-      screen.getAllByText(
-        "リーチ中です。ツモ和了かツモ切りを選んでください(北抜きは自動)。",
-      ).length,
+      screen.getAllByText(/^リーチ中です。.*ツモ切りを選べます。$/).length,
     ).toBeGreaterThan(0);
     expect(
       screen.getAllByRole("button", { name: "ツモ切り" }).length,
@@ -865,11 +909,17 @@ describe("GameBoard 対話 a11y 経路(#285)", () => {
       ),
     ).toBeInTheDocument();
 
-    // この局面はツモ和了可能(seed=53)なので、ツモで決着し和了内訳が表示される。
-    await user.click(screen.getAllByRole("button", { name: "ツモ" })[0]);
+    // この局面はリーチ後も北を保持している。北抜は選べ、補充後もロックと
+    // ツモ切り導線を維持する。
     expect(
-      screen.getAllByRole("heading", { name: "和了内訳" }).length,
+      screen.getAllByRole("button", { name: "北抜" }).length,
     ).toBeGreaterThan(0);
+    await user.click(screen.getAllByRole("button", { name: "北抜" })[0]);
+    expect(
+      screen.getAllByRole("button", { name: "ツモ切り" }).length,
+    ).toBeGreaterThan(0);
+    await user.click(screen.getAllByRole("button", { name: "ツモ切り" })[0]);
+    expect(screen.getAllByText(/局$/).length).toBeGreaterThan(0);
   });
 
   // `walkTo` executes the real engine until a post-pon state. Under the full
@@ -946,7 +996,7 @@ describe("GameBoard 対話 a11y 経路(#285)", () => {
       within(selfAfter).getAllByRole("listitem", { name: "暗槓" }),
     ).toHaveLength(1);
     expect(
-      screen.getAllByText("牌を選んで打牌してください(北抜きは自動)。").length,
+      screen.getAllByText("牌を選んで打牌してください。").length,
     ).toBeGreaterThan(0);
   });
 
@@ -1018,7 +1068,7 @@ describe("GameBoard 対話 a11y 経路(#285)", () => {
       ),
     ).toHaveLength(0);
     expect(
-      screen.getAllByText("牌を選んで打牌してください(北抜きは自動)。").length,
+      screen.getAllByText("牌を選んで打牌してください。").length,
     ).toBeGreaterThan(0);
   });
 });

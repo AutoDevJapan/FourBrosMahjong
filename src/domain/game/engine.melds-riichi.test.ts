@@ -26,7 +26,7 @@ import {
  * 大明槓は `canKan` なら `canPon` でもあり、この方策がポンを先に選ぶため構造的に
  * 到達しない。ron / tsumo はこの配牌群では提示されないため、本テストの保証対象外。
  *
- * 公開アクション全11種の保存則は、方策を `kanFirst` / `passive` / `riichiFirst` にも
+ * 公開アクション全種の保存則は、方策を `kanFirst` / `passive` / `riichiFirst` にも
  * 分けて未踏経路を明示的に落とす `engine.pot-invariant.test.ts` が担う(issue #458)。
  */
 
@@ -127,7 +127,7 @@ describe("engine: 鳴き・リーチ・裏ドラ・一発(#97)", () => {
       ron: 0,
       tsumo: 0,
     };
-    for (const seed of [1, 2, 3, 5, 8, 13, 21, 42, 99, 2024]) {
+    for (const seed of [1, 2, 3, 5, 8, 13, 21, 42, 99, 782, 2024]) {
       const s = playAggressive(seed, tally);
       expect(s.phase, `seed=${seed}`).toBe("gameEnd");
       expect(s.result).toHaveLength(4);

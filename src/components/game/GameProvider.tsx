@@ -66,6 +66,8 @@ export interface GameControls {
   readonly pon: () => void;
   /** 自家の明槓(大明槓・直前の他家打牌に対して)。 */
   readonly kan: () => void;
+  /** 自家の北抜き(自ツモ番・手牌またはツモ牌の北1枚)。 */
+  readonly kita: () => void;
   /** 自家の暗槓(自ツモ番・指定牌種)。 */
   readonly ankan: (tile: TileData) => void;
   /** 自家の加槓(自ツモ番・既存ポンに4枚目)。 */
@@ -379,6 +381,7 @@ export function GameProvider({ children, initialGame }: GameProviderProps) {
       ron: () => commit({ type: "ron" }),
       pon: () => commit({ type: "pon" }),
       kan: () => commit({ type: "kan" }),
+      kita: () => commit({ type: "kita" }),
       ankan: (tile) => tileAction("ankan", toTile(tile)),
       kakan: (tile) => tileAction("kakan", toTile(tile)),
       passRon: () => commit({ type: "passRon" }),

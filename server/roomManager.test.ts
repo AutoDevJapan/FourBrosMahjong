@@ -524,6 +524,7 @@ describe("online room manager", () => {
   });
 
   it("validates action tiles before the engine sees them", () => {
+    expect(parseGameAction({ type: "kita" })).toEqual({ type: "kita" });
     for (const rank of [1, 2, 3, 4, 5, 6, 7, 8, 9]) {
       expect(
         parseGameAction({

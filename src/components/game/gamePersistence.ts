@@ -8,6 +8,7 @@ import {
   declareAnkan,
   declareKakan,
   declareKan,
+  declareKita,
   declarePon,
   declareRiichi,
   declareRon,
@@ -42,6 +43,7 @@ export type GameAction =
   | { readonly type: "ron" }
   | { readonly type: "pon" }
   | { readonly type: "kan" }
+  | { readonly type: "kita" }
   | { readonly type: "ankan"; readonly tile: Tile }
   | { readonly type: "kakan"; readonly tile: Tile }
   | { readonly type: "passRon" }
@@ -61,6 +63,7 @@ const noTileActions = new Set([
   "ron",
   "pon",
   "kan",
+  "kita",
   "passRon",
   "nextRound",
 ]);
@@ -207,6 +210,8 @@ export function applyGameAction(
       return declarePon(state, playerId);
     case "kan":
       return declareKan(state, playerId);
+    case "kita":
+      return declareKita(state, playerId);
     case "ankan":
       return declareAnkan(state, action.tile, playerId);
     case "kakan":

@@ -285,6 +285,7 @@ export function parseGameAction(value: unknown): GameAction | null {
     "ron",
     "pon",
     "kan",
+    "kita",
     "passRon",
     "nextRound",
   ]);

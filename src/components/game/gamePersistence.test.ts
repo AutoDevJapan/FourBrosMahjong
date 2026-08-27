@@ -6,6 +6,7 @@ import {
   declareAnkan,
   declareKakan,
   declareKan,
+  declareKita,
   declarePon,
   declareRiichi,
   declareRon,
@@ -85,7 +86,7 @@ describe("game persistence journal", () => {
       [10, "kan"],
       [9, "ankan"],
       [84, "ron"],
-      [146, "tsumo"],
+      [127, "tsumo"],
       [342, "tsumogiri"],
     ] as const);
     for (const [seed, target] of targets) {
@@ -118,6 +119,9 @@ describe("game persistence journal", () => {
           if (pending.canTsumo) {
             action = { type: "tsumo" };
             direct = declareTsumo(direct);
+          } else if (pending.canKita) {
+            action = { type: "kita" };
+            direct = declareKita(direct);
           } else if (pending.locked) {
             action = { type: "tsumogiri" };
             direct = tsumogiri(direct);
@@ -179,6 +183,7 @@ describe("game persistence journal", () => {
         "ron",
         "pon",
         "kan",
+        "kita",
         "ankan",
         "kakan",
         "passRon",
@@ -201,10 +206,10 @@ describe("game persistence journal", () => {
 
   it.each([
     {
-      label: "手牌に存在しない北の打牌",
+      label: "手牌に存在しない五萬の打牌",
       action: {
         type: "discard",
-        tile: { suit: "honor", rank: 4, isRed: false },
+        tile: { suit: "man", rank: 5, isRed: false },
       },
     },
     { label: "playing中の次局開始", action: { type: "nextRound" } },

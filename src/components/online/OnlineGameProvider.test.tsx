@@ -13,12 +13,17 @@ import type { OnlineSnapshot } from "./types";
 function ActionProbe() {
   const { controls } = useGame();
   return (
-    <button
-      type="button"
-      onClick={() => controls.discard({ suit: "man", rank: 1, isRed: false })}
-    >
-      打牌
-    </button>
+    <>
+      <button
+        type="button"
+        onClick={() => controls.discard({ suit: "man", rank: 1, isRed: false })}
+      >
+        打牌
+      </button>
+      <button type="button" onClick={controls.kita}>
+        北抜
+      </button>
+    </>
   );
 }
 
@@ -165,6 +170,24 @@ describe("OnlineGameProvider", () => {
       type: "action",
       version: 3,
       action: { type: "discard" },
+    });
+  });
+
+  it("sends the explicit kita action for the local player", async () => {
+    const send = vi.fn();
+    const socket = { readyState: 1, send } as unknown as WebSocket;
+    render(
+      <OnlineGameProvider socket={socket} snapshot={snapshotFixture()}>
+        <ActionProbe />
+      </OnlineGameProvider>,
+    );
+
+    await userEvent.click(screen.getByRole("button", { name: "北抜" }));
+
+    expect(JSON.parse(send.mock.calls[0][0] as string)).toMatchObject({
+      type: "action",
+      version: 3,
+      action: { type: "kita" },
     });
   });
 

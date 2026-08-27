@@ -212,6 +212,7 @@ describe("公開アクションの契約適用漏れ(構造ガード)", () => {
         "declareAnkan",
         "declareKakan",
         "declareKan",
+        "declareKita",
         "declarePon",
         "declareRiichi",
         "declareRon",

@@ -33,7 +33,7 @@
  * - リーチ後の暗槓は**条件付きで許可**(Q18 / #116・ユーザー承認済み・標準慣行)。ツモ牌での暗槓に限り、
  *   待ち・面子構成が変わらない(送り槓でない)場合のみ許可する。七対子テンパイでの暗槓は不可
  *   (`canAnkanAfterRiichi` が判定)。加槓に対する槍槓横取りは Q17 / #115 の範囲。
- * - 北抜き(ガリ)は**自動**で処理する(手動選択は未対応)。
+ * - 北抜き(ガリ)は、人間席では自手番の明示操作、AI席では従来どおり自動で処理する(#708)。
  * - パオ(責任払い)は**鳴きで確定した大三元/大四喜/四槓子**に対応(#99)。ポン/大明槓で
  *   パオ役満が確定した瞬間に役満種類ごとの責任者(打牌者)を記録し、和了時
  *   `resolveWinPayment` へ役満単位で渡す(ロン折半・ツモ全額・本場 / #525)。役満祝儀は
@@ -346,6 +346,8 @@ export type Pending =
       readonly ankanTiles: readonly Tile[];
       /** 加槓できる牌(既存ポンに4枚目)。 */
       readonly kakanTiles: readonly Tile[];
+      /** 手牌またはツモ牌の北を1枚抜き、嶺上牌を補充できるか。 */
+      readonly canKita?: boolean;
       /**
        * 喰い替え禁止で切れない牌種(#105 / スペック1 1.4)。ポン直後のみ、ポンした牌と
        * 同種の1牌種が入る(それ以外は空)。UI は選択不可にし、`discard` も no-op にする。
@@ -764,7 +766,10 @@ function beginRound(state: EngineState): EngineState {
     passedRonSeats: [],
     ponnedKind: null,
   };
-  autoPullDealtNorths(hand);
+  autoPullDealtNorths(hand, (seat) => {
+    const occupant = seatOccupant(hand.seating, seat);
+    return !isHumanPlayer(state, occupant);
+  });
   const next: EngineState = {
     ...state,
     hand,
@@ -775,7 +780,7 @@ function beginRound(state: EngineState): EngineState {
 }
 
 /**
- * 北抜き(ガリ)を自動処理し、最終的に手番が持つツモ牌を返す。
+ * AI 席の北抜き(ガリ)を自動処理し、最終的に手番が持つツモ牌を返す。
  *
  * `pulled` は**嶺上補充が1回でも走ったか**。返した牌が嶺上牌であることを意味し、
  * 海底摸月の判定(`isHaiteiTsumo`)を抑止するために呼び出し側へ伝える(#396)。
@@ -810,15 +815,24 @@ function autoPullNorth(
   return { tile: current, pulled };
 }
 
+function isNorth(tile: Pick<Tile, "suit" | "rank">): boolean {
+  return tile.suit === "honor" && tile.rank === HONOR.NORTH;
+}
+
 /**
- * 配牌に含まれる北をガリとして抜き、抜いた枚数ぶん嶺上牌で13枚へ補充する。
+ * 指定された席の配牌に含まれる北をガリとして抜き、抜いた枚数ぶん嶺上牌で13枚へ補充する。
  * 補充牌も北なら {@link autoPullNorth} が連続して抜くため、手牌に北を残さない。
+ * 人間席は最初の自手番まで北を保持し、UI から1枚ずつ明示的に抜けるよう対象外にする。
  */
-function autoPullDealtNorths(hand: HandState): void {
+function autoPullDealtNorths(
+  hand: HandState,
+  shouldPull: (seat: SeatKey) => boolean,
+): void {
   for (const seat of SEATS) {
+    if (!shouldPull(seat)) continue;
     const concealed: Tile[] = [];
     for (const tile of hand.hands[seat]) {
-      if (tile.suit === "honor" && tile.rank === HONOR.NORTH) {
+      if (isNorth(tile)) {
         concealed.push(autoPullNorth(hand, seat, tile).tile);
       } else {
         concealed.push(tile);
@@ -829,13 +843,17 @@ function autoPullDealtNorths(hand: HandState): void {
 }
 
 /**
- * カン後の嶺上補充(北抜きも自動処理)。`drawn` を更新する。
+ * カン後の嶺上補充。`drawn` を更新する。AI は北も自動で抜き、人間は明示操作を待つ。
  *
  * 嶺上牌が北で続けて抜かれた場合も `"kanReplacement"` のままにする(カンを起点とした
  * 一連の補充なので嶺上開花の対象 / Q36・#437)。`"kitaReplacement"` は通常ツモ起点の
  * 北抜きにだけ使い、北抜きの直近性でカン起点の供給元を上書きしない。
  */
-function drawKanReplacement(hand: HandState, seat: SeatKey): void {
+function drawKanReplacement(
+  hand: HandState,
+  seat: SeatKey,
+  autoKita = true,
+): void {
   let tile: Tile;
   try {
     tile = hand.wall.drawReplacement();
@@ -847,7 +865,7 @@ function drawKanReplacement(hand: HandState, seat: SeatKey): void {
     throw error;
   }
   hand.drawn = {
-    tile: autoPullNorth(hand, seat, tile).tile,
+    tile: autoKita ? autoPullNorth(hand, seat, tile).tile : tile,
     source: "kanReplacement",
   };
   hand.tempMiss[seat] = false;
@@ -1235,7 +1253,9 @@ function pump(state: EngineState): EngineState {
         return settleDraw(s);
       }
       const raw = hand.wall.draw();
-      const pull = autoPullNorth(hand, seat, raw);
+      const pull = isHuman
+        ? { tile: raw, pulled: false }
+        : autoPullNorth(hand, seat, raw);
       hand.drawn = {
         tile: pull.tile,
         // 北抜きの嶺上牌も嶺上補充由来。海底摸月を付けてはならない(#396)。
@@ -1256,7 +1276,8 @@ function pump(state: EngineState): EngineState {
         // ならない暗槓は許可する(標準慣行 / Q18・#116)。
         const tsumo = analyzeTsumo(s, seat, hand.drawn.tile, haitei);
         const ankanTiles = riichiAnkanTiles(hand, seat);
-        if (tsumo !== null || ankanTiles.length > 0) {
+        const canKita = canDeclareKita(hand, seat);
+        if (tsumo !== null || ankanTiles.length > 0 || canKita) {
           return {
             ...s,
             pending: {
@@ -1267,6 +1288,7 @@ function pump(state: EngineState): EngineState {
               riichiTiles: [],
               ankanTiles,
               kakanTiles: [],
+              canKita,
               forbiddenDiscards: [],
               locked: true,
             },
@@ -1542,6 +1564,14 @@ function kakanCandidates(hand: HandState, seat: SeatKey, pool: Tile[]): Tile[] {
   return out;
 }
 
+/** 人間の自手番で、手牌またはツモ牌の北を1枚抜いて補充できるか。 */
+function canDeclareKita(hand: HandState, seat: SeatKey): boolean {
+  if (hand.wall.remainingReplacements <= 0) return false;
+  return [...hand.hands[seat], ...(hand.drawn ? [hand.drawn.tile] : [])].some(
+    isNorth,
+  );
+}
+
 /** 自家の打牌待ち Pending を、現局面から構築する。 */
 function buildHumanPending(state: EngineState, seat: SeatKey): Pending {
   const hand = state.hand;
@@ -1584,6 +1614,7 @@ function buildHumanPending(state: EngineState, seat: SeatKey): Pending {
     riichiTiles,
     ankanTiles,
     kakanTiles,
+    canKita: canDeclareKita(hand, seat),
     forbiddenDiscards,
     locked: false,
   };
@@ -2506,6 +2537,57 @@ function publicAction<Args extends readonly unknown[]>(
 /** 自家の打牌。`tile` は表示手牌から選ばれた牌(リーチ後は無視され `drawn` を切る)。 */
 export const discard = publicAction("discard", discardImpl);
 
+/** 自家の北抜き。北を1枚公開し、嶺上牌を補充して同じ手番を続ける。 */
+export const declareKita = publicAction("declareKita", declareKitaImpl);
+
+function declareKitaImpl(
+  state: EngineState,
+  playerId: PlayerId = HUMAN_ID,
+): EngineState {
+  if (
+    state.phase !== "playing" ||
+    state.pending?.kind !== "humanDiscard" ||
+    !pendingBelongsTo(state, playerId) ||
+    !state.pending.canKita ||
+    state.hand === null
+  ) {
+    return state;
+  }
+  const hand = state.hand;
+  const seat = seatOfPlayer(hand.seating, playerId);
+  if (
+    seat === null ||
+    hand.turn !== seat ||
+    hand.wall.remainingReplacements <= 0
+  ) {
+    return state;
+  }
+
+  // 手牌とツモ牌を一度まとめ、北をちょうど1枚だけ取り除く。補充牌を新しい
+  // `drawn` として扱うことで、その牌でのツモ和了と供給元判定を正しく維持する。
+  const pool = [...hand.hands[seat], ...(hand.drawn ? [hand.drawn.tile] : [])];
+  const northIndex = pool.findIndex(isNorth);
+  if (northIndex < 0) return state;
+  const rest = [...pool.slice(0, northIndex), ...pool.slice(northIndex + 1)];
+
+  let replacement: Tile;
+  try {
+    replacement = hand.wall.drawReplacement();
+  } catch (error) {
+    if (error instanceof WallEmptyError) return state;
+    throw error;
+  }
+  const source: DrawSource =
+    hand.drawn?.source === "kanReplacement"
+      ? "kanReplacement"
+      : "kitaReplacement";
+  hand.hands[seat] = rest;
+  hand.drawn = { tile: replacement, source };
+  hand.kita[seat] += 1;
+  hand.tempMiss[seat] = false;
+  return pump({ ...state, pending: null });
+}
+
 function discardImpl(
   state: EngineState,
   tile: Tile,
@@ -2734,7 +2816,7 @@ function declareKanImpl(
   hand.turn = seat;
   const abortiveDraw = settleFourKanAbortiveDraw(state);
   if (abortiveDraw !== null) return abortiveDraw;
-  drawKanReplacement(hand, seat); // 嶺上ツモ
+  drawKanReplacement(hand, seat, false); // 嶺上ツモ。人間の北抜きは明示操作。
   return { ...state, pending: buildHumanPending(state, seat) };
 }
 
@@ -2792,7 +2874,7 @@ function declareAnkanImpl(
   hand.callsMade = true;
   const abortiveDraw = settleFourKanAbortiveDraw(state);
   if (abortiveDraw !== null) return abortiveDraw;
-  drawKanReplacement(hand, seat); // 嶺上ツモ
+  drawKanReplacement(hand, seat, false); // 嶺上ツモ。人間の北抜きは明示操作。
   // リーチ中の暗槓(Q18・#116)は打牌の自由が無いため、pump に委ねて嶺上ツモ和了 /
   // 連続暗槓 / 自動ツモ切りを解決する(通常の打牌待ちに戻さない)。
   if (hand.riichi[seat]) return pump({ ...state, pending: null });
@@ -2859,7 +2941,7 @@ function declareKakanImpl(
   hand.callsMade = true;
   const abortiveDraw = settleFourKanAbortiveDraw(state);
   if (abortiveDraw !== null) return abortiveDraw;
-  drawKanReplacement(hand, seat); // 嶺上ツモ
+  drawKanReplacement(hand, seat, false); // 嶺上ツモ。人間の北抜きは明示操作。
   return { ...state, pending: buildHumanPending(state, seat) };
 }
 

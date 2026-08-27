@@ -68,6 +68,8 @@ function LastActionProbe({ action }: { action: GameAction }) {
         return controls.pon();
       case "kan":
         return controls.kan();
+      case "kita":
+        return controls.kita();
       case "passRon":
         return controls.passRon();
       case "nextRound":

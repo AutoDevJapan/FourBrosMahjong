@@ -152,7 +152,7 @@ export default function GameBoard({
   const selfKitaCount =
     slots.self.kind === "seated" ? slots.self.player.kitaCount : 0;
   const roundKey = `${tableInfo.roundWind}-${tableInfo.handNumber}-${tableInfo.honba}`;
-  // 自動北抜きは engine 遷移内で完了するため、公開枚数の増加を UI イベントとして保持する。
+  // 北抜きは engine 遷移内で完了するため、公開枚数の増加を UI イベントとして保持する。
   // 初期配牌で抜いた場合も 0→N として通知し、局替わりの N→0 では通知を消す。
   const [kitaObservation, setKitaObservation] = useState<KitaObservation>({
     roundKey,
@@ -369,6 +369,14 @@ export default function GameBoard({
           primary: pending.canTsumo,
         },
       ];
+      if (pending.canKita) {
+        items.push({
+          key: "kita",
+          label: "北抜",
+          icon: "北",
+          onClick: controls.kita,
+        });
+      }
       // リーチ後は手牌選択が固定されるため、ツモ切りボタンを提供する。
       if (pending.locked) {
         items.push({
@@ -460,12 +468,16 @@ export default function GameBoard({
     }
     if (pending?.kind === "humanDiscard") {
       if (pending.locked) {
-        return "リーチ中です。ツモ和了かツモ切りを選んでください(北抜きは自動)。";
+        return pending.canKita
+          ? "リーチ中です。ツモ和了、北抜、ツモ切りを選べます。"
+          : "リーチ中です。ツモ和了かツモ切りを選んでください。";
       }
       if (riichiArmed) {
         return "リーチ宣言牌を選んでください(テンパイを保つ牌のみ有効)。";
       }
-      return "牌を選んで打牌してください(北抜きは自動)。";
+      return pending.canKita
+        ? "北抜を選ぶか、牌を選んで打牌してください。"
+        : "牌を選んで打牌してください。";
     }
     return "";
   }, [
@@ -480,7 +492,11 @@ export default function GameBoard({
 
   const announcement = useMemo(() => {
     if (tileFeedback.message) return tileFeedback.message;
-    if (pending?.kind === "humanDiscard") return "あなたの手番です。";
+    if (pending?.kind === "humanDiscard") {
+      return pending.canKita
+        ? "あなたの手番です。北抜できます。"
+        : "あなたの手番です。";
+    }
     if (pending?.kind === "humanReact") {
       if (pending.chankan !== undefined) return "槍槓ロンできます。";
       return pending.canRon ? "ロンできます。" : "鳴きできます。";

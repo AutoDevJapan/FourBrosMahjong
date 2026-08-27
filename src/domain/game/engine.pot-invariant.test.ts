@@ -11,7 +11,7 @@
  * **カバレッジの実態(過大主張を避けるための明示)**:
  * - 検査点は「1回の公開アクション呼び出しの直後」であり、**AI の手番境界は含まない**
  *   (1回の公開アクションの内部で AI の手番が複数進むため)。
- * - 当初の単一の貪欲ドライバでは**公開アクション11種のうち6種**(`passRon` / `declareKan` /
+ * - 当初の単一の貪欲ドライバでは公開アクションのうち6種(`passRon` / `declareKan` /
  *   `tsumogiri` / `declareTsumo` / `declareRon` / `declareAnkan`)に一度も到達しておらず、
  *   それらの経路に点棒漏れを注入しても本ファイルは緑のままだった(`passRon` へ 1,000点の
  *   漏れを入れても本ファイル3件は全て緑 / 精算入口の `RangeError` でしか捕まらない)。
@@ -95,7 +95,7 @@ type ActionKind = DriverActionKind;
 /**
  * 網羅を要求する公開アクション。
  *
- * `engine.ts` の「公開アクション(UI から呼ぶ操作)」節が export する**全11種**と一致する
+ * `engine.ts` の「公開アクション(UI から呼ぶ操作)」節が export する全種と一致する
  * (`finishRound` / `withdrawPot` / `createGame` などは UI が直接呼ぶ操作ではないので対象外)。
  */
 const ALL_ACTIONS: readonly ActionKind[] = [
@@ -104,6 +104,7 @@ const ALL_ACTIONS: readonly ActionKind[] = [
   "declareRiichi",
   "declarePon",
   "declareKan",
+  "declareKita",
   "declareAnkan",
   "declareKakan",
   "declareTsumo",

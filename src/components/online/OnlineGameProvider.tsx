@@ -105,6 +105,7 @@ export default function OnlineGameProvider({
       ron: () => sendPlayerAction({ type: "ron" }, playerId),
       pon: () => sendPlayerAction({ type: "pon" }, playerId),
       kan: () => sendPlayerAction({ type: "kan" }, playerId),
+      kita: () => sendPlayerAction({ type: "kita" }, playerId),
       ankan: (tile) =>
         sendPlayerAction({ type: "ankan", tile: wireTile(tile) }, playerId),
       kakan: (tile) =>
