@@ -1,6 +1,6 @@
 import { type ChildProcess, spawn } from "node:child_process";
 import { request as httpRequest, type IncomingHttpHeaders } from "node:http";
-import { createServer } from "node:net";
+import { createConnection, createServer } from "node:net";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { WebSocket } from "ws";
 import type {
@@ -211,6 +211,36 @@ async function requestUpgrade(
     });
     request.once("error", fail);
     request.end();
+  });
+}
+
+/** NodeのHTTP clientが事前拒否するrequest-targetをraw TCPでローカルserverへ送る。 */
+async function requestRawHttp(
+  url: string,
+  requestTarget: string,
+  options: {
+    readonly method?: string;
+    readonly headers?: readonly string[];
+  } = {},
+): Promise<string> {
+  const target = new URL(url);
+  const method = options.method ?? "GET";
+  const headers = options.headers ?? ["Connection: close"];
+  return new Promise<string>((resolve, reject) => {
+    const chunks: Buffer[] = [];
+    const socket = createConnection(
+      { host: target.hostname, port: Number(target.port) },
+      () => {
+        socket.end(
+          `${method} ${requestTarget} HTTP/1.1\r\nHost: ${target.host}\r\n${headers.join("\r\n")}\r\n\r\n`,
+        );
+      },
+    );
+    socket.on("data", (chunk: Buffer) => chunks.push(chunk));
+    socket.once("error", reject);
+    socket.once("close", () => {
+      resolve(Buffer.concat(chunks).toString("utf8"));
+    });
   });
 }
 
@@ -509,6 +539,53 @@ async function advanceVersion(
   expect(first.phase).toBe(second.phase);
   return [first, second];
 }
+
+describe("online HTTP request-target fallback (#704)", () => {
+  it(
+    "HTTPとWebSocket upgradeの不正targetを400へ変換し、その後もhealth checkへ応答する",
+    async () => {
+      const server = await startLocalOnlineServer();
+      try {
+        const malformed = await requestRawHttp(server.url, "http://[");
+        expect(malformed).toMatch(/^HTTP\/1\.1 400 Bad Request\r\n/);
+        expect(malformed).toContain(
+          JSON.stringify({ ok: false, error: "bad_request" }),
+        );
+
+        const malformedPreflight = await requestRawHttp(
+          server.url,
+          "http://[",
+          { method: "OPTIONS" },
+        );
+        expect(malformedPreflight).toMatch(/^HTTP\/1\.1 400 Bad Request\r\n/);
+
+        const validPreflight = await requestRawHttp(server.url, "/healthz", {
+          method: "OPTIONS",
+        });
+        expect(validPreflight).toMatch(/^HTTP\/1\.1 204 No Content\r\n/);
+
+        const malformedUpgrade = await requestRawHttp(server.url, "http://[", {
+          headers: [
+            "Connection: Upgrade",
+            "Upgrade: websocket",
+            `Origin: ${TEST_ORIGIN}`,
+            `Sec-WebSocket-Key: ${Buffer.from("four-bros-mahjon").toString("base64")}`,
+            "Sec-WebSocket-Version: 13",
+          ],
+        });
+        expect(malformedUpgrade).toMatch(/^HTTP\/1\.1 400 Bad Request\r\n/);
+
+        const health = await fetch(`${server.url}/healthz`);
+        expect(health.status).toBe(200);
+        await expect(health.json()).resolves.toMatchObject({ ok: true });
+        expect(childExited(server.child)).toBe(false);
+      } finally {
+        await stopLocalOnlineServer(server);
+      }
+    },
+    TEST_TIMEOUT_MS,
+  );
+});
 
 describe("online multiplayer local E2E (#629)", () => {
   let server: LocalOnlineServer | undefined;
