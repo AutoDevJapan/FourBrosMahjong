@@ -25,6 +25,7 @@
 
 - [品質ツール運用方針](./品質ツール運用方針.md) — Biome / Knip / dependency-cruiser / TypeDoc の目的・
   役割分担・除外設定の妥当性・実行タイミング(ローカル/pre-commit/CI)。
+- [GitHub Actions SHA 固定ポリシー](./GitHub-Actions-SHA固定ポリシー.md) — repository policy の監査証跡、権限境界、外部 Action / reusable workflow の固定ルール。
 
 ## デプロイ・環境運用
 
