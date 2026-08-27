@@ -3,6 +3,7 @@ import { request as httpRequest, type IncomingHttpHeaders } from "node:http";
 import { createConnection, createServer } from "node:net";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { WebSocket } from "ws";
+import { runBoundaryProbe } from "../scripts/probe-online-boundary.mjs";
 import type {
   OnlineRateLimitScope,
   OnlineServerMessage,
@@ -579,6 +580,33 @@ describe("online HTTP request-target fallback (#704)", () => {
         const health = await fetch(`${server.url}/healthz`);
         expect(health.status).toBe(200);
         await expect(health.json()).resolves.toMatchObject({ ok: true });
+        expect(childExited(server.child)).toBe(false);
+      } finally {
+        await stopLocalOnlineServer(server);
+      }
+    },
+    TEST_TIMEOUT_MS,
+  );
+});
+
+describe("online deployment boundary probe (#653)", () => {
+  it(
+    "checks the local server health and exact Origin boundary without a game message",
+    async () => {
+      const server = await startLocalOnlineServer();
+      try {
+        const evidence = await runBoundaryProbe({
+          baseUrl: server.url,
+          allowedOrigin: TEST_ORIGIN,
+          disallowedOrigin: UNAUTHORIZED_ORIGIN,
+          timeoutMs: 1_000,
+        });
+
+        expect(evidence.ok).toBe(true);
+        expect(evidence.checks.health.statusCode).toBe(200);
+        expect(evidence.checks.allowedOrigin.statusCode).toBe(101);
+        expect(evidence.checks.disallowedOrigin.statusCode).toBe(403);
+        expect(evidence.checks.missingOrigin.statusCode).toBe(403);
         expect(childExited(server.child)).toBe(false);
       } finally {
         await stopLocalOnlineServer(server);
