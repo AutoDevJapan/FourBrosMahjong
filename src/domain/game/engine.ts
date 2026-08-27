@@ -93,6 +93,7 @@ import { HONOR, type PlayableWind, type Tile } from "@/domain/tiles/tile";
 import { buildWall, type Wall, WallEmptyError } from "@/domain/wall/wall";
 import {
   CHARACTER_DEFAULT_NAMES,
+  CHARACTER_PLAYER_IDS,
   type CharacterPlayerId,
   type CharacterPlayerNames,
 } from "./characters";
@@ -444,7 +445,7 @@ export interface CreateGameOptions {
  */
 export const DEFAULT_NAMES: PlayerNames = CHARACTER_DEFAULT_NAMES;
 
-const ALL_IDS: PlayerRing<PlayerId> = ["p0", "p1", "p2", "p3"];
+const ALL_IDS: PlayerRing<PlayerId> = CHARACTER_PLAYER_IDS;
 const DEFAULT_HUMAN_PLAYER_IDS: readonly PlayerId[] = [HUMAN_ID];
 
 // ---------------------------------------------------------------------------

@@ -540,7 +540,7 @@ test.describe("状態駆動 a11y 監査(裏ドラ開示 / #261)", () => {
       await expect(board).toHaveAttribute("data-phase", "roundEnd");
       await expect(board).toHaveAttribute("data-round-kind", "win");
       await expect(page.getByRole("alert").first()).toContainText(
-        "あなたのツモ",
+        "粗悪品のツモ",
       );
       await expect(page.getByText("裏ドラ開示").first()).toBeVisible();
 

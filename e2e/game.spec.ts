@@ -1,5 +1,6 @@
 import AxeBuilder from "@axe-core/playwright";
 import { expect, type Page, test } from "@playwright/test";
+import { expectCharacterPortraits } from "./helpers/characters";
 import { advanceUntil, armRiichi, visibleHand } from "./helpers/gameDriver";
 import { LANDMARK_RULES } from "./screens";
 
@@ -283,6 +284,19 @@ test.describe("対局画面(/game)", () => {
     // engine を同一戦略で走査して選定。戦略の定義と再選定手順は e2e/helpers/gameDriver.ts)。
     await page.goto("/game?seed=106");
 
+    // 最初の局だけで止め、席回転後もplayerId→portrait対応が崩れないことを固定する。
+    await advanceUntil(page, (state) => state?.phase === "roundEnd", {
+      maxSteps: 100,
+      onRoundEnd: "stop",
+    });
+    await page.getByRole("button", { name: "次の局へ" }).first().click();
+    const rotatedBench = page
+      .getByRole("region", { name: "粗悪品(抜け番)" })
+      .filter({ visible: true })
+      .first();
+    await expect(rotatedBench).toHaveAttribute("data-character-id", "p0");
+    await expectCharacterPortraits(page);
+
     // 半荘終了(gameEnd)で最終局の決着が表示され、ドライバが「結果を見る」を押して
     // /game/result へ進む(スペック6 6.3 / #277: 自動遷移は無い)。
     await advanceUntil(
@@ -297,6 +311,8 @@ test.describe("対局画面(/game)", () => {
       page.getByRole("heading", { level: 1, name: "対局結果" }),
     ).toBeVisible();
     await expect(page.getByRole("heading", { name: "最終順位" })).toBeVisible();
+    // 順位表とソシー内訳カードの双方で固定人物と原本由来portraitを対応させる。
+    await expectCharacterPortraits(page, 2);
     // 確定済みの結果本文もランドマーク外へ出ない(#409)。`ResultPageClient` は
     // 読み込み中/未確定/確定の 3 分岐を持ち、静的監査(`e2e/a11y.spec.ts`)が踏むのは
     // 未確定分岐だけなので、最大の本文(最終順位・ソシー内訳・導線 nav)を持つこの分岐は
@@ -973,9 +989,14 @@ test.describe("対局画面(/game)", () => {
 
         // Next dev の開発用ポータルが 320px 画面の下中央に重なるため、
         // 44px の操作領域内で上端寄りをタップする。本番にはこのポータルは存在しない。
-        const tapX = (box?.x ?? 0) + Math.max(8, (box?.width ?? 0) - 8);
-        const tapY = (box?.y ?? 0) + Math.min(8, (box?.height ?? 0) / 2);
-        await page.touchscreen.tap(tapX, tapY);
+        // キャラクター画像の読み込みなどで牌の文書座標が取得後に動いても、現在位置を
+        // 再解決してタップする。position は牌の padding box を基準にする。
+        await firstTile.tap({
+          position: {
+            x: Math.max(8, (box?.width ?? 0) - 8),
+            y: Math.min(8, (box?.height ?? 0) / 2),
+          },
+        });
 
         await expect(hand.getByRole("option")).toHaveCount(14);
         await expect(discards).toHaveCount(initialDiscards);
@@ -1003,13 +1024,18 @@ test.describe("対局画面(/game)", () => {
           }),
         ).toHaveCount(0);
 
-        await firstTile.scrollIntoViewIfNeeded();
-        const retryBox = await firstTile.boundingBox();
+        // 解除直後に同じ牌を再タップすると、ブラウザが直前の物理タップとまとめて
+        // click.detail=2 にする場合がある。別の合法牌で新しい1回タップを検証する。
+        const retryTile = hand.getByRole("option").nth(1);
+        await retryTile.scrollIntoViewIfNeeded();
+        const retryBox = await retryTile.boundingBox();
         expect(retryBox).not.toBeNull();
-        await page.touchscreen.tap(
-          (retryBox?.x ?? 0) + Math.max(8, (retryBox?.width ?? 0) - 8),
-          (retryBox?.y ?? 0) + Math.min(8, (retryBox?.height ?? 0) / 2),
-        );
+        await retryTile.tap({
+          position: {
+            x: Math.max(8, (retryBox?.width ?? 0) - 8),
+            y: Math.min(8, (retryBox?.height ?? 0) / 2),
+          },
+        });
         await expect(confirm).toBeFocused();
         await expect(confirm).toBeVisible();
         await confirm.click();

@@ -1,5 +1,6 @@
 import type { Page } from "@playwright/test";
 import { expect, test } from "@playwright/test";
+import { expectCharacterPortraits } from "./helpers/characters";
 
 /**
  * 対局者名の設定(issue #291)のブラウザ動線検証。
@@ -63,6 +64,15 @@ async function saveNames(
 }
 
 test.describe("対局者名の設定 (#291)", () => {
+  test("設定欄は固定playerIdと原本由来portraitを同じ人物へ対応させる", async ({
+    page,
+  }) => {
+    await openSettings(page, DEFAULT_NAMES);
+
+    await expectCharacterPortraits(page);
+    await expect(page.getByText("へちま", { exact: true })).toHaveCount(0);
+  });
+
   test("設定した名前が盤面に反映され、リロード後も保持される", async ({
     page,
   }) => {

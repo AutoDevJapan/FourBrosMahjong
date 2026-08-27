@@ -6,6 +6,7 @@ import {
   characterProfile,
   isCharacterPlayerId,
 } from "./characters";
+import { createGame } from "./engine";
 
 describe("四兄弟の固定キャラクター定義(issue #711)", () => {
   it("playerId・既定名・識別色・原本由来portraitの対応を一意に固定する", () => {
@@ -51,5 +52,17 @@ describe("四兄弟の固定キャラクター定義(issue #711)", () => {
     }
     expect(isCharacterPlayerId("p4")).toBe(false);
     expect(isCharacterPlayerId(null)).toBe(false);
+  });
+
+  it("engineの固定順・既定名も同じprofile定義から対応する", () => {
+    const game = createGame({ seed: 0 });
+
+    expect(game.order).toBe(CHARACTER_PLAYER_IDS);
+    expect(game.players).toEqual(
+      CHARACTER_PLAYER_IDS.map((playerId) => ({
+        id: playerId,
+        name: characterProfile(playerId).defaultName,
+      })),
+    );
   });
 });

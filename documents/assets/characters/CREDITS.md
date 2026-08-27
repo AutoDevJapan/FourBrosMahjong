@@ -1,6 +1,15 @@
 # 四兄弟キャラクターアセット
 
-Issue #711 でユーザーから提供され、リポジトリへの収録権限がある前提で採用した原本です。AIによる再生成・描き直しは行っていません。
+Issue #711 でユーザーがローカル原本を指定し、このプロジェクトでの採用・リポジトリ収録を明示的に依頼したものです。AIによる再生成・描き直しは行っていません。
+
+## 権利・再配布の確認状況
+
+- 権利者: **未確認**（依頼者が権利者本人、または権利者から許諾を受けた者かは独立確認していません）
+- ライセンス: **提示なし / 未確認**
+- 現時点の収録根拠: Issue #711 の依頼者による明示的な採用・収録指示のみ
+- 注意: 上記指示は、第三者が検証できる著作権者情報やパブリックな再配布ライセンスの代わりにはなりません。公開配布・商用利用を行う前に、保守者が権利者と再配布条件を書面等で確認してください。確認できない場合は、原本と派生AVIFをリポジトリおよび配布物から削除する必要があります。
+
+以下のSHA-256は、指定されたローカルファイルとの同一性・派生元を監査するためのもので、権利許諾を証明するものではありません。
 
 | player ID | UI名 / 色 | 提供原本 | リポジトリ内原本 | SHA-256 |
 | --- | --- | --- | --- | --- |
@@ -12,6 +21,28 @@ Issue #711 でユーザーから提供され、リポジトリへの収録権限
 ## 実行時ポートレート
 
 各原本の正面立ち絵を同じ条件で機械的に切り出しました。原本左上を基準に `x=0, y=110, width=220, height=420` でクロップし、AVIF quality 70へ変換しています。UIでは縦横比を維持して縮小表示します。
+
+- 変換ツール: macOS `sips-316`
+- 注意: AVIF encoderの出力はツールversionで変わり得ます。下記SHAは `sips-316` で再生成し一致することを確認した値です。
+
+再生成command（リポジトリルートで実行）:
+
+```sh
+regenerate_portrait() {
+  source_path="$1"
+  output_path="$2"
+  work_dir="$(mktemp -d)"
+  crop_path="$work_dir/crop.png"
+  sips --cropToHeightWidth 420 220 --cropOffset 110 0 "$source_path" --out "$crop_path"
+  sips --setProperty format avif --setProperty formatOptions 70 "$crop_path" --out "$output_path"
+  rm -R "$work_dir"
+}
+
+regenerate_portrait documents/assets/characters/originals/p0-soakuhin-character-sheet.png public/characters/p0-soakuhin-portrait.avif
+regenerate_portrait documents/assets/characters/originals/p1-ryuji-character-sheet.png public/characters/p1-ryuji-portrait.avif
+regenerate_portrait documents/assets/characters/originals/p2-masaki-character-sheet.png public/characters/p2-masaki-portrait.avif
+regenerate_portrait documents/assets/characters/originals/p3-hechima-character-sheet.png public/characters/p3-hechima-portrait.avif
+```
 
 | 実行時アセット | 寸法 | サイズ | SHA-256 |
 | --- | ---: | ---: | --- |
