@@ -9,9 +9,9 @@ RUN corepack enable && corepack prepare pnpm@10.33.0 --activate
 COPY package.json pnpm-lock.yaml ./
 RUN pnpm install --prod --frozen-lockfile
 
-COPY --chown=node:node tsconfig.json ./
-COPY --chown=node:node server ./server
-COPY --chown=node:node src ./src
+COPY tsconfig.json ./
+COPY server ./server
+COPY src ./src
 
 USER node
 
