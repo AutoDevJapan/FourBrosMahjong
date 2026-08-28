@@ -10,6 +10,12 @@
 **/*.pem
 *.key
 **/*.key
+**/*.test.*
+**/*.spec.*
+src/test
+**/__testing__
+**/__oracle__
+src/components/game/finishedGameFixture.ts
 .next
 .vercel
 coverage

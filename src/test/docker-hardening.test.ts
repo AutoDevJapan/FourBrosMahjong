@@ -17,6 +17,12 @@ const REQUIRED_DOCKERIGNORE_PATTERNS = [
   "**/*.pem",
   "*.key",
   "**/*.key",
+  "**/*.test.*",
+  "**/*.spec.*",
+  "src/test",
+  "**/__testing__",
+  "**/__oracle__",
+  "src/components/game/finishedGameFixture.ts",
 ] as const;
 
 interface DockerInstruction {
@@ -87,12 +93,92 @@ function isExplicitNonRootUser(value: string): boolean {
   return validUser && validGroup;
 }
 
+function copyArguments(value: string): readonly string[] | null {
+  const withoutFlags = value.replace(/^(?:--[^\s]+\s+)*/, "");
+  if (!withoutFlags.startsWith("[")) return withoutFlags.split(/\s+/);
+  try {
+    const parsed: unknown = JSON.parse(withoutFlags);
+    return Array.isArray(parsed) &&
+      parsed.every((item) => typeof item === "string")
+      ? parsed
+      : null;
+  } catch {
+    return null;
+  }
+}
+
 function dockerfileViolations(source: string): readonly string[] {
   const instructions = dockerInstructions(source);
   const fromIndexes = instructions.flatMap((instruction, index) =>
     instruction.name === "FROM" ? [index] : [],
   );
   const violations: string[] = [];
+
+  if (instructions.some((instruction) => instruction.name === "ADD")) {
+    violations.push("Dockerfile must not use ADD");
+  }
+
+  const copyInstructions = instructions.filter(
+    (instruction) => instruction.name === "COPY",
+  );
+  for (const instruction of copyInstructions) {
+    const args = copyArguments(instruction.value);
+    if (
+      args === null ||
+      args.slice(0, -1).some((source) => source.replace(/\/+$/, "") === ".")
+    ) {
+      violations.push("Dockerfile must not copy the whole build context");
+    }
+  }
+
+  const runCommands = instructions
+    .filter((instruction) => instruction.name === "RUN")
+    .map((instruction) => instruction.value);
+  const runSegments = runCommands.flatMap((command) =>
+    command.split(/&&|\|\||;/).map((segment) => segment.trim()),
+  );
+  if (
+    !runSegments.some(
+      (command) =>
+        /\bpnpm\s+install\b/.test(command) &&
+        /(?:^|\s)--prod(?:\s|$)/.test(command) &&
+        /(?:^|\s)--frozen-lockfile(?:\s|$)/.test(command),
+    )
+  ) {
+    violations.push(
+      "Dockerfile must install production dependencies from the frozen lockfile",
+    );
+  }
+  if (
+    !runSegments.some(
+      (command) =>
+        /\bpnpm\s+prune\b/.test(command) &&
+        /(?:^|\s)--prod(?:\s|$)/.test(command) &&
+        /\bnpm_config_offline=true\b/.test(command),
+    )
+  ) {
+    violations.push(
+      "Dockerfile must prune to the production dependency closure without network access",
+    );
+  }
+
+  for (const requiredCopy of [
+    ["package.json", "pnpm-lock.yaml", "./"],
+    ["tsconfig.json", "./"],
+    ["server", "./server"],
+    ["src", "./src"],
+  ]) {
+    if (
+      !copyInstructions.some(
+        ({ value }) =>
+          JSON.stringify(copyArguments(value)) === JSON.stringify(requiredCopy),
+      )
+    ) {
+      violations.push(
+        `required explicit COPY is missing: ${requiredCopy.join(" ")}`,
+      );
+    }
+  }
 
   if (fromIndexes.length === 0) {
     violations.push("Dockerfile must contain a FROM instruction");
@@ -187,9 +273,16 @@ describe("Docker hardening repository contract (#734)", () => {
     expect(dockerfileViolations(source)).toEqual([]);
   });
 
-  it("rejects unpinned, malformed, indirect, or root Dockerfile mutations", () => {
+  it("rejects unpinned, broad-copy, non-production, or root Dockerfile mutations", () => {
     const digest = "a".repeat(64);
-    const valid = `FROM node:24.15.0-slim@sha256:${digest}\nUSER node\nCMD ["node"]`;
+    const valid = `FROM node:24.15.0-slim@sha256:${digest}
+COPY package.json pnpm-lock.yaml ./
+RUN pnpm install --prod --frozen-lockfile && npm_config_offline=true pnpm prune --prod --ignore-scripts
+COPY tsconfig.json ./
+COPY server ./server
+COPY src ./src
+USER node
+CMD ["node"]`;
     expect(dockerfileViolations(valid)).toEqual([]);
     expect(
       dockerfileViolations(`FROM node:24.15.0-slim\nUSER node`),
@@ -220,9 +313,42 @@ describe("Docker hardening repository contract (#734)", () => {
         `FROM node:24.15.0-slim@sha256:${digest}\nUSER node\nUSER 0:0`,
       ),
     ).toContain("the final stage must select an explicit non-root USER");
+    expect(dockerfileViolations(`${valid}\nADD . /app`)).toContain(
+      "Dockerfile must not use ADD",
+    );
+    expect(dockerfileViolations(`${valid}\nCOPY . .`)).toContain(
+      "Dockerfile must not copy the whole build context",
+    );
+    expect(dockerfileViolations(`${valid}\nCOPY ./ ./`)).toContain(
+      "Dockerfile must not copy the whole build context",
+    );
+    expect(dockerfileViolations(`${valid}\nCOPY [".", "/app"]`)).toContain(
+      "Dockerfile must not copy the whole build context",
+    );
+    expect(
+      dockerfileViolations(valid.replace(" --frozen-lockfile", "")),
+    ).toContain(
+      "Dockerfile must install production dependencies from the frozen lockfile",
+    );
+    expect(dockerfileViolations(valid.replace(" --prod", ""))).toContain(
+      "Dockerfile must install production dependencies from the frozen lockfile",
+    );
+    expect(
+      dockerfileViolations(
+        valid.replace(
+          " && npm_config_offline=true pnpm prune --prod --ignore-scripts",
+          "",
+        ),
+      ),
+    ).toContain(
+      "Dockerfile must prune to the production dependency closure without network access",
+    );
+    expect(
+      dockerfileViolations(valid.replace("COPY server ./server\n", "")),
+    ).toContain("required explicit COPY is missing: server ./server");
   });
 
-  it("excludes root and nested environment, registry, and private-key files", () => {
+  it("excludes secrets and test-only source files from the build context", () => {
     const source = readFileSync(
       resolve(REPOSITORY_ROOT, ".dockerignore"),
       "utf8",
@@ -230,12 +356,17 @@ describe("Docker hardening repository contract (#734)", () => {
     expect(dockerignoreViolations(source)).toEqual([]);
   });
 
-  it("rejects a missing required ignore rule or any re-include", () => {
+  it("rejects every missing required ignore rule or any re-include", () => {
     const valid = REQUIRED_DOCKERIGNORE_PATTERNS.join("\n");
     expect(dockerignoreViolations(valid)).toEqual([]);
-    expect(dockerignoreViolations(valid.replace("**/.env.*\n", ""))).toContain(
-      "required dockerignore rule is missing: **/.env.*",
-    );
+    for (const missing of REQUIRED_DOCKERIGNORE_PATTERNS) {
+      const mutation = REQUIRED_DOCKERIGNORE_PATTERNS.filter(
+        (pattern) => pattern !== missing,
+      ).join("\n");
+      expect(dockerignoreViolations(mutation)).toContain(
+        `required dockerignore rule is missing: ${missing}`,
+      );
+    }
     expect(dockerignoreViolations(`${valid}\n!nested/.env.local`)).toContain(
       "negated dockerignore rule is forbidden: !nested/.env.local",
     );
