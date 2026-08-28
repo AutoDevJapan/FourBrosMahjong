@@ -33,6 +33,7 @@
 
 ### Fixed
 
+- GitHub Releaseの`contents: write` jobからcheckoutとrepository管理shellを撤去し、read-only検証jobが生成した同一run・固定名のrelease notes artifactだけをSHA固定Actionで受け渡すよう修正 (#747)。
 - 別タブのtheme変更がhydration前に発生しても、storage listenerを先に登録してから現在値へ再同期し、保存値・radio・`html[data-theme]`を収束させるよう修正 (#752)。
 - GitHub Release guard を、tagged SHA の CI だけでなく gitleaks と GitHub default CodeQL の exact workflow/check suite・期待 category 成功も確認する fail-closed gate へ拡張。これは GitHub Release 公開だけの gate で、`main` merge を起点とする Vercel Production deploy は待機・再実行しない (#748)。
 - Service Worker の install 時に、牌 SVG・PWA icon・manifest の HTTP 2xx だけでなく Content-Type も検証し、200 HTML fallback 等を必須オフライン素材として保存した不完全な worker の有効化を防止。

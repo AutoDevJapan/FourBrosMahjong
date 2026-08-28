@@ -41,6 +41,8 @@ Issue #663 の受け入れ条件に基づき、外部 Action と reusable workfl
 
 2026-08-27 の `origin/main` (`df55a38465b6e7e80451d7e214b2a6b26b47c772`) では、4 workflow の外部 `uses:` 18 件がすべて 40 桁 commit SHA に固定されています。local Action / reusable workflow の参照は 0 件です。
 
+Issue #747 では Release 公開jobからcheckoutとrepository管理shellを撤去するため、`actions/download-artifact` v8.0.1 (`3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c`) を1件追加しました。上記18件は2026-08-27時点の監査値として維持し、現在のstatic contractは外部参照19件を期待します。
+
 対象 workflow:
 
 - `ci.yml`
@@ -48,7 +50,7 @@ Issue #663 の受け入れ条件に基づき、外部 Action と reusable workfl
 - `gitleaks-version-check.yml`
 - `release.yml`
 
-参照元は `actions/checkout`、`pnpm/action-setup`、`actions/setup-node`、`actions/cache/restore`、`actions/cache/save`、`actions/upload-artifact`、`softprops/action-gh-release` です。`src/test/actions-sha-pinning.test.ts` は全 `.yml` / `.yaml` workflow の `jobs.*.uses` と `jobs.*.steps[*].uses` を検査します。local reusable workflow と local composite Action の manifest も再帰走査し、存在しない参照・循環・composite 内の未固定外部参照を fail closed にします。`env.uses`、`with.uses`、コメント、block string など、workflow schema 上で実行参照ではない値は対象外です。
+参照元は `actions/checkout`、`pnpm/action-setup`、`actions/setup-node`、`actions/cache/restore`、`actions/cache/save`、`actions/upload-artifact`、`actions/download-artifact`、`softprops/action-gh-release` です。`src/test/actions-sha-pinning.test.ts` は全 `.yml` / `.yaml` workflow の `jobs.*.uses` と `jobs.*.steps[*].uses` を検査します。local reusable workflow と local composite Action の manifest も再帰走査し、存在しない参照・循環・composite 内の未固定外部参照を fail closed にします。`env.uses`、`with.uses`、コメント、block string など、workflow schema 上で実行参照ではない値は対象外です。
 
 ## Runtime evidence
 
