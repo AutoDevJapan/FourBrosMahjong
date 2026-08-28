@@ -38,6 +38,7 @@ type RateLimitedScope = Exclude<OnlineRateLimitScope, "connection">;
 interface LocalOnlineServer {
   readonly child: ChildProcess;
   readonly url: string;
+  readonly output: readonly string[];
 }
 
 interface UpgradeResponse {
@@ -52,6 +53,7 @@ function childExited(child: ChildProcess): boolean {
 
 async function terminateChild(child: ChildProcess): Promise<void> {
   if (childExited(child)) return;
+  let forced = false;
   await new Promise<void>((resolve) => {
     let finished = false;
     const forceTimer: { id?: ReturnType<typeof setTimeout> } = {};
@@ -70,13 +72,21 @@ async function terminateChild(child: ChildProcess): Promise<void> {
       return;
     }
     forceTimer.id = setTimeout(() => {
-      if (!childExited(child)) child.kill("SIGKILL");
+      if (!childExited(child)) {
+        forced = true;
+        child.kill("SIGKILL");
+      }
       // SIGKILLでもexitイベントの到着を待つが、異常なchild実装で
       // イベントが来ない場合にafterAllを永久に塞がない。
       setTimeout(finish, 100);
     }, SERVER_STOP_TIMEOUT_MS);
     child.kill("SIGTERM");
   });
+  if (forced) {
+    throw new Error(
+      "オンラインサーバーはgraceful shutdown期限内に終了しませんでした。",
+    );
+  }
 }
 
 function delay(milliseconds: number): Promise<void> {
@@ -135,26 +145,33 @@ async function startLocalOnlineServer(
 ): Promise<LocalOnlineServer> {
   const port = await freePort();
   const output: string[] = [];
-  const pnpm = process.platform === "win32" ? "pnpm.cmd" : "pnpm";
-  const child = spawn(pnpm, ["server:start"], {
-    cwd: process.cwd(),
-    env: {
-      ...process.env,
-      // Keep ordinary local tests independent from an ambient Railway shell.
-      RAILWAY_ENVIRONMENT_ID: "",
-      ONLINE_OPS_REQUIRED: "false",
-      ONLINE_OPS_TOKEN: "",
-      ONLINE_SOURCE_REVISION: "",
-      ONLINE_MAINTENANCE_NOTICES_ENABLED: "false",
-      ONLINE_DRAIN_RECONNECT_GRACE_MS: "60000",
-      ONLINE_SHUTDOWN_GRACE_MS: "25000",
-      ONLINE_SOCKET_CLOSE_GRACE_MS: "3000",
-      ...environment,
-      ALLOWED_ORIGINS: allowedOrigins,
-      PORT: String(port),
+  // Spawn the actual Node entrypoint so SIGTERM reaches the handler directly;
+  // pnpm/sh wrapper forwarding is a separate production-container contract.
+  const child = spawn(
+    process.execPath,
+    ["--import", "tsx", "server/start.ts"],
+    {
+      cwd: process.cwd(),
+      env: {
+        ...process.env,
+        // Keep ordinary local tests independent from an ambient Railway shell.
+        RAILWAY_ENVIRONMENT_ID: "",
+        ONLINE_OPS_REQUIRED: "false",
+        ONLINE_OPS_TOKEN: "",
+        ONLINE_SOURCE_REVISION: "",
+        ONLINE_MAINTENANCE_NOTICES_ENABLED: "false",
+        ONLINE_DRAIN_RECONNECT_GRACE_MS: "60000",
+        // Ordinary fixture cleanup stays inside SERVER_STOP_TIMEOUT_MS. Dedicated
+        // shutdown tests override these values when exercising a longer budget.
+        ONLINE_SHUTDOWN_GRACE_MS: "1100",
+        ONLINE_SOCKET_CLOSE_GRACE_MS: "1000",
+        ...environment,
+        ALLOWED_ORIGINS: allowedOrigins,
+        PORT: String(port),
+      },
+      stdio: ["ignore", "pipe", "pipe"],
     },
-    stdio: ["ignore", "pipe", "pipe"],
-  });
+  );
   child.stdout?.on("data", (chunk: Buffer) => output.push(chunk.toString()));
   child.stderr?.on("data", (chunk: Buffer) => output.push(chunk.toString()));
   const url = `http://127.0.0.1:${port}`;
@@ -164,11 +181,29 @@ async function startLocalOnlineServer(
     await terminateChild(child);
     throw error;
   }
-  return { child, url };
+  return { child, url, output };
 }
 
 async function stopLocalOnlineServer(server: LocalOnlineServer): Promise<void> {
   await terminateChild(server.child);
+}
+
+async function waitForChildExit(
+  child: ChildProcess,
+  timeoutMs = TEST_TIMEOUT_MS,
+): Promise<void> {
+  if (childExited(child)) return;
+  await new Promise<void>((resolve, reject) => {
+    const timer = setTimeout(() => {
+      child.off("exit", onExit);
+      reject(new Error("オンラインサーバープロセスが終了しませんでした。"));
+    }, timeoutMs);
+    const onExit = () => {
+      clearTimeout(timer);
+      resolve();
+    };
+    child.once("exit", onExit);
+  });
 }
 
 /** Send a real HTTP upgrade request so rejected handshakes expose status/headers. */
@@ -1645,7 +1680,7 @@ describe("online maintenance ops integration (#726/#728)", () => {
           ok: true,
           phase: "draining",
           changed: true,
-          drainStartedAt: null,
+          drainStartedAt: expect.any(String),
           deadline: null,
           broadcast: { sent: 2, skipped: 0, failed: 0 },
         });
@@ -1958,6 +1993,88 @@ describe("online maintenance ops integration (#726/#728)", () => {
           await stopLocalOnlineServer(optionalInvalid);
         if (invalidRequired !== undefined)
           await stopLocalOnlineServer(invalidRequired);
+      }
+    },
+    TEST_TIMEOUT_MS,
+  );
+});
+
+describe("online graceful process shutdown (#726)", () => {
+  const shutdownEnvironment = {
+    ONLINE_OPS_REQUIRED: "true",
+    ONLINE_OPS_TOKEN: "S".repeat(32),
+    ONLINE_SOURCE_REVISION: "d".repeat(40),
+    ONLINE_MAINTENANCE_NOTICES_ENABLED: "true",
+    ONLINE_DRAIN_RECONNECT_GRACE_MS: "15000",
+    ONLINE_SHUTDOWN_GRACE_MS: "5000",
+    ONLINE_SOCKET_CLOSE_GRACE_MS: "1000",
+  };
+
+  it(
+    "keeps existing actions and health alive after first signal, then force-cleans once",
+    async () => {
+      let server: LocalOnlineServer | undefined;
+      const clients: OnlineTestClient[] = [];
+      try {
+        server = await startLocalOnlineServer(TEST_ORIGIN, shutdownEnvironment);
+        const host = new OnlineTestClient(server.url, TEST_ORIGIN);
+        clients.push(host);
+        await host.open();
+        host.send({ type: "create", name: "終了待機ホスト" });
+        const session = await host.waitForSession();
+
+        server.child.kill("SIGTERM");
+        const terminating = await host.waitForMaintenance("terminating");
+        if (!("deadline" in terminating)) {
+          throw new Error("terminating notice did not include its deadline");
+        }
+        expect(terminating.deadline).toMatch(/Z$/);
+        await expect(fetch(`${server.url}/healthz`)).resolves.toMatchObject({
+          status: 200,
+        });
+        await expect(fetch(`${server.url}/readyz`)).resolves.toMatchObject({
+          status: 503,
+        });
+
+        host.send({
+          type: "action",
+          version: session.snapshot.version,
+          action: actionFor(session.snapshot),
+        });
+        await host.waitForSnapshot(
+          (snapshot) => snapshot.version > session.snapshot.version,
+        );
+        host.send({ type: "newGame" });
+        await expect(host.waitForError()).resolves.toMatchObject({
+          code: "maintenance",
+        });
+
+        server.child.kill("SIGINT");
+        await host.waitForClose();
+        await waitForChildExit(server.child);
+        expect(server.child.exitCode).toBe(0);
+        expect(server.child.signalCode).toBeNull();
+        const events = server.output
+          .join("")
+          .split("\n")
+          .filter(Boolean)
+          .map((line) => JSON.parse(line) as { event: string });
+        expect(
+          events.filter((event) => event.event === "shutdown-started"),
+        ).toHaveLength(1);
+        expect(
+          events.filter((event) => event.event === "shutdown-second-signal"),
+        ).toHaveLength(1);
+        expect(
+          events.filter((event) => event.event === "shutdown-force-closed"),
+        ).toHaveLength(1);
+        expect(
+          events.filter((event) => event.event === "shutdown-completed"),
+        ).toHaveLength(1);
+        await expect(fetch(`${server.url}/healthz`)).rejects.toThrow();
+      } finally {
+        await closeTestClients(clients);
+        if (server !== undefined) await stopLocalOnlineServer(server);
       }
     },
     TEST_TIMEOUT_MS,

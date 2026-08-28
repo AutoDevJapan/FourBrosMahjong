@@ -1,6 +1,7 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
-import type { DrainController, DrainControllerStatus } from "./drainController";
+import type { DrainControllerStatus, DrainTransition } from "./drainController";
 import type { MaintenanceBroadcastResult } from "./maintenanceProtocol";
+import type { MaintenanceTimelineStatus } from "./maintenanceTimeline";
 import type { OpsBearerAuthenticator } from "./opsAuth";
 import type { OpsAuthRateLimiter } from "./opsRateLimit";
 
@@ -14,7 +15,10 @@ export interface OpsHttpDependencies {
   readonly maintenanceNoticesEnabled: boolean;
   readonly authenticator: OpsBearerAuthenticator | null;
   readonly rateLimiter: OpsAuthRateLimiter;
-  readonly drainController: DrainController;
+  /** Timeline wrappers preflight wall time before at-most-once mutations. */
+  readonly startDrain: () => DrainTransition;
+  readonly releaseDrain: () => DrainTransition;
+  readonly maintenanceTimeline: () => MaintenanceTimelineStatus;
   readonly reconnectGraceMs: number;
   readonly sourceRevision: string | null;
   readonly uptimeMs: () => number;
@@ -99,9 +103,8 @@ function statusPayload(
     ok: true,
     phase: status.phase,
     // Process-local monotonic values are deliberately not exposed as wall
-    // timestamps. The shutdown wiring owns these server-time fields later.
-    drainStartedAt: null,
-    deadline: null,
+    // timestamps. The server-owned display timeline supplies ISO values.
+    ...dependencies.maintenanceTimeline(),
     reconnectGraceMs: dependencies.reconnectGraceMs,
     sourceRevision: dependencies.sourceRevision,
     uptimeMs: sampledUptimeMs,
@@ -202,7 +205,7 @@ export function handleOpsHttpRequest(
       if (!Number.isSafeInteger(sampledUptimeMs) || sampledUptimeMs < 0) {
         throw new RangeError("ops uptime must be a non-negative safe integer");
       }
-      const transition = dependencies.drainController.startDrain();
+      const transition = dependencies.startDrain();
       const broadcast = transition.changed
         ? dependencies.broadcastDrainStatus(transition.status)
         : null;
@@ -221,7 +224,7 @@ export function handleOpsHttpRequest(
     if (!Number.isSafeInteger(sampledUptimeMs) || sampledUptimeMs < 0) {
       throw new RangeError("ops uptime must be a non-negative safe integer");
     }
-    const transition = dependencies.drainController.releaseDrain();
+    const transition = dependencies.releaseDrain();
     if (!transition.changed && transition.status.phase === "accepting") {
       writeOpsJson(response, 409, { ok: false, error: "not_draining" });
       return true;

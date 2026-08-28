@@ -110,8 +110,11 @@ function testResponse(): TestResponse {
 }
 
 function dependencies(
-  overrides: Partial<OpsHttpDependencies> = {},
+  overrides: Partial<OpsHttpDependencies> & {
+    readonly drainController?: DrainController;
+  } = {},
 ): OpsHttpDependencies & {
+  readonly drainController: DrainController;
   readonly broadcastDrainStatus: ReturnType<typeof vi.fn>;
   readonly broadcastAccepting: ReturnType<typeof vi.fn>;
   readonly observeStatus: ReturnType<typeof vi.fn>;
@@ -123,6 +126,9 @@ function dependencies(
     authenticator: new OpsBearerAuthenticator(TOKEN),
     rateLimiter: new OpsAuthRateLimiter(() => 1_000),
     drainController,
+    startDrain: () => drainController.startDrain(),
+    releaseDrain: () => drainController.releaseDrain(),
+    maintenanceTimeline: () => ({ drainStartedAt: null, deadline: null }),
     reconnectGraceMs: 60_000,
     sourceRevision: "a".repeat(40),
     uptimeMs: () => 1_234,
@@ -132,6 +138,7 @@ function dependencies(
     broadcastAccepting: vi.fn(() => ({ sent: 2, skipped: 0, failed: 0 })),
     ...overrides,
   } as OpsHttpDependencies & {
+    readonly drainController: DrainController;
     readonly broadcastDrainStatus: ReturnType<typeof vi.fn>;
     readonly broadcastAccepting: ReturnType<typeof vi.fn>;
     readonly observeStatus: ReturnType<typeof vi.fn>;

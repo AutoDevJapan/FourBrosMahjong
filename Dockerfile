@@ -13,4 +13,4 @@ COPY . .
 
 EXPOSE 8080
 
-CMD ["pnpm", "server:start"]
+CMD ["node", "--import", "tsx", "server/start.ts"]
