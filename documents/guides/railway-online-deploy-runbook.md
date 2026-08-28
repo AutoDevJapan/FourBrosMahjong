@@ -10,10 +10,12 @@
 
 - ルーム、座席、対局状態は `RoomManager` のプロセスメモリだけに存在する。restart、redeploy、rollback のいずれでも進行中のルームは復元されない。
 - `/healthz` はプロセスの起動を示すだけで、active room 数、接続数、drain 状態、source SHA を返さない。現行ログにも active room 数の集計はない。Railway の CPU / network graph や一般ログだけから「active room が 0」とは証明できない。
-- 現行サーバーには maintenance mode、利用者へのメンテナンス通知、SIGTERM graceful drain がない。Railway の overlap / draining time を設定するだけではこれらを補えない。特に、プロセスメモリを共有しない旧・新 deployment の overlap は既存ルームへの `resume` を保証しない。
+- リポジトリ上のサーバーにはdefault-offのmaintenance drainと利用者通知、bounded graceful shutdownを段階実装している。ただし、現在のRailway productionへ反映・有効化した証拠はない。Railway の overlap / draining time を設定するだけでもこれらを補えない。特に、プロセスメモリを共有しない旧・新 deployment の overlap は既存ルームへの `resume` を保証しない。
 - rollback はサービスの稼働コードと変数を戻す障害復旧であり、消失したルームを戻す操作ではない。既知の古い deployment へ戻すと、missing-Origin を受け入れる既存の drift も戻り得る。
 
-active room の確実な観測、事前の新規受付停止、アプリ内告知、graceful drain は別の設計・実装 issue で扱う。この runbook は、それらが未実装であることを隠さず、明示的なメンテナンスとして一回の deploy を判断するためのものとする。
+Docker imageの既定 `CMD` は `node --import tsx server/start.ts` とし、production相当imageのPID 1とsignal/shutdown契約をlocal containerで自動検証する。一方、現行 `railway.json` の `startCommand` は `pnpm server:start` であり、Railwayではimage commandを上書きする。authorized operatorによる後続のdirect Node command変更とread-backが完了するまで、local Docker証拠をRailway productionのsignal forwarding証拠へ読み替えてはならない。
+
+active room観測、maintenance drain、アプリ内告知、graceful shutdownの設計・残るrollout条件は [issue #726](https://github.com/AutoDevJapan/FourBrosMahjong/issues/726) で扱う。この runbook は、repo-local実装とproductionで有効な設定・deploy証拠を分離し、明示的なメンテナンスとして一回のdeployを判断するためのものとする。
 
 ## `HOLD` 条件
 
@@ -26,6 +28,8 @@ active room の確実な観測、事前の新規受付停止、アプリ内告�
 - active room 数を観測できないという現行制約を関係者へ伝えていない、または全ルーム消失を伴うメンテナンスの承認がない。
 - メンテナンス時刻と既存の外部告知手段が決まっていない。アプリ内告知が存在するかのように扱ってはならない。
 - deploy 前の health / Origin baseline、deploy 後の検証担当、rollback 判断者のいずれかが未定である。
+- Railwayの実効start commandがdirect Nodeであること、NodeがPID 1としてSIGTERMを一度受信すること、期限内にport/process treeが消滅することをproduction相当の検証とdeploy read-backで確認できない。現行`pnpm server:start`をsignal-safeと仮定してはならない。
+- Railwayの実効replica数、`drainingSeconds`、app shutdown総予算との大小関係をread-backできない、またはreplicaが1以外、`drainingSeconds`が`ceil(ONLINE_SHUTDOWN_GRACE_MS / 1000) + 5`未満である。
 
 ## 1. 変更前の証拠を保存する
 
