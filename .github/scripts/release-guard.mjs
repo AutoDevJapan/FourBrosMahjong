@@ -1,5 +1,4 @@
 // @ts-check
-import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { pathToFileURL } from "node:url";
 
@@ -485,26 +484,64 @@ export async function githubApi(path) {
   return response.json();
 }
 
-/** @param {string[]} args */
-export function runGit(args) {
-  return execFileSync("git", args, {
-    encoding: "utf8",
-    timeout: GITHUB_API_TIMEOUT_MS,
-    stdio: ["ignore", "pipe", "pipe"],
-  });
-}
-
-/** @param {{sha: string, git: (args: string[]) => string}} input */
-export function verifyTagOnMain({ sha, git }) {
-  if (!/^[0-9a-f]{40}$/.test(sha)) throw new Error("tag SHA is unresolved");
-  git([
-    "fetch",
-    "--quiet",
-    "--no-tags",
-    "origin",
-    "+refs/heads/main:refs/remotes/origin/main",
-  ]);
-  git(["merge-base", "--is-ancestor", sha, "origin/main"]);
+/**
+ * Capture the current main commit through the read-only GitHub API, then prove
+ * the tagged SHA is its exact merge base. This keeps checkout credentials out
+ * of git config without trusting a remote-tracking ref after checkout.
+ * @param {{repo: string, sha: string, api: (path: string) => Promise<unknown>}} input
+ */
+export async function verifyTagOnMain({ repo, sha, api }) {
+  try {
+    const repoMatch = /^([^/\s]+)\/([^/\s]+)$/.exec(repo);
+    const owner = repoMatch?.[1] ?? "";
+    const name = repoMatch?.[2] ?? "";
+    if (
+      !/^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})$/.test(owner) ||
+      !/^[A-Za-z0-9_.-]{1,100}$/.test(name) ||
+      name === "." ||
+      name === ".." ||
+      !/^[0-9a-f]{40}$/.test(sha)
+    ) {
+      throw new Error();
+    }
+    const repoPath = `${encodeURIComponent(owner)}/${encodeURIComponent(name)}`;
+    const ref = /** @type {any} */ (
+      await api(`/repos/${repoPath}/git/ref/heads/main`)
+    );
+    const mainSha = ref?.object?.sha;
+    if (
+      ref?.ref !== "refs/heads/main" ||
+      ref?.object?.type !== "commit" ||
+      !/^[0-9a-f]{40}$/.test(mainSha)
+    ) {
+      throw new Error();
+    }
+    const comparison = /** @type {any} */ (
+      await api(`/repos/${repoPath}/compare/${sha}...${mainSha}`)
+    );
+    const statusMatches =
+      (comparison?.status === "identical" &&
+        comparison?.ahead_by === 0 &&
+        mainSha === sha) ||
+      (comparison?.status === "ahead" &&
+        comparison?.ahead_by > 0 &&
+        mainSha !== sha);
+    if (
+      !statusMatches ||
+      !Number.isSafeInteger(comparison?.ahead_by) ||
+      comparison.ahead_by < 0 ||
+      !Number.isSafeInteger(comparison?.behind_by) ||
+      comparison.behind_by !== 0 ||
+      !Number.isSafeInteger(comparison?.total_commits) ||
+      comparison.total_commits !== comparison.ahead_by ||
+      comparison?.base_commit?.sha !== sha ||
+      comparison?.merge_base_commit?.sha !== sha
+    ) {
+      throw new Error();
+    }
+  } catch {
+    throw new Error("release ancestry evidence is unavailable");
+  }
 }
 
 async function main() {
@@ -517,9 +554,7 @@ async function main() {
     changelog: readFileSync("CHANGELOG.md", "utf8"),
   });
 
-  // Refresh the authoritative remote branch rather than trusting a possibly
-  // stale checkout ref, then prove the tagged commit is already on main.
-  verifyTagOnMain({ sha, git: runGit });
+  await verifyTagOnMain({ repo, sha, api: githubApi });
 
   if (!(await hasTrustedReleaseEvidence({ repo, sha, api: githubApi }))) {
     throw new Error(

@@ -216,32 +216,125 @@ describe("release metadata guard (#507)", () => {
 });
 
 describe("release ancestry guard (#507)", () => {
-  it("refreshes origin/main before checking exact tag ancestry", () => {
-    const git = vi.fn(() => "");
-    verifyTagOnMain({ sha: SHA, git });
-    expect(git.mock.calls).toEqual([
-      [
-        [
-          "fetch",
-          "--quiet",
-          "--no-tags",
-          "origin",
-          "+refs/heads/main:refs/remotes/origin/main",
-        ],
-      ],
-      [["merge-base", "--is-ancestor", SHA, "origin/main"]],
+  const MAIN_SHA = "b".repeat(40);
+  const ref = {
+    ref: "refs/heads/main",
+    object: { type: "commit", sha: MAIN_SHA },
+  };
+  const comparison = {
+    status: "ahead",
+    ahead_by: 2,
+    behind_by: 0,
+    total_commits: 2,
+    base_commit: { sha: SHA },
+    merge_base_commit: { sha: SHA },
+  };
+
+  it.each([
+    {
+      name: "mainがtagより先に進んだ状態",
+      mainRef: ref,
+      result: comparison,
+    },
+    {
+      name: "tagとmainが同一commitの状態",
+      mainRef: { ...ref, object: { ...ref.object, sha: SHA } },
+      result: {
+        ...comparison,
+        status: "identical",
+        ahead_by: 0,
+        total_commits: 0,
+      },
+    },
+  ])("accepts $name", async ({ mainRef, result }) => {
+    const api = vi.fn(async (path: string) =>
+      path.endsWith("/git/ref/heads/main") ? mainRef : result,
+    );
+
+    await expect(
+      verifyTagOnMain({ repo: "owner/repo", sha: SHA, api }),
+    ).resolves.toBeUndefined();
+    expect(api.mock.calls).toEqual([
+      ["/repos/owner/repo/git/ref/heads/main"],
+      [`/repos/owner/repo/compare/${SHA}...${mainRef.object.sha}`],
     ]);
   });
 
-  it("propagates fetch and non-ancestor failures", () => {
-    expect(() =>
-      verifyTagOnMain({
-        sha: SHA,
-        git: () => {
-          throw new Error("git failed");
-        },
-      }),
-    ).toThrow("git failed");
+  it.each([
+    ["behind", { ...comparison, status: "behind", ahead_by: 0 }],
+    ["diverged", { ...comparison, status: "diverged" }],
+    [
+      "ahead with zero commits",
+      { ...comparison, ahead_by: 0, total_commits: 0 },
+    ],
+    ["behind_by", { ...comparison, behind_by: 1 }],
+    ["base", { ...comparison, base_commit: { sha: MAIN_SHA } }],
+    ["merge base", { ...comparison, merge_base_commit: { sha: MAIN_SHA } }],
+    ["malformed count", { ...comparison, total_commits: "2" }],
+    ["inconsistent count", { ...comparison, total_commits: 1 }],
+    [
+      "identical with a different main SHA",
+      { ...comparison, status: "identical", ahead_by: 0, total_commits: 0 },
+    ],
+  ])("rejects %s ancestry evidence", async (_name, result) => {
+    const api = vi.fn(async (path: string) =>
+      path.endsWith("/git/ref/heads/main") ? ref : result,
+    );
+    await expect(
+      verifyTagOnMain({ repo: "owner/repo", sha: SHA, api }),
+    ).rejects.toThrow("release ancestry evidence is unavailable");
+  });
+
+  it.each([
+    ["wrong ref", { ...ref, ref: "refs/heads/dev" }],
+    ["wrong object type", { ...ref, object: { ...ref.object, type: "tag" } }],
+    ["bad main SHA", { ...ref, object: { ...ref.object, sha: "bad" } }],
+  ])("rejects %s main evidence", async (_name, mainRef) => {
+    const api = vi.fn(async () => mainRef);
+    await expect(
+      verifyTagOnMain({ repo: "owner/repo", sha: SHA, api }),
+    ).rejects.toThrow("release ancestry evidence is unavailable");
+    expect(api).toHaveBeenCalledTimes(1);
+  });
+
+  it("rejects malformed identity and API failures without reflecting details", async () => {
+    const malformedApi = vi.fn(async () => ({ object: { sha: MAIN_SHA } }));
+    await expect(
+      verifyTagOnMain({ repo: "owner/repo", sha: SHA, api: malformedApi }),
+    ).rejects.toThrow("release ancestry evidence is unavailable");
+
+    const failedApi = vi.fn(async () => {
+      throw new Error("token=secret upstream details");
+    });
+    const rejection = await verifyTagOnMain({
+      repo: "owner/repo",
+      sha: SHA,
+      api: failedApi,
+    }).catch((error: unknown) => String(error));
+    expect(rejection).toBe("Error: release ancestry evidence is unavailable");
+
+    for (const repo of [
+      ".",
+      "..",
+      "owner/.",
+      "owner/..",
+      "owner/re%po",
+      "owner/re#po",
+      "owner/re?po",
+      "owner/repo/extra",
+    ]) {
+      const api = vi.fn(async () => ref);
+      await expect(verifyTagOnMain({ repo, sha: SHA, api })).rejects.toThrow(
+        "release ancestry evidence is unavailable",
+      );
+      expect(api).not.toHaveBeenCalled();
+    }
+
+    const invalidShaApi = vi.fn(async () => ref);
+    await expect(
+      verifyTagOnMain({ repo: "owner/repo", sha: "bad", api: invalidShaApi }),
+    ).rejects.toThrow("release ancestry evidence is unavailable");
+    expect(invalidShaApi).not.toHaveBeenCalled();
   });
 });
 
@@ -957,39 +1050,281 @@ describe("trusted release security evidence guard (#748)", () => {
   });
 });
 
-describe("release workflow contract (#507)", () => {
-  it("keeps write authority behind the read-only guard job", () => {
-    const workflow = parse(
+describe("release workflow contract (#507 / #747)", () => {
+  type WorkflowStep = Record<string, unknown> & {
+    name?: string;
+    uses?: string;
+    run?: string;
+    shell?: string;
+    env?: Record<string, unknown>;
+    with?: Record<string, unknown>;
+  };
+  type WorkflowJob = Record<string, unknown> & {
+    permissions?: Record<string, unknown>;
+    steps: WorkflowStep[];
+  };
+  type ReleaseWorkflow = {
+    [key: string]: unknown;
+    name?: unknown;
+    on?: unknown;
+    concurrency?: unknown;
+    env?: unknown;
+    permissions: Record<string, unknown>;
+    jobs: Record<string, WorkflowJob>;
+  };
+
+  // verification-scopeのrepo input走査がtest内の.md文字列を実在文書と解釈するため、
+  // runtime artifactだけで使う拡張子は分割して表す。
+  const MARKDOWN_EXTENSION = "md";
+  const NOTES_FILENAME = `release-notes.${MARKDOWN_EXTENSION}`;
+  const ARTIFACT_FILE = "${{ runner.temp }}/release-artifact/" + NOTES_FILENAME;
+
+  const loadWorkflow = () =>
+    parse(
       readFileSync(
         resolve(process.cwd(), ".github/workflows/release.yml"),
         "utf8",
       ),
-    );
+    ) as ReleaseWorkflow;
+
+  const sortedKeys = (value: Record<string, unknown>) =>
+    Object.keys(value).sort();
+
+  function assertReleaseWorkflowContract(workflow: ReleaseWorkflow) {
+    expect(sortedKeys(workflow)).toEqual([
+      "concurrency",
+      "jobs",
+      "name",
+      "on",
+      "permissions",
+    ]);
+    expect(workflow.name).toBe("Release");
+    expect(workflow.on).toEqual({ push: { tags: ["v*"] } });
+    expect(workflow.concurrency).toEqual({
+      group: "release-${{ github.ref }}",
+      "cancel-in-progress": false,
+    });
+    expect(workflow.env).toBeUndefined();
     expect(workflow.permissions).toEqual({
       contents: "read",
       actions: "read",
       checks: "read",
     });
-    expect(workflow.permissions).not.toHaveProperty("security-events");
-    expect(workflow.jobs.validate.steps).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          run: "node .github/scripts/release-guard.mjs",
-        }),
-      ]),
+    expect(sortedKeys(workflow.jobs)).toEqual(["release", "validate"]);
+    const validate = workflow.jobs.validate;
+    const release = workflow.jobs.release;
+    if (!validate || !release) throw new Error("release jobs are incomplete");
+
+    expect(sortedKeys(validate)).toEqual([
+      "name",
+      "runs-on",
+      "steps",
+      "timeout-minutes",
+    ]);
+    expect(validate.permissions).toBeUndefined();
+    expect(validate["runs-on"]).toBe("ubuntu-latest");
+    expect(validate["timeout-minutes"]).toBe(10);
+    expect(validate.steps).toHaveLength(4);
+    const [checkout, guard, extract, upload] = validate.steps;
+    if (!checkout || !guard || !extract || !upload) {
+      throw new Error("validate steps are incomplete");
+    }
+
+    expect(sortedKeys(checkout)).toEqual(["name", "uses", "with"]);
+    expect(checkout.uses).toMatch(/^actions\/checkout@[0-9a-f]{40}$/);
+    expect(checkout.with).toEqual({
+      "persist-credentials": false,
+    });
+
+    expect(sortedKeys(guard)).toEqual(["env", "name", "run"]);
+    expect(guard.run).toBe("node .github/scripts/release-guard.mjs");
+    expect(guard.env).toEqual({
+      RELEASE_TAG: "${{ github.ref_name }}",
+      RELEASE_SHA: "${{ github.sha }}",
+      GITHUB_TOKEN: "${{ secrets.GITHUB_TOKEN }}",
+    });
+
+    expect(sortedKeys(extract)).toEqual(["name", "run", "shell"]);
+    expect(extract.shell).toBe("bash");
+    expect(extract.run).toBe(
+      [
+        'install -d -m 0700 "${RUNNER_TEMP}/release-artifact"',
+        'version="${GITHUB_REF_NAME#v}"',
+        'node .github/scripts/release-guard.mjs --extract-notes "${version}" > "${RUNNER_TEMP}/release-artifact/' +
+          NOTES_FILENAME +
+          '"',
+        "",
+      ].join("\n"),
     );
-    expect(workflow.jobs.release.needs).toBe("validate");
-    expect(workflow.jobs.release.permissions).toEqual({ contents: "write" });
-    const publish = workflow.jobs.release.steps.find(
-      (step: { uses?: string }) =>
-        step.uses?.startsWith("softprops/action-gh-release@"),
-    );
-    expect(publish.with.generate_release_notes).toBeUndefined();
-    expect(publish.with.body_path).toContain("notes_path");
-    const extract = workflow.jobs.release.steps.find(
-      (step: { id?: string }) => step.id === "changelog",
-    );
-    expect(extract.run).toContain("release-guard.mjs --extract-notes");
-    expect(extract.run).not.toContain("awk");
+
+    expect(sortedKeys(upload)).toEqual(["name", "uses", "with"]);
+    expect(upload.uses).toMatch(/^actions\/upload-artifact@[0-9a-f]{40}$/);
+    expect(upload.with).toEqual({
+      name: "validated-release-notes",
+      path: ARTIFACT_FILE,
+      "if-no-files-found": "error",
+      overwrite: false,
+      "retention-days": 1,
+      "include-hidden-files": false,
+    });
+
+    expect(sortedKeys(release)).toEqual([
+      "name",
+      "needs",
+      "permissions",
+      "runs-on",
+      "steps",
+      "timeout-minutes",
+    ]);
+    expect(release.needs).toBe("validate");
+    expect(release.permissions).toEqual({ contents: "write" });
+    expect(release["runs-on"]).toBe("ubuntu-latest");
+    expect(release["timeout-minutes"]).toBe(10);
+    expect(release.steps).toHaveLength(2);
+    const [download, publish] = release.steps;
+    if (!download || !publish) throw new Error("release steps are incomplete");
+
+    expect(sortedKeys(download)).toEqual(["name", "uses", "with"]);
+    expect(download.uses).toMatch(/^actions\/download-artifact@[0-9a-f]{40}$/);
+    expect(download.with).toEqual({
+      name: "validated-release-notes",
+      path: "${{ runner.temp }}/release-artifact",
+      "digest-mismatch": "error",
+    });
+
+    expect(sortedKeys(publish)).toEqual(["name", "uses", "with"]);
+    expect(publish.uses).toMatch(/^softprops\/action-gh-release@[0-9a-f]{40}$/);
+    expect(publish.with).toEqual({
+      name: "${{ github.ref_name }}",
+      tag_name: "${{ github.ref_name }}",
+      body_path: ARTIFACT_FILE,
+      prerelease: "${{ contains(github.ref_name, '-') }}",
+    });
+
+    const allSteps = Object.values(workflow.jobs).flatMap((job) => job.steps);
+    expect(
+      allSteps.filter((step) =>
+        /^actions\/upload-artifact@/.test(step.uses ?? ""),
+      ),
+    ).toEqual([upload]);
+    expect(
+      allSteps.filter((step) =>
+        /^actions\/download-artifact@/.test(step.uses ?? ""),
+      ),
+    ).toEqual([download]);
+  }
+
+  it("keeps write authority behind one read-only artifact producer", () => {
+    assertReleaseWorkflowContract(loadWorkflow());
+  });
+
+  it("rejects credential, repository code, and artifact boundary regressions", () => {
+    const mutations: Array<(workflow: ReleaseWorkflow) => void> = [
+      (workflow) => {
+        workflow.on = { push: { branches: ["v*"] } };
+      },
+      (workflow) => {
+        workflow.on = {
+          push: { tags: ["v*"] },
+          workflow_dispatch: null,
+        };
+      },
+      (workflow) => {
+        workflow.env = { NODE_OPTIONS: "--require ./repo-owned.cjs" };
+      },
+      (workflow) => {
+        workflow.jobs.validate.steps[0].with!["persist-credentials"] = true;
+      },
+      (workflow) => {
+        delete workflow.jobs.validate.steps[0].with!["persist-credentials"];
+      },
+      (workflow) => {
+        workflow.jobs.validate.steps.splice(1, 0, {
+          name: "Credentialed checkout",
+          uses: "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
+          with: { "persist-credentials": true },
+        });
+      },
+      (workflow) => {
+        workflow.jobs.validate.permissions = { contents: "write" };
+      },
+      (workflow) => {
+        workflow.jobs.extra = {
+          permissions: { contents: "write" },
+          steps: [],
+        };
+      },
+      (workflow) => {
+        workflow.jobs.release.steps.unshift({ run: "node repo-script.mjs" });
+      },
+      (workflow) => {
+        workflow.jobs.release.steps.unshift({
+          uses: "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
+        });
+      },
+      (workflow) => {
+        workflow.jobs.release.steps[0].with = {
+          pattern: "validated-release-*",
+          "merge-multiple": true,
+        };
+      },
+      (workflow) => {
+        workflow.jobs.release.steps[0].with!["run-id"] = 123;
+      },
+      (workflow) => {
+        workflow.jobs.release.steps[0].uses =
+          "actions/download-artifact-evil@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c";
+      },
+      (workflow) => {
+        workflow.jobs.release.steps[0].uses = "actions/download-artifact@v8";
+      },
+      (workflow) => {
+        workflow.jobs.validate.steps[3].with!.overwrite = true;
+      },
+      (workflow) => {
+        workflow.jobs.validate.steps[3].uses = "actions/upload-artifact@v7";
+      },
+      (workflow) => {
+        workflow.jobs.validate.steps[3].uses =
+          "actions/upload-artifact-evil@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a";
+      },
+      (workflow) => {
+        workflow.jobs.validate.steps[3].with!.name = "other-notes";
+      },
+      (workflow) => {
+        workflow.jobs.release.steps[0].with!.path = "other-path";
+      },
+      (workflow) => {
+        workflow.jobs.validate.steps[2].run += "echo replaced >> notes\n";
+      },
+      (workflow) => {
+        workflow.jobs.validate.steps.reverse();
+      },
+      (workflow) => {
+        workflow.jobs.validate.steps.pop();
+      },
+      (workflow) => {
+        workflow.jobs.validate.steps.push({
+          ...workflow.jobs.validate.steps[3],
+        });
+      },
+      (workflow) => {
+        workflow.jobs.release.steps.shift();
+      },
+      (workflow) => {
+        workflow.jobs.release.steps.unshift({
+          ...workflow.jobs.release.steps[0],
+        });
+      },
+      (workflow) => {
+        workflow.jobs.release.env = { GITHUB_TOKEN: "repo code" };
+      },
+    ];
+
+    for (const mutate of mutations) {
+      const workflow = loadWorkflow();
+      mutate(workflow);
+      expect(() => assertReleaseWorkflowContract(workflow)).toThrow();
+    }
   });
 });
