@@ -15,8 +15,11 @@ const REQUIRED_RUNTIME_PACKAGES = ["tsx", "ws"];
 const FORBIDDEN_RUNTIME_PACKAGES = [
   "vitest",
   "@playwright/test",
+  "next",
   "playwright",
   "playwright-core",
+  "react",
+  "react-dom",
   "typescript",
 ];
 const READ_ONLY_RUNTIME_PATHS = [
