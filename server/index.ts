@@ -111,8 +111,9 @@ export function createOnlineServer(
   const opsConfiguration = readOnlineOpsConfiguration(environment);
   const opsRateLimiter = new OpsAuthRateLimiter();
   const processStartedAt = monotonicNow();
+  const wallNow = options.wallNow ?? Date.now;
   const maintenanceTimeline = new MaintenanceTimeline({
-    wallNow: options.wallNow,
+    wallNow,
     shutdownGraceMs: opsConfiguration.config.shutdownGraceMs,
   });
   let shutdownController: GracefulShutdownController | null = null;
@@ -724,7 +725,10 @@ export function createOnlineServer(
     maintenanceTimeline: () => maintenanceTimeline.status(),
     reconnectGraceMs: opsConfiguration.config.reconnectGraceMs,
     sourceRevision: opsConfiguration.config.sourceRevision,
+    deploymentId: opsConfiguration.config.deploymentId,
+    replicaId: opsConfiguration.config.replicaId,
     uptimeMs: () => Math.max(0, Math.floor(monotonicNow() - processStartedAt)),
+    observedAtMs: wallNow,
     sourceFor: (request: IncomingMessage) => connectionSource(request),
     observeStatus: observeDrainStatus,
     broadcastDrainStatus,

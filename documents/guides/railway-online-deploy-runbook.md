@@ -31,6 +31,122 @@ active room観測、maintenance drain、アプリ内告知、graceful shutdown�
 - Railwayの実効start commandがdirect Nodeであること、NodeがPID 1としてSIGTERMを一度受信すること、期限内にport/process treeが消滅することをproduction相当の検証とdeploy read-backで確認できない。現行`pnpm server:start`をsignal-safeと仮定してはならない。
 - Railwayの実効replica数、`drainingSeconds`、app shutdown総予算との大小関係をread-backできない、またはreplicaが1以外、`drainingSeconds`が`ceil(ONLINE_SHUTDOWN_GRACE_MS / 1000) + 5`未満である。
 
+## offline read-back preflight
+
+authorized operator が Railway / Vercel / authenticated ops status から取得した値は、secretを除き、次の正規化済みJSONへ手動で転記してからoffline validatorへ渡す。validator自身はRailway API、Vercel API、公開URL、ops endpointへ接続せず、設定・flag・deploy・drainを変更しない。
+
+```bash
+pnpm verify:server:rollout-preflight < /path/outside/repository/sanitized-readback.json
+```
+
+入力は次のexact schemaとする。例のID/SHA/URLは架空であり、実行時は同じ時点でread-backした値へ置き換える。入力fileはrepositoryへcommitせず、権限制限した一時領域で扱う。`Authorization`、`ONLINE_OPS_TOKEN`、cookie、変数一覧、secretを含むraw API responseは入力しない。unknown field、欠落、`unknown`、曖昧な値はすべて `hold` になる。
+
+```json
+{
+  "schemaVersion": 1,
+  "phase": "pre-enable",
+  "capturedAt": "2026-08-28T04:00:00.000Z",
+  "railwayObservedAt": "2026-08-28T04:00:00.000Z",
+  "target": {
+    "projectId": "project-fixture",
+    "serviceId": "service-fixture",
+    "environmentId": "environment-fixture",
+    "activeDeploymentId": "deployment-active-fixture",
+    "activeDeploymentStatus": "success",
+    "deploymentSet": {
+      "activeDeploymentId": "deployment-active-fixture",
+      "inProgressDeploymentIds": [],
+      "stagedChanges": false
+    }
+  },
+  "rollback": {
+    "role": "prospective-after-approved-change",
+    "deploymentId": "deployment-active-fixture",
+    "sourceProvenance": {
+      "kind": "railway-git-commit",
+      "fullRevision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    "retentionEligible": true,
+    "effectiveStartCommand": "node --import tsx server/start.ts",
+    "effectiveHealthcheckPath": "/readyz",
+    "effectiveDrainingSeconds": 30,
+    "shutdownGraceMs": 25000,
+    "onlineOpsRequired": true,
+    "maintenanceNoticesEnabled": false
+  },
+  "runtime": {
+    "replicaScope": "all-regions",
+    "regions": [
+      {
+        "regionId": "region-fixture",
+        "replicaIds": ["replica-fixture"]
+      }
+    ],
+    "effectiveStartCommand": "node --import tsx server/start.ts",
+    "effectiveHealthcheckPath": "/readyz",
+    "effectiveDrainingSeconds": 30,
+    "shutdownGraceMs": 25000
+  },
+  "source": {
+    "reviewedServerRevision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "activeDeploymentRevision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "opsStatusSourceRevision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+  },
+  "client": {
+    "reviewedRevision": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "productionRevision": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "deploymentId": "client-deployment-fixture",
+    "observedAt": "2026-08-28T04:00:00.000Z",
+    "compatibilityEvidenceUrls": [
+      "https://github.com/AutoDevJapan/FourBrosMahjong/pull/729",
+      "https://github.com/AutoDevJapan/FourBrosMahjong/pull/730"
+    ]
+  },
+  "operations": {
+    "onlineOpsRequired": true,
+    "maintenanceNoticesEnabled": false,
+    "readyzStatus": 200,
+    "drainState": "accepting",
+    "blockingDrainRooms": 0,
+    "reconnectGraceRooms": 0,
+    "opsStatusDeploymentId": "deployment-active-fixture",
+    "opsStatusReplicaId": "replica-fixture",
+    "observedAt": "2026-08-28T04:00:00.000Z",
+    "acceptingReadiness": {
+      "observedAt": "2026-08-28T04:00:00.000Z",
+      "deploymentId": "deployment-active-fixture",
+      "sourceRevision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "readyzStatus": 200
+    }
+  }
+}
+```
+
+旧 `pnpm server:start` / `/healthz` / ops optional のproductionから最初のsafe baselineを作るmigrationは、このvalidatorで`pass`させない。notice default-offのinfra-only migrationとしてauthorized operatorが別途承認し、HOLD条件・#653境界を満たして実施する必要がある。migration後にdirect Node、`/readyz`、single replica、required ops、source/identityをfresh read-backできるまで、このrunbookのdrain/notice/deployへ進まない。
+
+`pre-enable` はclient-firstのexact Production revisionを確認し、server noticeがまだdefault-off、ops required、`accepting`、`/readyz=200`である段階だけを表す。`rollback`は現在rollback可能だという自己申告ではなく、承認済みの次変更後にprospective rollbackとなる操作前current activeを表す。そのためactiveと同じdeployment ID / full source / effective start / health / draining / shutdown / ops / noticesをexactに持ち、retention対象であることをread-backする。
+
+authorized enable後、POST前は `phase: "pre-drain"` とし、notice enabled、`accepting`、`/readyz=200`を必須にする。operator承認後にPOSTし、収束後は `phase: "drained"`、notice enabled、`drained`、`/readyz=503`、`blockingDrainRooms=0`、`reconnectGraceRooms=0`へfresh evidenceを更新して再検査する。`acceptingReadiness`は同一deployment/sourceのaccepting時に`/readyz=200`だった証拠であり、pre-enable/pre-drainではcurrent snapshot、drainedではPOST前snapshotとして使う。これによりconfig invalidによる503をdrain起因と誤認しない。replicaは現在regionだけでなく全regionを列挙し、validatorが`replicaIds`をunique集計する。唯一のreplica IDとauthenticated ops statusの`replicaId`を一致させる。ops statusの`deploymentId`もactive deployment IDと一致させるが、replica IDの存在だけからreplica数1を推測してはならない。deployment setはactive ID exact、in-progress 0、staged changesなしを同時read-backし、overlap/raceがあれば`hold`とする。これらのphase名はcurrent serviceのenable/drain状態だけを示し、upcoming candidateのfull SHA、clean tree、CI、deploy承認を検査・許可しない。それらは別のmanual HOLD gateである。
+
+| phase | notices | current phase / readyz | blocker requirement | acceptingReadiness |
+|---|---|---|---|---|
+| `pre-enable` | `false` | `accepting` / 200 | 0を要求しない | currentと同時刻 |
+| `pre-drain` | `true` | `accepting` / 200 | 0を要求しない | currentと同時刻 |
+| `drained` | `true` | `drained` / 503 | blocking / reconnect graceとも0 | POST前の同一identity/source 200、currentより前 |
+
+各fieldは次のauthorityから同じ時点にread-backする。Dockerfile、`railway.json`、期待値、以前のIssue本文、手入力booleanをeffective値として転記してはならない。
+
+| evidence | authority source |
+|---|---|
+| project / service / environment、active deployment、active status、prospective rollback retention eligibility、deployment source、deployment set | Railway deployment metadataとread-only retention/全deployment情報 |
+| effective start command / healthcheck / draining、全regionとreplica IDs | Railway deploymentのeffective settings / topology read-back |
+| shutdown grace、ops required、notices enabled | 対象deploymentのeffective runtime variable read-back。tokenや変数一覧全体は保存しない |
+| drain phase / blocker counts / deploymentId / replicaId / source revision / observedAt | 同一のauthenticated `GET /ops/status` response。`acceptingReadiness`は同一deployment/sourceのaccepting時 `/readyz=200` |
+| client full revision / deployment ID / observedAt | Vercel Production exact deploymentとcanonical read-back |
+| compatibility anchors | client-first parser/bannerのreviewed [PR #729](https://github.com/AutoDevJapan/FourBrosMahjong/pull/729) とaccepting復帰のreviewed [PR #730](https://github.com/AutoDevJapan/FourBrosMahjong/pull/730) |
+
+stdoutは固定の `repoPreflight: "pass" | "hold"`、固定reason code、`authorizesDeployment: false`、`externalMutationPerformed: false`だけを返し、入力IDや値を反射しない。`pass`でも、入力元APIの真正性、read-back後の変更、maintenance承認、現在のactive room/blocker、production操作権限は証明しない。freshnessは入力timestampだけのbounded検査であり、authorized operatorによるread-only再確認と承認記録を代替しない。現行`railway.json`の`pnpm server:start`と`/healthz`をそのまま転記すれば正しく`hold`となる。
+
 ## 1. 変更前の証拠を保存する
 
 ### Source と CI
@@ -50,10 +166,10 @@ Railway Dashboard または現在利用中の Railway CLI の read-only command 
 - 既存 project / service / environment の名前と ID
 - active deployment の ID、status、作成時刻、source marker、image digest
 - `ALLOWED_ORIGINS` が許可する production frontend Origin。変数一覧全体や無関係な secret はログ・Issueへ出力しない。
-- 直前の known-good deployment の ID、source/config、`canRollback` 相当の可否
+- manual recovery evidenceとして、直前の known-good deployment の ID、source/config、現時点の`canRollback`相当の可否
 - 利用 plan の image retention 内で rollback できる期限
 
-対象 ID はこの文書へ固定しない。operator がその時点の Dashboard と read-only query の双方で既存 production target を照合する。新しい resource を作成してはならない。
+上記manual prior-rollback evidenceは、offline validatorの`rollback`とは別物である。validator側は操作前current activeが承認済み変更後のprospective rollbackとなることと、そのretention eligibilityを検査する。current activeに現在の`canRollback=true`を要求・推測しない。対象 ID はこの文書へ固定しない。operator がその時点の Dashboard と read-only query の双方で既存 production target を照合する。新しい resource を作成してはならない。
 
 ### Public baseline
 
@@ -85,12 +201,80 @@ helper は timestamp と各 status を JSON で標準出力へ返す。期待値
 3. operator、検証担当、rollback 判断者が揃っていることを再確認する。
 4. `HOLD` 条件を再評価し、承認記録へ時刻と判断者を残す。
 
-## 3. 一度だけ deploy する
+### 認証済み drain と収束確認
 
-既存 production service だけを対象にする。変数変更、scale、project link の変更、新規 resource 作成を同じ操作へ混ぜない。
+この手順はclient-first配布、default-off解除、ops required/readiness、上記offline preflightをauthorized operatorが別途承認・確認した後だけ行う。tokenをcommand line、shell history、Issue、logへ出さない。次の例では一時header fileをmode 600で作成し、終了時に削除する。
+
+```bash
+set -euo pipefail
+umask 077
+OPS_BASE_URL=https://online-backend.example
+OPS_CONNECT_TIMEOUT_SECONDS=5
+OPS_REQUEST_TIMEOUT_SECONDS=10
+node -e '
+  const url = new URL(process.argv[1]);
+  if (url.protocol !== "https:" || url.origin !== process.argv[1]) process.exit(1);
+' "$OPS_BASE_URL"
+# token入力前に、このexact originが保存済みproduction serviceと一致することを照合する。
+OPS_HEADER_FILE="$(mktemp)"
+chmod 600 "$OPS_HEADER_FILE"
+trap 'rm -f "$OPS_HEADER_FILE"' EXIT
+read -r -s -p 'Ops bearer token: ' ONLINE_OPS_TOKEN; printf '\n'
+if ! printf '%s' "$ONLINE_OPS_TOKEN" | pnpm validate:server:ops-token; then
+  unset ONLINE_OPS_TOKEN
+  exit 1
+fi
+printf 'Authorization: Bearer %s\n' "$ONLINE_OPS_TOKEN" > "$OPS_HEADER_FILE"
+unset ONLINE_OPS_TOKEN
+
+OPS_STATUS_FILE="$(mktemp)"
+chmod 600 "$OPS_STATUS_FILE"
+trap 'rm -f "$OPS_HEADER_FILE" "$OPS_STATUS_FILE"' EXIT
+OPS_STATUS_CODE="$(curl --silent --show-error \
+  --connect-timeout "$OPS_CONNECT_TIMEOUT_SECONDS" \
+  --max-time "$OPS_REQUEST_TIMEOUT_SECONDS" --header "@$OPS_HEADER_FILE" \
+  --output "$OPS_STATUS_FILE" --write-out '%{http_code}' \
+  "$OPS_BASE_URL/ops/status")"
+test "$OPS_STATUS_CODE" = 200
+```
+
+ここで一旦止める。statusのdeployment/source/replica identityを保存済みRailway read-backと照合し、この同じresponseから`pre-drain` sanitized evidenceを再構成してoffline preflightが`pass`であることをoperatorが確認する。401/5xx、identity/source drift、`hold`ならPOSTを実行しない。`pass`も操作承認ではないため、maintenance承認者が別途開始を承認した後だけ、別のblockとして次を実行する。この確認・承認がevidence freshnessの5分以内に終わらなければshellを終了してheader fileを削除し、fresh GETからやり直す。
+
+```bash
+OPS_DRAIN_CODE="$(curl --silent --show-error \
+  --connect-timeout "$OPS_CONNECT_TIMEOUT_SECONDS" \
+  --max-time "$OPS_REQUEST_TIMEOUT_SECONDS" --header "@$OPS_HEADER_FILE" \
+  --output /dev/null --write-out '%{http_code}' \
+  --request POST "$OPS_BASE_URL/ops/drain")"
+test "$OPS_DRAIN_CODE" = 200
+```
+
+同じ認証済み `GET /ops/status` を5秒間隔・最大30回（各requestはconnect 5秒 / total 10秒）だけread-only確認する。この上限が承認済みmaintenance deadlineを超える場合は、開始前に回数をさらに減らす。exactに `phase="drained"`、`aggregate.blockingDrainRooms=0`、`aggregate.reconnectGraceRooms=0` が同一responseで揃ったら`drained` evidenceへ更新し、offline preflightが再び`pass`になるまでdeployしない。各responseのdeployment/source/replica identityも保存済みread-backと一致させる。30回で収束しない、identityがdriftする、requestが失敗する場合はpollを停止する。無期限pollや自動SIGTERMへ進める実装は使わない。
+
+成功pathではDELETEを実行しない。`drained`を維持したままupcoming candidateのmanual SHA/clean tree/CI/target/承認gateを再確認し、すべて成功した場合だけ§3の承認済みtarget deploymentへ進む。
+
+#### abort path（失敗・取消時だけ）
+
+次のDELETEはpoll不収束、identity drift、candidate manual gate失敗、承認取消、またはtarget deployment中止時だけ、かつSIGTERM/target deployment開始前だけに実行する。成功した`drained` pathで実行してはならない。
+
+```bash
+OPS_RELEASE_CODE="$(curl --silent --show-error \
+  --connect-timeout "$OPS_CONNECT_TIMEOUT_SECONDS" \
+  --max-time "$OPS_REQUEST_TIMEOUT_SECONDS" --header "@$OPS_HEADER_FILE" \
+  --output /dev/null --write-out '%{http_code}' \
+  --request DELETE "$OPS_BASE_URL/ops/drain")"
+test "$OPS_RELEASE_CODE" = 200
+```
+
+解除responseと同じtimeout付き後続statusが`accepting`であることを確認し、外部告知を更新する。`terminating`は不可逆であり、SIGTERM/SIGINT後にDELETEで解除しようとしてはならない。token、Authorization header、room/player/session情報、raw variable一覧は証拠へ保存しない。`curl --location`を付けずredirectを追跡しない。3xxも上記exact 200 checkでfail-stopし、Bearerを別hostへ転送しない。一時header fileはこのbounded手順の終了/失敗時にtrapで即削除し、別作業へ持ち越さない。
+
+## 3. 承認済みphaseごとに一度だけ deploy する
+
+既存 production service だけを対象にする。初回infra-only safe baseline、notice enable変数のdeployment、drain収束後のtarget deploymentは別の承認・別のdeploymentとして扱い、同時化しない。ここでいう「一度だけ」は各承認済みphase内でcommandをretry・重複実行しないという意味である。変数変更、scale、project link の変更、新規 resource 作成を同じ操作へ混ぜない。
 
 - GitHub source integration から deploy する場合は、対象がレビュー済み `main` SHA であることを確認し、deployment ID と `RAILWAY_GIT_COMMIT_SHA` を証拠に残す。
 - CLI upload を使う場合は、上で確認した detached clean worktree から実行し、deployment message に full SHA を含める。CLI upload では Railway metadata の commit SHA が空になる場合があるため、deployment ID、image digest、full-SHA message、deploy 元の `HEAD` と clean tree を一組の証拠として残す。
+- offline preflightのsource provenanceは、GitHub source integrationの`kind="railway-git-commit"`とmetadataのfull revisionだけを受理する。CLI uploadはmetadataだけで同じprovenanceを機械検証できないためvalidatorでは明示的に`hold`となる。CLI uploadを別途承認する場合も、deployment ID、image digest、full-SHA-only message、deploy元clean HEADをmanual evidenceとして扱い、validatorの`pass`へ読み替えない。
 - deploy command を実行する直前に、CLI が示す project / service / environment が保存済み target と完全一致することを再確認する。
 - command の再実行や細かな追加 deploy をしない。失敗時は原因を確認し、下記の rollback 判断へ進む。
 
@@ -99,12 +283,16 @@ helper は timestamp と各 status を JSON で標準出力へ返す。期待値
 ## 4. deploy 後の gate
 
 1. 新 deployment が `SUCCESS` になったことを確認し、deployment ID、source SHA 証拠、image digest、開始・完了時刻を保存する。
-2. `ALLOWED_ORIGINS` が変更前の承認値と一致することを、無関係な secret を出力せず確認する。
-3. boundary probe helper を同じ引数で一度実行する。
-4. health `200`、allowed `101`、disallowed `403`、missing `403` の全一致を確認する。
-5. Railway の deploy/runtime logs に crash、継続的な5xx、予期しないrestartがないことを確認する。
-6. abuse control の接続・message・action・room試行上限は local または隔離した staging で検証する。production へ負荷・game messageを送って完了証拠を作らない。
-7. Issue コメントには full source SHA、deployment ID / image digest、allowlist確認方法、probe JSON、時刻、local/staging test結果だけを記録し、secretを含めない。
+2. upcoming candidateのmanual reviewed full SHA / clean tree / CIと、new active deployment sourceをexact一致させる。不一致ならrollback判断へ進む。
+3. Railwayのeffective start / healthcheck / draining、全region topology、stable deployment setをfresh read-backする。
+4. authenticated `GET /ops/status`からnew deploymentId / replicaId / sourceRevision / observedAt / `accepting`を確認する。Railway effective runtime variable read-backからops required / notices enabledを別に確認し、`/readyz=200`と同じ時点で突合する。ops payloadに存在しないvariable値をGETから取得したと扱わない。POSTは再実行しない。
+5. new activeをprospective rollbackとしてfresh `pre-drain` evidenceを再構成し、offline validatorが`pass`であることを確認する。失敗は成功扱いにせずrollback判断へ進む。
+6. `ALLOWED_ORIGINS` が変更前の承認値と一致することを、無関係な secret を出力せず確認する。
+7. boundary probe helper を同じ引数で一度実行する。
+8. health `200`、allowed `101`、disallowed `403`、missing `403` の全一致を確認する。
+9. Railway の deploy/runtime logs に crash、継続的な5xx、予期しないrestartがないことを確認する。
+10. abuse control の接続・message・action・room試行上限は local または隔離した staging で検証する。production へ負荷・game messageを送って完了証拠を作らない。
+11. Issue コメントには full source SHA、deployment ID / image digest、allowlist確認方法、probe JSON、時刻、local/staging test結果だけを記録し、secretを含めない。
 
 ## 5. rollback
 

@@ -12,6 +12,8 @@
     "server:dev": "tsx watch server/start.ts",
     "server:start": "tsx server/start.ts",
     "verify:server:container": "node scripts/verify-online-container-signal.mjs",
+    "verify:server:rollout-preflight": "tsx scripts/verify-online-rollout-preflight.ts",
+    "validate:server:ops-token": "tsx scripts/validate-online-ops-token.ts",
     "build": "next build",
     "start": "next start",
     "lint": "eslint .",

@@ -32,6 +32,8 @@ interface OnlineOpsConfiguration {
   readonly maintenanceNoticesEnabled: boolean;
   readonly authenticator: OpsBearerAuthenticator | null;
   readonly sourceRevision: string | null;
+  readonly deploymentId: string | null;
+  readonly replicaId: string | null;
   readonly reconnectGraceMs: number;
   readonly shutdownGraceMs: number;
   readonly socketCloseGraceMs: number;
@@ -97,6 +99,17 @@ function sourceRevisionSetting(
     return null;
   }
   return value.toLowerCase();
+}
+
+export function sanitizedRailwayIdentifier(
+  value: string | undefined,
+): string | null {
+  if (value === undefined || value === "") return null;
+  // Railway does not promise one identifier format. Keep only bounded,
+  // non-whitespace printable ASCII and sanitize all other provider values to
+  // null without changing readiness or ops-route availability.
+  if (value.length > 128 || !/^[\x21-\x7e]+$/.test(value)) return null;
+  return value;
 }
 
 function authenticatorSetting(
@@ -177,6 +190,10 @@ export function readOnlineOpsConfiguration(
     required,
     errors,
   );
+  const deploymentId = sanitizedRailwayIdentifier(
+    environment.RAILWAY_DEPLOYMENT_ID,
+  );
+  const replicaId = sanitizedRailwayIdentifier(environment.RAILWAY_REPLICA_ID);
   const valid = errors.length === 0;
   // A malformed required flag is not equivalent to an explicit opt-out: a
   // production typo such as `TRUE` must not silently make the deployment
@@ -188,6 +205,8 @@ export function readOnlineOpsConfiguration(
     maintenanceNoticesEnabled,
     authenticator,
     sourceRevision,
+    deploymentId,
+    replicaId,
     reconnectGraceMs,
     shutdownGraceMs,
     socketCloseGraceMs,
