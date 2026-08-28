@@ -9,8 +9,8 @@
   },
   "scripts": {
     "dev": "next dev --turbopack",
-    "server:dev": "tsx watch server/index.ts",
-    "server:start": "tsx server/index.ts",
+    "server:dev": "tsx watch server/start.ts",
+    "server:start": "tsx server/start.ts",
     "build": "next build",
     "start": "next start",
     "lint": "eslint .",
