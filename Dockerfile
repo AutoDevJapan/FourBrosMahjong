@@ -1,4 +1,4 @@
-FROM node:24.15.0-slim@sha256:4e6b70dd6cbfc88c8157ba19aa3d9f9cce6ba4703576d55459e45efcbc9c5f5d
+FROM node:24.15.0-slim@sha256:4e6b70dd6cbfc88c8157ba19aa3d9f9cce6ba4703576d55459e45efcbc9c5f5d AS dependencies
 
 ENV NODE_ENV=production
 
@@ -6,9 +6,19 @@ WORKDIR /app
 
 RUN corepack enable && corepack prepare pnpm@10.33.0 --activate
 
-COPY package.json pnpm-lock.yaml ./
-RUN pnpm install --prod --frozen-lockfile
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
+COPY container/online/package.json ./container/online/package.json
+RUN pnpm --filter soshina-majong-online-runtime --fail-if-no-match install --prod --frozen-lockfile \
+    && pnpm --filter soshina-majong-online-runtime --fail-if-no-match deploy --prod /runtime
 
+FROM node:24.15.0-slim@sha256:4e6b70dd6cbfc88c8157ba19aa3d9f9cce6ba4703576d55459e45efcbc9c5f5d
+
+ENV NODE_ENV=production
+
+WORKDIR /app
+
+COPY --from=dependencies /runtime/node_modules ./node_modules
+COPY --from=dependencies /runtime/package.json ./package.json
 COPY tsconfig.json ./
 COPY server ./server
 COPY src ./src
