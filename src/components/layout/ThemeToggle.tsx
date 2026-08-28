@@ -151,12 +151,24 @@ function applyPreference(preference: ThemePreference): void {
   }
 }
 
-/** 全ページ共通の storage listener から別タブのテーマをDOMへ同期する。 */
-export function syncThemeFromStorage(): void {
-  volatilePreference = null;
+/**
+ * 現在の保存値をDOMと購読者へ再同期する。
+ *
+ * mount時は、listener登録前に取り逃がしたstorage eventをこの現在値読取りで
+ * catch-upする。localStorageが使えないタブの揮発選択は、mountだけで
+ * 破棄しない。
+ */
+export function reconcileThemeFromStorage(): void {
   writeThemeToDom(readStoredPreference());
   cachedSnapshot = null;
   for (const callback of subscribers) callback();
+}
+
+/** 全ページ共通の storage listener から別タブのテーマをDOMへ同期する。 */
+export function syncThemeFromStorage(): void {
+  // 別タブの永続値が権威となるため、このタブの揮発fallbackは破棄する。
+  volatilePreference = null;
+  reconcileThemeFromStorage();
 }
 
 export function ThemeToggle() {
