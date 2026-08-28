@@ -1,4 +1,9 @@
 {
   "$schema": "https://unpkg.com/knip@6/schema.json",
-  "ignore": ["e2e/visual-screenshot.css"]
+  "ignore": ["e2e/visual-screenshot.css"],
+  "workspaces": {
+    "container/online": {
+      "ignoreDependencies": ["tsx", "ws"]
+    }
+  }
 }

@@ -1,0 +1,9 @@
+{
+  "name": "@four-bros-mahjong/online-runtime",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "tsx": "^4.23.12",
+    "ws": "^8.21.3"
+  }
+}

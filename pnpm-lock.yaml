@@ -3,6 +3,7 @@ lockfileVersion: '9.0'
 settings:
   autoInstallPeers: true
   excludeLinksFromLockfile: false
+  injectWorkspacePackages: true
 
 overrides:
   brace-expansion@^1.0.0: 1.1.18
@@ -102,6 +103,15 @@ importers:
       yaml:
         specifier: ^2.9.0
         version: 2.9.0
+
+  container/online:
+    dependencies:
+      tsx:
+        specifier: ^4.23.12
+        version: 4.23.12
+      ws:
+        specifier: ^8.21.3
+        version: 8.21.3
 
 packages:
 

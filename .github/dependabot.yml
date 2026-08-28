@@ -2,7 +2,9 @@ version: 2
 updates:
   # npm / pnpm
   - package-ecosystem: "npm"
-    directory: "/"
+    directories:
+      - "/"
+      - "/container/online"
     schedule:
       interval: "daily"
     versioning-strategy: "increase"
@@ -19,6 +21,16 @@ updates:
         dependency-type: "production"
         update-types:
           - "patch"
+
+  # Docker base image
+  - package-ecosystem: "docker"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    open-pull-requests-limit: 99
+    labels:
+      - "dependencies"
 
   # GitHub Actions
   - package-ecosystem: "github-actions"
