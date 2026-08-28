@@ -1,36 +1,71 @@
-import { expect, test } from "@playwright/test";
+import { expect, type Page, test } from "@playwright/test";
 import {
   installWebSocketStub,
   type OnlineTestWindow,
   onlineSnapshotFixture,
 } from "./helpers/onlineTest";
+import { SCREENS, type Screen } from "./screens";
 
 const navigationCases = [
-  { source: "/rules", target: "設定", href: "/settings" },
-  { source: "/settings", target: "戦績", href: "/history" },
-  { source: "/history", target: "ルール説明", href: "/rules" },
-  { source: "/online", target: "戦績", href: "/history" },
-  { source: "/game/result", target: "設定", href: "/settings" },
+  { source: "/rules", target: "設定", targetPath: "/settings" },
+  { source: "/settings", target: "戦績", targetPath: "/history" },
+  { source: "/history", target: "ルール説明", targetPath: "/rules" },
+  { source: "/online", target: "戦績", targetPath: "/history" },
+  { source: "/game/result", target: "設定", targetPath: "/settings" },
 ] as const;
 
+function screenForPath(path: string): Screen {
+  const screen = SCREENS.find((candidate) => candidate.path === path);
+  if (!screen) throw new Error(`内部画面インベントリに未登録です: ${path}`);
+  return screen;
+}
+
+/** SSRの殻だけでなく、画面固有のclient islandまで操作可能になったことを待つ。 */
+async function waitForScreenReady(page: Page, screen: Screen): Promise<void> {
+  await expect(
+    page.getByRole("heading", { level: 1, name: screen.heading }),
+  ).toBeVisible();
+  if (screen.clientReady) {
+    await expect(screen.clientReady(page)).toBeAttached();
+  }
+}
+
+async function waitForScreenMenuReady(page: Page) {
+  const navigation = page.getByRole("navigation", { name: "画面メニュー" });
+  await expect(navigation).toHaveAttribute("data-navigation-hydrated", "true");
+  return navigation;
+}
+
+async function openScreenMenu(page: Page) {
+  const navigation = await waitForScreenMenuReady(page);
+  const disclosure = navigation.locator("details");
+  await expect(disclosure).toBeVisible();
+  await expect(disclosure).not.toHaveAttribute("open", "");
+  await disclosure.locator("summary").click();
+  await expect(disclosure).toHaveAttribute("open", "");
+  return navigation;
+}
+
 test.describe("内部画面の共通ナビゲーション (#614)", () => {
-  for (const { source, target, href } of navigationCases) {
+  for (const { source, target, targetPath } of navigationCases) {
     test(`${source} から ${target} へ2操作以内で移動できる`, async ({
       page,
     }) => {
       await page.goto(source);
+      await waitForScreenReady(page, screenForPath(source));
 
-      const navigation = page.getByRole("navigation", { name: "画面メニュー" });
-      await expect(navigation).toBeVisible();
-      await navigation.getByText("他の画面へ", { exact: true }).click();
+      const navigation = await openScreenMenu(page);
 
       const targetLink = navigation.getByRole("link", {
         name: new RegExp(target),
       });
       await expect(targetLink).toBeVisible();
-      await expect(targetLink).toHaveAttribute("href", href);
-      await targetLink.click();
-      await expect(page).toHaveURL(new RegExp(`${href}$`));
+      await expect(targetLink).toHaveAttribute("href", targetPath);
+      await Promise.all([
+        page.waitForURL((url) => url.pathname === targetPath),
+        targetLink.click(),
+      ]);
+      await waitForScreenReady(page, screenForPath(targetPath));
     });
   }
 
@@ -39,9 +74,9 @@ test.describe("内部画面の共通ナビゲーション (#614)", () => {
   }) => {
     await page.setViewportSize({ width: 320, height: 800 });
     await page.goto("/rules");
+    await waitForScreenReady(page, screenForPath("/rules"));
 
-    const navigation = page.getByRole("navigation", { name: "画面メニュー" });
-    await navigation.getByText("他の画面へ", { exact: true }).click();
+    const navigation = await openScreenMenu(page);
     const links = navigation.getByRole("link");
     await expect(links).toHaveCount(4);
 
@@ -65,15 +100,17 @@ test.describe("内部画面の共通ナビゲーション (#614)", () => {
     page,
   }) => {
     await page.goto("/settings");
+    await waitForScreenReady(page, screenForPath("/settings"));
+    const navigation = await waitForScreenMenuReady(page);
 
     await page.keyboard.press("Tab");
     await expect(
       page.getByRole("link", { name: "ロビーへ戻る" }),
     ).toBeFocused();
     await page.keyboard.press("Tab");
-    const navigation = page.getByRole("navigation", { name: "画面メニュー" });
     await expect(navigation.locator("summary")).toBeFocused();
     await page.keyboard.press("Enter");
+    await expect(navigation.locator("details")).toHaveAttribute("open", "");
     await page.keyboard.press("Tab");
     await expect(
       navigation.getByRole("link", { name: /対局を開始/ }),

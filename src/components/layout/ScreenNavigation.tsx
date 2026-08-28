@@ -1,4 +1,7 @@
+"use client";
+
 import Link from "next/link";
+import { useEffect, useRef } from "react";
 
 type ScreenDestination = {
   href: string;
@@ -52,14 +55,22 @@ export default function ScreenNavigation({
   currentPath,
   showGameLink = true,
 }: ScreenNavigationProps) {
+  const navigationRef = useRef<HTMLElement>(null);
   const destinations = SCREEN_DESTINATIONS.filter(
     (destination) =>
       destination.href !== currentPath &&
       (showGameLink || destination.href !== "/game"),
   );
 
+  useEffect(() => {
+    const navigation = navigationRef.current;
+    if (!navigation) return;
+    navigation.setAttribute("data-navigation-hydrated", "true");
+    return () => navigation.removeAttribute("data-navigation-hydrated");
+  }, []);
+
   return (
-    <nav aria-label="画面メニュー">
+    <nav ref={navigationRef} aria-label="画面メニュー">
       <details className="rounded-lg border border-control-border">
         <summary className="flex min-h-11 cursor-pointer list-none items-center justify-between gap-3 rounded-lg px-3 py-2 text-sm font-medium hover:bg-foreground/5 focus-visible:rounded-lg [&::-webkit-details-marker]:hidden">
           <span>他の画面へ</span>
