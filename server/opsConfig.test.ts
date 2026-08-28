@@ -1,3 +1,4 @@
+import { spawnSync } from "node:child_process";
 import { describe, expect, it } from "vitest";
 import { ONLINE_DRAIN_RECONNECT_GRACE_MS } from "./maintenanceLimits";
 import {
@@ -38,6 +39,8 @@ describe("online ops configuration", () => {
         maintenanceNoticesEnabled: false,
         authenticator: null,
         sourceRevision: null,
+        deploymentId: null,
+        replicaId: null,
         reconnectGraceMs: ONLINE_DRAIN_RECONNECT_GRACE_DEFAULT_MS,
         shutdownGraceMs: ONLINE_SHUTDOWN_GRACE_DEFAULT_MS,
         socketCloseGraceMs: ONLINE_SOCKET_CLOSE_GRACE_DEFAULT_MS,
@@ -113,6 +116,37 @@ describe("online ops configuration", () => {
       });
       expect(status.errors).toContain("invalid-source-revision");
       expect(status.config.sourceRevision).toBeNull();
+    }
+  });
+
+  it("sanitizes optional Railway process identity without changing readiness", () => {
+    const valid = readOnlineOpsConfiguration({
+      RAILWAY_DEPLOYMENT_ID: "deployment:fixture/1",
+      RAILWAY_REPLICA_ID: "replica-fixture_1",
+    });
+    expect(valid.config.deploymentId).toBe("deployment:fixture/1");
+    expect(valid.config.replicaId).toBe("replica-fixture_1");
+    expect(valid.valid).toBe(true);
+    expect(valid.readinessBlocked).toBe(false);
+
+    for (const malformed of [
+      "has whitespace",
+      "contains\ncontrol",
+      "x".repeat(129),
+    ]) {
+      const status = readOnlineOpsConfiguration({
+        ONLINE_OPS_REQUIRED: "true",
+        ONLINE_OPS_TOKEN: VALID_TOKEN,
+        ONLINE_SOURCE_REVISION: REVISION_40,
+        RAILWAY_DEPLOYMENT_ID: malformed,
+        RAILWAY_REPLICA_ID: malformed,
+      });
+      expect(status.config.deploymentId).toBeNull();
+      expect(status.config.replicaId).toBeNull();
+      expect(status.valid).toBe(true);
+      expect(status.opsRoutesAvailable).toBe(true);
+      expect(status.readinessBlocked).toBe(false);
+      expect(JSON.stringify(status)).not.toContain(malformed);
     }
   });
 
@@ -210,6 +244,25 @@ describe("online ops configuration", () => {
     expect(status.config.authenticator?.verify(`Bearer ${VALID_TOKEN}`)).toBe(
       true,
     );
+  });
+
+  it("validates operator token stdin without reflecting it", () => {
+    for (const [token, expectedStatus] of [
+      [VALID_TOKEN, 0],
+      ["short", 1],
+      [`${"A".repeat(31)}\n`, 1],
+      ["A".repeat(1_025), 1],
+    ] as const) {
+      const result = spawnSync(
+        process.execPath,
+        ["--import", "tsx", "scripts/validate-online-ops-token.ts"],
+        { cwd: process.cwd(), encoding: "utf8", input: token },
+      );
+      expect(result.status).toBe(expectedStatus);
+      expect(result.stdout).toBe("");
+      expect(result.stderr).toBe("");
+      expect(`${result.stdout}${result.stderr}`).not.toContain(token);
+    }
   });
 
   it("reports optional malformed settings without blocking public readiness", () => {

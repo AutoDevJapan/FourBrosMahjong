@@ -1,7 +1,10 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import type { DrainControllerStatus, DrainTransition } from "./drainController";
 import type { MaintenanceBroadcastResult } from "./maintenanceProtocol";
-import type { MaintenanceTimelineStatus } from "./maintenanceTimeline";
+import {
+  type MaintenanceTimelineStatus,
+  maintenanceIsoTimestamp,
+} from "./maintenanceTimeline";
 import type { OpsBearerAuthenticator } from "./opsAuth";
 import type { OpsAuthRateLimiter } from "./opsRateLimit";
 
@@ -21,7 +24,11 @@ export interface OpsHttpDependencies {
   readonly maintenanceTimeline: () => MaintenanceTimelineStatus;
   readonly reconnectGraceMs: number;
   readonly sourceRevision: string | null;
+  readonly deploymentId: string | null;
+  readonly replicaId: string | null;
   readonly uptimeMs: () => number;
+  /** Server-owned wall clock sampled and canonicalized at the HTTP boundary. */
+  readonly observedAtMs: () => number;
   readonly sourceFor: (request: IncomingMessage) => string;
   /** Reads state through the server's transition-observing boundary. */
   readonly observeStatus: () => DrainControllerStatus;
@@ -95,6 +102,7 @@ function statusPayload(
   dependencies: OpsHttpDependencies,
   status: DrainControllerStatus,
   sampledUptimeMs = dependencies.uptimeMs(),
+  sampledObservedAt = maintenanceIsoTimestamp(dependencies.observedAtMs()),
 ): Record<string, unknown> {
   if (!Number.isSafeInteger(sampledUptimeMs) || sampledUptimeMs < 0) {
     throw new RangeError("ops uptime must be a non-negative safe integer");
@@ -107,6 +115,9 @@ function statusPayload(
     ...dependencies.maintenanceTimeline(),
     reconnectGraceMs: dependencies.reconnectGraceMs,
     sourceRevision: dependencies.sourceRevision,
+    deploymentId: dependencies.deploymentId,
+    replicaId: dependencies.replicaId,
+    observedAt: sampledObservedAt,
     uptimeMs: sampledUptimeMs,
     aggregate: status.aggregate,
   };
@@ -202,6 +213,9 @@ export function handleOpsHttpRequest(
     if (request.method === "POST") {
       // Validate all payload providers before the at-most-once transition.
       const sampledUptimeMs = dependencies.uptimeMs();
+      const sampledObservedAt = maintenanceIsoTimestamp(
+        dependencies.observedAtMs(),
+      );
       if (!Number.isSafeInteger(sampledUptimeMs) || sampledUptimeMs < 0) {
         throw new RangeError("ops uptime must be a non-negative safe integer");
       }
@@ -210,7 +224,12 @@ export function handleOpsHttpRequest(
         ? dependencies.broadcastDrainStatus(transition.status)
         : null;
       writeOpsJson(response, 200, {
-        ...statusPayload(dependencies, transition.status, sampledUptimeMs),
+        ...statusPayload(
+          dependencies,
+          transition.status,
+          sampledUptimeMs,
+          sampledObservedAt,
+        ),
         changed: transition.changed,
         broadcast,
       });
@@ -221,6 +240,9 @@ export function handleOpsHttpRequest(
     // status first could publish drained at the grace boundary immediately
     // before an operator-requested accepting notice.
     const sampledUptimeMs = dependencies.uptimeMs();
+    const sampledObservedAt = maintenanceIsoTimestamp(
+      dependencies.observedAtMs(),
+    );
     if (!Number.isSafeInteger(sampledUptimeMs) || sampledUptimeMs < 0) {
       throw new RangeError("ops uptime must be a non-negative safe integer");
     }
@@ -239,7 +261,12 @@ export function handleOpsHttpRequest(
     }
     const broadcast = dependencies.broadcastAccepting();
     writeOpsJson(response, 200, {
-      ...statusPayload(dependencies, transition.status, sampledUptimeMs),
+      ...statusPayload(
+        dependencies,
+        transition.status,
+        sampledUptimeMs,
+        sampledObservedAt,
+      ),
       changed: true,
       broadcast,
     });

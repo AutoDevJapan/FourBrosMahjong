@@ -10,7 +10,7 @@ export interface MaintenanceTimelineOptions {
   readonly shutdownGraceMs: number;
 }
 
-function isoTimestamp(milliseconds: number): string {
+export function maintenanceIsoTimestamp(milliseconds: number): string {
   if (!Number.isFinite(milliseconds) || milliseconds < 0) {
     throw new RangeError(
       "maintenance wall clock must be finite and non-negative",
@@ -54,7 +54,7 @@ export class MaintenanceTimeline {
     if (this.drainStartedAt !== null) return transition();
     // Pre-sample before the at-most-once transition so an invalid display
     // clock cannot commit drain while returning an error to the operator.
-    const startedAt = isoTimestamp(this.wallNow());
+    const startedAt = maintenanceIsoTimestamp(this.wallNow());
     const result = transition();
     if (result.changed) {
       this.drainStartedAt ??= startedAt;
@@ -76,8 +76,8 @@ export class MaintenanceTimeline {
   beginTermination(deadline: Date | null): void {
     if (deadline === null || this.deadline !== null) return;
     const deadlineMs = deadline.getTime();
-    const safeDeadline = isoTimestamp(deadlineMs);
-    this.drainStartedAt ??= isoTimestamp(
+    const safeDeadline = maintenanceIsoTimestamp(deadlineMs);
+    this.drainStartedAt ??= maintenanceIsoTimestamp(
       Math.max(0, deadlineMs - this.shutdownGraceMs),
     );
     this.deadline = safeDeadline;

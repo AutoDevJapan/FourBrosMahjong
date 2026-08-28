@@ -131,7 +131,10 @@ function dependencies(
     maintenanceTimeline: () => ({ drainStartedAt: null, deadline: null }),
     reconnectGraceMs: 60_000,
     sourceRevision: "a".repeat(40),
+    deploymentId: "deployment-fixture",
+    replicaId: "replica-fixture",
     uptimeMs: () => 1_234,
+    observedAtMs: () => Date.parse("2026-08-28T04:00:00.000Z"),
     sourceFor: () => "test-source",
     observeStatus: vi.fn(() => drainController.status()),
     broadcastDrainStatus: vi.fn(() => ({ sent: 2, skipped: 0, failed: 0 })),
@@ -166,6 +169,27 @@ function invoke(
 }
 
 describe("handleOpsHttpRequest", () => {
+  it("returns only sanitized process identity in authenticated status", () => {
+    const result = invoke(ONLINE_OPS_STATUS_PATH, "GET", dependencies());
+    expect(result.response.state.status).toBe(200);
+    expect(JSON.parse(result.response.state.body)).toMatchObject({
+      sourceRevision: "a".repeat(40),
+      deploymentId: "deployment-fixture",
+      replicaId: "replica-fixture",
+      observedAt: "2026-08-28T04:00:00.000Z",
+    });
+
+    const absent = invoke(
+      ONLINE_OPS_STATUS_PATH,
+      "GET",
+      dependencies({ deploymentId: null, replicaId: null }),
+    );
+    expect(JSON.parse(absent.response.state.body)).toMatchObject({
+      deploymentId: null,
+      replicaId: null,
+    });
+  });
+
   it("leaves public paths alone and fails closed for unknown ops paths", () => {
     const deps = dependencies();
     expect(invoke("/healthz", "GET", deps).handled).toBe(false);
@@ -392,5 +416,42 @@ describe("handleOpsHttpRequest", () => {
       invoke(ONLINE_OPS_DRAIN_PATH, "DELETE", release).response.state.status,
     ).toBe(409);
     expect(release.broadcastAccepting).toHaveBeenCalledOnce();
+  });
+
+  it("preflights the canonical wall observation before drain mutations", () => {
+    const startController = controller();
+    const startFault = dependencies({
+      drainController: startController,
+      observedAtMs: () => Number.NaN,
+    });
+    const start = invoke(ONLINE_OPS_DRAIN_PATH, "POST", startFault);
+    expect(start.response.state.status).toBe(500);
+    expect(start.response.state.body).not.toContain("NaN");
+    expect(startController.status().phase).toBe("accepting");
+    expect(startFault.broadcastDrainStatus).not.toHaveBeenCalled();
+
+    const releaseController = controller();
+    releaseController.startDrain();
+    const releaseFault = dependencies({
+      drainController: releaseController,
+      observedAtMs: () => {
+        throw new Error("private wall provider detail");
+      },
+    });
+    const release = invoke(ONLINE_OPS_DRAIN_PATH, "DELETE", releaseFault);
+    expect(release.response.state.status).toBe(500);
+    expect(release.response.state.body).not.toContain("private wall");
+    expect(releaseController.status().phase).toBe("draining");
+    expect(releaseFault.broadcastAccepting).not.toHaveBeenCalled();
+
+    const getFault = invoke(
+      ONLINE_OPS_STATUS_PATH,
+      "GET",
+      dependencies({ observedAtMs: () => Number.POSITIVE_INFINITY }),
+    );
+    expect(getFault.response.state.status).toBe(500);
+    expect(getFault.response.state.body).toBe(
+      JSON.stringify({ ok: false, error: "internal_error" }),
+    );
   });
 });

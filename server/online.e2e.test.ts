@@ -1922,12 +1922,15 @@ describe("online maintenance ops integration (#726/#728)", () => {
     "keeps ops default-off and required invalid configuration unready",
     async () => {
       let defaultOff: LocalOnlineServer | undefined;
+      let invalidIdentity: LocalOnlineServer | undefined;
       let optionalInvalid: LocalOnlineServer | undefined;
       let invalidRequired: LocalOnlineServer | undefined;
       try {
         defaultOff = await startLocalOnlineServer(TEST_ORIGIN, {
           ONLINE_OPS_TOKEN: opsToken,
           ONLINE_SOURCE_REVISION: "b".repeat(40),
+          RAILWAY_DEPLOYMENT_ID: "deployment/fixture:1",
+          RAILWAY_REPLICA_ID: "replica/fixture:1",
         });
         const disabled = await fetch(`${defaultOff.url}/ops/drain`, {
           method: "POST",
@@ -1945,6 +1948,21 @@ describe("online maintenance ops integration (#726/#728)", () => {
           },
         );
         expect(singleAuthorization).toContain("HTTP/1.1 200 OK");
+        const identityStatusResponse = await fetch(
+          `${defaultOff.url}/ops/status`,
+          { headers: opsHeaders },
+        );
+        expect(identityStatusResponse.status).toBe(200);
+        const identityStatus = (await identityStatusResponse.json()) as Record<
+          string,
+          unknown
+        >;
+        expect(identityStatus).toMatchObject({
+          deploymentId: "deployment/fixture:1",
+          replicaId: "replica/fixture:1",
+          sourceRevision: "b".repeat(40),
+          observedAt: expect.stringMatching(/Z$/),
+        });
         const duplicateAuthorization = await requestRawHttp(
           defaultOff.url,
           "/ops/status",
@@ -1960,6 +1978,25 @@ describe("online maintenance ops integration (#726/#728)", () => {
         expect(duplicateAuthorization.toLowerCase()).not.toContain(
           "access-control-allow-origin",
         );
+
+        const invalidIdentitySentinel = "invalid identity sentinel";
+        invalidIdentity = await startLocalOnlineServer(TEST_ORIGIN, {
+          ONLINE_OPS_TOKEN: opsToken,
+          ONLINE_SOURCE_REVISION: "b".repeat(40),
+          RAILWAY_DEPLOYMENT_ID: invalidIdentitySentinel,
+          RAILWAY_REPLICA_ID: invalidIdentitySentinel,
+        });
+        const sanitizedIdentity = await fetch(
+          `${invalidIdentity.url}/ops/status`,
+          { headers: opsHeaders },
+        );
+        expect(sanitizedIdentity.status).toBe(200);
+        const sanitizedBody = await sanitizedIdentity.text();
+        expect(JSON.parse(sanitizedBody)).toMatchObject({
+          deploymentId: null,
+          replicaId: null,
+        });
+        expect(sanitizedBody).not.toContain(invalidIdentitySentinel);
 
         optionalInvalid = await startLocalOnlineServer(TEST_ORIGIN, {
           ONLINE_OPS_TOKEN: "invalid",
@@ -1989,6 +2026,8 @@ describe("online maintenance ops integration (#726/#728)", () => {
         ).resolves.toMatchObject({ status: 503 });
       } finally {
         if (defaultOff !== undefined) await stopLocalOnlineServer(defaultOff);
+        if (invalidIdentity !== undefined)
+          await stopLocalOnlineServer(invalidIdentity);
         if (optionalInvalid !== undefined)
           await stopLocalOnlineServer(optionalInvalid);
         if (invalidRequired !== undefined)
