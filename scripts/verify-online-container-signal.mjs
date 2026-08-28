@@ -30,7 +30,15 @@ const ABSENT_RUNTIME_PATHS = [
   "/app/e2e",
   "/app/docs",
   "/app/vitest.config.ts",
+  "/app/src/test",
+  "/app/server/index.lifecycle.test.ts",
+  "/app/src/domain/hand/__oracle__",
+  "/app/src/domain/game/__testing__",
+  "/app/src/components/game/finishedGameFixture.ts",
 ];
+const RUNTIME_SOURCE_SCAN_ROOTS = ["/app/server", "/app/src"];
+const MAX_RUNTIME_SOURCE_ENTRIES = 10_000;
+const MAX_RUNTIME_SOURCE_DEPTH = 32;
 
 function usage() {
   throw new Error(
@@ -230,6 +238,9 @@ const requiredPackages = ${JSON.stringify(REQUIRED_RUNTIME_PACKAGES)};
 const forbiddenPackages = ${JSON.stringify(FORBIDDEN_RUNTIME_PACKAGES)};
 const readOnlyPaths = ${JSON.stringify(READ_ONLY_RUNTIME_PATHS)};
 const absentPaths = ${JSON.stringify(ABSENT_RUNTIME_PATHS)};
+const sourceScanRoots = ${JSON.stringify(RUNTIME_SOURCE_SCAN_ROOTS)};
+const maxSourceEntries = ${MAX_RUNTIME_SOURCE_ENTRIES};
+const maxSourceDepth = ${MAX_RUNTIME_SOURCE_DEPTH};
 const pnpmStoreEntries = await readdir("/app/node_modules/.pnpm");
 
 async function pathExists(path) {
@@ -251,6 +262,45 @@ function pnpmStoreContains(packageName) {
     ? packageName.replace("/", "+") + "@"
     : packageName + "@";
   return pnpmStoreEntries.some((entry) => entry.startsWith(prefix));
+}
+
+function isTestOnlySource(path, entry) {
+  return (
+    entry.isSymbolicLink() ||
+    (entry.isDirectory() &&
+      (entry.name === "__oracle__" || entry.name === "__testing__")) ||
+    (entry.isFile() &&
+      (entry.name.includes(".test.") ||
+        entry.name.includes(".spec.") ||
+        path.endsWith("/finishedGameFixture.ts")))
+  );
+}
+
+async function findUnexpectedSourceEntries(roots) {
+  const pending = roots.map((path) => ({ depth: 0, path }));
+  const unexpected = [];
+  let visited = 0;
+  while (pending.length > 0) {
+    const current = pending.pop();
+    const entries = await readdir(current.path, { withFileTypes: true });
+    for (const entry of entries) {
+      visited += 1;
+      if (visited > maxSourceEntries) {
+        throw new Error("runtime source scan exceeded entry limit");
+      }
+      const path = join(current.path, entry.name);
+      if (isTestOnlySource(path, entry)) {
+        unexpected.push(path);
+        continue;
+      }
+      if (!entry.isDirectory()) continue;
+      if (current.depth >= maxSourceDepth) {
+        throw new Error("runtime source scan exceeded depth limit");
+      }
+      pending.push({ depth: current.depth + 1, path });
+    }
+  }
+  return unexpected.sort();
 }
 
 const status = await readFile("/proc/1/status", "utf8");
@@ -308,6 +358,9 @@ const unexpectedRuntimePaths = Object.fromEntries(
     absentPaths.map(async (path) => [path, await pathExists(path)]),
   ),
 );
+const unexpectedRuntimeSourceEntries = await findUnexpectedSourceEntries(
+  sourceScanRoots,
+);
 console.log(JSON.stringify({
   pid1Uids: processIds("Uid"),
   pid1Gids: processIds("Gid"),
@@ -315,6 +368,7 @@ console.log(JSON.stringify({
   forbidden,
   readOnlyRuntimePaths,
   unexpectedRuntimePaths,
+  unexpectedRuntimeSourceEntries,
 }));
 `;
 }
@@ -375,6 +429,13 @@ async function inspectRuntimeSecurity(name) {
       `unnecessary runtime path is present: ${path}`,
     );
   }
+  invariant(
+    Array.isArray(details.unexpectedRuntimeSourceEntries) &&
+      details.unexpectedRuntimeSourceEntries.length === 0,
+    `test-only runtime source is present: ${JSON.stringify(
+      details.unexpectedRuntimeSourceEntries,
+    )}`,
+  );
   return Object.freeze(details);
 }
 
