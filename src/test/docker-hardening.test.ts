@@ -4,7 +4,7 @@ import { describe, expect, it } from "vitest";
 import { parse } from "yaml";
 
 const REPOSITORY_ROOT = process.cwd();
-const ONLINE_RUNTIME_PACKAGE_NAME = "soshina-majong-online-runtime";
+const ONLINE_RUNTIME_PACKAGE_NAME = "@four-bros-mahjong/online-runtime";
 const PINNED_NODE_IMAGE =
   /^node:\d+\.\d+\.\d+-[a-z0-9][a-z0-9._-]*@sha256:[a-f0-9]{64}$/;
 const REQUIRED_DOCKERIGNORE_PATTERNS = [
@@ -45,6 +45,8 @@ interface PackageManifest {
   readonly devDependencies?: unknown;
   readonly optionalDependencies?: unknown;
   readonly peerDependencies?: unknown;
+  readonly packageManager?: unknown;
+  readonly [key: string]: unknown;
 }
 
 interface DependabotUpdate {
@@ -92,7 +94,7 @@ function dockerInstructions(source: string): readonly DockerInstruction[] {
 
 function fromImage(value: string): string | null {
   const tokens = value.split(/\s+/);
-  while (tokens[0]?.startsWith("--")) tokens.shift();
+  if (tokens[0]?.startsWith("--")) return null;
   const image = tokens.shift();
   if (!image) return null;
   if (tokens.length === 0) return image;
@@ -125,6 +127,15 @@ function copyArguments(value: string): readonly string[] | null {
   }
 }
 
+function copyFlags(value: string): readonly string[] {
+  const flags: string[] = [];
+  for (const token of value.split(/\s+/)) {
+    if (!token.startsWith("--")) break;
+    flags.push(token);
+  }
+  return flags;
+}
+
 function copyFromStage(value: string): string | null {
   return value.match(/(?:^|\s)--from=([^\s]+)/)?.[1] ?? null;
 }
@@ -155,33 +166,56 @@ function commandSegments(stage: DockerStage): readonly string[] {
     );
 }
 
+function pnpmCommandTokens(command: string): readonly string[] | null {
+  const tokens = command.split(/\s+/).filter(Boolean);
+  return tokens[0] === "pnpm" ? tokens : null;
+}
+
+function isExactPnpmCommand(
+  command: string,
+  packageName: string,
+  operation: "install" | "deploy",
+): boolean {
+  const tokens = pnpmCommandTokens(command);
+  if (!tokens) return false;
+  const normalized = tokens.flatMap((token) =>
+    token.startsWith("--filter=") ? ["--filter", token.slice(9)] : [token],
+  );
+  const suffix =
+    operation === "install"
+      ? ["install", "--prod", "--frozen-lockfile"]
+      : ["deploy", "--prod", "/runtime"];
+  return (
+    JSON.stringify(normalized) ===
+    JSON.stringify([
+      "pnpm",
+      "--filter",
+      packageName,
+      "--fail-if-no-match",
+      ...suffix,
+    ])
+  );
+}
+
 function hasFlag(command: string, flag: string): boolean {
   return command.split(/\s+/).includes(flag);
 }
 
-function targetsPackage(command: string, packageName: string): boolean {
-  const tokens = command.split(/\s+/);
-  return tokens.some(
-    (token, index) =>
-      token === `--filter=${packageName}` ||
-      ((token === "--filter" || token === "-F") &&
-        tokens[index + 1] === packageName),
-  );
-}
-
 function sameCopy(
-  instruction: DockerInstruction,
+  instruction: DockerInstruction | undefined,
   expected: readonly string[],
 ): boolean {
   return (
+    instruction !== undefined &&
     JSON.stringify(copyArguments(instruction.value)) ===
-    JSON.stringify(expected)
+      JSON.stringify(expected)
   );
 }
 
 function dockerfileViolations(
   source: string,
   runtimePackageName = ONLINE_RUNTIME_PACKAGE_NAME,
+  packageManager = "pnpm@10.33.0",
 ): readonly string[] {
   const instructions = dockerInstructions(source);
   const stages = dockerStages(instructions);
@@ -196,6 +230,16 @@ function dockerfileViolations(
   );
   for (const instruction of copyInstructions) {
     const args = copyArguments(instruction.value);
+    const flags = copyFlags(instruction.value);
+    const from = copyFromStage(instruction.value);
+    if (
+      (from === null && flags.length !== 0) ||
+      (from !== null && (flags.length !== 1 || flags[0] !== `--from=${from}`))
+    ) {
+      violations.push(
+        "Dockerfile COPY flags must be absent except for one exact --from",
+      );
+    }
     if (
       args === null ||
       args.slice(0, -1).some((copySource) => {
@@ -336,13 +380,8 @@ function dockerfileViolations(
   }
   const deployCommands = deployStage ? commandSegments(deployStage) : [];
   if (
-    !deployCommands.some(
-      (command) =>
-        /\bpnpm\b.*\binstall\b/.test(command) &&
-        targetsPackage(command, runtimePackageName) &&
-        hasFlag(command, "--fail-if-no-match") &&
-        hasFlag(command, "--prod") &&
-        hasFlag(command, "--frozen-lockfile"),
+    !deployCommands.some((command) =>
+      isExactPnpmCommand(command, runtimePackageName, "install"),
     )
   ) {
     violations.push(
@@ -350,13 +389,8 @@ function dockerfileViolations(
     );
   }
   if (
-    !deployCommands.some(
-      (command) =>
-        /\bpnpm\b.*\bdeploy\b/.test(command) &&
-        targetsPackage(command, runtimePackageName) &&
-        hasFlag(command, "--fail-if-no-match") &&
-        hasFlag(command, "--prod") &&
-        command.split(/\s+/).includes("/runtime"),
+    !deployCommands.some((command) =>
+      isExactPnpmCommand(command, runtimePackageName, "deploy"),
     )
   ) {
     violations.push(
@@ -364,13 +398,112 @@ function dockerfileViolations(
     );
   }
   if (
-    deployCommands.some(
-      (command) =>
-        /\bpnpm\b.*\bdeploy\b/.test(command) && hasFlag(command, "--legacy"),
-    )
+    deployCommands.some((command) => {
+      const tokens = pnpmCommandTokens(command);
+      return (
+        tokens !== null &&
+        tokens.includes("deploy") &&
+        hasFlag(command, "--legacy")
+      );
+    })
   ) {
     violations.push(
       "the consumed deploy stage must use modern workspace deploy",
+    );
+  }
+
+  const expectedDeployInstructionNames = [
+    "ENV",
+    "WORKDIR",
+    "RUN",
+    "COPY",
+    "COPY",
+    "RUN",
+  ];
+  const deployCopies =
+    deployStage?.instructions.filter(
+      (instruction) => instruction.name === "COPY",
+    ) ?? [];
+  if (
+    stages.length !== 2 ||
+    deployStage?.alias === null ||
+    JSON.stringify(deployStage.instructions.map(({ name }) => name)) !==
+      JSON.stringify(expectedDeployInstructionNames) ||
+    deployStage.instructions[0]?.value !== "NODE_ENV=production" ||
+    deployStage.instructions[1]?.value !== "/app" ||
+    deployCommands.length !== 4 ||
+    deployCommands[0] !== "corepack enable" ||
+    !/^pnpm@\d+\.\d+\.\d+$/.test(packageManager) ||
+    deployCommands[1] !== `corepack prepare ${packageManager} --activate` ||
+    !isExactPnpmCommand(
+      deployCommands[2] ?? "",
+      runtimePackageName,
+      "install",
+    ) ||
+    !isExactPnpmCommand(
+      deployCommands[3] ?? "",
+      runtimePackageName,
+      "deploy",
+    ) ||
+    !sameCopy(deployCopies[0] as DockerInstruction, [
+      "package.json",
+      "pnpm-lock.yaml",
+      "pnpm-workspace.yaml",
+      "./",
+    ]) ||
+    !sameCopy(deployCopies[1] as DockerInstruction, [
+      "container/online/package.json",
+      "./container/online/package.json",
+    ])
+  ) {
+    violations.push(
+      "the dependencies stage must contain only the ordered runtime install and deploy contract",
+    );
+  }
+
+  const expectedFinalInstructionNames = [
+    "ENV",
+    "WORKDIR",
+    "COPY",
+    "COPY",
+    "COPY",
+    "COPY",
+    "COPY",
+    "USER",
+    "EXPOSE",
+    "CMD",
+  ];
+  if (
+    finalStage.alias !== null ||
+    JSON.stringify(finalStage.instructions.map(({ name }) => name)) !==
+      JSON.stringify(expectedFinalInstructionNames) ||
+    finalStage.instructions[0]?.value !== "NODE_ENV=production" ||
+    finalStage.instructions[1]?.value !== "/app" ||
+    !sameCopy(finalStage.instructions[2] as DockerInstruction, [
+      "/runtime/node_modules",
+      "./node_modules",
+    ]) ||
+    !sameCopy(finalStage.instructions[3] as DockerInstruction, [
+      "/runtime/package.json",
+      "./package.json",
+    ]) ||
+    !sameCopy(finalStage.instructions[4] as DockerInstruction, [
+      "tsconfig.json",
+      "./",
+    ]) ||
+    !sameCopy(finalStage.instructions[5] as DockerInstruction, [
+      "server",
+      "./server",
+    ]) ||
+    !sameCopy(finalStage.instructions[6] as DockerInstruction, [
+      "src",
+      "./src",
+    ]) ||
+    finalStage.instructions[7]?.value !== "node" ||
+    finalStage.instructions[8]?.value !== "8080"
+  ) {
+    violations.push(
+      "the final stage must contain only the exact immutable runtime instructions",
     );
   }
   return violations;
@@ -397,6 +530,13 @@ function runtimeWorkspaceViolations(
   const runtimeDependencies = runtime.dependencies as
     | Record<string, unknown>
     | undefined;
+
+  if (
+    JSON.stringify(Object.keys(runtime).sort()) !==
+    JSON.stringify(["dependencies", "name", "private", "type"])
+  ) {
+    violations.push("runtime package must contain only runtime metadata");
+  }
 
   if (
     runtime.name !== ONLINE_RUNTIME_PACKAGE_NAME ||
@@ -426,16 +566,6 @@ function runtimeWorkspaceViolations(
       }
     }
   }
-  for (const forbiddenSection of [
-    "devDependencies",
-    "optionalDependencies",
-    "peerDependencies",
-  ] as const) {
-    if (runtime[forbiddenSection] !== undefined) {
-      violations.push(`runtime package must not declare ${forbiddenSection}`);
-    }
-  }
-
   const packages =
     workspaceValue !== null && typeof workspaceValue === "object"
       ? (workspaceValue as { readonly packages?: unknown }).packages
@@ -628,13 +758,14 @@ function dependabotViolations(value: unknown): readonly string[] {
     violations.push("Dependabot must contain exactly one npm ecosystem entry");
   }
   const dockerUpdate = dockerUpdates[0];
+  const npmUpdate = npmUpdates[0];
   if (dockerUpdate?.directory !== "/") {
     violations.push('Dependabot Docker directory must be "/"');
   }
-  const npmDirectories = npmUpdates[0]?.directories;
+  const npmDirectories = npmUpdate?.directories;
   if (
     !Array.isArray(npmDirectories) ||
-    npmUpdates[0]?.directory !== undefined ||
+    npmUpdate?.directory !== undefined ||
     JSON.stringify([...npmDirectories].sort()) !==
       JSON.stringify(["/", "/container/online"])
   ) {
@@ -651,13 +782,31 @@ function dependabotViolations(value: unknown): readonly string[] {
       "Dependabot Docker entry must have a supported periodic schedule",
     );
   }
+  if (
+    !["daily", "weekly", "monthly"].includes(
+      String(npmUpdate?.schedule?.interval),
+    )
+  ) {
+    violations.push(
+      "Dependabot npm entry must have a supported periodic schedule",
+    );
+  }
   return violations;
 }
 
 describe("Docker hardening repository contract (#734)", () => {
   it("pins every non-scratch base and selects a non-root final user", () => {
     const source = readFileSync(resolve(REPOSITORY_ROOT, "Dockerfile"), "utf8");
-    expect(dockerfileViolations(source)).toEqual([]);
+    const root = readJsonOrNull(
+      resolve(REPOSITORY_ROOT, "package.json"),
+    ) as PackageManifest | null;
+    expect(
+      dockerfileViolations(
+        source,
+        ONLINE_RUNTIME_PACKAGE_NAME,
+        String(root?.packageManager),
+      ),
+    ).toEqual([]);
   });
 
   it("isolates the online runtime in a minimal pnpm workspace package", () => {
@@ -751,7 +900,25 @@ describe("Docker hardening repository contract (#734)", () => {
         workspace,
         lockfile,
       ),
-    ).toContain("runtime package must not declare devDependencies");
+    ).toContain("runtime package must contain only runtime metadata");
+    for (const extraKey of [
+      "scripts",
+      "bin",
+      "main",
+      "exports",
+      "packageManager",
+      "optionalDependencies",
+      "peerDependencies",
+    ]) {
+      expect(
+        runtimeWorkspaceViolations(
+          root,
+          { ...runtime, [extraKey]: {} },
+          workspace,
+          lockfile,
+        ),
+      ).toContain("runtime package must contain only runtime metadata");
+    }
     expect(
       runtimeWorkspaceViolations(
         root,
@@ -859,18 +1026,24 @@ describe("Docker hardening repository contract (#734)", () => {
   it("rejects unconsumed deploy stages, broad copies, or root final stages", () => {
     const digest = "a".repeat(64);
     const runtimePackageName = ONLINE_RUNTIME_PACKAGE_NAME;
-    const valid = `FROM node:24.15.0-slim@sha256:${digest} AS runtime-dependencies
+    const valid = `FROM node:24.15.0-slim@sha256:${digest} AS dependencies
+ENV NODE_ENV=production
+WORKDIR /app
+RUN corepack enable && corepack prepare pnpm@10.33.0 --activate
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 COPY container/online/package.json ./container/online/package.json
-RUN pnpm --filter ${runtimePackageName} --fail-if-no-match install --prod --frozen-lockfile
-RUN pnpm --filter=${runtimePackageName} --fail-if-no-match deploy --prod /runtime
-FROM node:24.15.0-slim@sha256:${digest} AS runtime
-COPY --from=runtime-dependencies /runtime/package.json ./package.json
-COPY --from=runtime-dependencies /runtime/node_modules ./node_modules
+RUN pnpm --filter ${runtimePackageName} --fail-if-no-match install --prod --frozen-lockfile \
+    && pnpm --filter=${runtimePackageName} --fail-if-no-match deploy --prod /runtime
+FROM node:24.15.0-slim@sha256:${digest}
+ENV NODE_ENV=production
+WORKDIR /app
+COPY --from=dependencies /runtime/node_modules ./node_modules
+COPY --from=dependencies /runtime/package.json ./package.json
 COPY tsconfig.json ./
 COPY server ./server
 COPY src ./src
 USER node
+EXPOSE 8080
 CMD ["node", "--import", "tsx", "server/start.ts"]`;
     expect(dockerfileViolations(valid, runtimePackageName)).toEqual([]);
     const expectViolation = (mutated: string, message: string) => {
@@ -881,6 +1054,10 @@ CMD ["node", "--import", "tsx", "server/start.ts"]`;
     expectViolation("FROM node:24.15.0-slim\nUSER node", "FROM must use");
     expectViolation(
       "ARG BASE=node:24.15.0-slim\nFROM ${BASE}\nUSER node",
+      "FROM must use",
+    );
+    expectViolation(
+      `FROM --platform=linux/amd64 node:24.15.0-slim@sha256:${digest}\nUSER node`,
       "FROM must use",
     );
     expectViolation(
@@ -913,6 +1090,26 @@ CMD ["node", "--import", "tsx", "server/start.ts"]`;
         "Dockerfile must not use a broad or wildcard COPY source",
       );
     }
+    for (const copyFlag of [
+      "--chown=node:node",
+      "--chmod=0777",
+      "--link --chown=node:node",
+    ]) {
+      expectViolation(
+        valid.replace(
+          "COPY server ./server",
+          `COPY ${copyFlag} server ./server`,
+        ),
+        "Dockerfile COPY flags must be absent except for one exact --from",
+      );
+    }
+    expectViolation(
+      valid.replace(
+        "COPY --from=dependencies /runtime/node_modules",
+        "COPY --from=dependencies --chown=node:node /runtime/node_modules",
+      ),
+      "Dockerfile COPY flags must be absent except for one exact --from",
+    );
     const installContract =
       "consumed deploy stage must frozen-install only the production runtime workspace";
     expectViolation(valid.replace(" --frozen-lockfile", ""), installContract);
@@ -925,6 +1122,13 @@ CMD ["node", "--import", "tsx", "server/start.ts"]`;
     );
     expectViolation(
       valid.replace(`--filter ${runtimePackageName} `, ""),
+      installContract,
+    );
+    expectViolation(
+      valid.replace(
+        `RUN pnpm --filter ${runtimePackageName} --fail-if-no-match install --prod --frozen-lockfile`,
+        `RUN echo "pnpm --filter ${runtimePackageName} --fail-if-no-match install --prod --frozen-lockfile"`,
+      ),
       installContract,
     );
     const deployContract =
@@ -940,6 +1144,13 @@ CMD ["node", "--import", "tsx", "server/start.ts"]`;
     );
     expectViolation(valid.replace(" /runtime", " /elsewhere"), deployContract);
     expectViolation(
+      valid.replace(
+        `pnpm --filter=${runtimePackageName} --fail-if-no-match deploy --prod /runtime`,
+        `echo "pnpm --filter=${runtimePackageName} --fail-if-no-match deploy --prod /runtime"`,
+      ),
+      deployContract,
+    );
+    expectViolation(
       valid.replace("deploy --prod", "deploy --prod --legacy"),
       "consumed deploy stage must use modern workspace deploy",
     );
@@ -949,21 +1160,39 @@ CMD ["node", "--import", "tsx", "server/start.ts"]`;
     );
     expectViolation(
       valid.replace(
-        "COPY --from=runtime-dependencies /runtime/package.json ./package.json\nCOPY --from=runtime-dependencies /runtime/node_modules ./node_modules",
-        "COPY --from=runtime-dependencies /runtime ./",
+        "COPY --from=dependencies /runtime/node_modules ./node_modules\nCOPY --from=dependencies /runtime/package.json ./package.json",
+        "COPY --from=dependencies /runtime ./",
       ),
       "final stage must copy only /runtime package.json and node_modules from one deploy stage",
     );
     const unconsumedSafeStage = valid
-      .replaceAll("--from=runtime-dependencies", "--from=unsafe-dependencies")
+      .replaceAll("--from=dependencies", "--from=unsafe-dependencies")
       .replace(
-        `FROM node:24.15.0-slim@sha256:${digest} AS runtime\n`,
-        `FROM node:24.15.0-slim@sha256:${digest} AS unsafe-dependencies\nRUN pnpm install --prod --frozen-lockfile\nFROM node:24.15.0-slim@sha256:${digest} AS runtime\n`,
+        `FROM node:24.15.0-slim@sha256:${digest}\n`,
+        `FROM node:24.15.0-slim@sha256:${digest} AS unsafe-dependencies\nRUN pnpm install --prod --frozen-lockfile\nFROM node:24.15.0-slim@sha256:${digest}\n`,
       );
     expectViolation(unconsumedSafeStage, deployContract);
     expectViolation(
       valid.replace("USER node", "RUN pnpm install --prod\nUSER node"),
       "final stage must not run a package manager",
+    );
+    const exactDependenciesContract =
+      "dependencies stage must contain only the ordered runtime install and deploy contract";
+    expectViolation(
+      valid.replace(
+        `COPY container/online/package.json ./container/online/package.json\nRUN pnpm --filter ${runtimePackageName}`,
+        `COPY container/online/package.json ./container/online/package.json\nRUN echo poisoned >> /runtime/package.json\nRUN pnpm --filter ${runtimePackageName}`,
+      ),
+      exactDependenciesContract,
+    );
+    expectViolation(
+      valid.replace("USER node", "RUN echo poisoned\nUSER node"),
+      "final stage must contain only the exact immutable runtime instructions",
+    );
+    expect(
+      dockerfileViolations(valid, runtimePackageName, "pnpm@10.32.0"),
+    ).toContain(
+      "the dependencies stage must contain only the ordered runtime install and deploy contract",
     );
     expectViolation(
       valid.replace(
@@ -981,8 +1210,8 @@ CMD ["node", "--import", "tsx", "server/start.ts"]`;
     );
     expectViolation(
       valid.replace(
-        `FROM node:24.15.0-slim@sha256:${digest} AS runtime\n`,
-        `FROM node:24.15.0-slim@sha256:${digest} AS runtime-dependencies\n`,
+        `FROM node:24.15.0-slim@sha256:${digest}\nENV NODE_ENV=production`,
+        `FROM node:24.15.0-slim@sha256:${digest} AS dependencies\n`,
       ),
       "Dockerfile stage aliases must be unique",
     );
@@ -1081,6 +1310,12 @@ CMD ["node", "--import", "tsx", "server/start.ts"]`;
     ).toContain(
       "Dependabot Docker entry must have a supported periodic schedule",
     );
+    expect(
+      dependabotViolations({
+        version: 2,
+        updates: [{ ...npmUpdate, schedule: undefined }, dockerUpdate],
+      }),
+    ).toContain("Dependabot npm entry must have a supported periodic schedule");
     expect(
       dependabotViolations({
         version: 2,
