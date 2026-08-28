@@ -12,7 +12,13 @@ const STOP_MARGIN_MS = 1_500;
 const EXPECTED_CMDLINE = "node --import tsx server/start.ts";
 const OWNERSHIP_LABEL = "com.fourbrosmahjong.signal-verifier-run";
 const REQUIRED_RUNTIME_PACKAGES = ["tsx", "ws"];
-const FORBIDDEN_RUNTIME_PACKAGES = ["vitest", "@playwright/test", "typescript"];
+const FORBIDDEN_RUNTIME_PACKAGES = [
+  "vitest",
+  "@playwright/test",
+  "playwright",
+  "playwright-core",
+  "typescript",
+];
 const READ_ONLY_RUNTIME_PATHS = [
   "/app",
   "/app/node_modules",
