@@ -11,6 +11,26 @@ const START_TIMEOUT_MS = 15_000;
 const STOP_MARGIN_MS = 1_500;
 const EXPECTED_CMDLINE = "node --import tsx server/start.ts";
 const OWNERSHIP_LABEL = "com.fourbrosmahjong.signal-verifier-run";
+const REQUIRED_RUNTIME_PACKAGES = ["tsx", "ws"];
+const FORBIDDEN_RUNTIME_PACKAGES = ["vitest", "@playwright/test", "typescript"];
+const READ_ONLY_RUNTIME_PATHS = [
+  "/app",
+  "/app/node_modules",
+  "/app/server",
+  "/app/server/start.ts",
+  "/app/src",
+  "/app/src/domain",
+  "/app/src/domain/game",
+  "/app/src/domain/game/engine.ts",
+];
+const ABSENT_RUNTIME_PATHS = [
+  "/app/.git",
+  "/app/.github",
+  "/app/scripts",
+  "/app/e2e",
+  "/app/docs",
+  "/app/vitest.config.ts",
+];
 
 function usage() {
   throw new Error(
@@ -185,12 +205,187 @@ async function assertPortClosed(port) {
   );
 }
 
-async function inspectProcessTree(name) {
-  const [cmdlineResult, executableResult, topResult] = await Promise.all([
-    docker(["exec", name, "sh", "-c", 'tr "\\0" " " < /proc/1/cmdline']),
-    docker(["exec", name, "readlink", "-f", "/proc/1/exe"]),
-    docker(["top", name, "-eo", "pid,ppid,stat,comm,args"]),
+function assertExplicitNonRootImageUser(value) {
+  invariant(
+    typeof value === "string" && value.trim().length > 0,
+    "image Config.User must explicitly name a non-root user",
+  );
+  const imageUser = value.trim();
+  const [user] = imageUser.split(":", 1);
+  const isNumericRoot = /^\d+$/.test(user) && Number(user) === 0;
+  invariant(
+    user.length > 0 && user.toLowerCase() !== "root" && !isNumericRoot,
+    `image Config.User must be non-root: ${imageUser}`,
+  );
+  return imageUser;
+}
+
+function runtimeSecurityProbeSource() {
+  return `
+import { constants } from "node:fs";
+import { access, readFile, readdir, stat } from "node:fs/promises";
+import { join } from "node:path";
+
+const requiredPackages = ${JSON.stringify(REQUIRED_RUNTIME_PACKAGES)};
+const forbiddenPackages = ${JSON.stringify(FORBIDDEN_RUNTIME_PACKAGES)};
+const readOnlyPaths = ${JSON.stringify(READ_ONLY_RUNTIME_PATHS)};
+const absentPaths = ${JSON.stringify(ABSENT_RUNTIME_PATHS)};
+const pnpmStoreEntries = await readdir("/app/node_modules/.pnpm");
+
+async function pathExists(path) {
+  try {
+    await access(path);
+    return true;
+  } catch (error) {
+    if (error?.code === "ENOENT") return false;
+    throw error;
+  }
+}
+
+function directPackageExists(packageName) {
+  return pathExists(join("/app/node_modules", packageName, "package.json"));
+}
+
+function pnpmStoreContains(packageName) {
+  const prefix = packageName.startsWith("@")
+    ? packageName.replace("/", "+") + "@"
+    : packageName + "@";
+  return pnpmStoreEntries.some((entry) => entry.startsWith(prefix));
+}
+
+const status = await readFile("/proc/1/status", "utf8");
+function processIds(label) {
+  const match = status.match(
+    new RegExp(
+      "^" + label + ":\\\\s+(\\\\d+)\\\\s+(\\\\d+)\\\\s+(\\\\d+)\\\\s+(\\\\d+)",
+      "m",
+    ),
+  );
+  if (match === null) throw new Error("PID 1 " + label + " is unavailable");
+  return match.slice(1).map(Number);
+}
+
+const required = Object.fromEntries(
+  await Promise.all(
+    requiredPackages.map(async (name) => [
+      name,
+      await directPackageExists(name),
+    ]),
+  ),
+);
+const forbidden = Object.fromEntries(
+  await Promise.all(
+    forbiddenPackages.map(async (name) => [
+      name,
+      {
+        direct: await directPackageExists(name),
+        pnpmStore: pnpmStoreContains(name),
+      },
+    ]),
+  ),
+);
+const readOnlyRuntimePaths = Object.fromEntries(
+  await Promise.all(
+    readOnlyPaths.map(async (path) => {
+      const metadata = await stat(path);
+      await access(
+        path,
+        metadata.isDirectory() ? constants.R_OK | constants.X_OK : constants.R_OK,
+      );
+      let writable = true;
+      try {
+        await access(path, constants.W_OK);
+      } catch (error) {
+        if (error?.code !== "EACCES" && error?.code !== "EROFS") throw error;
+        writable = false;
+      }
+      return [path, { uid: metadata.uid, gid: metadata.gid, writable }];
+    }),
+  ),
+);
+const unexpectedRuntimePaths = Object.fromEntries(
+  await Promise.all(
+    absentPaths.map(async (path) => [path, await pathExists(path)]),
+  ),
+);
+console.log(JSON.stringify({
+  pid1Uids: processIds("Uid"),
+  pid1Gids: processIds("Gid"),
+  required,
+  forbidden,
+  readOnlyRuntimePaths,
+  unexpectedRuntimePaths,
+}));
+`;
+}
+
+async function inspectRuntimeSecurity(name) {
+  const result = await docker([
+    "exec",
+    name,
+    "node",
+    "--input-type=module",
+    "--eval",
+    runtimeSecurityProbeSource(),
   ]);
+  const details = JSON.parse(result.stdout.trim());
+  invariant(
+    Array.isArray(details.pid1Uids) &&
+      details.pid1Uids.length === 4 &&
+      details.pid1Uids.every(
+        (value) => Number.isSafeInteger(value) && value > 0,
+      ),
+    `all PID 1 UIDs must be non-root: ${JSON.stringify(details.pid1Uids)}`,
+  );
+  invariant(
+    Array.isArray(details.pid1Gids) &&
+      details.pid1Gids.length === 4 &&
+      details.pid1Gids.every(
+        (value) => Number.isSafeInteger(value) && value > 0,
+      ),
+    `all PID 1 GIDs must be non-root: ${JSON.stringify(details.pid1Gids)}`,
+  );
+  for (const packageName of REQUIRED_RUNTIME_PACKAGES) {
+    invariant(
+      details.required?.[packageName] === true,
+      `required runtime package is missing: ${packageName}`,
+    );
+  }
+  for (const packageName of FORBIDDEN_RUNTIME_PACKAGES) {
+    invariant(
+      details.forbidden?.[packageName]?.direct === false &&
+        details.forbidden?.[packageName]?.pnpmStore === false,
+      `development-only package is present: ${packageName}`,
+    );
+  }
+  for (const path of READ_ONLY_RUNTIME_PATHS) {
+    const source = details.readOnlyRuntimePaths?.[path];
+    invariant(
+      source?.uid === 0 && source?.gid === 0,
+      `runtime path must remain root-owned: ${path}`,
+    );
+    invariant(
+      source.writable === false,
+      `runtime path must not be writable: ${path}`,
+    );
+  }
+  for (const path of ABSENT_RUNTIME_PATHS) {
+    invariant(
+      details.unexpectedRuntimePaths?.[path] === false,
+      `unnecessary runtime path is present: ${path}`,
+    );
+  }
+  return Object.freeze(details);
+}
+
+async function inspectProcessTree(name) {
+  const [cmdlineResult, executableResult, topResult, runtimeSecurity] =
+    await Promise.all([
+      docker(["exec", name, "sh", "-c", 'tr "\\0" " " < /proc/1/cmdline']),
+      docker(["exec", name, "readlink", "-f", "/proc/1/exe"]),
+      docker(["top", name, "-eo", "pid,ppid,stat,comm,args"]),
+      inspectRuntimeSecurity(name),
+    ]);
   const cmdline = cmdlineResult.stdout.trim();
   const executable = executableResult.stdout.trim();
   const top = topResult.stdout.trim();
@@ -210,6 +405,7 @@ async function inspectProcessTree(name) {
     cmdline,
     executable,
     esbuildChildObserved: top.includes("/esbuild "),
+    runtimeSecurity,
     top,
   });
 }
@@ -590,6 +786,7 @@ async function main() {
   const imageDetails = JSON.parse(inspected.stdout.trim());
   const imageId = imageDetails.Id;
   const command = imageDetails.Config?.Cmd;
+  const imageUser = assertExplicitNonRootImageUser(imageDetails.Config?.User);
   invariant(
     typeof imageId === "string" && /^sha256:[0-9a-f]{64}$/.test(imageId),
     `image does not have an immutable ID: ${String(imageId)}`,
@@ -608,6 +805,7 @@ async function main() {
       ok: true,
       requestedImage: image,
       imageId,
+      imageUser,
       command,
       results,
     }),
