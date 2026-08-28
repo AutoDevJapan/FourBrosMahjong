@@ -142,6 +142,13 @@ async function startLocalOnlineServer(
       ...process.env,
       // Keep ordinary local tests independent from an ambient Railway shell.
       RAILWAY_ENVIRONMENT_ID: "",
+      ONLINE_OPS_REQUIRED: "false",
+      ONLINE_OPS_TOKEN: "",
+      ONLINE_SOURCE_REVISION: "",
+      ONLINE_MAINTENANCE_NOTICES_ENABLED: "false",
+      ONLINE_DRAIN_RECONNECT_GRACE_MS: "60000",
+      ONLINE_SHUTDOWN_GRACE_MS: "25000",
+      ONLINE_SOCKET_CLOSE_GRACE_MS: "3000",
       ...environment,
       ALLOWED_ORIGINS: allowedOrigins,
       PORT: String(port),
@@ -379,6 +386,17 @@ class OnlineTestClient {
     return this.waitFor(
       (message): message is Extract<ProtocolMessage, { type: "pong" }> =>
         message.type === "pong",
+    );
+  }
+
+  async waitForMaintenance(
+    phase: "accepting" | "draining" | "drained" | "terminating",
+    timeoutMs = TEST_TIMEOUT_MS,
+  ): Promise<Extract<ProtocolMessage, { type: "maintenance" }>> {
+    return this.waitFor(
+      (message): message is Extract<ProtocolMessage, { type: "maintenance" }> =>
+        message.type === "maintenance" && message.phase === phase,
+      timeoutMs,
     );
   }
 
@@ -1585,6 +1603,361 @@ describe("online host handoff (#681)", () => {
       } finally {
         await closeTestClients(clients);
         if (server !== undefined) await stopLocalOnlineServer(server);
+      }
+    },
+    TEST_TIMEOUT_MS,
+  );
+});
+
+describe("online maintenance ops integration (#726/#728)", () => {
+  const opsToken = "O".repeat(32);
+  const opsEnvironment = {
+    ONLINE_OPS_REQUIRED: "true",
+    ONLINE_OPS_TOKEN: opsToken,
+    ONLINE_SOURCE_REVISION: "a".repeat(40),
+    ONLINE_MAINTENANCE_NOTICES_ENABLED: "true",
+    ONLINE_DRAIN_RECONNECT_GRACE_MS: "15000",
+  } as const;
+  const opsHeaders = { authorization: `Bearer ${opsToken}` } as const;
+
+  it(
+    "broadcasts drain and accepting exactly to current OPEN peers while play continues",
+    async () => {
+      let server: LocalOnlineServer | undefined;
+      const clients: OnlineTestClient[] = [];
+      try {
+        server = await startLocalOnlineServer(TEST_ORIGIN, opsEnvironment);
+        const host = new OnlineTestClient(server.url, TEST_ORIGIN);
+        const unattached = new OnlineTestClient(server.url, TEST_ORIGIN);
+        clients.push(host, unattached);
+        await Promise.all([host.open(), unattached.open()]);
+
+        host.send({ type: "create", name: "保守ホスト" });
+        const session = await host.waitForSession();
+        expect(session.snapshot.pending).not.toBeNull();
+
+        const started = await fetch(`${server.url}/ops/drain`, {
+          method: "POST",
+          headers: opsHeaders,
+        });
+        expect(started.status).toBe(200);
+        await expect(started.json()).resolves.toMatchObject({
+          ok: true,
+          phase: "draining",
+          changed: true,
+          drainStartedAt: null,
+          deadline: null,
+          broadcast: { sent: 2, skipped: 0, failed: 0 },
+        });
+        await expect(
+          host.waitForMaintenance("draining"),
+        ).resolves.toMatchObject({ retryAfterMs: 15_000 });
+        await expect(
+          unattached.waitForMaintenance("draining"),
+        ).resolves.toMatchObject({ retryAfterMs: 15_000 });
+
+        const duringDrain = new OnlineTestClient(server.url, TEST_ORIGIN);
+        clients.push(duringDrain);
+        await duringDrain.open();
+        await expect(
+          duringDrain.waitForMaintenance("draining"),
+        ).resolves.toMatchObject({ retryAfterMs: 15_000 });
+        duringDrain.send({ type: "create", name: "拒否対象" });
+        await expect(duringDrain.waitForError()).resolves.toMatchObject({
+          code: "maintenance",
+          retryAfterMs: 15_000,
+        });
+        duringDrain.send({
+          type: "join",
+          code: session.snapshot.code,
+          name: "拒否対象",
+        });
+        await expect(duringDrain.waitForError()).resolves.toMatchObject({
+          code: "maintenance",
+          retryAfterMs: 15_000,
+        });
+        for (
+          let attempt = 0;
+          attempt < ABUSE_LIMITS.roomAttempts.create.limit;
+          attempt += 1
+        ) {
+          duringDrain.send({ type: "create", name: "quota非消費" });
+          await expect(duringDrain.waitForError()).resolves.toMatchObject({
+            code: "maintenance",
+          });
+        }
+        host.send({ type: "newGame" });
+        await expect(host.waitForError()).resolves.toMatchObject({
+          code: "maintenance",
+          retryAfterMs: 15_000,
+        });
+
+        host.send({
+          type: "action",
+          version: session.snapshot.version,
+          action: actionFor(session.snapshot),
+        });
+        await host.waitForSnapshot(
+          (snapshot) => snapshot.version > session.snapshot.version,
+        );
+
+        const released = await fetch(`${server.url}/ops/drain`, {
+          method: "DELETE",
+          headers: opsHeaders,
+        });
+        expect(released.status).toBe(200);
+        await expect(released.json()).resolves.toMatchObject({
+          phase: "accepting",
+          changed: true,
+          broadcast: { sent: 3, skipped: 0, failed: 0 },
+        });
+        await Promise.all(
+          [host, unattached, duringDrain].map(async (client) => {
+            await expect(
+              client.waitForMaintenance("accepting"),
+            ).resolves.toEqual({ type: "maintenance", phase: "accepting" });
+          }),
+        );
+        duringDrain.send({ type: "create", name: "解除後作成" });
+        await expect(duringDrain.waitForSession()).resolves.toMatchObject({
+          snapshot: { you: "p0" },
+        });
+
+        const duplicate = await fetch(`${server.url}/ops/drain`, {
+          method: "DELETE",
+          headers: opsHeaders,
+        });
+        expect(duplicate.status).toBe(409);
+        await expect(duplicate.json()).resolves.toEqual({
+          ok: false,
+          error: "not_draining",
+        });
+        await expect(host.waitForMaintenance("accepting", 150)).rejects.toThrow(
+          "期待した応答を受信できませんでした",
+        );
+      } finally {
+        await closeTestClients(clients);
+        if (server !== undefined) await stopLocalOnlineServer(server);
+      }
+    },
+    TEST_TIMEOUT_MS,
+  );
+
+  it(
+    "keeps path and Origin precedence before terminal maintenance admission",
+    async () => {
+      let server: LocalOnlineServer | undefined;
+      try {
+        server = await startLocalOnlineServer(TEST_ORIGIN, opsEnvironment);
+        const started = await fetch(`${server.url}/ops/drain`, {
+          method: "POST",
+          headers: opsHeaders,
+        });
+        expect(started.status).toBe(200);
+        await expect(started.json()).resolves.toMatchObject({
+          phase: "drained",
+          changed: true,
+        });
+
+        const wrongOrigin = await requestUpgrade(
+          server.url,
+          UNAUTHORIZED_ORIGIN,
+        );
+        expect(wrongOrigin.statusCode).toBe(403);
+
+        const terminal = await requestUpgrade(server.url, TEST_ORIGIN);
+        expect(terminal.statusCode).toBe(503);
+        expect(terminal.headers).toMatchObject({
+          connection: "close",
+          "cache-control": "no-store",
+        });
+        expect(JSON.parse(terminal.body)).toMatchObject({
+          ok: false,
+          code: "maintenance",
+          retryAfterMs: 15_000,
+        });
+
+        const status = await fetch(`${server.url}/ops/status`, {
+          headers: opsHeaders,
+        });
+        expect(status.status).toBe(200);
+        await expect(status.json()).resolves.toMatchObject({
+          phase: "drained",
+          aggregate: { pendingUpgrades: 0 },
+        });
+        await expect(fetch(`${server.url}/healthz`)).resolves.toMatchObject({
+          status: 200,
+        });
+        await expect(fetch(`${server.url}/readyz`)).resolves.toMatchObject({
+          status: 503,
+        });
+
+        await fetch(`${server.url}/ops/drain`, {
+          method: "DELETE",
+          headers: opsHeaders,
+        });
+        await expect(fetch(`${server.url}/readyz`)).resolves.toMatchObject({
+          status: 200,
+        });
+      } finally {
+        if (server !== undefined) await stopLocalOnlineServer(server);
+      }
+    },
+    TEST_TIMEOUT_MS,
+  );
+
+  it(
+    "allows bounded resume once, then seals grace and returns maintenance",
+    async () => {
+      let server: LocalOnlineServer | undefined;
+      const clients: OnlineTestClient[] = [];
+      try {
+        server = await startLocalOnlineServer(TEST_ORIGIN, opsEnvironment);
+        const host = new OnlineTestClient(server.url, TEST_ORIGIN);
+        const quickResume = new OnlineTestClient(server.url, TEST_ORIGIN);
+        clients.push(host, quickResume);
+        await Promise.all([host.open(), quickResume.open()]);
+        host.send({ type: "create", name: "再接続ホスト" });
+        const session = await host.waitForSession();
+
+        await fetch(`${server.url}/ops/drain`, {
+          method: "POST",
+          headers: opsHeaders,
+        });
+        await Promise.all(
+          [host, quickResume].map((client) =>
+            client.waitForMaintenance("draining"),
+          ),
+        );
+
+        await host.close();
+        quickResume.send({
+          type: "resume",
+          code: session.snapshot.code,
+          token: session.token,
+        });
+        await expect(quickResume.waitForSession()).resolves.toMatchObject({
+          snapshot: { code: session.snapshot.code, you: "p0" },
+        });
+        await expect(
+          quickResume.waitForMaintenance("draining", 150),
+        ).rejects.toThrow("期待した応答を受信できませんでした");
+
+        await quickResume.close();
+        // Unattached peers time out after 10s, so open this observer in the
+        // latter half of the 15s reconnect grace instead of before drain.
+        await delay(7_000);
+        const boundaryResume = new OnlineTestClient(server.url, TEST_ORIGIN);
+        clients.push(boundaryResume);
+        await boundaryResume.open();
+        await boundaryResume.waitForMaintenance("draining");
+        await expect(
+          boundaryResume.waitForMaintenance("drained", 20_000),
+        ).resolves.toMatchObject({ retryAfterMs: 15_000 });
+        await expect(
+          boundaryResume.waitForMaintenance("drained", 150),
+        ).rejects.toThrow("期待した応答を受信できませんでした");
+        boundaryResume.send({
+          type: "resume",
+          code: session.snapshot.code,
+          token: session.token,
+        });
+        await expect(boundaryResume.waitForError()).resolves.toMatchObject({
+          code: "maintenance",
+          retryAfterMs: 15_000,
+        });
+
+        const released = await fetch(`${server.url}/ops/drain`, {
+          method: "DELETE",
+          headers: opsHeaders,
+        });
+        expect(released.status).toBe(200);
+        await expect(
+          boundaryResume.waitForMaintenance("accepting"),
+        ).resolves.toEqual({ type: "maintenance", phase: "accepting" });
+      } finally {
+        await closeTestClients(clients);
+        if (server !== undefined) await stopLocalOnlineServer(server);
+      }
+    },
+    TEST_TIMEOUT_MS,
+  );
+
+  it(
+    "keeps ops default-off and required invalid configuration unready",
+    async () => {
+      let defaultOff: LocalOnlineServer | undefined;
+      let optionalInvalid: LocalOnlineServer | undefined;
+      let invalidRequired: LocalOnlineServer | undefined;
+      try {
+        defaultOff = await startLocalOnlineServer(TEST_ORIGIN, {
+          ONLINE_OPS_TOKEN: opsToken,
+          ONLINE_SOURCE_REVISION: "b".repeat(40),
+        });
+        const disabled = await fetch(`${defaultOff.url}/ops/drain`, {
+          method: "POST",
+          headers: opsHeaders,
+        });
+        expect(disabled.status).toBe(409);
+        await expect(fetch(`${defaultOff.url}/readyz`)).resolves.toMatchObject({
+          status: 200,
+        });
+        const singleAuthorization = await requestRawHttp(
+          defaultOff.url,
+          "/ops/status",
+          {
+            headers: [`Authorization: Bearer ${opsToken}`, "Connection: close"],
+          },
+        );
+        expect(singleAuthorization).toContain("HTTP/1.1 200 OK");
+        const duplicateAuthorization = await requestRawHttp(
+          defaultOff.url,
+          "/ops/status",
+          {
+            headers: [
+              `Authorization: Bearer ${opsToken}`,
+              `Authorization: Bearer ${opsToken}`,
+              "Connection: close",
+            ],
+          },
+        );
+        expect(duplicateAuthorization).toContain("HTTP/1.1 401 Unauthorized");
+        expect(duplicateAuthorization.toLowerCase()).not.toContain(
+          "access-control-allow-origin",
+        );
+
+        optionalInvalid = await startLocalOnlineServer(TEST_ORIGIN, {
+          ONLINE_OPS_TOKEN: "invalid",
+        });
+        await expect(
+          fetch(`${optionalInvalid.url}/ops/status`, { headers: opsHeaders }),
+        ).resolves.toMatchObject({ status: 404 });
+        await expect(
+          fetch(`${optionalInvalid.url}/readyz`),
+        ).resolves.toMatchObject({ status: 200 });
+
+        invalidRequired = await startLocalOnlineServer(TEST_ORIGIN, {
+          ONLINE_OPS_REQUIRED: "true",
+          ONLINE_OPS_TOKEN: "invalid",
+          ONLINE_SOURCE_REVISION: "c".repeat(40),
+        });
+        const unavailable = await fetch(`${invalidRequired.url}/ops/status`, {
+          headers: opsHeaders,
+        });
+        expect(unavailable.status).toBe(404);
+        expect(
+          unavailable.headers.get("access-control-allow-origin"),
+        ).toBeNull();
+        expect(unavailable.headers.get("cache-control")).toBe("no-store");
+        await expect(
+          fetch(`${invalidRequired.url}/readyz`),
+        ).resolves.toMatchObject({ status: 503 });
+      } finally {
+        if (defaultOff !== undefined) await stopLocalOnlineServer(defaultOff);
+        if (optionalInvalid !== undefined)
+          await stopLocalOnlineServer(optionalInvalid);
+        if (invalidRequired !== undefined)
+          await stopLocalOnlineServer(invalidRequired);
       }
     },
     TEST_TIMEOUT_MS,
