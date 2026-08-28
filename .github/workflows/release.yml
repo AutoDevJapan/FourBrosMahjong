@@ -6,8 +6,9 @@
 #
 # 動作: `v*` タグの push を契機に GitHub Release を自動作成します。
 #   - 外部シークレット不要 (組み込みの GITHUB_TOKEN のみを使用)。
-#   - 公開前 guard が SemVer・package/CHANGELOG・main ancestry・trusted CI を照合し、
-#     どの証拠も確認できない場合は fail closed で停止します。
+#   - 公開前 guard が SemVer・package/CHANGELOG・main ancestry と、同じ SHA の
+#     trusted CI・gitleaks・CodeQL を照合し、
+#     いずれかの証拠を確認できない場合は fail closed で停止します。
 #
 # リリース手順の詳細は CHANGELOG.md の「リリース運用方針」を参照してください。
 
@@ -29,6 +30,7 @@ concurrency:
 permissions:
   contents: read
   actions: read
+  checks: read
 
 jobs:
   validate:

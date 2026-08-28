@@ -128,7 +128,7 @@ helper の出力と API 応答に含まれる `target=tag`、`source_type=Reposi
 ## 正常リリース手順
 
 1. Operator 以外が release PR を作り、`CHANGELOG.md` の dated section と `package.json` version を一致させる。
-2. Approver が version、公開対象 SHA、main への取り込み、同じ SHA の trusted main CI 成功を確認し、issue / release ticket に承認を記録する。
+2. Approver が version、公開対象 SHA、main への取り込み、同じ SHA の trusted main CI・gitleaks・CodeQL 成功を確認し、issue / release ticket に承認を記録する。pending・失敗・API 取得不能のまま tag を作らない。この確認は GitHub Release 公開用であり、既に `main` merge で開始された Vercel Production deploy の gate ではない。
 3. Release Operator が最新の remote を取得し、対象を明示して annotated tag を作る。作成認可 ruleset A が未適用の現状では、承認済みの repository admin がこの操作を担当し、通常 writer に push 権限を付与しない。A を適用した後は、専用 Release Operators Team の member だけが担当する。
 
    ```bash
@@ -140,8 +140,12 @@ helper の出力と API 応答に含まれる `target=tag`、`source_type=Reposi
 
 4. `Release` workflow の `Validate release evidence` と `Create GitHub Release` が成功したこと、Release の tag SHA が承認 SHA と一致することを確認する。
 
+   tag 作成時点で同じ SHA の CI・gitleaks・CodeQL が pending だったため guard が失敗した場合は、全証拠の成功後に**同じ Release workflow run ID**を再実行する。公開識別子は immutable とし、tag の削除・付け替え・再 push や、同じ version の別 tag 作成は行わない。
+
    ```bash
    gh run list --workflow Release --limit 10
+   # guard が証拠未完了で失敗した場合だけ、同じ run ID の failed job を再実行
+   gh run rerun <FAILED_RELEASE_RUN_ID> --failed
    git fetch --quiet origin tag vX.Y.Z
    git rev-parse 'vX.Y.Z^{commit}'
    gh release view vX.Y.Z --json tagName,isDraft,isPrerelease,url

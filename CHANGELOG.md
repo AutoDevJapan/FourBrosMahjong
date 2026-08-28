@@ -13,8 +13,8 @@
 - **リリース手順**:
   1. `## [Unreleased]` の内容を確定し、`## [x.y.z] - YYYY-MM-DD` の新セクションへ繰り上げる。
   2. `package.json` の `version` を同じ値に更新する。
-  3. `main` に反映し、その commit に対する `main` push の CI 成功を確認してから、同じ commit へ `vx.y.z` 形式のタグを push する (例: `git tag v0.1.0 && git push origin v0.1.0`)。CI 完了前に tag を push すると guard は公開を拒否するため、CI 完了後に失敗した Release workflow を再実行する。
-  4. タグ push を契機に `.github/workflows/release.yml` が、tag/package/CHANGELOG の一致、tag commit の `main` ancestry、その SHA に対する信頼済み CI 成功を確認してから GitHub Release を自動作成する。証拠を取得できない場合も公開しない。
+  3. `main` に反映し、その commit に対する `main` push の CI・gitleaks・CodeQL 成功を確認してから、同じ commit へ `vx.y.z` 形式のタグを push する (例: `git tag v0.1.0 && git push origin v0.1.0`)。いずれかの検証完了前に tag を push すると guard は公開を拒否する。その場合は全検証完了後に、同じ immutable tag の失敗した Release workflow だけを再実行し、tag の削除・付け替え・再 push は行わない。
+  4. タグ push を契機に `.github/workflows/release.yml` が、tag/package/CHANGELOG の一致、tag commit の `main` ancestry、その SHA に対する信頼済み CI・gitleaks・CodeQL 成功を確認してから GitHub Release を自動作成する。API 不全や証拠不足を含め、確認できない場合は公開しない。
 - **デプロイとの境界**: Production の昇格は Vercel Git Integration による **`main` マージ時の自動デプロイ**が SSOT です。GitHub Release は、その後に同じ検証済み commit へ付ける配布記録であり、Production デプロイを開始・ゲートするものではありません。詳細は [`docs/デプロイ環境運用.md`](./docs/デプロイ環境運用.md) を参照してください。
 
 ## [Unreleased]
@@ -33,6 +33,7 @@
 
 ### Fixed
 
+- GitHub Release guard を、tagged SHA の CI だけでなく gitleaks と GitHub default CodeQL の exact workflow/check suite・期待 category 成功も確認する fail-closed gate へ拡張。これは GitHub Release 公開だけの gate で、`main` merge を起点とする Vercel Production deploy は待機・再実行しない (#748)。
 - Service Worker の install 時に、牌 SVG・PWA icon・manifest の HTTP 2xx だけでなく Content-Type も検証し、200 HTML fallback 等を必須オフライン素材として保存した不完全な worker の有効化を防止。
 - GitHub Release の公開前に、厳密な SemVer、package/CHANGELOG、`main` ancestry、tagged SHA の信頼済み CI 成功を fail-closed で照合する guard を追加。Production は従来どおり `main` マージ時の Vercel 自動デプロイを SSOT とし、tag ruleset はリポジトリ外の権限変更になるため別途合意事項として文書化 (#507)。
 - 対局者名の12文字上限を書記素クラスタ(grapheme cluster)単位へ統一し、絵文字・結合文字をUTF-16境界で分断せず設定・再読込・盤面表示できるよう修正 (#484)。修正前に保存された半端なサロゲート入りの名前は、対局ジャーナルの読み込み時に U+FFFD へ正規化して受け入れる(進行中の半荘を失わせない)。
