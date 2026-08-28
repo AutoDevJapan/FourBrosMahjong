@@ -47,6 +47,19 @@ function reachRoundEnd(manager: RoomManager, host: RoomSession): void {
   }
 }
 
+function disconnectAtDeterministicRoundEnd(
+  manager: RoomManager,
+  session: RoomSession,
+): void {
+  session.room.state = createGame({
+    seed: 0,
+    humanPlayerIds: ["p0"],
+    explicitKitaPlayerIds: [],
+  });
+  manager.disconnect(session.room, session.player);
+  expect(session.room.state.phase).toBe("roundEnd");
+}
+
 describe("RoomManager drain aggregates", () => {
   it("returns numeric privacy-safe aggregates without confusing socket and seat counts", () => {
     const clock = fakeClock();
@@ -322,7 +335,7 @@ describe("RoomManager drain aggregates", () => {
     const clock = fakeClock();
     const manager = new RoomManager({ monotonicNow: clock.now });
     const host = manager.create("ホスト");
-    manager.disconnect(host.room, host.player);
+    disconnectAtDeterministicRoundEnd(manager, host);
     clock.advance(45_000);
     const observer = manager.createDrainAggregateObserver(GRACE_MS);
 
@@ -344,7 +357,7 @@ describe("RoomManager drain aggregates", () => {
     const clock = fakeClock();
     const manager = new RoomManager({ monotonicNow: clock.now });
     const host = manager.create("ホスト");
-    manager.disconnect(host.room, host.player);
+    disconnectAtDeterministicRoundEnd(manager, host);
     clock.advance(GRACE_MS);
 
     const observer = manager.createDrainAggregateObserver(GRACE_MS);
@@ -385,7 +398,7 @@ describe("RoomManager drain aggregates", () => {
     const clock = fakeClock();
     const manager = new RoomManager({ monotonicNow: clock.now });
     const first = manager.create("一卓目");
-    manager.disconnect(first.room, first.player);
+    disconnectAtDeterministicRoundEnd(manager, first);
     const observer = manager.createDrainAggregateObserver(GRACE_MS);
 
     clock.advance(GRACE_MS / 2);
@@ -415,7 +428,7 @@ describe("RoomManager drain aggregates", () => {
     const clock = fakeClock();
     const manager = new RoomManager({ monotonicNow: clock.now });
     const host = manager.create("ホスト");
-    manager.disconnect(host.room, host.player);
+    disconnectAtDeterministicRoundEnd(manager, host);
     const observer = manager.createDrainAggregateObserver(GRACE_MS);
 
     clock.advance(60 * 60 * 1_000 + 1);
@@ -434,7 +447,7 @@ describe("RoomManager drain aggregates", () => {
     const clock = fakeClock();
     const manager = new RoomManager({ monotonicNow: clock.now });
     const host = manager.create("ホスト");
-    manager.disconnect(host.room, host.player);
+    disconnectAtDeterministicRoundEnd(manager, host);
     const observer = manager.createDrainAggregateObserver(GRACE_MS);
 
     clock.advance(GRACE_MS);
