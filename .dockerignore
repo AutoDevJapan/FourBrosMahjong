@@ -1,5 +1,15 @@
 .git
 .github
+.env
+.env.*
+**/.env
+**/.env.*
+.npmrc
+**/.npmrc
+*.pem
+**/*.pem
+*.key
+**/*.key
 .next
 .vercel
 coverage
