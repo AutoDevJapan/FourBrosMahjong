@@ -1,8 +1,26 @@
 import { render, screen, within } from "@testing-library/react";
+import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import ScreenNavigation from "./ScreenNavigation";
 
 describe("ScreenNavigation", () => {
+  it("SSRの殻を操作可能と誤認させるmarkerを出力しない", () => {
+    const html = renderToStaticMarkup(
+      <ScreenNavigation currentPath="/settings" />,
+    );
+
+    expect(html).not.toContain("data-navigation-hydrated");
+  });
+
+  it("操作可能になったことを明示し、unmount時にmarkerを除去する", () => {
+    const view = render(<ScreenNavigation currentPath="/settings" />);
+    const navigation = screen.getByRole("navigation", { name: "画面メニュー" });
+
+    expect(navigation).toHaveAttribute("data-navigation-hydrated", "true");
+    view.unmount();
+    expect(navigation).not.toHaveAttribute("data-navigation-hydrated");
+  });
+
   it("現在の画面を除く主要画面へのリンクを折りたたみ内に表示する", () => {
     render(<ScreenNavigation currentPath="/settings" />);
 
