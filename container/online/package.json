@@ -1,5 +1,5 @@
 {
-  "name": "soshina-majong-online-runtime",
+  "name": "@four-bros-mahjong/online-runtime",
   "private": true,
   "type": "module",
   "dependencies": {

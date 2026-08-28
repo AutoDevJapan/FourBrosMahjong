@@ -8,8 +8,8 @@ RUN corepack enable && corepack prepare pnpm@10.33.0 --activate
 
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 COPY container/online/package.json ./container/online/package.json
-RUN pnpm --filter soshina-majong-online-runtime --fail-if-no-match install --prod --frozen-lockfile \
-    && pnpm --filter soshina-majong-online-runtime --fail-if-no-match deploy --prod /runtime
+RUN pnpm --filter @four-bros-mahjong/online-runtime --fail-if-no-match install --prod --frozen-lockfile \
+    && pnpm --filter @four-bros-mahjong/online-runtime --fail-if-no-match deploy --prod /runtime
 
 FROM node:24.15.0-slim@sha256:4e6b70dd6cbfc88c8157ba19aa3d9f9cce6ba4703576d55459e45efcbc9c5f5d
 
