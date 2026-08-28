@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 import { parse } from "yaml";
@@ -138,6 +138,20 @@ function dockerignoreViolations(source: string): readonly string[] {
   return violations;
 }
 
+function dockerfileIgnoreOverrideViolations(
+  filenames: readonly string[],
+): readonly string[] {
+  return filenames
+    .filter(
+      (filename) =>
+        filename !== ".dockerignore" && filename.endsWith(".dockerignore"),
+    )
+    .map(
+      (filename) =>
+        `Dockerfile-specific ignore override is forbidden: ${filename}`,
+    );
+}
+
 function dependabotViolations(value: unknown): readonly string[] {
   if (value === null || typeof value !== "object") {
     return ["Dependabot config must be an object"];
@@ -216,7 +230,7 @@ describe("Docker hardening repository contract (#734)", () => {
     expect(dockerignoreViolations(source)).toEqual([]);
   });
 
-  it("rejects a missing required ignore rule or any later re-include", () => {
+  it("rejects a missing required ignore rule or any re-include", () => {
     const valid = REQUIRED_DOCKERIGNORE_PATTERNS.join("\n");
     expect(dockerignoreViolations(valid)).toEqual([]);
     expect(dockerignoreViolations(valid.replace("**/.env.*\n", ""))).toContain(
@@ -228,6 +242,24 @@ describe("Docker hardening repository contract (#734)", () => {
     expect(dockerignoreViolations(`${valid}\n!**`)).toContain(
       "negated dockerignore rule is forbidden: !**",
     );
+  });
+
+  it("rejects Dockerfile-specific ignore files that override the root policy", () => {
+    const rootFiles = readdirSync(REPOSITORY_ROOT);
+    expect(dockerfileIgnoreOverrideViolations(rootFiles)).toEqual([]);
+    expect(
+      dockerfileIgnoreOverrideViolations([
+        ".dockerignore",
+        "Dockerfile.dockerignore",
+      ]),
+    ).toEqual([
+      "Dockerfile-specific ignore override is forbidden: Dockerfile.dockerignore",
+    ]);
+    expect(
+      dockerfileIgnoreOverrideViolations(["lint.Dockerfile.dockerignore"]),
+    ).toEqual([
+      "Dockerfile-specific ignore override is forbidden: lint.Dockerfile.dockerignore",
+    ]);
   });
 
   it("keeps one scheduled root Docker ecosystem Dependabot entry", () => {
