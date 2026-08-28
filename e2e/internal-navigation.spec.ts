@@ -61,10 +61,8 @@ test.describe("内部画面の共通ナビゲーション (#614)", () => {
       });
       await expect(targetLink).toBeVisible();
       await expect(targetLink).toHaveAttribute("href", targetPath);
-      await Promise.all([
-        page.waitForURL((url) => url.pathname === targetPath),
-        targetLink.click(),
-      ]);
+      await targetLink.click();
+      await expect(page).toHaveURL((url) => url.pathname === targetPath);
       await waitForScreenReady(page, screenForPath(targetPath));
     });
   }
