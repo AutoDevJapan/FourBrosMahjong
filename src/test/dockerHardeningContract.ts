@@ -751,6 +751,9 @@ export function dependabotViolations(value: unknown): readonly string[] {
   const npmUpdates = updates.filter(
     (update) => update?.["package-ecosystem"] === "npm",
   );
+  const githubActionsUpdates = updates.filter(
+    (update) => update?.["package-ecosystem"] === "github-actions",
+  );
   const violations: string[] = [];
   if (dockerUpdates.length !== 1) {
     violations.push(
@@ -760,21 +763,28 @@ export function dependabotViolations(value: unknown): readonly string[] {
   if (npmUpdates.length !== 1) {
     violations.push("Dependabot must contain exactly one npm ecosystem entry");
   }
+  if (githubActionsUpdates.length !== 1) {
+    violations.push(
+      "Dependabot must contain exactly one GitHub Actions ecosystem entry",
+    );
+  }
   const dockerUpdate = dockerUpdates[0];
   const npmUpdate = npmUpdates[0];
-  if (dockerUpdate?.directory !== "/") {
+  const githubActionsUpdate = githubActionsUpdates[0];
+  if (
+    dockerUpdate?.directory !== "/" ||
+    dockerUpdate?.directories !== undefined
+  ) {
     violations.push('Dependabot Docker directory must be "/"');
   }
-  const npmDirectories = npmUpdate?.directories;
+  if (npmUpdate?.directory !== "/" || npmUpdate?.directories !== undefined) {
+    violations.push('Dependabot npm directory must be exactly "/"');
+  }
   if (
-    !Array.isArray(npmDirectories) ||
-    npmUpdate?.directory !== undefined ||
-    JSON.stringify([...npmDirectories].sort()) !==
-      JSON.stringify(["/", "/container/online"])
+    githubActionsUpdate?.directory !== "/" ||
+    githubActionsUpdate?.directories !== undefined
   ) {
-    violations.push(
-      "Dependabot npm directories must contain exactly / and /container/online",
-    );
+    violations.push('Dependabot GitHub Actions directory must be exactly "/"');
   }
   if (
     !["daily", "weekly", "monthly"].includes(
@@ -792,6 +802,15 @@ export function dependabotViolations(value: unknown): readonly string[] {
   ) {
     violations.push(
       "Dependabot npm entry must have a supported periodic schedule",
+    );
+  }
+  if (
+    !["daily", "weekly", "monthly"].includes(
+      String(githubActionsUpdate?.schedule?.interval),
+    )
+  ) {
+    violations.push(
+      "Dependabot GitHub Actions entry must have a supported periodic schedule",
     );
   }
   return violations;

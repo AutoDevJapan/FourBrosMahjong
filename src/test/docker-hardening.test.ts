@@ -529,7 +529,7 @@ CMD ["node", "--import", "tsx", "server/start.ts"]`;
     ]);
   });
 
-  it("covers both pnpm manifests and the root Dockerfile with Dependabot", () => {
+  it("updates the pnpm workspace only from its root and covers the root Dockerfile", () => {
     const source = readFileSync(
       resolve(REPOSITORY_ROOT, ".github/dependabot.yml"),
       "utf8",
@@ -545,13 +545,18 @@ CMD ["node", "--import", "tsx", "server/start.ts"]`;
     };
     const npmUpdate = {
       "package-ecosystem": "npm",
-      directories: ["/", "/container/online"],
+      directory: "/",
       schedule: { interval: "daily" },
+    };
+    const githubActionsUpdate = {
+      "package-ecosystem": "github-actions",
+      directory: "/",
+      schedule: { interval: "weekly" },
     };
     expect(
       dependabotViolations({
         version: 2,
-        updates: [npmUpdate, dockerUpdate],
+        updates: [npmUpdate, dockerUpdate, githubActionsUpdate],
       }),
     ).toEqual([]);
     expect(dependabotViolations({ version: 2, updates: [] })).toContain(
@@ -560,19 +565,37 @@ CMD ["node", "--import", "tsx", "server/start.ts"]`;
     expect(
       dependabotViolations({
         version: 2,
-        updates: [npmUpdate, dockerUpdate, dockerUpdate],
+        updates: [npmUpdate, dockerUpdate, dockerUpdate, githubActionsUpdate],
       }),
     ).toContain("Dependabot must contain exactly one Docker ecosystem entry");
     expect(
       dependabotViolations({
         version: 2,
-        updates: [npmUpdate, { ...dockerUpdate, directory: "/server" }],
+        updates: [
+          npmUpdate,
+          { ...dockerUpdate, directory: "/server" },
+          githubActionsUpdate,
+        ],
       }),
     ).toContain('Dependabot Docker directory must be "/"');
     expect(
       dependabotViolations({
         version: 2,
-        updates: [npmUpdate, { ...dockerUpdate, schedule: undefined }],
+        updates: [
+          npmUpdate,
+          { ...dockerUpdate, directories: ["/server"] },
+          githubActionsUpdate,
+        ],
+      }),
+    ).toContain('Dependabot Docker directory must be "/"');
+    expect(
+      dependabotViolations({
+        version: 2,
+        updates: [
+          npmUpdate,
+          { ...dockerUpdate, schedule: undefined },
+          githubActionsUpdate,
+        ],
       }),
     ).toContain(
       "Dependabot Docker entry must have a supported periodic schedule",
@@ -580,16 +603,105 @@ CMD ["node", "--import", "tsx", "server/start.ts"]`;
     expect(
       dependabotViolations({
         version: 2,
-        updates: [{ ...npmUpdate, schedule: undefined }, dockerUpdate],
+        updates: [
+          { ...npmUpdate, schedule: undefined },
+          dockerUpdate,
+          githubActionsUpdate,
+        ],
       }),
     ).toContain("Dependabot npm entry must have a supported periodic schedule");
     expect(
       dependabotViolations({
         version: 2,
-        updates: [{ ...npmUpdate, directories: ["/"] }, dockerUpdate],
+        updates: [
+          {
+            ...npmUpdate,
+            directory: undefined,
+            directories: ["/", "/container/online"],
+          },
+          dockerUpdate,
+          githubActionsUpdate,
+        ],
+      }),
+    ).toContain('Dependabot npm directory must be exactly "/"');
+    expect(
+      dependabotViolations({
+        version: 2,
+        updates: [
+          { ...npmUpdate, directory: "/container/online" },
+          dockerUpdate,
+          githubActionsUpdate,
+        ],
+      }),
+    ).toContain('Dependabot npm directory must be exactly "/"');
+    expect(
+      dependabotViolations({
+        version: 2,
+        updates: [
+          { ...npmUpdate, directories: ["/container/online"] },
+          dockerUpdate,
+          githubActionsUpdate,
+        ],
+      }),
+    ).toContain('Dependabot npm directory must be exactly "/"');
+    expect(
+      dependabotViolations({
+        version: 2,
+        updates: [npmUpdate, npmUpdate, dockerUpdate, githubActionsUpdate],
+      }),
+    ).toContain("Dependabot must contain exactly one npm ecosystem entry");
+    expect(
+      dependabotViolations({
+        version: 2,
+        updates: [npmUpdate, dockerUpdate],
       }),
     ).toContain(
-      "Dependabot npm directories must contain exactly / and /container/online",
+      "Dependabot must contain exactly one GitHub Actions ecosystem entry",
+    );
+    expect(
+      dependabotViolations({
+        version: 2,
+        updates: [
+          npmUpdate,
+          dockerUpdate,
+          githubActionsUpdate,
+          githubActionsUpdate,
+        ],
+      }),
+    ).toContain(
+      "Dependabot must contain exactly one GitHub Actions ecosystem entry",
+    );
+    expect(
+      dependabotViolations({
+        version: 2,
+        updates: [
+          npmUpdate,
+          dockerUpdate,
+          { ...githubActionsUpdate, directory: "/container/online" },
+        ],
+      }),
+    ).toContain('Dependabot GitHub Actions directory must be exactly "/"');
+    expect(
+      dependabotViolations({
+        version: 2,
+        updates: [
+          npmUpdate,
+          dockerUpdate,
+          { ...githubActionsUpdate, directories: ["/"] },
+        ],
+      }),
+    ).toContain('Dependabot GitHub Actions directory must be exactly "/"');
+    expect(
+      dependabotViolations({
+        version: 2,
+        updates: [
+          npmUpdate,
+          dockerUpdate,
+          { ...githubActionsUpdate, schedule: undefined },
+        ],
+      }),
+    ).toContain(
+      "Dependabot GitHub Actions entry must have a supported periodic schedule",
     );
   });
 });

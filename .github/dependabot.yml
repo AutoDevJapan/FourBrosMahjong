@@ -2,9 +2,7 @@ version: 2
 updates:
   # npm / pnpm
   - package-ecosystem: "npm"
-    directories:
-      - "/"
-      - "/container/online"
+    directory: "/"
     schedule:
       interval: "daily"
     versioning-strategy: "increase"
