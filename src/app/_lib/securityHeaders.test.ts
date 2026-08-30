@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   contentSecurityPolicy,
+  isLoopbackHttpRequest,
   onlineWebSocketConnectSource,
   STATIC_SECURITY_HEADERS,
   SVG_CONTENT_SECURITY_POLICY,
@@ -84,6 +85,34 @@ describe("contentSecurityPolicy", () => {
     expect(policy).toContain("'unsafe-eval'");
     expect(policy).not.toContain("upgrade-insecure-requests");
     expect(policy).toContain("connect-src 'self' ws://localhost:8080");
+  });
+
+  it("local production smokeだけupgrade-insecure-requestsを抑止し、他のproduction制約は維持する", () => {
+    const policy = contentSecurityPolicy(
+      "loopback-nonce",
+      false,
+      undefined,
+      false,
+    );
+
+    expect(policy).toContain(
+      "script-src 'self' 'nonce-loopback-nonce' 'strict-dynamic'",
+    );
+    expect(policy).not.toContain("'unsafe-eval'");
+    expect(policy).not.toContain("upgrade-insecure-requests");
+    expect(policy).toContain("frame-ancestors 'none'");
+  });
+});
+
+describe("isLoopbackHttpRequest", () => {
+  it("recognizes only HTTP loopback hostnames", () => {
+    for (const hostname of ["localhost", "127.0.0.1", "::1", "[::1]"]) {
+      expect(isLoopbackHttpRequest("http:", hostname)).toBe(true);
+    }
+
+    expect(isLoopbackHttpRequest("https:", "localhost")).toBe(false);
+    expect(isLoopbackHttpRequest("http:", "example.com")).toBe(false);
+    expect(isLoopbackHttpRequest("http:", "127.0.0.1.example.com")).toBe(false);
   });
 });
 

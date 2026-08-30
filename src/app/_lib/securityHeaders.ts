@@ -42,10 +42,32 @@ export function onlineWebSocketConnectSource(
   return normalizedUrl ? new URL(normalizedUrl).origin : null;
 }
 
+/**
+ * Local production smoke servers intentionally use HTTP. WebKit applies
+ * `upgrade-insecure-requests` to loopback subresources, which upgrades the
+ * same-origin Next.js chunks to an HTTPS endpoint that does not exist. Keep
+ * the exception narrowly scoped to the three loopback host spellings; every
+ * deployed or non-loopback HTTP request still receives the production policy.
+ */
+export function isLoopbackHttpRequest(
+  protocol: string,
+  hostname: string,
+): boolean {
+  const normalizedHostname = hostname.toLowerCase();
+  return (
+    protocol === "http:" &&
+    (normalizedHostname === "localhost" ||
+      normalizedHostname === "127.0.0.1" ||
+      normalizedHostname === "::1" ||
+      normalizedHostname === "[::1]")
+  );
+}
+
 export function contentSecurityPolicy(
   nonce: string,
   development: boolean,
   onlineWebSocketUrl = process.env.NEXT_PUBLIC_ONLINE_WS_URL,
+  upgradeInsecureRequests = !development,
 ) {
   const onlineWebSocketSource = onlineWebSocketConnectSource(
     onlineWebSocketUrl,
@@ -74,7 +96,7 @@ export function contentSecurityPolicy(
     "base-uri 'self'",
     "form-action 'self'",
     "frame-ancestors 'none'",
-    ...(development ? [] : ["upgrade-insecure-requests"]),
+    ...(upgradeInsecureRequests ? ["upgrade-insecure-requests"] : []),
   ];
 
   return directives.join("; ");
