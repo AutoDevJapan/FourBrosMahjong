@@ -10,7 +10,10 @@ const GITLEAKS_RELEASE_PAGE_ROOT =
   "https://github.com/gitleaks/gitleaks/releases/tag";
 const SHA256_PATTERN = /^[0-9a-f]{64}$/i;
 
-/** @param {unknown} value */
+/** @typedef {{name?: unknown, browser_download_url?: unknown}} GitleaksAsset */
+/** @typedef {{tag_name?: unknown, draft?: unknown, prerelease?: unknown, assets?: unknown}} GitleaksRelease */
+
+/** @param {unknown} value @param {string} label */
 function assertString(value, label) {
   if (typeof value !== "string") {
     throw new Error(`${label} must be a string`);
@@ -100,19 +103,24 @@ function canonicalReleaseAsset(release, name) {
   if (!release || typeof release !== "object") {
     throw new Error("gitleaks release metadata must be an object");
   }
-  const assets = release.assets;
+  const releaseRecord = /** @type {GitleaksRelease} */ (release);
+  const assets = releaseRecord.assets;
   if (!Array.isArray(assets)) {
     throw new Error("gitleaks release metadata has no assets array");
   }
   const matches = assets.filter(
-    (asset) => asset && typeof asset === "object" && asset.name === name,
+    (asset) =>
+      asset &&
+      typeof asset === "object" &&
+      /** @type {GitleaksAsset} */ (asset).name === name,
   );
   if (matches.length !== 1) {
     throw new Error(
       `gitleaks release must contain exactly one asset named ${name}`,
     );
   }
-  const url = matches[0].browser_download_url;
+  const asset = /** @type {GitleaksAsset} */ (matches[0]);
+  const url = asset.browser_download_url;
   if (typeof url !== "string") {
     throw new Error(`gitleaks asset ${name} has no browser download URL`);
   }
@@ -130,11 +138,12 @@ export function validateGitleaksReleaseMetadata(release) {
   if (!release || typeof release !== "object") {
     throw new Error("gitleaks release metadata must be an object");
   }
-  const tag = release.tag_name;
+  const releaseRecord = /** @type {GitleaksRelease} */ (release);
+  const tag = releaseRecord.tag_name;
   const version = versionFromGitleaksReleaseTag(
     assertString(tag, "release tag"),
   );
-  if (release.draft === true || release.prerelease === true) {
+  if (releaseRecord.draft === true || releaseRecord.prerelease === true) {
     throw new Error(
       `gitleaks release ${tag} is not a stable published release`,
     );
@@ -360,7 +369,9 @@ async function readStdin(input = "") {
   });
 }
 
-/** @param {string} resolved */
+/**
+ * @param {{version: string, archive: string, archiveSha256: string, archiveUrl: string, upstreamUrl: string}} resolved
+ */
 function latestOutput(resolved) {
   return [
     `latest_version=${resolved.version}`,
