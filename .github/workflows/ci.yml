@@ -39,6 +39,8 @@ permissions:
 # この形なら job 自体は常に実行され常に成功を報告するため、「skip された required check が
 # 永久に pending になる」罠を構造的に回避でき、branch protection の context 名も変えずに済む。
 # つまり `ci` job そのものが「変更が無関係でも短時間で成功する安定した gate」として働く。
+# unit-test-only の PR は quality (lint / typecheck / format / Vitest) を維持し、
+# production graph / build / browser / Production E2E を分離して省略する (#758)。
 # 判定ロジックと根拠は .github/scripts/verification-scope.mjs、不変条件は
 # src/test/ci-workflow.test.ts が固定する。
 
@@ -139,11 +141,11 @@ jobs:
           key: pnpm-store-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
 
       - name: Lint (eslint)
-        if: steps.scope.outputs.verify == 'true'
+        if: steps.scope.outputs.quality == 'true'
         run: pnpm lint
 
       - name: Typecheck (tsc --noEmit)
-        if: steps.scope.outputs.verify == 'true'
+        if: steps.scope.outputs.quality == 'true'
         run: pnpm typecheck
 
       # `biome check` は `biome format` の上位互換(整形 + assist。linter は
@@ -151,23 +153,26 @@ jobs:
       # (organizeImports) の違反が 38 件たまり、`pnpm check` が main で一度も
       # 緑にならない状態になっていた (#418)。ステップは増やさず check へ寄せる。
       - name: Format & assist check (biome)
-        if: steps.scope.outputs.verify == 'true'
+        if: steps.scope.outputs.quality == 'true'
         run: pnpm check
 
       - name: Test (vitest)
-        if: steps.scope.outputs.verify == 'true'
+        if: steps.scope.outputs.quality == 'true'
         run: pnpm test
 
+      # Knip / dependency-cruiser は shipped graph の未使用依存と境界を検査する。
+      # unit-test-only では shipped graph が変わらず、lint/typecheck/Vitest で変更を検証できるため
+      # production gate 側へ分離して runner 時間を使わない (#758)。
       - name: Knip
-        if: steps.scope.outputs.verify == 'true'
+        if: steps.scope.outputs.production == 'true'
         run: pnpm knip
 
       - name: Dependency Cruiser
-        if: steps.scope.outputs.verify == 'true'
+        if: steps.scope.outputs.production == 'true'
         run: pnpm depcruise
 
       - name: Build (next build)
-        if: steps.scope.outputs.verify == 'true'
+        if: steps.scope.outputs.production == 'true'
         env:
           # 実配布buildでは未設定のE2E専用フラグ。production成果物でも決定的seedを使い、
           # dev/prodの主要導線を同じ局面で比較する(#432)。
@@ -184,7 +189,7 @@ jobs:
       # 同じキーで共有すると、先に保存した側(chromium のみ)の内容がキーを占有し、
       # webkit を要求する e2e job は毎回ダウンロードし直しになる(exact hit のため保存も走らない)。
       - name: Restore Playwright browser for production PWA E2E
-        if: steps.scope.outputs.setup == 'true'
+        if: steps.scope.outputs.browser == 'true'
         id: pwa-playwright-cache
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
@@ -193,21 +198,21 @@ jobs:
 
       # 同上。検証しない run でキャッシュも既にあるなら取得する意味が無い (#491)。
       - name: Install Playwright browser for production PWA E2E
-        if: steps.scope.outputs.setup == 'true' && (steps.scope.outputs.verify == 'true' || steps.pwa-playwright-cache.outputs.cache-hit != 'true')
+        if: steps.scope.outputs.browser == 'true' && (steps.scope.outputs.production == 'true' || steps.pwa-playwright-cache.outputs.cache-hit != 'true')
         env:
           DEBIAN_FRONTEND: noninteractive
           NEEDRESTART_MODE: a
         run: pnpm exec playwright install --with-deps chromium
 
       - name: Save Playwright browser for production PWA E2E
-        if: steps.scope.outputs.setup == 'true' && github.ref == 'refs/heads/main' && steps.pwa-playwright-cache.outputs.cache-hit != 'true'
+        if: steps.scope.outputs.browser == 'true' && github.ref == 'refs/heads/main' && steps.pwa-playwright-cache.outputs.cache-hit != 'true'
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.cache/ms-playwright
           key: playwright-browsers-${{ runner.os }}-chromium-${{ hashFiles('pnpm-lock.yaml') }}
 
       - name: Production E2E (PWA / persistence / modal focus / security / metadata / a11y)
-        if: steps.scope.outputs.verify == 'true'
+        if: steps.scope.outputs.production == 'true'
         env:
           E2E_PORT: "3101"
           NEXT_PUBLIC_ONLINE_WS_URL: "https://four-bros-mahjong-online-production.up.railway.app/ws"

@@ -129,9 +129,12 @@ export function classifyChangedPaths(paths) {
  * @param {boolean} [input.seedCaches=false]
  *   既定ブランチの ci job として共有キャッシュを投入するか。dev / stg の cache は
  *   保存しないため、検証済み昇格 push で setup を行っても消費するだけで再利用されない。
- * @returns {{ setup: boolean, verify: boolean }}
- *   `verify`: 検証コマンド (lint/test/build/playwright) を実行するか。
- *   `setup`: 依存とブラウザの導入 (= キャッシュ投入) を行うか。
+ * @returns {{ setup: boolean, verify: boolean, quality: boolean, production: boolean, browser: boolean }}
+ *   `verify`: この job の検証コマンド (ci の品質全体 / e2e) を実行するか。
+ *   `quality`: ci のうち lint/typecheck/format/Vitest を実行するか。
+ *   `production`: production graph/build/PWA E2E を実行するか。
+ *   `browser`: Playwright browser を復元・導入するか (main の cache seed を含む)。
+ *   `setup`: 依存を導入するか。
  */
 export function resolveScope({
   job,
@@ -142,16 +145,29 @@ export function resolveScope({
   const { docsOnly, unitTestOnly } = classifyChangedPaths(paths);
   const irrelevant = job === "e2e" ? unitTestOnly : docsOnly;
   const verify = !irrelevant && !postMergeDuplicate;
+  // test-only は shipped tree を変更しない。品質に必要な静的検査と Vitest は
+  // 維持する一方、production graph / build / browser / PWA E2E は省略する (#758)。
+  // docs + test の混在は docsOnly=false なので quality は実行する。
+  const quality = job === "ci" && !docsOnly && !postMergeDuplicate;
+  const production =
+    job === "ci" && !docsOnly && !unitTestOnly && !postMergeDuplicate;
   // マージ後 push は検証しない。既定ブランチの **ci job だけ**がキャッシュを投入する。
   // E2E job は Playwright の固定イメージを使い、現在はキャッシュを書き込まないため、
   // verify=false の post-merge E2E で依存を導入する理由がない (#569)。
   // Actions のキャッシュは既定ブランチ (main) で保存したものだけが全 PR から復元できるため
   // (#380)、main の ci run が導入を止めると全 PR が毎回ダウンロードし直しになる。
   const seed = job === "ci" && postMergeDuplicate && seedCaches;
-  return { setup: verify || seed, verify };
+  const browser = production || seed;
+  return { setup: verify || seed, verify, quality, production, browser };
 }
 
-export const SCOPE_OUTPUT_KEYS = /** @type {const} */ (["setup", "verify"]);
+export const SCOPE_OUTPUT_KEYS = /** @type {const} */ ([
+  "setup",
+  "verify",
+  "quality",
+  "production",
+  "browser",
+]);
 
 /** API / ref 取得が job 全体の timeout まで居座らないための上限。 */
 export const EVIDENCE_IO_TIMEOUT_MS = 15_000;
@@ -619,6 +635,9 @@ async function main() {
       : "changedPaths=unresolved (fail-open)",
     `setup=${scope.setup}`,
     `verify=${scope.verify}`,
+    `quality=${scope.quality}`,
+    `production=${scope.production}`,
+    `browser=${scope.browser}`,
   ].join(" ");
   console.log(summary);
   if (paths)
