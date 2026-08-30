@@ -8,7 +8,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { dirname, join, relative, resolve, sep } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { parse } from "yaml";
 import {
@@ -22,6 +22,8 @@ import {
   resolveChangedPaths,
   resolvePostMergeEvidence,
   resolveScope,
+  TEST_INPUT_DIRECTORIES,
+  TEST_INPUT_PATHS,
 } from "../../.github/scripts/verification-scope.mjs";
 import playwrightConfig from "../../playwright.config";
 
@@ -897,69 +899,160 @@ describe("verification-scope の分類契約 (#491)", () => {
  * 「ルール文書を書き換えたのに /rules との整合検査が走らなかった」という失敗は
  * 誰にも気づかれない。除外一覧が実態と一致していることを機械的に固定する。
  */
-describe("文書スキップがテストの前提を壊していない (#491)", () => {
+describe("テスト入力資産をdocs-onlyで黙殺しない (#745)", () => {
   /**
-   * テストコードが**どう解決しているかに関係なく**、文字列リテラルとして現れる
-   * 「文書扱いになりうるリポジトリ相対パス」を集める。
+   * テストコードがどう解決しているかに関係なく、文字列リテラルとして現れる
+   * リポジトリ相対の docs/documents/README/CHANGELOG 入力を集める。
    *
-   * 解決方法で絞ると идиом の取りこぼしが起きる: 本リポジトリには
-   * `resolve(process.cwd(), "…")` だけでなく `new URL("…", import.meta.url)` や
-   * 独自ヘルパ (`repoPath("…")`) で読むテストが実在し、そのどれかが将来 `.md` を
-   * 読み始めた瞬間に「守っているつもりの検査」が黙って素通りする。
-   * したがって解決方法を問わず `.md` / `docs/` / `documents/` リテラルを全部拾う。
+   * `resolve(process.cwd(), "…")`、`readFileSync("…")`、`new URL("…", import.meta.url)`、
+   * JSON import、ディレクトリコピーのどれかへ限定すると、新しい参照形式を追加した
+   * 瞬間に検査が黙って素通りするため、構文ではなくパス文字列を横断的に拾う。
    */
-  function documentaryLiteralsInTests(): string[] {
+  function testInputLiterals(): string[] {
     const found = new Set<string>();
+    const repositoryRoot = resolve(process.cwd());
+    const sourcePath = (file: string, literal: string) => {
+      const normalized = literal.replaceAll("\\", "/");
+      const absolute = normalized.startsWith(".")
+        ? resolve(dirname(file), normalized)
+        : resolve(repositoryRoot, normalized);
+      const relativePath = relative(repositoryRoot, absolute).replaceAll(
+        sep,
+        "/",
+      );
+      return relativePath && !relativePath.startsWith("..")
+        ? relativePath.replace(/\/$/, "")
+        : null;
+    };
     const walk = (dir: string) => {
       for (const entry of readdirSync(dir, { withFileTypes: true })) {
-        const path = resolve(dir, entry.name);
+        const file = resolve(dir, entry.name);
         if (entry.isDirectory()) {
-          walk(path);
+          walk(file);
           continue;
         }
-        if (!/\.tsx?$/.test(entry.name)) continue;
-        // このファイル自身は分類テストの**入力データ**として `.md` リテラルを並べるため
-        // 除外する。判定対象はあくまで「他のテストが参照している文書」。
+        if (!/(?:\.test|\.spec)\.(?:[cm]?ts|tsx|js|mjs)$/.test(entry.name))
+          continue;
+        // このファイル自身は分類テストの入力データとしてパスを並べるため除外する。
+        // 判定対象はあくまで「他のテストが参照している入力資産」。
         if (entry.name === "ci-workflow.test.ts") continue;
-        for (const match of readFileSync(path, "utf8").matchAll(
-          /"([^"\n]*\.md)"/g,
-        )) {
-          // 相対指定 (`../../docs/x.md`) はリポジトリ相対へ正規化する。
-          found.add(match[1].replace(/^(?:\.\.\/)+/, ""));
+        const source = readFileSync(file, "utf8");
+        for (const match of source.matchAll(/(["'])([^"'\\\n]+)\1/g)) {
+          const literal = match[2];
+          if (
+            !/(^|\/)(?:docs|documents)\//.test(literal) &&
+            !/^(?:README|CHANGELOG)\.md$/.test(literal)
+          )
+            continue;
+          const path = sourcePath(file, literal);
+          if (path) found.add(path);
         }
       }
     };
-    // e2e/ のテストも同じ理由で対象にする。
-    for (const root of ["src", "e2e"]) walk(resolve(process.cwd(), root));
+    // server/ のrunbook、src/ のJSON import、e2e/ のfixtureを同じ検査対象にする。
+    for (const root of ["server", "src", "e2e"])
+      walk(resolve(repositoryRoot, root));
     return [...found];
   }
 
-  it("テストが読む文書は文書として黙殺されない", () => {
-    const literals = documentaryLiteralsInTests();
+  it("server/src/e2eのテスト入力を網羅してunit-test inputに分類する", () => {
+    const literals = testInputLiterals();
     // 走査自体が壊れて 0 件になれば、この検査は何も守らなくなる。
     expect(
       literals.length,
-      "テストから .md リテラルを 1 件も抽出できなかった(走査が壊れている)",
-    ).toBeGreaterThanOrEqual(2);
+      "テストからdocs/documents/README/CHANGELOG入力を1件も抽出できなかった(走査が壊れている)",
+    ).toBeGreaterThanOrEqual(6);
+
+    expect(literals).toEqual(
+      expect.arrayContaining([
+        "documents/guides/railway-online-deploy-runbook.md",
+        "documents/assets/ui-refresh/manifest.json",
+        "documents/assets/ui-refresh",
+      ]),
+    );
 
     for (const path of literals) {
       expect(
         classifyPath(path),
-        `${path}: テストが参照しているのに文書として扱われている。` +
-          "この変更だけの PR では CI がスキップされ、検証が静かに失われる。" +
-          "verification-scope.mjs の DOCUMENTATION_EXCEPTIONS に追加すること",
-      ).not.toBe("documentation");
+        `${path}: テストが参照している入力資産なのにunit-testとして扱われていない。`,
+      ).toBe("unit-test");
     }
   });
 
-  it("除外一覧に不要な項目が残っていない", () => {
-    const literals = new Set(documentaryLiteralsInTests());
-    for (const path of DOCUMENTATION_EXCEPTIONS) {
+  it("テスト入力一覧・ディレクトリに不要な項目が残っていない", () => {
+    const literals = new Set(testInputLiterals());
+    for (const path of TEST_INPUT_PATHS) {
       expect(
         literals.has(path),
-        `${path}: どのテストからも参照されていない。除外は検証コスト増に直結するため、不要になったら消す`,
+        `${path}: どのテストからも参照されていない。入力一覧は検証コスト増に直結するため、不要になったら消す`,
       ).toBe(true);
     }
+    for (const directory of TEST_INPUT_DIRECTORIES) {
+      expect(
+        literals.has(directory),
+        `${directory}: ディレクトリ依存がテストから検出されていない`,
+      ).toBe(true);
+    }
+    // 旧export名も残しているため、互換配列が意図せず別物にならないよう固定する。
+    expect(DOCUMENTATION_EXCEPTIONS).toEqual(TEST_INPUT_PATHS);
+  });
+
+  it.each([
+    "documents/guides/railway-online-deploy-runbook.md",
+    "documents/assets/ui-refresh/manifest.json",
+    "documents/assets/ui-refresh/originals/lobby.png",
+    "documents/assets/ui-refresh/originals/new-reference.png",
+    "README.md",
+    "CHANGELOG.md",
+    "docs/四兄弟麻雀ルール.md",
+  ])("%sの変更はqualityだけを実行しE2Eを起動しない", (path) => {
+    expect(
+      resolveScope({ job: "ci", paths: [path], postMergeDuplicate: false }),
+    ).toEqual({
+      setup: true,
+      verify: true,
+      quality: true,
+      production: false,
+      browser: false,
+    });
+    expect(
+      resolveScope({ job: "e2e", paths: [path], postMergeDuplicate: false }),
+    ).toEqual({
+      setup: false,
+      verify: false,
+      quality: false,
+      production: false,
+      browser: false,
+    });
+  });
+
+  it("test inputとproduction codeの混在はfail-openで全検証する", () => {
+    expect(
+      resolveScope({
+        job: "ci",
+        paths: [
+          "documents/assets/ui-refresh/manifest.json",
+          "src/app/page.tsx",
+        ],
+        postMergeDuplicate: false,
+      }),
+    ).toEqual({
+      setup: true,
+      verify: true,
+      quality: true,
+      production: true,
+      browser: true,
+    });
+    expect(
+      resolveScope({
+        job: "e2e",
+        paths: [
+          "documents/assets/ui-refresh/originals/lobby.png",
+          "src/app/page.tsx",
+        ],
+        postMergeDuplicate: false,
+      }).verify,
+    ).toBe(true);
   });
 });
 
