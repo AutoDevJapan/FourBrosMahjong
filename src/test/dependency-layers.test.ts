@@ -110,6 +110,25 @@ const FIXTURE: readonly [path: string, source: string][] = [
     "src/domain/dora/dora.ts",
     'import { Modal } from "@/components/common/Modal";\nexport const k = Modal;\n',
   ],
+  // 本番サーバーの依存グラフも同じ canary で固定する(#750)。
+  [
+    "server/onlineBridge.ts",
+    'import { tile } from "../src/domain/tiles/tile";\nexport const onlineTile = tile;\n',
+  ],
+  [
+    "server/presentationLeak.ts",
+    'import { Modal } from "../src/components/common/Modal";\nexport const leakedModal = Modal;\n',
+  ],
+  [
+    "server/appLeak.ts",
+    'import { csp } from "../src/app/_lib/securityHeaders";\nexport const leakedCsp = csp;\n',
+  ],
+  [
+    "server/unresolvable.ts",
+    'import { missing } from "./missing";\nexport const missingValue = missing;\n',
+  ],
+  ["server/cycle-a.ts", 'import "./cycle-b";\nexport const cycleA = 1;\n'],
+  ["server/cycle-b.ts", 'import "./cycle-a";\nexport const cycleB = 1;\n'],
 ];
 
 /** 解決できない import の specifier(上記フィクスチャと対応)。 */
@@ -119,6 +138,12 @@ const UNRESOLVABLE_SPECIFIER = "@/components/common/Modal";
 const DOMAIN_RULE = "no-domain-to-presentation";
 /** 共有コンポーネント → App Router の逆流を禁止するルール名。 */
 const COMPONENTS_RULE = "no-components-to-app";
+/** 本番サーバー → プレゼンテーション層の依存を禁止するルール名。 */
+const SERVER_PRESENTATION_RULE = "no-server-to-presentation";
+/** 本番サーバーの未解決 import を禁止するルール名。 */
+const SERVER_UNRESOLVABLE_RULE = "no-unresolvable-in-server";
+/** サーバーを含む全グラフで循環依存を禁止するルール名。 */
+const CIRCULAR_RULE = "no-circular";
 const LAYER_RULES: readonly string[] = [DOMAIN_RULE, COMPONENTS_RULE];
 
 /** 設定・レイヤーの実在確認は cwd ではなくこのテストファイルからの相対で解決する。 */
@@ -142,7 +167,7 @@ beforeAll(async () => {
       mkdirSync(dirname(absolute), { recursive: true });
       writeFileSync(absolute, source, "utf8");
     }
-    const result = await cruise(["src"], {
+    const result = await cruise(["src", "server"], {
       ...depcruiseConfig.options,
       // リポジトリの `tsconfig.json` は一時ディレクトリに存在しないため外す。
       // レイヤーの各ケースは相対 import で書いてあり解決に影響しない。唯一の
@@ -255,14 +280,77 @@ describe("許可された依存はレイヤールールに当たらない (#382)
   });
 });
 
+describe("本番サーバーの依存境界を dependency-cruiser が検出する (#750)", () => {
+  const FORBIDDEN_SERVER_EDGES: readonly [
+    label: string,
+    from: string,
+    to: string,
+  ][] = [
+    [
+      "サーバー → Reactコンポーネント",
+      "server/presentationLeak.ts",
+      "src/components/common/Modal.ts",
+    ],
+    [
+      "サーバー → App Router",
+      "server/appLeak.ts",
+      "src/app/_lib/securityHeaders.ts",
+    ],
+  ];
+
+  it.each(FORBIDDEN_SERVER_EDGES)("%s", (_label, from, to) => {
+    const violation = violations.find(
+      (candidate) =>
+        candidate.from === from &&
+        candidate.to === to &&
+        candidate.rule.name === SERVER_PRESENTATION_RULE,
+    );
+    expect(violation, `${from} → ${to} が検出されていない`).toBeDefined();
+    expect(violation?.rule.severity).toBe("error");
+  });
+
+  it("サーバー → domain は許可される", () => {
+    expect(
+      violations.find(
+        (candidate) =>
+          candidate.from === "server/onlineBridge.ts" &&
+          candidate.to === "src/domain/tiles/tile.ts" &&
+          candidate.rule.name === SERVER_PRESENTATION_RULE,
+      ),
+    ).toBeUndefined();
+  });
+
+  it("サーバーの未解決 import は error として報告される", () => {
+    const violation = violations.find(
+      (candidate) =>
+        candidate.from === "server/unresolvable.ts" &&
+        candidate.rule.name === SERVER_UNRESOLVABLE_RULE,
+    );
+    expect(violation, "サーバーの未解決 import が素通りしている").toBeDefined();
+    expect(violation?.rule.severity).toBe("error");
+  });
+
+  it("サーバー内の循環依存は error として報告される", () => {
+    const cycleFiles = new Set(["server/cycle-a.ts", "server/cycle-b.ts"]);
+    const violation = violations.find(
+      (candidate) =>
+        candidate.rule.name === CIRCULAR_RULE &&
+        cycleFiles.has(candidate.from) &&
+        cycleFiles.has(candidate.to),
+    );
+    expect(violation, "server/ の循環依存が検出されていない").toBeDefined();
+    expect(violation?.rule.severity).toBe("error");
+  });
+});
+
 /**
  * 上の 2 つは合成パスを使うため、ルールの正規表現が**実在しない**フォルダを指すように
  * 書き換えられても(例: `^src/core/`)、フィクスチャ側を同じ名前にすれば緑のままになる。
  * 実レイアウトとの対応はここで別途固定する(#382 の見送り理由だった
  * 「存在しないフォルダへの path ルール = 検証不能な死んだ設定」への回帰防止)。
  */
-describe("ルールが指すレイヤーが実リポジトリに存在する (#382)", () => {
-  it.each(["src/domain", "src/components", "src/app"])(
+describe("ルールが指すレイヤーが実リポジトリに存在する (#382/#750)", () => {
+  it.each(["src/domain", "src/components", "src/app", "server"])(
     "%s が実在する",
     (layer) => {
       expect(
@@ -274,7 +362,12 @@ describe("ルールが指すレイヤーが実リポジトリに存在する (#3
 
   it("レイヤールールの from/to が実レイアウトのパスを指している", () => {
     const source = JSON.stringify(depcruiseConfig.forbidden);
-    for (const layer of ["src/domain/", "src/app/", "src/components/"]) {
+    for (const layer of [
+      "src/domain/",
+      "src/app/",
+      "src/components/",
+      "server/",
+    ]) {
       expect(source, `レイヤールールが ${layer} に言及していない`).toContain(
         layer,
       );
@@ -339,15 +432,15 @@ describe("レイヤールールが機能する前提条件 (#382)", () => {
 
 /**
  * ルールが正しくても、CI がそれを走らせる範囲が狭ければ意味がない
- * (`depcruise src/app` に縮めても、CI からステップを消しても、上のテストは全て緑のまま)。
+ * (`depcruise src/app` に縮めても、server/ を外しても、CI からステップを消しても、上のテストは全て緑のまま)。
  * 適用スコープもここで固定する。
  */
 describe("レイヤールールの適用スコープ (#382)", () => {
-  it("pnpm depcruise が src 全体を対象にしている", () => {
+  it("pnpm depcruise が src と server 全体を対象にしている", () => {
     const packageJson = JSON.parse(
       readFileSync(repoPath("package.json"), "utf8"),
     ) as { scripts?: Record<string, string> };
-    expect(packageJson.scripts?.depcruise).toBe("depcruise src");
+    expect(packageJson.scripts?.depcruise).toBe("depcruise src server");
   });
 
   it("CI が pnpm depcruise を実行している", () => {

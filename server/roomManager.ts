@@ -1,16 +1,5 @@
 import { randomBytes } from "node:crypto";
 import {
-  applyGameAction,
-  type GameAction,
-} from "../src/components/game/gamePersistence";
-import { selectView } from "../src/components/game/gameView";
-import type { GameViewState } from "../src/components/game/types";
-import type {
-  OnlineDepartureNotice,
-  OnlineHostNotice,
-  OnlineHostTransitionReason,
-} from "../src/components/online/types";
-import {
   createGame,
   DEFAULT_NAMES,
   type EngineState,
@@ -21,6 +10,17 @@ import {
   setExplicitKitaPlayerIds,
   setHumanPlayerIds,
 } from "../src/domain/game/engine";
+import {
+  applyGameAction,
+  type GameAction,
+} from "../src/domain/game/gamePersistence";
+import { selectView } from "../src/domain/game/gameView";
+import type { GameViewState } from "../src/domain/game/viewTypes";
+import type {
+  OnlineDepartureNotice,
+  OnlineHostNotice,
+  OnlineHostTransitionReason,
+} from "../src/domain/online/types";
 import { sanitizePlayerName } from "../src/lib/playerName";
 import {
   normalizeRoomCode,

@@ -2,7 +2,7 @@ import type {
   OnlineMaintenanceAcceptingNotice,
   OnlineMaintenanceNotice,
   OnlineMaintenancePhase,
-} from "../src/components/online/types";
+} from "../src/domain/online/types";
 
 export const MAX_MAINTENANCE_RETRY_AFTER_MS = 10 * 60 * 1_000;
 export const MAINTENANCE_CLOSE_CODE = 1012;

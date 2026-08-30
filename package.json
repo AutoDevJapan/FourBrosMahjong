@@ -39,7 +39,7 @@
     "test:e2e:prod:prebuilt": "E2E_PROD=1 E2E_PROD_PREBUILT=1 playwright test --project=chromium e2e/pwa-offline.spec.ts e2e/persistence.spec.ts e2e/modal-focus.spec.ts e2e/security-headers.spec.ts e2e/metadata.spec.ts e2e/a11y.spec.ts",
     "test:e2e:ui": "playwright test --ui",
     "knip": "knip",
-    "depcruise": "depcruise src",
+    "depcruise": "depcruise src server",
     "docs": "typedoc"
   },
   "dependencies": {

@@ -29,12 +29,18 @@ const FACTORY = "domain/tiles/tile.ts";
  * `Tile` 組み立ての走査対象。ドメイン本番コードのみ(issue #375 の完了条件と一致)。
  *
  * 表示層を含めないのは、ビューモデル `TileData` が `isRed` 任意の**投影**であって
- * `Tile` そのものではないため。例えば `components/game/gameView.ts` の
+ * `Tile` そのものではないため。例えば `domain/game/gameView.ts` の
  * `{ suit, rank, isRed: tile.isRed }` は `Tile` → `TileData` の正当な写像で、
  * 表示層まで走査すると確実に偽陽性になる。ドメインへ戻す唯一の境界
  * (同ファイルの `toTile()`)は `createTile` を使っており、穴は空いていない。
  */
 const TILE_LITERAL_ROOTS = ["domain"] as const;
+
+/**
+ * `Tile` ではなく表示用 `TileData` を組み立てる中立投影。サーバーとUIが共有するため
+ * `src/domain` に置くが、`isRed` 必須の `Tile` 生成を検査する対象ではない(issue #750)。
+ */
+const TILE_LITERAL_EXEMPTIONS = new Set(["domain/game/gameView.ts"]);
 
 /**
  * 赤扱いの走査対象。**表示層まで含める**(issue #485)。
@@ -145,13 +151,13 @@ const ALLOWED_RAW_IS_RED_READS: readonly string[] = [
   "components/game/GameBoard.tsx: candidate.isRed === !!tile.isRed,",
   "components/game/GameBoard.tsx: candidate.isRed === !!tile.isRed,",
   // 復元ジャーナルの保存値検証(不変条件を破った値を fail-closed で弾く)。
-  'components/game/gamePersistence.ts: typeof tile.isRed === "boolean" &&',
-  "components/game/gamePersistence.ts: tile.isRed === createTile(suit, rank).isRed",
-  "components/game/gamePersistence.ts: tile.isRed === createTile(suit, rank).isRed",
+  'domain/game/gamePersistence.ts: typeof tile.isRed === "boolean" &&',
+  "domain/game/gamePersistence.ts: tile.isRed === createTile(suit, rank).isRed",
+  "domain/game/gamePersistence.ts: tile.isRed === createTile(suit, rank).isRed",
   // Tile → TileData の投影と、表示ソートのタイブレーク。
-  "components/game/gameView.ts: return { suit: tile.suit, rank: tile.rank, isRed: tile.isRed };",
-  "components/game/gameView.ts: Number(a.isRed) - Number(b.isRed),",
-  "components/game/gameView.ts: Number(a.isRed) - Number(b.isRed),",
+  "domain/game/gameView.ts: return { suit: tile.suit, rank: tile.rank, isRed: tile.isRed };",
+  "domain/game/gameView.ts: Number(a.isRed) - Number(b.isRed),",
+  "domain/game/gameView.ts: Number(a.isRed) - Number(b.isRed),",
   // WebSocket由来TileDataの赤フラグ型検証。赤ドラの意味づけには使わない。
   "components/online/onlineServerMessage.ts: isOptionalBoolean(value.isRed)",
 ];
@@ -245,10 +251,11 @@ function scan(
   re: () => RegExp,
   roots: readonly string[],
   keyOf: (match: RegExpMatchArray, text: string) => string,
+  exemptions: ReadonlySet<string> = new Set(),
 ): string[] {
   const found: string[] = [];
   for (const rel of productionFiles(roots)) {
-    if (rel === FACTORY) continue;
+    if (rel === FACTORY || exemptions.has(rel)) continue;
     const text = stripComments(readFileSync(join(SRC, rel), "utf8"));
     for (const key of collectIn(text, re, keyOf)) found.push(`${rel}: ${key}`);
   }
@@ -256,8 +263,12 @@ function scan(
 }
 
 /** 「どこかに違反がある」だけを見る検査用。マッチ文字列を鍵にする。 */
-function offenders(re: () => RegExp, roots: readonly string[]): string[] {
-  return scan(re, roots, (m) => m[0]);
+function offenders(
+  re: () => RegExp,
+  roots: readonly string[],
+  exemptions?: ReadonlySet<string>,
+): string[] {
+  return scan(re, roots, (m) => m[0], exemptions);
 }
 
 /**
@@ -449,7 +460,11 @@ describe("牌ファクトリの単一起点(issue #375)", () => {
   });
 
   it("ドメイン本番コードは tiles/tile.ts 以外で Tile を組み立てない", () => {
-    const found = offenders(tileLiteral, TILE_LITERAL_ROOTS);
+    const found = offenders(
+      tileLiteral,
+      TILE_LITERAL_ROOTS,
+      TILE_LITERAL_EXEMPTIONS,
+    );
     expect(
       found,
       `Tile の組み立ては createTile(${FACTORY})に集約してください。\n` +
