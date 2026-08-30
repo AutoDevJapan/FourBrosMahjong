@@ -398,6 +398,16 @@ describe("Railway IaC parity snapshot contract (#742)", () => {
     ).toBe(false);
     expect(
       generatedIacSourceIsSecretSafe(
+        `import { service } from "railway/iac"; const resource = service("other", {}); const { env } = resource; service("fixture", { source: env.SECRET });`,
+      ),
+    ).toBe(false);
+    expect(
+      generatedIacSourceIsSecretSafe(
+        `import { service } from "railway/iac"; const make = ({ env }) => service("fixture", { source: env.SECRET });`,
+      ),
+    ).toBe(false);
+    expect(
+      generatedIacSourceIsSecretSafe(
         `import { ref, service } from "railway/iac"; const untrusted = ctx; service("fixture", { source: ref(untrusted, "output") });`,
       ),
     ).toBe(false);

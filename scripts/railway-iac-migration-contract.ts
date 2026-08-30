@@ -472,6 +472,7 @@ export function generatedIacSourceIsSecretSafe(source: string): boolean {
   ]);
   const resourceBindings = new Set<string>();
   const nonResourceBindings = new Set<string>();
+  let unsupportedBindingPattern = false;
   const addBindingNames = (
     name: ts.BindingName,
     destination: Set<string>,
@@ -488,6 +489,7 @@ export function generatedIacSourceIsSecretSafe(source: string): boolean {
   };
   const collectResourceBindings = (node: ts.Node): void => {
     if (ts.isVariableDeclaration(node)) {
+      if (!ts.isIdentifier(node.name)) unsupportedBindingPattern = true;
       const isResourceDeclaration =
         ts.isIdentifier(node.name) &&
         node.initializer !== undefined &&
@@ -502,11 +504,15 @@ export function generatedIacSourceIsSecretSafe(source: string): boolean {
       }
     }
     if (ts.isParameter(node)) {
+      if (!ts.isIdentifier(node.name)) unsupportedBindingPattern = true;
       addBindingNames(node.name, nonResourceBindings);
     }
     ts.forEachChild(node, collectResourceBindings);
   };
   collectResourceBindings(sourceFile);
+  // Destructuring can alias resource.env or ctx.shared without retaining
+  // provenance, so reject it instead of attempting incomplete flow analysis.
+  if (unsupportedBindingPattern) return false;
   const isResourceBinding = (name: string): boolean =>
     resourceBindings.has(name) && !nonResourceBindings.has(name);
   const resourceEnvOwner = (node: ts.Node): string | null => {
