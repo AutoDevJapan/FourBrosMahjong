@@ -21,13 +21,17 @@
  *   app → components) that issue #12 listed but deferred while `src/` had no
  *   domain layer; `src/domain/` is now implemented, so the deferral condition
  *   is satisfied (issue #382).
- * - `no-unresolvable-in-src` is `severity: "error"` because it guards the
+ * - `no-server-to-presentation` is `severity: "error"` because the production
+ *   online server must be reusable without React or the Next.js App Router.
+ *   Shared game/protocol code therefore lives under `src/domain/` or `src/lib/`.
+ * - `no-unresolvable-in-src` and `no-unresolvable-in-server` are `severity: "error"`
+ *   because they guard the
  *   *precondition* of every path-based rule above. `src/` imports go through
  *   the `@/*` alias, which dependency-cruiser can only follow via
  *   `options.tsConfig`. Drop that option and 47 `src/` imports silently become
  *   unresolvable, at which point the layer rules match nothing and a
- *   domain → UI canary passes with exit 0 (measured). Without this rule that
- *   failure mode is completely silent.
+ *   domain → UI canary passes with exit 0 (measured). Without these rules that
+ *   failure mode is completely silent in either shipped graph.
  */
 
 /**
@@ -49,6 +53,8 @@ const APP_ROUTER = "^src/app/";
 const COMPONENTS = "^src/components/";
 /** Everything the layer rules govern. */
 const SRC = "^src/";
+/** Production online server; test modules are exempt only from presentation boundaries. */
+const SERVER = "^server/";
 
 /** @type {import('dependency-cruiser').IConfiguration} */
 module.exports = {
@@ -91,6 +97,15 @@ module.exports = {
       to: { path: APP_ROUTER },
     },
     {
+      name: "no-server-to-presentation",
+      comment:
+        "Production server modules must not depend on React/App Router presentation modules. " +
+        "Shared game/protocol code belongs under src/domain or src/lib.",
+      severity: "error",
+      from: { path: SERVER, pathNot: TEST_FILE },
+      to: { path: PRESENTATION },
+    },
+    {
       name: "no-unresolvable-in-src",
       comment:
         "An import under src/ that dependency-cruiser cannot resolve produces no " +
@@ -99,6 +114,15 @@ module.exports = {
         "outside the cruised graph.",
       severity: "error",
       from: { path: SRC },
+      to: { couldNotResolve: true },
+    },
+    {
+      name: "no-unresolvable-in-server",
+      comment:
+        "An unresolvable server import must fail the architecture gate instead of " +
+        "silently disappearing from the production dependency graph.",
+      severity: "error",
+      from: { path: SERVER },
       to: { couldNotResolve: true },
     },
   ],

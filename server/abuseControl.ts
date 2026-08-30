@@ -1,4 +1,4 @@
-import type { OnlineRateLimitScope } from "../src/components/online/types";
+import type { OnlineRateLimitScope } from "../src/domain/online/types";
 
 const SECOND_MS = 1_000;
 const MINUTE_MS = 60 * SECOND_MS;

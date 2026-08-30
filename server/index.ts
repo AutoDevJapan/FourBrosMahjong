@@ -8,7 +8,7 @@ import { WebSocket, WebSocketServer } from "ws";
 import type {
   OnlineErrorCode,
   OnlineRateLimitScope,
-} from "../src/components/online/types";
+} from "../src/domain/online/types";
 import { ROOM_CODE_FORMAT_MESSAGE } from "../src/lib/roomCode";
 import {
   type AbuseRejection,
