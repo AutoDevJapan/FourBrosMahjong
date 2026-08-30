@@ -129,6 +129,15 @@ describe("online room manager", () => {
     const guest = manager.join(host.room.code, "ゲスト");
     if (!guest) throw new Error("guest should join");
 
+    // `RoomManager.create` uses a crypto seed. Pin this fixture so the first
+    // discard deterministically hands control to p1 before the guest leaves.
+    host.room.state = createGame({
+      seed: 0,
+      names: ["ホスト", "ゲスト", "ゲスト3", "ゲスト4"],
+      humanPlayerIds: ["p0", "p1"],
+      explicitKitaPlayerIds: [],
+    });
+
     const drawn = host.room.state.hand?.drawn?.tile;
     if (!drawn) throw new Error("host should start on a draw decision");
     expect(
