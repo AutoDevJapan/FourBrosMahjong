@@ -469,21 +469,44 @@ export function generatedIacSourceIsSecretSafe(source: string): boolean {
     "volume",
   ]);
   const resourceBindings = new Set<string>();
+  const nonResourceBindings = new Set<string>();
+  const addBindingNames = (
+    name: ts.BindingName,
+    destination: Set<string>,
+  ): void => {
+    if (ts.isIdentifier(name)) {
+      destination.add(name.text);
+      return;
+    }
+    for (const element of name.elements) {
+      if (ts.isBindingElement(element)) {
+        addBindingNames(element.name, destination);
+      }
+    }
+  };
   const collectResourceBindings = (node: ts.Node): void => {
-    if (
-      ts.isVariableDeclaration(node) &&
-      ts.isIdentifier(node.name) &&
-      node.initializer !== undefined &&
-      ts.isCallExpression(node.initializer) &&
-      ts.isIdentifier(node.initializer.expression) &&
-      resourceFactoryNames.has(node.initializer.expression.text) &&
-      importedBindings.has(node.initializer.expression.text)
-    ) {
-      resourceBindings.add(node.name.text);
+    if (ts.isVariableDeclaration(node)) {
+      const isResourceDeclaration =
+        ts.isIdentifier(node.name) &&
+        node.initializer !== undefined &&
+        ts.isCallExpression(node.initializer) &&
+        ts.isIdentifier(node.initializer.expression) &&
+        resourceFactoryNames.has(node.initializer.expression.text) &&
+        importedBindings.has(node.initializer.expression.text);
+      if (isResourceDeclaration) {
+        resourceBindings.add(node.name.text);
+      } else {
+        addBindingNames(node.name, nonResourceBindings);
+      }
+    }
+    if (ts.isParameter(node)) {
+      addBindingNames(node.name, nonResourceBindings);
     }
     ts.forEachChild(node, collectResourceBindings);
   };
   collectResourceBindings(sourceFile);
+  const isResourceBinding = (name: string): boolean =>
+    resourceBindings.has(name) && !nonResourceBindings.has(name);
   const resourceEnvOwner = (node: ts.Node): string | null => {
     if (
       ts.isPropertyAccessExpression(node) &&
@@ -511,7 +534,7 @@ export function generatedIacSourceIsSecretSafe(source: string): boolean {
       return false;
     }
     const owner = resourceEnvOwner(node) ?? resourceEnvOwner(node.expression);
-    return owner !== null && !resourceBindings.has(owner);
+    return owner !== null && !isResourceBinding(owner);
   };
   const refCallIsSafe = (node: ts.CallExpression): boolean =>
     node.arguments.length === 2 &&
@@ -531,7 +554,7 @@ export function generatedIacSourceIsSecretSafe(source: string): boolean {
       if (
         owner.name.text === "env" &&
         ts.isIdentifier(owner.expression) &&
-        resourceBindings.has(owner.expression.text)
+        isResourceBinding(owner.expression.text)
       ) {
         return true;
       }

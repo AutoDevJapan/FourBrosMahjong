@@ -368,6 +368,16 @@ describe("Railway IaC parity snapshot contract (#742)", () => {
     ).toBe(true);
     expect(
       generatedIacSourceIsSecretSafe(
+        `import { postgres, service } from "railway/iac"; const db = postgres("db"); { const db = Bun; service("fixture", { env: { VALUE: db.env.SECRET } }); }`,
+      ),
+    ).toBe(false);
+    expect(
+      generatedIacSourceIsSecretSafe(
+        `import { postgres, service } from "railway/iac"; const db = postgres("db"); const make = (db) => service("fixture", { env: { VALUE: db.env.SECRET } });`,
+      ),
+    ).toBe(false);
+    expect(
+      generatedIacSourceIsSecretSafe(
         `import { service } from "railway/iac"; service("fixture", { env: { VALUE: Bun.env.SECRET } });`,
       ),
     ).toBe(false);
@@ -384,6 +394,16 @@ describe("Railway IaC parity snapshot contract (#742)", () => {
     expect(
       generatedIacSourceIsSecretSafe(
         `import { service } from "railway/iac"; service("fixture", { source: Bun.env.SECRET });`,
+      ),
+    ).toBe(false);
+    expect(
+      generatedIacSourceIsSecretSafe(
+        `import { service } from "railway/iac"; service("fixture", { env: { VALUE: ctx.env.SECRET } });`,
+      ),
+    ).toBe(false);
+    expect(
+      generatedIacSourceIsSecretSafe(
+        `import { service } from "railway/iac"; service("fixture", { source: Bun["env"].SECRET });`,
       ),
     ).toBe(false);
     expect(
