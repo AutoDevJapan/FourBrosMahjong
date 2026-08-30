@@ -85,16 +85,24 @@ describe("sanitizePlayerName", () => {
     expect(sanitizePlayerName("   \n ")).toBeNull();
   });
 
-  it.each(["\u200B", "\u2060", "\uFEFF", "\u202E"])(
-    "不可視-onlyの名前(%s)はnullへフォールバックする",
-    (value) => {
-      expect(sanitizePlayerName(value)).toBeNull();
-    },
-  );
+  it.each([
+    "\u00AD",
+    "\u180E",
+    "\u200B",
+    "\u200C",
+    "\u200D",
+    "\u2060",
+    "\u2061",
+    "\uFEFF",
+    "\u202E",
+  ])("不可視-onlyの名前(%s)はnullへフォールバックする", (value) => {
+    expect(sanitizePlayerName(value)).toBeNull();
+  });
 
   it("Bidi制御文字を除去し、RTL名・ZWJ絵文字・結合文字は保持する", () => {
     expect(sanitizePlayerName("A\u202EB")).toBe("AB");
     expect(sanitizePlayerName("עברית")).toBe("עברית");
+    expect(sanitizePlayerName("א\u200Cב")).toBe("א\u200Cב");
     expect(sanitizePlayerName("👨‍👩‍👧‍👦か\u3099\uFE0F")).toBe(
       "👨‍👩‍👧‍👦か\u3099\uFE0F",
     );
@@ -150,7 +158,7 @@ describe("isValidPlayerName", () => {
     );
   });
 
-  it.each(["\u200B", "\u2060", "\uFEFF", "A\u202EB"])(
+  it.each(["\u200B", "\u200C", "\u200D", "\u2060", "\uFEFF", "A\u202EB"])(
     "不可視/Bidi制御文字を含む生値(%s)は拒否する",
     (value) => {
       expect(isValidPlayerName(value)).toBe(false);
