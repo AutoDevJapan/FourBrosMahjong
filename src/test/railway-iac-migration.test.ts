@@ -368,6 +368,51 @@ describe("Railway IaC parity snapshot contract (#742)", () => {
     ).toBe(true);
     expect(
       generatedIacSourceIsSecretSafe(
+        `import { service } from "railway/iac"; service("fixture", { env: { VALUE: ctx.shared.SECRET } });`,
+      ),
+    ).toBe(true);
+    expect(
+      generatedIacSourceIsSecretSafe(
+        `import { service } from "railway/iac"; const host = { runtime: Bun }; service("fixture", { source: host.runtime.env.SECRET });`,
+      ),
+    ).toBe(false);
+    expect(
+      generatedIacSourceIsSecretSafe(
+        `import { service } from "railway/iac"; const host = { runtime: Bun }; service("fixture", { source: host.runtime["env"].SECRET });`,
+      ),
+    ).toBe(false);
+    expect(
+      generatedIacSourceIsSecretSafe(
+        `import { service } from "railway/iac"; service("fixture", { source: import.meta.env.SECRET });`,
+      ),
+    ).toBe(false);
+    expect(
+      generatedIacSourceIsSecretSafe(
+        `import { service } from "railway/iac"; service("fixture", { source: ctx.shared.SECRET });`,
+      ),
+    ).toBe(false);
+    expect(
+      generatedIacSourceIsSecretSafe(
+        `import { postgres, service } from "railway/iac"; const db = postgres("db"); service("fixture", { source: db.env.SECRET });`,
+      ),
+    ).toBe(false);
+    expect(
+      generatedIacSourceIsSecretSafe(
+        `import { ref, service } from "railway/iac"; const untrusted = ctx; service("fixture", { source: ref(untrusted, "output") });`,
+      ),
+    ).toBe(false);
+    expect(
+      generatedIacSourceIsSecretSafe(
+        `import { service } from "railway/iac"; service("fixture", { options: { ["TOKEN"]: "SECRET_SENTINEL" } });`,
+      ),
+    ).toBe(false);
+    expect(
+      generatedIacSourceIsSecretSafe(
+        `import { service } from "railway/iac"; service("fixture", { options: { "TOKEN": "SECRET_SENTINEL" } });`,
+      ),
+    ).toBe(false);
+    expect(
+      generatedIacSourceIsSecretSafe(
         `import { postgres, service } from "railway/iac"; const db = postgres("db"); { const db = Bun; service("fixture", { env: { VALUE: db.env.SECRET } }); }`,
       ),
     ).toBe(false);

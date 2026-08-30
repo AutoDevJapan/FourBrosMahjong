@@ -377,6 +377,8 @@ function configSourceMatchesReadback(
 }
 
 export function generatedIacSourceIsSecretSafe(source: string): boolean {
+  const secretLikePropertyName =
+    /(?:TOKEN|SECRET|PASSWORD|PRIVATE_KEY|ALLOWED_ORIGINS)/i;
   if (Buffer.byteLength(source, "utf8") > 256 * 1_024) return false;
   if (
     /(?:TOKEN|SECRET|PASSWORD|PRIVATE_KEY|ALLOWED_ORIGINS)\s*:\s*["'`]/i.test(
@@ -527,18 +529,38 @@ export function generatedIacSourceIsSecretSafe(source: string): boolean {
     return null;
   };
   const propertyUsesUnboundEnvironment = (node: ts.Node): boolean => {
-    if (
-      !ts.isPropertyAccessExpression(node) &&
-      !ts.isElementAccessExpression(node)
-    ) {
-      return false;
+    if (ts.isPropertyAccessExpression(node) && node.name.text === "env") {
+      return !(
+        ts.isIdentifier(node.expression) &&
+        isResourceBinding(node.expression.text)
+      );
     }
-    const owner = resourceEnvOwner(node) ?? resourceEnvOwner(node.expression);
-    return owner !== null && !isResourceBinding(owner);
+    if (ts.isElementAccessExpression(node)) {
+      const argument = node.argumentExpression;
+      if (argument === undefined) return true;
+      if (ts.isStringLiteral(argument) && argument.text === "env") {
+        return !(
+          ts.isIdentifier(node.expression) &&
+          isResourceBinding(node.expression.text)
+        );
+      }
+      if (!ts.isStringLiteral(argument) && !ts.isNumericLiteral(argument)) {
+        return true;
+      }
+    }
+    if (
+      (ts.isPropertyAccessExpression(node) ||
+        ts.isElementAccessExpression(node)) &&
+      propertyUsesUnboundEnvironment(node.expression)
+    ) {
+      return true;
+    }
+    return false;
   };
   const refCallIsSafe = (node: ts.CallExpression): boolean =>
     node.arguments.length === 2 &&
     ts.isIdentifier(node.arguments[0]!) &&
+    isResourceBinding(node.arguments[0]!.text) &&
     ts.isStringLiteral(node.arguments[1]!) &&
     isBoundedName(node.arguments[1]!.text);
   const isAllowedVariableValue = (node: ts.Expression): boolean => {
@@ -575,6 +597,74 @@ export function generatedIacSourceIsSecretSafe(source: string): boolean {
       return name.expression.text;
     }
     return null;
+  };
+  const allowedVariableValueNodes = new Set<ts.Node>();
+  const collectAllowedVariableValues = (node: ts.Node): void => {
+    if (
+      ts.isPropertyAssignment(node) &&
+      ["env", "variables"].includes(propertyNameText(node.name) ?? "") &&
+      ts.isObjectLiteralExpression(node.initializer)
+    ) {
+      for (const property of node.initializer.properties) {
+        if (
+          ts.isPropertyAssignment(property) &&
+          isAllowedVariableValue(property.initializer)
+        ) {
+          allowedVariableValueNodes.add(property.initializer);
+        }
+      }
+    }
+    ts.forEachChild(node, collectAllowedVariableValues);
+  };
+  collectAllowedVariableValues(sourceFile);
+  const isWithinAllowedVariableValue = (node: ts.Node): boolean => {
+    let current: ts.Node | undefined = node;
+    while (current !== undefined) {
+      if (allowedVariableValueNodes.has(current)) return true;
+      current = current.parent;
+    }
+    return false;
+  };
+  const isResourceEnvironmentAccess = (node: ts.Node): boolean => {
+    const owner = resourceEnvOwner(node);
+    if (owner !== null) {
+      return isResourceBinding(owner);
+    }
+    if (
+      (ts.isPropertyAccessExpression(node) ||
+        ts.isElementAccessExpression(node)) &&
+      isResourceEnvironmentAccess(node.expression)
+    ) {
+      return true;
+    }
+    return false;
+  };
+  const isSharedNamespaceAccess = (node: ts.Node): boolean => {
+    if (
+      ts.isPropertyAccessExpression(node) &&
+      node.name.text === "shared" &&
+      ts.isIdentifier(node.expression) &&
+      node.expression.text === "ctx"
+    ) {
+      return true;
+    }
+    if (
+      ts.isElementAccessExpression(node) &&
+      ts.isStringLiteral(node.argumentExpression) &&
+      node.argumentExpression.text === "shared" &&
+      ts.isIdentifier(node.expression) &&
+      node.expression.text === "ctx"
+    ) {
+      return true;
+    }
+    if (
+      (ts.isPropertyAccessExpression(node) ||
+        ts.isElementAccessExpression(node)) &&
+      isSharedNamespaceAccess(node.expression)
+    ) {
+      return true;
+    }
+    return false;
   };
   let safe = true;
   const visit = (node: ts.Node): void => {
@@ -618,6 +708,22 @@ export function generatedIacSourceIsSecretSafe(source: string): boolean {
       return;
     }
     if (propertyUsesUnboundEnvironment(node)) {
+      safe = false;
+      return;
+    }
+    if (
+      (isResourceEnvironmentAccess(node) || isSharedNamespaceAccess(node)) &&
+      !isWithinAllowedVariableValue(node)
+    ) {
+      safe = false;
+      return;
+    }
+    if (
+      ts.isPropertyAssignment(node) &&
+      secretLikePropertyName.test(propertyNameText(node.name) ?? "") &&
+      (ts.isStringLiteral(node.initializer) ||
+        ts.isNoSubstitutionTemplateLiteral(node.initializer))
+    ) {
       safe = false;
       return;
     }
