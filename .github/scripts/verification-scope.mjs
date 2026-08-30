@@ -34,22 +34,30 @@ import { pathToFileURL } from "node:url";
 const DOCUMENTATION = [/^docs\//, /^documents\//, /\.md$/];
 
 /**
- * `DOCUMENTATION` に形の上では一致するが、**テストが実際に読んでいる**ため
- * 文書として扱ってはいけないファイル。
+ * 文書ツリーに置かれているが、単体テストが入力として読む資産。
  *
- * ここが実態とずれると「テストが読んでいるファイルを変更したのに CI が走らない」
- * という静かな検証漏れになる。`src/test/ci-workflow.test.ts` が
- * `src/**` 内の `resolve(process.cwd(), "…")` リテラルを走査して、この一覧が
- * 実態と一致していることを固定する。
+ * これらは出荷ツリーへは入らないため E2E は不要だが、内容・inventory・hash の
+ * 整合性を検査する Vitest は必要である。`DOCUMENTATION` より先に unit-test として
+ * 分類することで、変更時に ci の quality は維持しつつ production/E2E を省略できる。
  */
-export const DOCUMENTATION_EXCEPTIONS = [
+export const TEST_INPUT_PATHS = [
   // src/app/rules/rules-doc.test.ts が内容を読み、/rules の記載と突き合わせる。
   "docs/四兄弟麻雀ルール.md",
   // src/test/playwright-projects.test.ts が playwright install 手順を検証する。
   "README.md",
   // src/test/release-guard.test.ts が current package version の release section を検証する。
   "CHANGELOG.md",
+  // server/rolloutPreflight.test.ts が secret-safe な deploy 手順を検証する。
+  "documents/guides/railway-online-deploy-runbook.md",
+  // src/test/ui-refresh-assets.test.ts が manifest と原本 inventory を検証する。
+  "documents/assets/ui-refresh/manifest.json",
 ];
+
+/** テストがディレクトリ単位で列挙する入力資産。追加・削除も同じ分類にする。 */
+export const TEST_INPUT_DIRECTORIES = ["documents/assets/ui-refresh"];
+
+/** @deprecated TEST_INPUT_PATHS に改名。既存のimportとの互換性を保つ。 */
+export const DOCUMENTATION_EXCEPTIONS = TEST_INPUT_PATHS;
 
 /**
  * production バンドルにも E2E の対象にも入らないテスト専用資産。
@@ -77,6 +85,13 @@ const E2E_ASSET = [/^e2e\//, /^playwright\.config\.ts$/];
 const matches = (path, patterns) =>
   patterns.some((pattern) => pattern.test(path));
 
+/** @param {string} path */
+const isTestInput = (path) =>
+  TEST_INPUT_PATHS.includes(path) ||
+  TEST_INPUT_DIRECTORIES.some(
+    (directory) => path === directory || path.startsWith(`${directory}/`),
+  );
+
 /**
  * 1 パスを分類する。
  * @param {string} path
@@ -84,7 +99,7 @@ const matches = (path, patterns) =>
  */
 export function classifyPath(path) {
   if (matches(path, E2E_ASSET)) return "e2e-asset";
-  if (DOCUMENTATION_EXCEPTIONS.includes(path)) return "code";
+  if (isTestInput(path)) return "unit-test";
   // `public/` は定義上そのまま配信される出荷ツリー。拡張子が .md でも文書ではない
   // (例: public/tiles/CREDITS.md は /tiles/CREDITS.md として配信され、
   //  Service Worker の /tiles/ ランタイムルールの対象にもなる)。
