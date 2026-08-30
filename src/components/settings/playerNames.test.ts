@@ -84,6 +84,22 @@ describe("sanitizePlayerName", () => {
     expect(sanitizePlayerName("")).toBeNull();
     expect(sanitizePlayerName("   \n ")).toBeNull();
   });
+
+  it.each(["\u200B", "\u2060", "\uFEFF", "\u202E"])(
+    "不可視-onlyの名前(%s)はnullへフォールバックする",
+    (value) => {
+      expect(sanitizePlayerName(value)).toBeNull();
+    },
+  );
+
+  it("Bidi制御文字を除去し、RTL名・ZWJ絵文字・結合文字は保持する", () => {
+    expect(sanitizePlayerName("A\u202EB")).toBe("AB");
+    expect(sanitizePlayerName("עברית")).toBe("עברית");
+    expect(sanitizePlayerName("👨‍👩‍👧‍👦か\u3099\uFE0F")).toBe(
+      "👨‍👩‍👧‍👦か\u3099\uFE0F",
+    );
+    expect(limitPlayerName("A\u2060B")).toBe("AB");
+  });
 });
 
 describe("playerNameGraphemes", () => {
@@ -133,6 +149,13 @@ describe("isValidPlayerName", () => {
       false,
     );
   });
+
+  it.each(["\u200B", "\u2060", "\uFEFF", "A\u202EB"])(
+    "不可視/Bidi制御文字を含む生値(%s)は拒否する",
+    (value) => {
+      expect(isValidPlayerName(value)).toBe(false);
+    },
+  );
 
   it("巨大入力は書記素分割へ渡さず code unit 長で拒否する(#484)", () => {
     // 分割コストを払う前に O(1) で弾く防御。上限は 12書記素がどんな構成でも

@@ -238,6 +238,41 @@ describe("parseOnlineServerMessage", () => {
     ).toBeNull();
   });
 
+  it("rejects invisible and bidi-controlled names before they reach the UI", () => {
+    const snapshot = snapshotFixture();
+    for (const name of ["\u200B", "\u2060", "\uFEFF", "A\u202EB"]) {
+      expect(
+        parseOnlineServerMessage({
+          type: "snapshot",
+          snapshot: {
+            ...snapshot,
+            players: [{ ...snapshot.players[0]!, name }],
+          },
+        }),
+        name,
+      ).toBeNull();
+    }
+
+    const gameEnd = snapshotForState(walkToGameEnd(2024).state);
+    const result = gameEnd.view.result;
+    if (!result) throw new Error("gameEnd result expected");
+    const poisonedResult = {
+      ...result,
+      players: result.players.map((player, index) =>
+        index === 0 ? { ...player, name: "A\u202EB" } : player,
+      ),
+    };
+    expect(
+      parseOnlineServerMessage({
+        type: "snapshot",
+        snapshot: {
+          ...gameEnd,
+          view: { ...gameEnd.view, result: poisonedResult },
+        },
+      }),
+    ).toBeNull();
+  });
+
   it("accepts the production legacy snapshot shape without newer host/player fields", () => {
     const legacySnapshot = structuredClone(snapshotFixture()) as unknown as {
       hostId?: unknown;

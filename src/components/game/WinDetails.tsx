@@ -30,7 +30,7 @@ export default function WinDetails({ summary }: { summary: RoundSummary }) {
         和了内訳
       </h2>
       <p>
-        <span className="font-semibold">
+        <span dir="auto" className="player-name-bidi-isolate font-semibold">
           {detail.winnerName}({SEAT_WIND_LABEL[detail.winnerSeat]})
         </span>
         ・{detail.dealer ? "親" : "子"}・
@@ -120,7 +120,9 @@ export default function WinDetails({ summary }: { summary: RoundSummary }) {
       <ul role="list" aria-label="支払い内訳">
         {detail.payments.map((payment, index) => (
           <li key={`payment-${index}`}>
-            {payment.name}: {payment.amount.toLocaleString("ja-JP")}点
+            <span dir="auto" className="player-name-bidi-isolate">
+              {payment.name}: {payment.amount.toLocaleString("ja-JP")}点
+            </span>
           </li>
         ))}
       </ul>

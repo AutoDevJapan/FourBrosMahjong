@@ -19,6 +19,18 @@ export const MAX_PLAYER_NAME_LENGTH = 12;
  */
 export const MAX_PLAYER_NAME_CODE_UNITS = MAX_PLAYER_NAME_LENGTH * 32;
 
+/**
+ * 表示名へ持ち込ませない不可視の書式制御文字。
+ *
+ * `Default_Ignorable_Code_Point` を一括で除去すると、絵文字の ZWJ・VS16 や
+ * 正規の結合文字まで壊してしまうため、spoof に使われるものだけを明示する。
+ * `Bidi_Control` には LRM/RLM、embedding/override、isolate などを含める。
+ */
+const DISALLOWED_PLAYER_NAME_FORMAT =
+  /(?:\p{Bidi_Control}|[\u200B\u2060\uFEFF])/u;
+const DISALLOWED_PLAYER_NAME_FORMAT_GLOBAL =
+  /(?:\p{Bidi_Control}|[\u200B\u2060\uFEFF])/gu;
+
 /** 不正な UTF-16 を U+FFFD へ置換し、サロゲートペアを分断しない文字列にする。 */
 function toWellFormed(value: string): string {
   let result = "";
@@ -34,6 +46,16 @@ function toWellFormed(value: string): string {
     else result += value[index];
   }
   return result;
+}
+
+/** 表示名へ混入した bidi/invisible format control の有無を判定する。 */
+export function hasDisallowedPlayerNameControls(value: string): boolean {
+  return DISALLOWED_PLAYER_NAME_FORMAT.test(value);
+}
+
+/** lone surrogate を含まない名前か判定する。 */
+export function isWellFormedPlayerName(value: string): boolean {
+  return toWellFormed(value) === value;
 }
 
 const isRegionalIndicator = (value: string) =>
@@ -91,7 +113,11 @@ export function playerNameGraphemes(value: string): string[] {
  */
 export function limitPlayerName(value: string): string {
   // 先頭12書記素しか使わないので、巨大な貼り付けは分割前に code unit で切り落とす。
-  return playerNameGraphemes(value.slice(0, MAX_PLAYER_NAME_CODE_UNITS))
+  const safeValue = toWellFormed(value).replace(
+    DISALLOWED_PLAYER_NAME_FORMAT_GLOBAL,
+    "",
+  );
+  return playerNameGraphemes(safeValue.slice(0, MAX_PLAYER_NAME_CODE_UNITS))
     .slice(0, MAX_PLAYER_NAME_LENGTH)
     .join("");
 }
@@ -101,13 +127,17 @@ export function isValidPlayerName(value: string): boolean {
   return (
     value.length > 0 &&
     value.length <= MAX_PLAYER_NAME_CODE_UNITS &&
+    !hasDisallowedPlayerNameControls(value) &&
     playerNameGraphemes(value).length <= MAX_PLAYER_NAME_LENGTH
   );
 }
 
 /** 1件の入力値を保存・表示可能な形へ正規化する。空欄は `null` を返す。 */
 export function sanitizePlayerName(raw: string): string | null {
-  const normalized = raw.replace(/\s+/gu, " ").trim();
+  const normalized = toWellFormed(raw)
+    .replace(DISALLOWED_PLAYER_NAME_FORMAT_GLOBAL, "")
+    .replace(/\s+/gu, " ")
+    .trim();
   if (normalized === "") return null;
   return limitPlayerName(normalized);
 }

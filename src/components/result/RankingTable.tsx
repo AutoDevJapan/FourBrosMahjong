@@ -107,7 +107,10 @@ export default function RankingTable({
                   {player.playerId ? (
                     <CharacterPortrait playerId={player.playerId} />
                   ) : null}
-                  <span className="character-name font-medium">
+                  <span
+                    dir="auto"
+                    className="character-name player-name-bidi-isolate font-medium"
+                  >
                     {player.name}
                   </span>
                 </span>

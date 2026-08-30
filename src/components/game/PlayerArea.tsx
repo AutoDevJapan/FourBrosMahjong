@@ -97,7 +97,12 @@ export default function PlayerArea({
         <span className="rounded bg-foreground/10 px-1.5 py-0.5 text-xs font-semibold">
           {SEAT_WIND_LABEL[seatWind]}
         </span>
-        <span className="character-name font-medium">{name}</span>
+        <span
+          dir="auto"
+          className="character-name player-name-bidi-isolate font-medium"
+        >
+          {name}
+        </span>
         {status?.isDealer ? <StatusBadge icon="◆" label="親" /> : null}
         {status?.isCurrentTurn ? (
           <StatusBadge icon="▶" label="手番" variant="highlight" />

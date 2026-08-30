@@ -70,7 +70,8 @@ export default function SoshiiBreakdown({
           {rank}位
         </span>
         <span
-          className={`${presentationClass("breakdown-name") ?? ""}${presentation ? " " : ""}character-name`}
+          dir="auto"
+          className={`${presentationClass("breakdown-name") ?? ""}${presentation ? " " : ""}character-name player-name-bidi-isolate`}
         >
           {name}
         </span>

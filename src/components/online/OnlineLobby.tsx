@@ -1260,7 +1260,10 @@ export default function OnlineLobby() {
               }
             />
             <div className="flex items-center gap-2">
-              <span className="text-sm text-foreground/70">
+              <span
+                dir="auto"
+                className="player-name-bidi-isolate text-sm text-foreground/70"
+              >
                 {
                   snapshot.players.find((player) => player.id === snapshot.you)
                     ?.name
@@ -1281,7 +1284,8 @@ export default function OnlineLobby() {
               {snapshot.players.map((player) => (
                 <span
                   key={player.id}
-                  className={player.connected ? "" : "text-foreground/60"}
+                  dir="auto"
+                  className={`player-name-bidi-isolate ${player.connected ? "" : "text-foreground/60"}`}
                 >
                   {player.name}
                   {player.isHost ? "（ホスト）" : ""}
@@ -1289,7 +1293,11 @@ export default function OnlineLobby() {
                 </span>
               ))}
             </div>
-            <span aria-live="polite">
+            <span
+              dir="auto"
+              className="player-name-bidi-isolate"
+              aria-live="polite"
+            >
               {currentTurnName ? `${currentTurnName}の手番` : "対局終了"}
             </span>
           </div>
