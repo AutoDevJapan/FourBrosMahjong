@@ -457,6 +457,62 @@ export function generatedIacSourceIsSecretSafe(source: string): boolean {
       importedBindings.add(element.name.text);
     }
   }
+  const resourceFactoryNames = new Set([
+    "bucket",
+    "database",
+    "fn",
+    "mongo",
+    "mysql",
+    "postgres",
+    "redis",
+    "service",
+    "volume",
+  ]);
+  const resourceBindings = new Set<string>();
+  const collectResourceBindings = (node: ts.Node): void => {
+    if (
+      ts.isVariableDeclaration(node) &&
+      ts.isIdentifier(node.name) &&
+      node.initializer !== undefined &&
+      ts.isCallExpression(node.initializer) &&
+      ts.isIdentifier(node.initializer.expression) &&
+      resourceFactoryNames.has(node.initializer.expression.text) &&
+      importedBindings.has(node.initializer.expression.text)
+    ) {
+      resourceBindings.add(node.name.text);
+    }
+    ts.forEachChild(node, collectResourceBindings);
+  };
+  collectResourceBindings(sourceFile);
+  const resourceEnvOwner = (node: ts.Node): string | null => {
+    if (
+      ts.isPropertyAccessExpression(node) &&
+      node.name.text === "env" &&
+      ts.isIdentifier(node.expression)
+    ) {
+      return node.expression.text;
+    }
+    if (
+      ts.isElementAccessExpression(node) &&
+      ts.isIdentifier(node.expression) &&
+      node.argumentExpression !== undefined &&
+      ts.isStringLiteral(node.argumentExpression) &&
+      node.argumentExpression.text === "env"
+    ) {
+      return node.expression.text;
+    }
+    return null;
+  };
+  const propertyUsesUnboundEnvironment = (node: ts.Node): boolean => {
+    if (
+      !ts.isPropertyAccessExpression(node) &&
+      !ts.isElementAccessExpression(node)
+    ) {
+      return false;
+    }
+    const owner = resourceEnvOwner(node) ?? resourceEnvOwner(node.expression);
+    return owner !== null && !resourceBindings.has(owner);
+  };
   const refCallIsSafe = (node: ts.CallExpression): boolean =>
     node.arguments.length === 2 &&
     ts.isIdentifier(node.arguments[0]!) &&
@@ -475,7 +531,7 @@ export function generatedIacSourceIsSecretSafe(source: string): boolean {
       if (
         owner.name.text === "env" &&
         ts.isIdentifier(owner.expression) &&
-        owner.expression.text !== "process"
+        resourceBindings.has(owner.expression.text)
       ) {
         return true;
       }
@@ -530,7 +586,15 @@ export function generatedIacSourceIsSecretSafe(source: string): boolean {
     if (ts.isImportDeclaration(node)) {
       return;
     }
+    if (ts.isExportDeclaration(node) && node.moduleSpecifier !== undefined) {
+      safe = false;
+      return;
+    }
     if (ts.isImportEqualsDeclaration(node) || ts.isNewExpression(node)) {
+      safe = false;
+      return;
+    }
+    if (propertyUsesUnboundEnvironment(node)) {
       safe = false;
       return;
     }
