@@ -604,6 +604,37 @@ export function generatedIacSourceIsSecretSafe(source: string): boolean {
     }
     return null;
   };
+  const unwrapParenthesizedExpression = (
+    node: ts.Expression,
+  ): ts.Expression => {
+    let current = node;
+    while (ts.isParenthesizedExpression(current)) current = current.expression;
+    return current;
+  };
+  const containsStringLiteral = (node: ts.Node): boolean => {
+    if (ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node)) {
+      return true;
+    }
+    let found = false;
+    ts.forEachChild(node, (child) => {
+      if (!found && containsStringLiteral(child)) found = true;
+    });
+    return found;
+  };
+  const secretLikeValueIsStaticSafe = (node: ts.Expression): boolean => {
+    const unwrapped = unwrapParenthesizedExpression(node);
+    if (
+      ts.isCallExpression(unwrapped) &&
+      ts.isIdentifier(unwrapped.expression)
+    ) {
+      return (
+        (unwrapped.expression.text === "preserve" &&
+          unwrapped.arguments.length === 0) ||
+        (unwrapped.expression.text === "ref" && refCallIsSafe(unwrapped))
+      );
+    }
+    return !containsStringLiteral(unwrapped);
+  };
   const allowedVariableValueNodes = new Set<ts.Node>();
   const collectAllowedVariableValues = (node: ts.Node): void => {
     if (
@@ -727,8 +758,7 @@ export function generatedIacSourceIsSecretSafe(source: string): boolean {
     if (
       ts.isPropertyAssignment(node) &&
       secretLikePropertyName.test(propertyNameText(node.name) ?? "") &&
-      (ts.isStringLiteral(node.initializer) ||
-        ts.isNoSubstitutionTemplateLiteral(node.initializer))
+      !secretLikeValueIsStaticSafe(node.initializer)
     ) {
       safe = false;
       return;
