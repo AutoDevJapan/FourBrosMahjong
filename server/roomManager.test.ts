@@ -64,6 +64,21 @@ describe("online room manager", () => {
     );
     expect(normalizePlayerName("名前\uD83D")).toBe("名前�");
     expect(normalizePlayerName("   ")).toBe("ゲスト");
+    expect(normalizePlayerName("\u200B\u2060\uFEFF")).toBe("ゲスト");
+    expect(normalizePlayerName("A\u202EB")).toBe("AB");
+    expect(normalizePlayerName("עברית")).toBe("עברית");
+  });
+
+  it("create/joinの直接入力でも不可視名をroom stateへ保存しない", () => {
+    const manager = new RoomManager();
+    const host = manager.create("\u200B");
+    expect(host.player.name).toBe("ホスト");
+    expect(host.room.state.players[0]?.name).toBe("ホスト");
+
+    const guest = manager.join(host.room.code, "\u202Eא");
+    if (!guest) throw new Error("guest should join");
+    expect(guest.player.name).toBe("א");
+    expect(guest.room.state.players[1]?.name).toBe("א");
   });
 
   it("creates a room, assigns the next human seat, and rejects stale actions", () => {

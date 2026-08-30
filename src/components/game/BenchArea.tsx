@@ -56,7 +56,12 @@ export default function BenchArea({
           ) : null}
           <CharacterPortrait playerId={player.playerId} />
           <StatusBadge icon="⏸" label="抜け番" variant="bench" />
-          <span className="character-name font-medium">{player.name}</span>
+          <span
+            dir="auto"
+            className="character-name player-name-bidi-isolate font-medium"
+          >
+            {player.name}
+          </span>
         </header>
         <ScoreDisplay points={player.points} delta={player.pointsDelta} />
       </section>
@@ -82,7 +87,12 @@ export default function BenchArea({
       ) : null}
       <CharacterPortrait playerId={player.playerId} size="medium" />
       <StatusBadge icon="⏸" label="抜け番" variant="bench" />
-      <p className="character-name font-medium">{player.name}</p>
+      <p
+        dir="auto"
+        className="character-name player-name-bidi-isolate font-medium"
+      >
+        {player.name}
+      </p>
       <ScoreDisplay points={player.points} delta={player.pointsDelta} />
       <p className="text-xs text-foreground/60">この局は休み</p>
     </section>

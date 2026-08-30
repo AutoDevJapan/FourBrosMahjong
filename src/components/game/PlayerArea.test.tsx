@@ -24,6 +24,8 @@ describe("PlayerArea status badges (spec 5.2.1)", () => {
     });
     expect(self).toHaveAttribute("data-player-role", "self");
     expect(screen.getByText("あなた")).toBeVisible();
+    expect(screen.getByText("粗悪品")).toHaveAttribute("dir", "auto");
+    expect(screen.getByText("粗悪品")).toHaveClass("player-name-bidi-isolate");
 
     rerender(<PlayerArea player={{ ...PLAYER, status: {} }} isSelf={false} />);
     expect(

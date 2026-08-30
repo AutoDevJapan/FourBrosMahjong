@@ -125,7 +125,12 @@ function HistoryItem({ entry }: { entry: MatchHistoryEntry }) {
         <span className="history-entry-winner text-foreground/70">
           {top.playerId ? <CharacterPortrait playerId={top.playerId} /> : null}
           <span className="history-entry-winner-copy">
-            <span className="history-entry-winner-name">1位 {top.name}</span>
+            <span className="history-entry-winner-name">
+              1位{" "}
+              <span dir="auto" className="player-name-bidi-isolate">
+                {top.name}
+              </span>
+            </span>
             <span className="history-entry-total">
               <span aria-hidden="true">{topTotal.display}</span>
               <span className="sr-only">{topTotal.srLabel}</span>

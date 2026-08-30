@@ -82,7 +82,7 @@ describe("WinDetails", () => {
 
   it("和了者名と席を和了内訳の冒頭に表示する(#259)", () => {
     render(<WinDetails summary={winSummary} />);
-    expect(screen.getByText("あなた(南家)")).toBeInTheDocument();
+    expect(screen.getByText("あなた(南家)")).toHaveAttribute("dir", "auto");
   });
 
   it("和了形(手牌13枚+和了牌)を表向きで開示し、和了牌をaria-labelで区別する(#259)", () => {

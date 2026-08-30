@@ -583,6 +583,30 @@ describe("OnlineLobby の参加条件", () => {
     expect(input).toHaveValue("名前�");
   });
 
+  it("不可視-only名は送信できず、Bidi制御文字は送信前に除去する", () => {
+    render(<OnlineLobby />);
+    const input = screen.getByLabelText("表示名");
+    const createButton = screen.getByRole("button", {
+      name: "新しいルームを作る",
+    });
+
+    fireEvent.change(input, { target: { value: "\u200B\u2060\uFEFF" } });
+    expect(input).toHaveValue("");
+    expect(createButton).toBeDisabled();
+
+    fireEvent.change(input, { target: { value: "A\u202EB" } });
+    expect(input).toHaveValue("AB");
+    expect(createButton).toBeEnabled();
+    fireEvent.click(createButton);
+
+    expect(sockets).toHaveLength(1);
+    act(() => sockets[0]?.open());
+    expect(JSON.parse(sockets[0]?.sent[0] ?? "{}")).toMatchObject({
+      type: "create",
+      name: "AB",
+    });
+  });
+
   it("IME変換中は読みを保持し、確定時に書記素上限を適用する", () => {
     render(<OnlineLobby />);
     const input = screen.getByLabelText("表示名");

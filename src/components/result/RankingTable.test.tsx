@@ -70,6 +70,7 @@ describe("RankingTable (spec 6.7)", () => {
     expect(first.getByText("あなた")).toBeInTheDocument();
     expect(within(rows[2]).getByText("3位")).toBeInTheDocument();
     expect(within(rows[3]).getByText("4位")).toBeInTheDocument();
+    expect(within(rows[1]).getByText("あなた")).toHaveAttribute("dir", "auto");
   });
 
   it("exposes a screen-reader label for a negative total", () => {

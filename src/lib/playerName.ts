@@ -19,6 +19,20 @@ export const MAX_PLAYER_NAME_LENGTH = 12;
  */
 export const MAX_PLAYER_NAME_CODE_UNITS = MAX_PLAYER_NAME_LENGTH * 32;
 
+/**
+ * 表示名へ持ち込ませない不可視の書式制御文字。
+ *
+ * `Cf` を一括で除去すると、絵文字の ZWJ・正規のRTL表記に使うZWNJ・emoji tag
+ * sequenceまで壊してしまうため、表示に意味のある列の構成要素だけを保持する。
+ * `Bidi_Control` (LRM/RLM、embedding/override、isolate等)や U+200B/U+2060/U+FEFF は
+ * 保持対象外である。
+ */
+const PLAYER_NAME_FORMAT = /\p{Cf}/u;
+const PRESERVED_PLAYER_NAME_FORMAT =
+  /(?:[\u200C\u200D]|\u{E0001}|[\u{E0020}-\u{E007F}])/u;
+const NON_RENDERING_PLAYER_NAME_POINT =
+  /(?:\p{Mark}|\p{White_Space}|\p{Cf}|[\uFE0E\uFE0F\u{E0100}-\u{E01EF}])/u;
+
 /** 不正な UTF-16 を U+FFFD へ置換し、サロゲートペアを分断しない文字列にする。 */
 function toWellFormed(value: string): string {
   let result = "";
@@ -34,6 +48,38 @@ function toWellFormed(value: string): string {
     else result += value[index];
   }
   return result;
+}
+
+/** 表示名へ混入した bidi/invisible format control の有無を判定する。 */
+export function hasDisallowedPlayerNameControls(value: string): boolean {
+  return [...toWellFormed(value)].some(
+    (point) =>
+      PLAYER_NAME_FORMAT.test(point) &&
+      !PRESERVED_PLAYER_NAME_FORMAT.test(point),
+  );
+}
+
+/** lone surrogate を含まない名前か判定する。 */
+export function isWellFormedPlayerName(value: string): boolean {
+  return toWellFormed(value) === value;
+}
+
+function stripDisallowedPlayerNameControls(value: string): string {
+  return [...toWellFormed(value)]
+    .filter(
+      (point) =>
+        !(
+          PLAYER_NAME_FORMAT.test(point) &&
+          !PRESERVED_PLAYER_NAME_FORMAT.test(point)
+        ),
+    )
+    .join("");
+}
+
+function hasVisiblePlayerNameBase(value: string): boolean {
+  return [...toWellFormed(value)].some(
+    (point) => !NON_RENDERING_PLAYER_NAME_POINT.test(point),
+  );
 }
 
 const isRegionalIndicator = (value: string) =>
@@ -91,7 +137,11 @@ export function playerNameGraphemes(value: string): string[] {
  */
 export function limitPlayerName(value: string): string {
   // 先頭12書記素しか使わないので、巨大な貼り付けは分割前に code unit で切り落とす。
-  return playerNameGraphemes(value.slice(0, MAX_PLAYER_NAME_CODE_UNITS))
+  const safeValue = stripDisallowedPlayerNameControls(
+    value.slice(0, MAX_PLAYER_NAME_CODE_UNITS),
+  );
+  if (!hasVisiblePlayerNameBase(safeValue)) return "";
+  return playerNameGraphemes(safeValue)
     .slice(0, MAX_PLAYER_NAME_LENGTH)
     .join("");
 }
@@ -101,13 +151,17 @@ export function isValidPlayerName(value: string): boolean {
   return (
     value.length > 0 &&
     value.length <= MAX_PLAYER_NAME_CODE_UNITS &&
+    !hasDisallowedPlayerNameControls(value) &&
+    hasVisiblePlayerNameBase(value) &&
     playerNameGraphemes(value).length <= MAX_PLAYER_NAME_LENGTH
   );
 }
 
 /** 1件の入力値を保存・表示可能な形へ正規化する。空欄は `null` を返す。 */
 export function sanitizePlayerName(raw: string): string | null {
-  const normalized = raw.replace(/\s+/gu, " ").trim();
-  if (normalized === "") return null;
+  const normalized = stripDisallowedPlayerNameControls(raw)
+    .replace(/\s+/gu, " ")
+    .trim();
+  if (normalized === "" || !hasVisiblePlayerNameBase(normalized)) return null;
   return limitPlayerName(normalized);
 }

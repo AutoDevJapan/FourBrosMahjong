@@ -110,6 +110,10 @@ describe("MatchHistoryList (#293)", () => {
     // 新しい半荘(seed=2)が先頭に来る。
     expect(items[0]).toHaveTextContent(formatted(1_753_100_000_000));
     expect(items[0]).toHaveTextContent("1位 四郎");
+    const winnerName = items[0].querySelector(
+      ".history-entry-winner-name .player-name-bidi-isolate",
+    );
+    expect(winnerName).toHaveAttribute("dir", "auto");
     expect(items[1]).toHaveTextContent("1位 三郎");
     const placements = within(items[0] as HTMLElement).getByRole("group", {
       name: "四兄弟の最終順位",

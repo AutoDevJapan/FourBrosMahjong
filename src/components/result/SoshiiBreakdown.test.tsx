@@ -75,6 +75,7 @@ describe("SoshiiBreakdown (spec 6.7 / 6.8)", () => {
 
   it("labels the section by the player name for assistive tech", () => {
     render(<SoshiiBreakdown player={player} />);
+    expect(screen.getByText("あなた")).toHaveAttribute("dir", "auto");
     expect(
       screen.getByRole("region", { name: "1位 あなたのソシー内訳" }),
     ).toBeInTheDocument();

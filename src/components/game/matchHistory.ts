@@ -10,6 +10,10 @@
  * 形状を厳密検証し、件数・容量に上限を設けて巨大入力や破損データから防御する。
  */
 import { localStorageOrNull } from "@/components/common/browserStorage";
+import {
+  hasDisallowedPlayerNameControls,
+  isWellFormedPlayerName,
+} from "@/lib/playerName";
 import { hasOnlyKeys } from "./gamePersistence";
 
 /** `localStorage` の保存キー。形式変更時は version を上げて別キーにする。 */
@@ -97,6 +101,8 @@ function isPlayer(value: unknown): value is MatchHistoryPlayer {
     typeof player.name === "string" &&
     player.name.length > 0 &&
     player.name.length <= MAX_NAME_LENGTH &&
+    isWellFormedPlayerName(player.name) &&
+    !hasDisallowedPlayerNameControls(player.name) &&
     Number.isInteger(player.rank) &&
     Number(player.rank) >= 1 &&
     Number(player.rank) <= PLAYER_COUNT &&

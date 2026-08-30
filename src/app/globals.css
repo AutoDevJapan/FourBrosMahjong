@@ -650,6 +650,11 @@ body {
   color: var(--character-accent, currentColor);
 }
 
+/* ユーザー由来のRTL名が順位・席・点数など周辺ラベルを並べ替えないよう隔離する。 */
+.player-name-bidi-isolate {
+  unicode-bidi: isolate;
+}
+
 .character-portrait {
   border: 2px solid var(--character-accent, var(--control-border));
   background: #f4f4f4;

@@ -1,4 +1,9 @@
 import { CHARACTER_PLAYER_IDS } from "@/domain/game/characters";
+import {
+  hasDisallowedPlayerNameControls,
+  isValidPlayerName,
+  isWellFormedPlayerName,
+} from "@/lib/playerName";
 import type {
   OnlineErrorCode,
   OnlineMaintenanceAcceptingNotice,
@@ -158,7 +163,21 @@ function isInteger(value: unknown): value is number {
 }
 
 function isBoundedString(value: unknown, maximum = 2_048): value is string {
-  return typeof value === "string" && value.length <= maximum;
+  return (
+    typeof value === "string" &&
+    value.length <= maximum &&
+    isWellFormedPlayerName(value) &&
+    !hasDisallowedPlayerNameControls(value)
+  );
+}
+
+/** サーバーから届く対局者名は共有ポリシーの正規形だけを表示境界へ通す。 */
+function isPlayerName(value: unknown): value is string {
+  return (
+    typeof value === "string" &&
+    isValidPlayerName(value) &&
+    isWellFormedPlayerName(value)
+  );
 }
 
 function isOptionalBoolean(value: unknown): boolean {
@@ -215,7 +234,7 @@ function isBenchPlayer(value: unknown): boolean {
   return (
     isRecord(value) &&
     isPlayerId(value.playerId) &&
-    isBoundedString(value.name, 384) &&
+    isPlayerName(value.name) &&
     isFiniteNumber(value.points) &&
     isOptionalNumber(value.pointsDelta) &&
     !Object.hasOwn(value, "hand") &&
@@ -227,7 +246,7 @@ function isSeatedPlayer(value: unknown): boolean {
   return (
     isRecord(value) &&
     isPlayerId(value.playerId) &&
-    isBoundedString(value.name, 384) &&
+    isPlayerName(value.name) &&
     isFiniteNumber(value.points) &&
     isOptionalNumber(value.pointsDelta) &&
     (value.seatWind === "east" ||
@@ -256,7 +275,7 @@ function isSlot(value: unknown): boolean {
 function isResultPlayer(value: unknown): boolean {
   return (
     isRecord(value) &&
-    isBoundedString(value.name, 384) &&
+    isPlayerName(value.name) &&
     isInteger(value.rank) &&
     value.rank >= 1 &&
     value.rank <= 4 &&
@@ -390,7 +409,7 @@ function isWinDetails(value: unknown): boolean {
   return (
     (value.winType === "tsumo" || value.winType === "ron") &&
     typeof value.dealer === "boolean" &&
-    isBoundedString(value.winnerName, 384) &&
+    isPlayerName(value.winnerName) &&
     (value.winnerSeat === "east" ||
       value.winnerSeat === "south" ||
       value.winnerSeat === "west") &&
@@ -436,7 +455,7 @@ function isRoundSummary(value: unknown): boolean {
     (value.residualSticks === undefined ||
       (isRecord(value.residualSticks) &&
         isPlayerId(value.residualSticks.recipientId) &&
-        isBoundedString(value.residualSticks.recipientName, 384) &&
+        isPlayerName(value.residualSticks.recipientName) &&
         isInteger(value.residualSticks.sticks) &&
         value.residualSticks.sticks >= 0 &&
         isFiniteNumber(value.residualSticks.points))) &&
@@ -448,7 +467,7 @@ function isOnlinePlayer(value: unknown): boolean {
   return (
     isRecord(value) &&
     isPlayerId(value.id) &&
-    isBoundedString(value.name, 384) &&
+    isPlayerName(value.name) &&
     typeof value.connected === "boolean" &&
     typeof value.isHost === "boolean"
   );
@@ -470,7 +489,7 @@ function isDepartureNotice(value: unknown): boolean {
     value === null ||
     (isRecord(value) &&
       isPlayerId(value.playerId) &&
-      isBoundedString(value.playerName, 384) &&
+      isPlayerName(value.playerName) &&
       isBoundedString(value.message) &&
       isBoundedString(value.nextAction))
   );
@@ -642,7 +661,7 @@ export function parseOnlineServerMessage(
     const snapshot = normalizeSnapshot(value.snapshot);
     return snapshot ? { type: "snapshot", snapshot } : null;
   }
-  if (value.type !== "error" || typeof value.message !== "string") {
+  if (value.type !== "error" || !isBoundedString(value.message)) {
     return null;
   }
 
