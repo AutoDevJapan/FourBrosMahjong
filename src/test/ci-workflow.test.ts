@@ -518,20 +518,17 @@ describe("変更パスによる実行範囲の絞り込み (#491)", () => {
    * 素通りし、マージ後 push で毎回テストが走って削減が静かに消える。
    */
   it.each([
+    ["quality", ["pnpm lint", "pnpm typecheck", "pnpm check", "pnpm test"]],
     [
-      "verify",
+      "production",
       [
-        "pnpm lint",
-        "pnpm typecheck",
-        "pnpm check",
-        "pnpm test",
         "pnpm knip",
         "pnpm depcruise",
         "pnpm build",
-        "pnpm test:e2e",
         "pnpm test:e2e:prod:prebuilt",
       ],
     ],
+    ["verify", ["pnpm test:e2e"]],
     ["setup", ["pnpm store path"]],
   ] as const)(
     "%s でゲートすべきコマンドが正しいゲートを持つ",
@@ -580,12 +577,12 @@ describe("変更パスによる実行範囲の絞り込み (#491)", () => {
         expect(
           step.if ?? "",
           `${jobName} / ${step.name}: setup しない run ではブラウザ導入も実行してはならない`,
-        ).toMatch(/^steps\.scope\.outputs\.setup == 'true' && \(/);
+        ).toMatch(/^steps\.scope\.outputs\.browser == 'true' && \(/);
         expect(
           step.if ?? "",
           `${jobName} / ${step.name}: 検証するかcache missの場合だけ導入すべき`,
         ).toMatch(
-          /steps\.scope\.outputs\.verify == 'true' \|\| steps\.[\w-]+\.outputs\.cache-hit != 'true'/,
+          /steps\.scope\.outputs\.production == 'true' \|\| steps\.[\w-]+\.outputs\.cache-hit != 'true'/,
         );
       }
     }
@@ -629,7 +626,7 @@ describe("変更パスによる実行範囲の絞り込み (#491)", () => {
    * E2E job は Playwright 固定イメージを使いキャッシュを書き込まないため、
    * verify=false のとき setup も false でなければならない (#569)。
    */
-  it("setup を伴わない verify は存在しない", () => {
+  it("setup を伴わない検証・cache seed は存在しない", () => {
     for (const job of ["ci", "e2e"] as const) {
       for (const postMergeDuplicate of [false, true]) {
         for (const paths of [
@@ -651,6 +648,17 @@ describe("変更パスによる実行範囲の絞り込み (#491)", () => {
               `${job}: verify=true なのに setup=false (依存が無い状態で検証コマンドが走る)`,
             ).toBe(true);
           }
+          const scope = resolveScope({
+            job,
+            paths,
+            postMergeDuplicate,
+          });
+          if (scope.quality || scope.production || scope.browser) {
+            expect(
+              scope.setup,
+              `${job}: setup=false のまま検証またはcache seedを実行してはならない`,
+            ).toBe(true);
+          }
         }
       }
     }
@@ -664,7 +672,13 @@ describe("変更パスによる実行範囲の絞り込み (#491)", () => {
         postMergeDuplicate: true,
         seedCaches: true,
       }),
-    ).toEqual({ setup: true, verify: false });
+    ).toEqual({
+      setup: true,
+      verify: false,
+      quality: false,
+      production: false,
+      browser: true,
+    });
     expect(
       resolveScope({
         job: "e2e",
@@ -672,7 +686,97 @@ describe("変更パスによる実行範囲の絞り込み (#491)", () => {
         postMergeDuplicate: true,
         seedCaches: true,
       }),
-    ).toEqual({ setup: false, verify: false });
+    ).toEqual({
+      setup: false,
+      verify: false,
+      quality: false,
+      production: false,
+      browser: false,
+    });
+  });
+});
+
+describe("test-only quality scope (#758)", () => {
+  it("unit-test-only は品質検証を維持し production 検証を省略する", () => {
+    expect(
+      resolveScope({
+        job: "ci",
+        paths: ["server/roomManager.drain.test.ts"],
+        postMergeDuplicate: false,
+      }),
+    ).toEqual({
+      setup: true,
+      verify: true,
+      quality: true,
+      production: false,
+      browser: false,
+    });
+    expect(
+      resolveScope({
+        job: "e2e",
+        paths: ["server/roomManager.drain.test.ts"],
+        postMergeDuplicate: false,
+      }),
+    ).toEqual({
+      setup: false,
+      verify: false,
+      quality: false,
+      production: false,
+      browser: false,
+    });
+  });
+
+  it("test と出荷コードの混在は full verification に戻る", () => {
+    const paths = ["server/roomManager.drain.test.ts", "server/roomManager.ts"];
+    expect(
+      resolveScope({
+        job: "ci",
+        paths,
+        postMergeDuplicate: false,
+      }),
+    ).toEqual({
+      setup: true,
+      verify: true,
+      quality: true,
+      production: true,
+      browser: true,
+    });
+    expect(
+      resolveScope({ job: "e2e", paths, postMergeDuplicate: false }).verify,
+    ).toBe(true);
+  });
+
+  it("変更を特定できない場合は全検証へ fail-open で戻る", () => {
+    expect(
+      resolveScope({ job: "ci", paths: null, postMergeDuplicate: false }),
+    ).toEqual({
+      setup: true,
+      verify: true,
+      quality: true,
+      production: true,
+      browser: true,
+    });
+    expect(
+      resolveScope({ job: "e2e", paths: null, postMergeDuplicate: false })
+        .verify,
+    ).toBe(true);
+  });
+
+  it("検証済みmainのexact-tree reuseは検証せず共有cacheだけseedする", () => {
+    expect(
+      resolveScope({
+        job: "ci",
+        paths: ["server/roomManager.ts"],
+        postMergeDuplicate: true,
+        seedCaches: true,
+      }),
+    ).toEqual({
+      setup: true,
+      verify: false,
+      quality: false,
+      production: false,
+      browser: true,
+    });
   });
 });
 
@@ -774,7 +878,13 @@ describe("verification-scope の分類契約 (#491)", () => {
           postMergeDuplicate: true,
           seedCaches: false,
         }),
-      ).toEqual({ setup: false, verify: false });
+      ).toEqual({
+        setup: false,
+        verify: false,
+        quality: false,
+        production: false,
+        browser: false,
+      });
     }
   });
 });
