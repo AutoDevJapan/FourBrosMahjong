@@ -1,6 +1,7 @@
 import { type NextRequest, NextResponse } from "next/server";
 import {
   contentSecurityPolicy,
+  isLoopbackHttpRequest,
   STATIC_SECURITY_HEADERS,
 } from "@/app/_lib/securityHeaders";
 
@@ -11,9 +12,12 @@ import {
  */
 export function proxy(request: NextRequest) {
   const nonce = btoa(crypto.randomUUID());
+  const development = process.env.NODE_ENV !== "production";
   const csp = contentSecurityPolicy(
     nonce,
-    process.env.NODE_ENV !== "production",
+    development,
+    undefined,
+    !isLoopbackHttpRequest(request.nextUrl.protocol, request.nextUrl.hostname),
   );
   const requestHeaders = new Headers(request.headers);
   requestHeaders.set("x-nonce", nonce);
