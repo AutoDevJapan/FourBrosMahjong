@@ -137,15 +137,16 @@ function readWorkflow(): Workflow {
 }
 
 describe("GITHUB_TOKEN 生成PRのrequired checks", () => {
-  it("upstream release tagをoutputやbranchへ渡す前に検証する", () => {
+  it("release tag・asset・archive hashをoutputやbranchへ渡す前に検証する", () => {
     const updater = readWorkflowFile("gitleaks-version-check.yml");
     const compare = updater.jobs?.["check-version"]?.steps?.find(
       (step) => step.id === "compare",
     );
-    expect(compare?.run).toContain(
-      'node .github/scripts/gitleaks-version.mjs "$latest_tag"',
-    );
-    expect(compare?.run).not.toContain('latest_version="${latest_tag#v}"');
+    expect(compare?.run).toContain("gitleaks-release.mjs --read-pinned");
+    expect(compare?.run).toContain("gitleaks-release.mjs --resolve-release");
+    expect(compare?.run).toContain("latest_archive_sha256");
+    expect(compare?.run).toContain("needs_update=true");
+    expect(compare?.run).not.toContain("latest_tag#v");
   });
 
   it("version bump workflowはdispatch可能なgitleaksとCIを同じheadで起動する", () => {

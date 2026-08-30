@@ -38,10 +38,11 @@ jobs:
       # GitHub organization repositories, so it fails with "missing gitleaks
       # license" on this org-owned repo (see gitleaks/gitleaks-action#211).
       # Install and run the open-source gitleaks CLI directly instead, pinned to
-      # the same version (8.30.1) already verified locally per the PR description.
+      # the same version and review-approved archive digest stored in this file.
       - name: Install gitleaks
         env:
           GITLEAKS_VERSION: "8.30.1"
+          GITLEAKS_ARCHIVE_SHA256: "551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb"
         run: |
           set -euo pipefail
           archive="gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
@@ -53,7 +54,7 @@ jobs:
           # Do not let a checksum manifest silently omit the archive we are about to
           # install. A missing-file-tolerant checksum check would return success in
           # that case and leave the downloaded executable unverified.
-          expected_hash="$(
+          remote_hash="$(
             awk -v archive="${archive}" '
               {
                 name = $2
@@ -72,11 +73,23 @@ jobs:
             echo "checksum manifest must contain exactly one entry for ${archive}" >&2
             exit 1
           }
-          if [[ ! "${expected_hash}" =~ ^[[:xdigit:]]{64}$ ]]; then
+          if [[ ! "${remote_hash}" =~ ^[[:xdigit:]]{64}$ ]]; then
             echo "checksum manifest contains an invalid SHA-256 for ${archive}" >&2
             exit 1
           fi
-          printf '%s  %s\n' "${expected_hash}" "${archive}" | sha256sum --check --strict -
+          if [[ ! "${GITLEAKS_ARCHIVE_SHA256}" =~ ^[[:xdigit:]]{64}$ ]]; then
+            echo "repository-pinned SHA-256 for ${archive} is invalid" >&2
+            exit 1
+          fi
+
+          # The repository pin is the only value that authenticates the bytes
+          # before extraction. The remote manifest is auxiliary consistency
+          # evidence and can only make this step fail closed.
+          printf '%s  %s\n' "${GITLEAKS_ARCHIVE_SHA256}" "${archive}" | sha256sum --check --strict -
+          if [[ "${remote_hash,,}" != "${GITLEAKS_ARCHIVE_SHA256,,}" ]]; then
+            echo "upstream checksum differs from the repository-pinned SHA-256" >&2
+            exit 1
+          fi
           tar -xzf "${archive}" gitleaks
           sudo install -m 0755 gitleaks /usr/local/bin/gitleaks
           gitleaks version
