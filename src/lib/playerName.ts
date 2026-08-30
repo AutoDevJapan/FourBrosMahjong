@@ -137,9 +137,11 @@ export function playerNameGraphemes(value: string): string[] {
  */
 export function limitPlayerName(value: string): string {
   // 先頭12書記素しか使わないので、巨大な貼り付けは分割前に code unit で切り落とす。
-  const safeValue = stripDisallowedPlayerNameControls(value);
+  const safeValue = stripDisallowedPlayerNameControls(
+    value.slice(0, MAX_PLAYER_NAME_CODE_UNITS),
+  );
   if (!hasVisiblePlayerNameBase(safeValue)) return "";
-  return playerNameGraphemes(safeValue.slice(0, MAX_PLAYER_NAME_CODE_UNITS))
+  return playerNameGraphemes(safeValue)
     .slice(0, MAX_PLAYER_NAME_LENGTH)
     .join("");
 }
