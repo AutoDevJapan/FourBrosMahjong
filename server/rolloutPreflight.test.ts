@@ -155,6 +155,17 @@ describe("online rollout preflight", () => {
     ]);
   });
 
+  it("holds provider unknown placeholders instead of treating them as identities", () => {
+    for (const placeholder of ["unknown", "UNKNOWN", "UnKnOwN"]) {
+      const ambiguous = cloneEvidence();
+      ambiguous.target.projectId = placeholder;
+
+      const result = validateOnlineRolloutPreflight(ambiguous, NOW);
+      expect(result.repoPreflight).toBe("hold");
+      expect(result.reasons).toContain("target-identity-invalid");
+    }
+  });
+
   it("requires a fresh canonical snapshot and fresh client observation", () => {
     const stale = cloneEvidence();
     stale.capturedAt = new Date(
