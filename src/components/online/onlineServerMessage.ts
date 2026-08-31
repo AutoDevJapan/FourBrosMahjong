@@ -1,4 +1,6 @@
+import { MAX_OMOTE_DORA_COUNT } from "@/domain/dora/dice";
 import { CHARACTER_PLAYER_IDS } from "@/domain/game/characters";
+import { COPIES_PER_TILE, TOTAL_TILE_COUNT } from "@/domain/tiles/tileSet";
 import {
   hasDisallowedPlayerNameControls,
   isValidPlayerName,
@@ -17,6 +19,12 @@ import type {
 export const MAX_MAINTENANCE_RETRY_AFTER_MS = 10 * 60 * 1_000;
 
 const SLOT_POSITIONS = ["self", "right", "across", "left"] as const;
+/** 表示コンポーネントが配列を展開する値のゲーム上の上限。 */
+const MAX_VISIBLE_HAND_TILES = 14;
+const MAX_MELD_TILES = 4;
+const MAX_MELD_COUNT = 4;
+const MAX_KITA_COUNT = COPIES_PER_TILE;
+const MAX_DORA_INDICATOR_COUNT = MAX_OMOTE_DORA_COUNT;
 const ISO_TIMESTAMP =
   /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.\d{1,3})?(?:Z|[+-](\d{2}):(\d{2}))$/u;
 
@@ -162,6 +170,13 @@ function isInteger(value: unknown): value is number {
   return isFiniteNumber(value) && Number.isInteger(value);
 }
 
+function isBoundedNonNegativeInteger(
+  value: unknown,
+  maximum: number,
+): value is number {
+  return isInteger(value) && value >= 0 && value <= maximum;
+}
+
 function isBoundedString(value: unknown, maximum = 2_048): value is string {
   return (
     typeof value === "string" &&
@@ -204,8 +219,8 @@ function isTile(value: unknown): boolean {
   );
 }
 
-function isTileArray(value: unknown): boolean {
-  return Array.isArray(value) && value.every(isTile);
+function isTileArray(value: unknown, maximum = TOTAL_TILE_COUNT): boolean {
+  return Array.isArray(value) && value.length <= maximum && value.every(isTile);
 }
 
 function isPlayerStatus(value: unknown): boolean {
@@ -225,7 +240,7 @@ function isMeld(value: unknown): boolean {
   return (
     isRecord(value) &&
     (value.type === "pon" || value.type === "kan") &&
-    isTileArray(value.tiles) &&
+    isTileArray(value.tiles, MAX_MELD_TILES) &&
     typeof value.concealed === "boolean"
   );
 }
@@ -253,13 +268,15 @@ function isSeatedPlayer(value: unknown): boolean {
       value.seatWind === "south" ||
       value.seatWind === "west") &&
     (value.status === undefined || isPlayerStatus(value.status)) &&
-    (value.hand === undefined || isTileArray(value.hand)) &&
+    (value.hand === undefined ||
+      isTileArray(value.hand, MAX_VISIBLE_HAND_TILES)) &&
     (value.handCount === undefined ||
-      (isInteger(value.handCount) && value.handCount >= 0)) &&
+      isBoundedNonNegativeInteger(value.handCount, MAX_VISIBLE_HAND_TILES)) &&
     (value.melds === undefined ||
-      (Array.isArray(value.melds) && value.melds.every(isMeld))) &&
-    isInteger(value.kitaCount) &&
-    value.kitaCount >= 0 &&
+      (Array.isArray(value.melds) &&
+        value.melds.length <= MAX_MELD_COUNT &&
+        value.melds.every(isMeld))) &&
+    isBoundedNonNegativeInteger(value.kitaCount, MAX_KITA_COUNT) &&
     isTileArray(value.discards)
   );
 }
@@ -324,13 +341,15 @@ function isGameView(value: unknown, you: OnlineSnapshot["you"]): boolean {
     const player = slot.player as Record<string, unknown>;
     if (slot.kind !== "seated") continue;
     if (position === "self") {
-      if (!isTileArray(player.hand) || Object.hasOwn(player, "handCount")) {
+      if (
+        !isTileArray(player.hand, MAX_VISIBLE_HAND_TILES) ||
+        Object.hasOwn(player, "handCount")
+      ) {
         return false;
       }
     } else if (
       Object.hasOwn(player, "hand") ||
-      !isInteger(player.handCount) ||
-      player.handCount < 0
+      !isBoundedNonNegativeInteger(player.handCount, MAX_VISIBLE_HAND_TILES)
     ) {
       return false;
     }
@@ -351,12 +370,15 @@ function isGameView(value: unknown, you: OnlineSnapshot["you"]): boolean {
     Array.isArray(table.dice) &&
     table.dice.length === 2 &&
     table.dice.every((die) => isInteger(die) && die >= 1 && die <= 6) &&
-    isInteger(table.doraCount) &&
-    table.doraCount >= 0 &&
-    isTileArray(dora.indicators) &&
+    isBoundedNonNegativeInteger(table.doraCount, MAX_DORA_INDICATOR_COUNT) &&
+    isTileArray(dora.indicators, MAX_DORA_INDICATOR_COUNT) &&
     (dora.uraIndicatorCount === undefined ||
-      (isInteger(dora.uraIndicatorCount) && dora.uraIndicatorCount >= 0)) &&
-    (dora.uraIndicators === undefined || isTileArray(dora.uraIndicators)) &&
+      isBoundedNonNegativeInteger(
+        dora.uraIndicatorCount,
+        MAX_DORA_INDICATOR_COUNT,
+      )) &&
+    (dora.uraIndicators === undefined ||
+      isTileArray(dora.uraIndicators, MAX_DORA_INDICATOR_COUNT)) &&
     (value.result === null || isGameResult(value.result))
   );
 }
