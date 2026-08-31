@@ -148,9 +148,10 @@ function hasExactKeys(
 }
 
 function isOpaqueIdentifier(value: unknown): value is string {
-  return (
-    typeof value === "string" && sanitizedRailwayIdentifier(value) === value
-  );
+  if (typeof value !== "string") return false;
+  const sanitized = sanitizedRailwayIdentifier(value);
+  // Provider/CLI placeholders are not evidence of a read-back identity.
+  return sanitized !== null && sanitized.toLowerCase() !== "unknown";
 }
 
 function isFullRevision(value: unknown): value is string {
