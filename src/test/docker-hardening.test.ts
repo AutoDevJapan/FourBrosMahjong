@@ -293,15 +293,15 @@ describe("Docker hardening repository contract (#734)", () => {
   it("rejects unconsumed deploy stages, broad copies, or root final stages", () => {
     const digest = "a".repeat(64);
     const runtimePackageName = ONLINE_RUNTIME_PACKAGE_NAME;
-    const valid = `FROM node:24.15.0-slim@sha256:${digest} AS dependencies
+    const valid = `FROM node:26.8.1-slim@sha256:${digest} AS dependencies
 ENV NODE_ENV=production
 WORKDIR /app
-RUN corepack enable && corepack prepare pnpm@10.33.0 --activate
+RUN npm install --global pnpm@10.33.0
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 COPY container/online/package.json ./container/online/package.json
 RUN pnpm --filter ${runtimePackageName} --fail-if-no-match install --prod --frozen-lockfile \
     && pnpm --filter=${runtimePackageName} --fail-if-no-match deploy --prod /runtime
-FROM node:24.15.0-slim@sha256:${digest}
+FROM node:26.8.1-slim@sha256:${digest}
 ENV NODE_ENV=production
 WORKDIR /app
 COPY --from=dependencies /runtime/node_modules ./node_modules
@@ -318,27 +318,27 @@ CMD ["node", "--import", "tsx", "server/start.ts"]`;
         dockerfileViolations(mutated, runtimePackageName).join("\n"),
       ).toContain(message);
     };
-    expectViolation("FROM node:24.15.0-slim\nUSER node", "FROM must use");
+    expectViolation("FROM node:26.8.1-slim\nUSER node", "FROM must use");
     expectViolation(
-      "ARG BASE=node:24.15.0-slim\nFROM ${BASE}\nUSER node",
+      "ARG BASE=node:26.8.1-slim\nFROM ${BASE}\nUSER node",
       "FROM must use",
     );
     expectViolation(
-      `FROM --platform=linux/amd64 node:24.15.0-slim@sha256:${digest}\nUSER node`,
+      `FROM --platform=linux/amd64 node:26.8.1-slim@sha256:${digest}\nUSER node`,
       "FROM must use",
     );
     expectViolation(
-      `FROM node:24.15.0-slim@sha256:${"a".repeat(63)}\nUSER node`,
+      `FROM node:26.8.1-slim@sha256:${"a".repeat(63)}\nUSER node`,
       "FROM must use",
     );
     expectViolation(
-      `${valid}\nFROM node:24.15.0-slim\nUSER node`,
+      `${valid}\nFROM node:26.8.1-slim\nUSER node`,
       "FROM must use",
     );
     for (const mutation of [
-      `FROM node:24.15.0-slim@sha256:${digest}`,
-      `FROM node:24.15.0-slim@sha256:${digest}\nUSER root`,
-      `FROM node:24.15.0-slim@sha256:${digest}\nUSER node\nUSER 0:0`,
+      `FROM node:26.8.1-slim@sha256:${digest}`,
+      `FROM node:26.8.1-slim@sha256:${digest}\nUSER root`,
+      `FROM node:26.8.1-slim@sha256:${digest}\nUSER node\nUSER 0:0`,
     ]) {
       expectViolation(
         mutation,
@@ -435,8 +435,8 @@ CMD ["node", "--import", "tsx", "server/start.ts"]`;
     const unconsumedSafeStage = valid
       .replaceAll("--from=dependencies", "--from=unsafe-dependencies")
       .replace(
-        `FROM node:24.15.0-slim@sha256:${digest}\n`,
-        `FROM node:24.15.0-slim@sha256:${digest} AS unsafe-dependencies\nRUN pnpm install --prod --frozen-lockfile\nFROM node:24.15.0-slim@sha256:${digest}\n`,
+        `FROM node:26.8.1-slim@sha256:${digest}\n`,
+        `FROM node:26.8.1-slim@sha256:${digest} AS unsafe-dependencies\nRUN pnpm install --prod --frozen-lockfile\nFROM node:26.8.1-slim@sha256:${digest}\n`,
       );
     expectViolation(unconsumedSafeStage, deployContract);
     expectViolation(
@@ -463,6 +463,13 @@ CMD ["node", "--import", "tsx", "server/start.ts"]`;
     );
     expectViolation(
       valid.replace(
+        "RUN npm install --global pnpm@10.33.0",
+        "RUN corepack enable && corepack prepare pnpm@10.33.0 --activate",
+      ),
+      "the dependencies stage must contain only the ordered runtime install and deploy contract",
+    );
+    expectViolation(
+      valid.replace(
         'CMD ["node", "--import", "tsx", "server/start.ts"]',
         'CMD ["pnpm", "server:start"]',
       ),
@@ -477,8 +484,8 @@ CMD ["node", "--import", "tsx", "server/start.ts"]`;
     );
     expectViolation(
       valid.replace(
-        `FROM node:24.15.0-slim@sha256:${digest}\nENV NODE_ENV=production`,
-        `FROM node:24.15.0-slim@sha256:${digest} AS dependencies\n`,
+        `FROM node:26.8.1-slim@sha256:${digest}\nENV NODE_ENV=production`,
+        `FROM node:26.8.1-slim@sha256:${digest} AS dependencies\n`,
       ),
       "Dockerfile stage aliases must be unique",
     );

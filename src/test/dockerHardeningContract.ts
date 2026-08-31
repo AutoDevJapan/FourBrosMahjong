@@ -197,6 +197,13 @@ function isExactPnpmCommand(
   );
 }
 
+function isExactPnpmBootstrapCommand(
+  command: string,
+  packageManager: string,
+): boolean {
+  return command === `npm install --global ${packageManager}`;
+}
+
 function hasFlag(command: string, flag: string): boolean {
   return command.split(/\s+/).includes(flag);
 }
@@ -431,17 +438,16 @@ export function dockerfileViolations(
       JSON.stringify(expectedDeployInstructionNames) ||
     deployStage.instructions[0]?.value !== "NODE_ENV=production" ||
     deployStage.instructions[1]?.value !== "/app" ||
-    deployCommands.length !== 4 ||
-    deployCommands[0] !== "corepack enable" ||
+    deployCommands.length !== 3 ||
     !/^pnpm@\d+\.\d+\.\d+$/.test(packageManager) ||
-    deployCommands[1] !== `corepack prepare ${packageManager} --activate` ||
+    !isExactPnpmBootstrapCommand(deployCommands[0] ?? "", packageManager) ||
     !isExactPnpmCommand(
-      deployCommands[2] ?? "",
+      deployCommands[1] ?? "",
       runtimePackageName,
       "install",
     ) ||
     !isExactPnpmCommand(
-      deployCommands[3] ?? "",
+      deployCommands[2] ?? "",
       runtimePackageName,
       "deploy",
     ) ||
