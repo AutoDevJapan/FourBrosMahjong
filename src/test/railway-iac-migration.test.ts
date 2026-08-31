@@ -368,9 +368,44 @@ describe("Railway IaC parity snapshot contract (#742)", () => {
     ).toBe(true);
     expect(
       generatedIacSourceIsSecretSafe(
-        `import { service } from "railway/iac"; service("fixture", { env: { VALUE: ctx.shared.SECRET } });`,
+        `import { defineRailway, service } from "railway/iac"; export default defineRailway((ctx) => service("fixture", { env: { VALUE: ctx.shared.SECRET } }));`,
       ),
     ).toBe(true);
+    expect(
+      generatedIacSourceIsSecretSafe(
+        `import { service } from "railway/iac"; const ctx = { shared: { VALUE: "SECRET_SENTINEL" } }; service("fixture", { env: { VALUE: ctx.shared.VALUE } });`,
+      ),
+    ).toBe(false);
+    expect(
+      generatedIacSourceIsSecretSafe(
+        `import { service } from "railway/iac"; const read = (ctx) => service("fixture", { env: { VALUE: ctx.shared.SECRET } });`,
+      ),
+    ).toBe(false);
+    expect(
+      generatedIacSourceIsSecretSafe(
+        `import { defineRailway, preserve, project, service } from "railway/iac"; export default defineRailway(() => { const preserve = () => "SECRET_SENTINEL"; const web = service("fixture", { env: { TOKEN: preserve() } }); return project("fixture", { resources: [web] }); });`,
+      ),
+    ).toBe(false);
+    expect(
+      generatedIacSourceIsSecretSafe(
+        `import { defineRailway, project, ref, service } from "railway/iac"; export default defineRailway(() => { const resource = service("other", {}); const ref = () => "SECRET_SENTINEL"; const web = service("fixture", { env: { TOKEN: ref(resource, "output") } }); return project("fixture", { resources: [resource, web] }); });`,
+      ),
+    ).toBe(false);
+    expect(
+      generatedIacSourceIsSecretSafe(
+        `import { ref, service } from "railway/iac"; const resource = service("other", {}); const build = (ref) => service("fixture", { env: { TOKEN: ref(resource, "output") } });`,
+      ),
+    ).toBe(false);
+    expect(
+      generatedIacSourceIsSecretSafe(
+        `import { preserve, service } from "railway/iac"; const build = (preserve) => service("fixture", { env: { TOKEN: preserve() } });`,
+      ),
+    ).toBe(false);
+    expect(
+      generatedIacSourceIsSecretSafe(
+        `import { preserve, service } from "railway/iac"; const build = function preserve() { return service("fixture", { env: { TOKEN: preserve() } }); };`,
+      ),
+    ).toBe(false);
     expect(
       generatedIacSourceIsSecretSafe(
         `import { service } from "railway/iac"; const host = { runtime: Bun }; service("fixture", { source: host.runtime.env.SECRET });`,

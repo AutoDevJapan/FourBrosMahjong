@@ -487,6 +487,70 @@ export function generatedIacSourceIsSecretSafe(source: string): boolean {
       }
     }
   };
+  // Fail closed for the whole source when a local binding reuses an approved
+  // name; partial scope analysis could otherwise approve the wrong binding.
+  const shadowedImportedBindings = new Set<string>();
+  const trustedContextBindings = new Set<string>();
+  const shadowedContextBindings = new Set<string>();
+  const isTrustedContextParameter = (
+    node: ts.ParameterDeclaration,
+  ): boolean => {
+    const callback = node.parent;
+    if (
+      (!ts.isArrowFunction(callback) && !ts.isFunctionExpression(callback)) ||
+      callback.parameters[0] !== node
+    ) {
+      return false;
+    }
+    const call = callback.parent;
+    return (
+      ts.isCallExpression(call) &&
+      call.arguments[0] === callback &&
+      ts.isIdentifier(call.expression) &&
+      call.expression.text === "defineRailway" &&
+      importedBindings.has("defineRailway")
+    );
+  };
+  const collectBindingShadows = (node: ts.Node): void => {
+    if (ts.isFunctionExpression(node) && node.name !== undefined) {
+      if (importedBindings.has(node.name.text)) {
+        shadowedImportedBindings.add(node.name.text);
+      }
+      shadowedContextBindings.add(node.name.text);
+    }
+    if (ts.isVariableDeclaration(node)) {
+      if (!ts.isIdentifier(node.name)) {
+        unsupportedBindingPattern = true;
+      } else {
+        if (importedBindings.has(node.name.text)) {
+          shadowedImportedBindings.add(node.name.text);
+        }
+        shadowedContextBindings.add(node.name.text);
+      }
+    }
+    if (ts.isParameter(node)) {
+      if (!ts.isIdentifier(node.name)) {
+        unsupportedBindingPattern = true;
+      } else {
+        if (importedBindings.has(node.name.text)) {
+          shadowedImportedBindings.add(node.name.text);
+        }
+        if (isTrustedContextParameter(node)) {
+          trustedContextBindings.add(node.name.text);
+        } else {
+          shadowedContextBindings.add(node.name.text);
+        }
+      }
+    }
+    ts.forEachChild(node, collectBindingShadows);
+  };
+  collectBindingShadows(sourceFile);
+  const isImportedBindingUsable = (name: string): boolean =>
+    importedBindings.has(name) && !shadowedImportedBindings.has(name);
+  const isTrustedContextBinding = (name: string): boolean =>
+    trustedContextBindings.has(name) &&
+    !shadowedContextBindings.has(name) &&
+    isImportedBindingUsable("defineRailway");
   const collectResourceBindings = (node: ts.Node): void => {
     if (ts.isVariableDeclaration(node)) {
       if (!ts.isIdentifier(node.name)) unsupportedBindingPattern = true;
@@ -496,7 +560,7 @@ export function generatedIacSourceIsSecretSafe(source: string): boolean {
         ts.isCallExpression(node.initializer) &&
         ts.isIdentifier(node.initializer.expression) &&
         resourceFactoryNames.has(node.initializer.expression.text) &&
-        importedBindings.has(node.initializer.expression.text);
+        isImportedBindingUsable(node.initializer.expression.text);
       if (isResourceDeclaration) {
         resourceBindings.add(node.name.text);
       } else {
@@ -565,14 +629,20 @@ export function generatedIacSourceIsSecretSafe(source: string): boolean {
   };
   const refCallIsSafe = (node: ts.CallExpression): boolean =>
     node.arguments.length === 2 &&
+    isImportedBindingUsable("ref") &&
     ts.isIdentifier(node.arguments[0]!) &&
     isResourceBinding(node.arguments[0]!.text) &&
     ts.isStringLiteral(node.arguments[1]!) &&
     isBoundedName(node.arguments[1]!.text);
+  const isPreserveCall = (node: ts.CallExpression): boolean =>
+    isImportedBindingUsable("preserve") &&
+    ts.isIdentifier(node.expression) &&
+    node.expression.text === "preserve" &&
+    node.arguments.length === 0;
   const isAllowedVariableValue = (node: ts.Expression): boolean => {
     if (ts.isCallExpression(node) && ts.isIdentifier(node.expression)) {
       return (
-        (node.expression.text === "preserve" && node.arguments.length === 0) ||
+        isPreserveCall(node) ||
         (node.expression.text === "ref" && refCallIsSafe(node))
       );
     }
@@ -589,7 +659,7 @@ export function generatedIacSourceIsSecretSafe(source: string): boolean {
       return (
         owner.name.text === "shared" &&
         ts.isIdentifier(owner.expression) &&
-        owner.expression.text === "ctx"
+        isTrustedContextBinding(owner.expression.text)
       );
     }
     return false;
@@ -628,8 +698,7 @@ export function generatedIacSourceIsSecretSafe(source: string): boolean {
       ts.isIdentifier(unwrapped.expression)
     ) {
       return (
-        (unwrapped.expression.text === "preserve" &&
-          unwrapped.arguments.length === 0) ||
+        isPreserveCall(unwrapped) ||
         (unwrapped.expression.text === "ref" && refCallIsSafe(unwrapped))
       );
     }
@@ -680,8 +749,7 @@ export function generatedIacSourceIsSecretSafe(source: string): boolean {
     if (
       ts.isPropertyAccessExpression(node) &&
       node.name.text === "shared" &&
-      ts.isIdentifier(node.expression) &&
-      node.expression.text === "ctx"
+      ts.isIdentifier(node.expression)
     ) {
       return true;
     }
@@ -689,8 +757,7 @@ export function generatedIacSourceIsSecretSafe(source: string): boolean {
       ts.isElementAccessExpression(node) &&
       ts.isStringLiteral(node.argumentExpression) &&
       node.argumentExpression.text === "shared" &&
-      ts.isIdentifier(node.expression) &&
-      node.expression.text === "ctx"
+      ts.isIdentifier(node.expression)
     ) {
       return true;
     }
@@ -767,7 +834,7 @@ export function generatedIacSourceIsSecretSafe(source: string): boolean {
       if (
         !ts.isIdentifier(node.expression) ||
         !allowedImportsAndCalls.has(node.expression.text) ||
-        !importedBindings.has(node.expression.text) ||
+        !isImportedBindingUsable(node.expression.text) ||
         (node.expression.text === "preserve" && node.arguments.length !== 0) ||
         (node.expression.text === "ref" && !refCallIsSafe(node))
       ) {
