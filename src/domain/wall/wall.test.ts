@@ -44,6 +44,13 @@ describe("Wall(スペック4 4.1)", () => {
       ).toThrow(RangeError);
     });
 
+    it("108枚でも正準牌構成でなければ RangeError", () => {
+      const invalid = buildTileSet();
+      invalid[0] = invalid[4]!;
+
+      expect(() => new Wall(invalid)).toThrow(RangeError);
+    });
+
     it("deadWallSize が範囲外なら RangeError", () => {
       expect(() => new Wall(buildTileSet(), -1)).toThrow(RangeError);
       expect(() => new Wall(buildTileSet(), 109)).toThrow(RangeError);

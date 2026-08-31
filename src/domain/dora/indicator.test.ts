@@ -86,10 +86,17 @@ describe("nextTile (次牌ルール)", () => {
   it("不正な字牌 rank は RangeError", () => {
     expect(() => nextTile(ind("honor", 8))).toThrow(RangeError);
     expect(() => nextTile(ind("honor", 0))).toThrow(RangeError);
+    expect(() => nextTile(ind("honor", 1.5))).toThrow(RangeError);
   });
 
   it("不正な数牌 rank は RangeError", () => {
     expect(() => nextTile(ind("pin", 0))).toThrow(RangeError);
     expect(() => nextTile(ind("sou", 10))).toThrow(RangeError);
+  });
+
+  it("未知の suit は RangeError", () => {
+    expect(() =>
+      nextTile({ suit: "evil", rank: 5, isRed: false } as unknown as Tile),
+    ).toThrow(RangeError);
   });
 });

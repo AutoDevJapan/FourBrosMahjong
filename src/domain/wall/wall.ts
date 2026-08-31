@@ -82,6 +82,30 @@ export const MAX_KAN_PER_HAND = 4;
  */
 export const MAX_REPLACEMENTS_PER_HAND = COPIES_PER_TILE + MAX_KAN_PER_HAND;
 
+function tileKey(tile: Tile): string {
+  return `${tile.suit}-${tile.rank}-${tile.isRed ? "r" : "n"}`;
+}
+
+function hasCanonicalTileMultiset(tiles: readonly Tile[]): boolean {
+  const expected = new Map<string, number>();
+  for (const tile of buildTileSet()) {
+    const key = tileKey(tile);
+    expected.set(key, (expected.get(key) ?? 0) + 1);
+  }
+
+  const actual = new Map<string, number>();
+  for (const tile of tiles) {
+    const key = tileKey(tile);
+    actual.set(key, (actual.get(key) ?? 0) + 1);
+  }
+
+  if (actual.size !== expected.size) return false;
+  for (const [key, count] of expected) {
+    if (actual.get(key) !== count) return false;
+  }
+  return true;
+}
+
 /** 山が尽きている状態で `draw()`/`drawReplacement()` を呼んだ場合に投げる。 */
 export class WallEmptyError extends Error {
   constructor(message: string) {
@@ -112,13 +136,18 @@ export class Wall {
    * @param tiles        108枚の牌(通常はシャッフル済み)。順序はそのまま採用する。
    * @param deadWallSize 王牌に確保する枚数(既定 {@link DEAD_WALL_SIZE})。
    *   **0(王牌なし)** か **{@link DORA_INDICATOR_RESERVE} 以上**の整数でなければならない。
-   * @throws RangeError 牌が108枚でないとき、`deadWallSize` が整数でないとき、
+   * @throws RangeError 牌が正準の108枚でないとき、`deadWallSize` が整数でないとき、
    *   `[0, 108]` の範囲外のとき、または 1〜{@link DORA_INDICATOR_RESERVE}−1 のとき。
    */
   constructor(tiles: readonly Tile[], deadWallSize: number = DEAD_WALL_SIZE) {
     if (tiles.length !== TOTAL_TILE_COUNT) {
       throw new RangeError(
         `Wall requires exactly ${TOTAL_TILE_COUNT} tiles, received ${tiles.length}.`,
+      );
+    }
+    if (!hasCanonicalTileMultiset(tiles)) {
+      throw new RangeError(
+        "Wall requires the canonical tile multiset for this game variant.",
       );
     }
     // NaN / 小数は以下の比較をすり抜けて壊れた `Wall` を作るため、最初に弾く。

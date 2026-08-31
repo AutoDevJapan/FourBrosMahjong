@@ -123,7 +123,9 @@ export function deterministicSeedEnabled(
   return nodeEnv !== "production" || e2eSeedEnabled === "1";
 }
 
-function seedFromLocation(): number | null {
+const MAX_SEED = 0xffffffff;
+
+export function seedFromLocation(): number | null {
   if (
     !deterministicSeedEnabled(
       process.env.NODE_ENV,
@@ -136,7 +138,9 @@ function seedFromLocation(): number | null {
   const raw = new URLSearchParams(window.location.search).get("seed");
   if (raw === null || raw.trim() === "") return null;
   const seed = Number(raw);
-  return Number.isSafeInteger(seed) && seed >= 0 ? seed : null;
+  return Number.isSafeInteger(seed) && seed >= 0 && seed <= MAX_SEED
+    ? seed
+    : null;
 }
 
 /**

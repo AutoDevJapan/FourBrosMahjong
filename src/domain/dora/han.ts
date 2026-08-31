@@ -20,6 +20,7 @@
  */
 
 import { createTile, HONOR, isRedDora, type Tile } from "../tiles/tile";
+import { COPIES_PER_TILE } from "../tiles/tileSet";
 import type { DoraSet } from "./doraSet";
 import { resolveDora } from "./doraSet";
 
@@ -83,14 +84,18 @@ function countMatches(
 /**
  * 和了手のドラ翻を集計する(スペック3 3.2)。
  *
- * @throws RangeError `kitaCount` が 0 以上の整数でないとき。
+ * @throws RangeError `kitaCount` が0〜牌集合上の北の枚数(4枚)でないとき。
  */
 export function countDoraHan(input: DoraHanInput): DoraHanBreakdown {
   const { hand, doraSet, riichi, kitaCount } = input;
 
-  if (!Number.isInteger(kitaCount) || kitaCount < 0) {
+  if (
+    !Number.isInteger(kitaCount) ||
+    kitaCount < 0 ||
+    kitaCount > COPIES_PER_TILE
+  ) {
     throw new RangeError(
-      `kitaCount must be a non-negative integer, received ${kitaCount}.`,
+      `kitaCount must be an integer between 0 and ${COPIES_PER_TILE}, received ${kitaCount}.`,
     );
   }
 

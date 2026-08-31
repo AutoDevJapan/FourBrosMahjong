@@ -147,6 +147,8 @@ const ALLOWED_RAW_IS_RED_READS: readonly string[] = [
   "domain/game/engine.ts: return a.suit === b.suit && a.rank === b.rank && !!a.isRed === !!b.isRed;",
   "domain/game/engine.ts: return a.suit === b.suit && a.rank === b.rank && !!a.isRed === !!b.isRed;",
   "domain/game/engine.ts: const key = `${t.suit}-${t.rank}-${t.isRed ? 1 : 0}`;",
+  // Wallの正準多重集合キー。赤フラグの値を同一性検証に使い、偽赤を受け入れない。
+  'domain/wall/wall.ts: return `${tile.suit}-${tile.rank}-${tile.isRed ? "r" : "n"}`;',
   // 打牌候補の同一性一致(赤・非赤を取り違えないための比較)。
   "components/game/GameBoard.tsx: candidate.isRed === !!tile.isRed,",
   "components/game/GameBoard.tsx: candidate.isRed === !!tile.isRed,",
