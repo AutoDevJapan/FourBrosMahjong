@@ -48,9 +48,13 @@ export function nextTile(indicator: Tile): Tile {
 
   if (suit === "honor") {
     let next: number;
-    if (rank >= WIND_MIN && rank <= WIND_MAX) {
+    if (Number.isInteger(rank) && rank >= WIND_MIN && rank <= WIND_MAX) {
       next = cycle(rank, WIND_MIN, WIND_MAX); // 東南西北 で巡回
-    } else if (rank >= DRAGON_MIN && rank <= DRAGON_MAX) {
+    } else if (
+      Number.isInteger(rank) &&
+      rank >= DRAGON_MIN &&
+      rank <= DRAGON_MAX
+    ) {
       next = cycle(rank, DRAGON_MIN, DRAGON_MAX); // 白發中 で巡回
     } else {
       throw new RangeError(`Invalid honor rank for dora indicator: ${rank}.`);
@@ -67,6 +71,10 @@ export function nextTile(indicator: Tile): Tile {
     }
     const next = rank === NUMBER_MIN ? NUMBER_MAX : NUMBER_MIN;
     return createTile(suit, next);
+  }
+
+  if (suit !== "pin" && suit !== "sou") {
+    throw new RangeError(`Invalid suit for dora indicator: ${suit}.`);
   }
 
   // 筒子・索子: 1〜9、9 の次は 1。

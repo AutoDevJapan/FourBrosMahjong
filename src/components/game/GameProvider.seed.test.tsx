@@ -1,7 +1,11 @@
 // @vitest-environment jsdom
 
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { deterministicSeedEnabled, freshSeed } from "./GameProvider";
+import {
+  deterministicSeedEnabled,
+  freshSeed,
+  seedFromLocation,
+} from "./GameProvider";
 
 describe("deterministicSeedEnabled", () => {
   it("developmentではE2Eフラグなしでも決定的seedを許可する", () => {
@@ -43,4 +47,26 @@ describe("freshSeed", () => {
       expect(freshSeed()).toBe(expected);
     }
   });
+});
+
+describe("seedFromLocation", () => {
+  afterEach(() => {
+    window.history.replaceState(null, "", "/");
+  });
+
+  it("uint32範囲内のURL seedだけを受け入れる", () => {
+    window.history.replaceState(null, "", "/game?seed=0");
+    expect(seedFromLocation()).toBe(0);
+
+    window.history.replaceState(null, "", "/game?seed=4294967295");
+    expect(seedFromLocation()).toBe(0xffffffff);
+  });
+
+  it.each(["-1", "4294967296", "1.5", "9007199254740991"])(
+    "uint32範囲外のURL seed %s は既定の乱数へフォールバックする",
+    (raw) => {
+      window.history.replaceState(null, "", `/game?seed=${raw}`);
+      expect(seedFromLocation()).toBeNull();
+    },
+  );
 });

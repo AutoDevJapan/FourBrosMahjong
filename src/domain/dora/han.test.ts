@@ -145,6 +145,20 @@ describe("countDoraHan", () => {
       }),
     ).toThrow(RangeError);
   });
+
+  it.each([5, Number.MAX_SAFE_INTEGER])(
+    "kitaCount が牌集合上の北4枚を超える %s なら RangeError",
+    (kitaCount) => {
+      expect(() =>
+        countDoraHan({
+          hand: [],
+          doraSet: DORA_SET_2,
+          riichi: false,
+          kitaCount,
+        }),
+      ).toThrow("between 0 and 4");
+    },
+  );
 });
 
 // Q16(二重取りする / 天鳳サンマ流): ドラ表示牌=西 → 次牌写像で実ドラ=北。
