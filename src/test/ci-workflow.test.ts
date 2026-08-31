@@ -193,6 +193,15 @@ describe("GITHUB_TOKEN 生成PRのrequired checks", () => {
   });
 });
 
+describe("gitleaks workflow concurrency", () => {
+  it("manual dispatch on main does not cancel a required push scan", () => {
+    const concurrency = readWorkflowFile("gitleaks.yml").concurrency;
+    expect(concurrency?.group).toContain("github.event_name");
+    expect(concurrency?.group).toContain("github.ref");
+    expect(concurrency?.["cancel-in-progress"]).toBe(true);
+  });
+});
+
 /**
  * キャッシュを**書き込む**ステップか(一体型 `actions/cache@` と `actions/cache/save@`)。
  * `actions/cache/restore@` は読み取り専用なのでここには含めない。

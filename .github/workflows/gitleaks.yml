@@ -11,10 +11,10 @@ on:
       - main
   workflow_dispatch:
 
-# Keep only the newest scan for a given PR or branch. github.ref is unique per
-# PR (refs/pull/<number>/merge) and per branch, so unrelated work is not cancelled.
+# Keep only the newest scan for a given event/ref. Including the event prevents
+# an opt-in workflow_dispatch on main from cancelling the required push scan.
 concurrency:
-  group: gitleaks-${{ github.ref }}
+  group: gitleaks-${{ github.event_name }}-${{ github.ref }}
   cancel-in-progress: true
 
 # Minimize permissions so fork PRs work without extra grants.
