@@ -2,7 +2,9 @@ import { describe, expect, it } from "vitest";
 import { walkToGameEnd } from "@/components/game/finishedGameFixture";
 import { replayJournal } from "@/components/game/gamePersistence";
 import { selectView } from "@/components/game/gameView";
+import { MAX_OMOTE_DORA_COUNT } from "@/domain/dora/dice";
 import { createGame, type EngineState } from "@/domain/game/engine";
+import { COPIES_PER_TILE } from "@/domain/tiles/tileSet";
 import {
   LEGACY_1C8CC9_PLAYING_SNAPSHOT,
   LEGACY_1C8CC9_TOP_LEVEL_KEYS,
@@ -236,6 +238,64 @@ describe("parseOnlineServerMessage", () => {
         snapshot: { ...snapshot, players: null },
       }),
     ).toBeNull();
+  });
+
+  it("rejects display counts above the game bounds before rendering", () => {
+    const snapshot = snapshotFixture();
+    const self = snapshot.view.slots.self;
+    const right = snapshot.view.slots.right;
+    if (self.kind !== "seated" || right.kind !== "seated") {
+      throw new Error(
+        "count-bound fixture requires seated self and right slots",
+      );
+    }
+
+    const oversizedKita = {
+      ...snapshot,
+      view: {
+        ...snapshot.view,
+        slots: {
+          ...snapshot.view.slots,
+          self: {
+            ...self,
+            player: { ...self.player, kitaCount: COPIES_PER_TILE + 1 },
+          },
+        },
+      },
+    };
+    const oversizedHand = {
+      ...snapshot,
+      view: {
+        ...snapshot.view,
+        slots: {
+          ...snapshot.view.slots,
+          right: {
+            ...right,
+            player: { ...right.player, handCount: 15 },
+          },
+        },
+      },
+    };
+    const oversizedDora = {
+      ...snapshot,
+      view: {
+        ...snapshot.view,
+        tableInfo: {
+          ...snapshot.view.tableInfo,
+          doraCount: MAX_OMOTE_DORA_COUNT + 1,
+        },
+        dora: {
+          ...snapshot.view.dora,
+          uraIndicatorCount: MAX_OMOTE_DORA_COUNT + 1,
+        },
+      },
+    };
+
+    for (const candidate of [oversizedKita, oversizedHand, oversizedDora]) {
+      expect(
+        parseOnlineServerMessage({ type: "snapshot", snapshot: candidate }),
+      ).toBeNull();
+    }
   });
 
   it("rejects invisible and bidi-controlled names before they reach the UI", () => {
