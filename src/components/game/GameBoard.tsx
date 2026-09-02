@@ -34,6 +34,8 @@ import type { RoundSummary } from "@/domain/game/engine";
 import Modal from "../common/Modal";
 import { tileLabel } from "../common/tileLabel";
 import ActionPanel, { type ActionItem } from "./ActionPanel";
+import EffectOverlay from "./effects/EffectOverlay";
+import { useGameEffects } from "./effects/useGameEffects";
 import { useGame } from "./GameProvider";
 import type { HandProps, HandTileState } from "./Hand";
 import LiveRegion from "./LiveRegion";
@@ -97,6 +99,7 @@ export default function GameBoard({
   const { slots, tableInfo, dora } = view;
   const router = useRouter();
   const narrowBoardDescriptionId = useId();
+  const gameEffect = useGameEffects(view, phase, roundSummary);
 
   // 実対局は乱数(クライアント固有)で生成されるため、盤面はマウント後のクライアントでのみ描画する。
   // これにより SSR プリレンダーとの牌のハイドレーション不一致を避け、初回描画後の盤面も安定させる。
@@ -656,7 +659,7 @@ export default function GameBoard({
       // スペック5 5.2.2 が持つ(#405)。
       role="group"
       aria-label="対局盤面"
-      className="game-board @container w-full"
+      className="game-board relative @container w-full"
       data-phase={phase}
       data-pending={pending?.kind ?? "none"}
       data-round-kind={roundSummary?.kind ?? "none"}
@@ -730,6 +733,8 @@ export default function GameBoard({
         </div>
       </div>
 
+      <EffectOverlay effect={gameEffect} />
+
       {/* 全体盤面モーダル(段階②の補完): 4物理枠を閲覧専用で再表示。狭幅では読み順に1列化し、フォーカストラップ/Escape は Modal が担保。 */}
       {boardOpen ? (
         <Modal
@@ -758,6 +763,9 @@ export default function GameBoard({
       <LiveRegion
         politeMessage={announcement}
         politeMessageKey={tileFeedback.eventId}
+        secondaryPoliteMessage={
+          gameEffect?.assertive === false ? gameEffect.announcement : ""
+        }
         assertiveMessage={assertive}
       />
     </div>
