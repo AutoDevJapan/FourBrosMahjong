@@ -12,6 +12,8 @@
 import { useCallback, useId, useLayoutEffect, useRef, useState } from "react";
 import Tile from "../common/Tile";
 import { tileLabel } from "../common/tileLabel";
+import HandTileAnimation from "./hand-animation/HandTileAnimation";
+import { findNewTileIndex } from "./hand-animation/handAnimation";
 import type { TileData } from "./types";
 
 export interface HandProps {
@@ -37,6 +39,11 @@ export interface HandTileState {
   readonly highlighted?: boolean;
 }
 
+interface HandAnimationState {
+  readonly id: number;
+  readonly tileIndex: number | null;
+}
+
 export default function Hand({
   tiles,
   readOnly = false,
@@ -54,6 +61,10 @@ export default function Hand({
   );
   const [previousReadOnly, setPreviousReadOnly] = useState(readOnly);
   const [previousTiles, setPreviousTiles] = useState(tiles);
+  const [handAnimation, setHandAnimation] = useState<HandAnimationState>({
+    id: 0,
+    tileIndex: null,
+  });
   const optionRefs = useRef<(HTMLLIElement | null)[]>([]);
   const confirmButtonRef = useRef<HTMLButtonElement | null>(null);
   const restoreFocusIndexRef = useRef<number | null>(null);
@@ -65,7 +76,12 @@ export default function Hand({
   // GameProvider の view は engine 更新時だけ新しい手牌配列を生成するため、参照比較により
   // GameBoard 内の無関係な再レンダーでは選択を維持しつつ、手牌構成の更新を検出できる。
   if (previousTiles !== tiles) {
+    const newTileIndex = findNewTileIndex(previousTiles, tiles);
     setPreviousTiles(tiles);
+    setHandAnimation({
+      id: handAnimation.id + 1,
+      tileIndex: newTileIndex,
+    });
     if (selectedIndex !== null) setSelectedIndex(null);
     if (touchSelectionIndex !== null) setTouchSelectionIndex(null);
   }
@@ -286,9 +302,14 @@ export default function Hand({
         // 「リーチ可」と「選択中」は同じリングで、選択中だけ浮き上がりを足して区別する。
         const ringed = state?.highlighted === true || isSelected;
         return (
-          <li
+          <HandTileAnimation
             // 同一牌が複数あるため index を key に含める。
             key={`${tile.suit}-${tile.rank}-${index}`}
+            animationKey={
+              handAnimation.tileIndex === index
+                ? `draw-${handAnimation.id}`
+                : undefined
+            }
             ref={(el) => {
               optionRefs.current[index] = el;
             }}
@@ -361,7 +382,7 @@ export default function Hand({
                 {state.indicator}
               </span>
             ) : null}
-          </li>
+          </HandTileAnimation>
         );
       })}
     </ul>

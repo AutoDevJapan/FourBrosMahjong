@@ -223,6 +223,30 @@ describe("Hand (roving tabindex listbox, spec 5.2.2)", () => {
     ).toHaveLength(1);
   });
 
+  it("ツモ/補充で追加された牌だけを一度だけ入場表示する", () => {
+    const beforeDraw = [tiles[0], tiles[2]];
+    const afterDraw = [tiles[0], tiles[1], tiles[2]];
+    const { rerender } = render(<Hand tiles={beforeDraw} />);
+
+    rerender(<Hand tiles={afterDraw} />);
+
+    const options = screen.getAllByRole("option");
+    expect(options[1]).toHaveAttribute("data-hand-animation", "draw");
+    expect(options[0]).not.toHaveAttribute("data-hand-animation");
+    expect(options[2]).not.toHaveAttribute("data-hand-animation");
+    expect(options[1]).toHaveClass(
+      "transition-opacity",
+      "motion-reduce:transition-none",
+      "motion-reduce:opacity-100",
+    );
+
+    // 同じ牌面の再レンダーは新しいツモイベントではないため再演出しない。
+    rerender(<Hand tiles={[...afterDraw]} />);
+    expect(
+      screen.queryByRole("option", { name: "五筒(赤ドラ)" }),
+    ).not.toHaveAttribute("data-hand-animation");
+  });
+
   it("キーボード打牌で手牌が更新されてもactive optionへ実フォーカスを戻す(#248)", async () => {
     const user = userEvent.setup();
     const { rerender } = render(<Hand tiles={tiles} />);
