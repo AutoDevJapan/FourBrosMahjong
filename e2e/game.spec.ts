@@ -681,6 +681,77 @@ test.describe("対局画面(/game)", () => {
     expect(sawAiMeld).toBe(true);
   });
 
+  test("リーチ宣言牌を横置きにし、同段の後続牌だけを詰めても横溢れしない(issue #782)", async ({
+    page,
+  }) => {
+    test.setTimeout(60_000);
+    await page.setViewportSize({ width: 393, height: 850 });
+    await page.goto("/game?seed=1");
+
+    const board = page
+      .locator('[data-board-layout="cross"]')
+      .filter({ visible: true });
+    const river = board
+      .locator('ul.river-grid:has(> li[data-riichi="true"])')
+      .filter({ visible: true })
+      .first();
+
+    // seed=1 is the existing deterministic AI-riichi fixture. Wait for a later
+    // discard in the declaration row so this checks the rendered CSS geometry,
+    // not just the view-model marker.
+    await advanceUntil(
+      page,
+      async () =>
+        (await river.count()) > 0 &&
+        (await river.locator('li[data-after-riichi="true"]').count()) > 0,
+      { maxSteps: 600 },
+    );
+
+    const geometry = await river.evaluate((list) => {
+      const riichiTile = list.querySelector<HTMLElement>(
+        'li[data-riichi="true"] > .game-tile--river',
+      );
+      const normalTile = list.querySelector<HTMLElement>(
+        'li:not([data-riichi="true"]) > .game-tile--river',
+      );
+      const shifted = list.querySelector<HTMLElement>(
+        'li[data-after-riichi="true"]',
+      );
+      if (riichiTile === null || normalTile === null || shifted === null) {
+        throw new Error("リーチ河の描画対象が見つからない");
+      }
+
+      const shiftedTransform = getComputedStyle(shifted).transform;
+      const matrix = shiftedTransform.match(/^matrix\(([^)]+)\)$/);
+      const horizontalTranslation = matrix
+        ? Number(matrix[1].split(",")[4])
+        : 0;
+
+      return {
+        riichiWidth: riichiTile.getBoundingClientRect().width,
+        riichiHeight: riichiTile.getBoundingClientRect().height,
+        normalWidth: normalTile.getBoundingClientRect().width,
+        normalHeight: normalTile.getBoundingClientRect().height,
+        riichiTransform: getComputedStyle(riichiTile).transform,
+        horizontalTranslation,
+        riverOverflow: list.scrollWidth - list.clientWidth,
+        pageOverflow:
+          document.documentElement.scrollWidth -
+          document.documentElement.clientWidth,
+      };
+    });
+
+    // Rotating the portrait river tile makes its rendered box wider than tall.
+    expect(geometry.riichiWidth).toBeGreaterThan(geometry.riichiHeight);
+    expect(geometry.normalWidth).toBeLessThan(geometry.normalHeight);
+    expect(geometry.riichiTransform).not.toBe("none");
+    // The follower is shifted by the reserved sideways-tile width; a later row
+    // is deliberately not part of this assertion (the marker is same-row only).
+    expect(geometry.horizontalTranslation).toBeGreaterThan(0);
+    expect(geometry.riverOverflow).toBeLessThanOrEqual(1);
+    expect(geometry.pageOverflow).toBeLessThanOrEqual(1);
+  });
+
   test("自家の手牌は矢印キーでフォーカス移動できる(ロービングタブインデックス / スペック5 5.2.2)", async ({
     page,
   }) => {
