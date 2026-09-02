@@ -558,34 +558,43 @@ describe("online room manager", () => {
     );
   });
 
-  it("validates action tiles before the engine sees them", () => {
+  it("validates action tiles against the canonical red-five invariant", () => {
     expect(parseGameAction({ type: "kita" })).toEqual({ type: "kita" });
-    for (const rank of [1, 2, 3, 4, 5, 6, 7, 8, 9]) {
+
+    const tileActionTypes = ["discard", "riichi", "ankan", "kakan"] as const;
+    const suits = [
+      ["man", 9],
+      ["pin", 9],
+      ["sou", 9],
+      ["honor", 7],
+    ] as const;
+
+    for (const type of tileActionTypes) {
+      for (const [suit, maxRank] of suits) {
+        for (let rank = 1; rank <= maxRank; rank += 1) {
+          const isRed = (suit === "pin" || suit === "sou") && rank === 5;
+          const canonicalTile = { suit, rank, isRed };
+
+          expect(parseGameAction({ type, tile: canonicalTile })).toEqual({
+            type,
+            tile: canonicalTile,
+          });
+          expect(
+            parseGameAction({
+              type,
+              tile: { ...canonicalTile, isRed: !isRed },
+            }),
+          ).toBeNull();
+        }
+      }
+
       expect(
         parseGameAction({
-          type: "discard",
-          tile: { suit: "man", rank, isRed: false },
+          type,
+          tile: { suit: "man", rank: 10, isRed: false },
         }),
-      ).toEqual({
-        type: "discard",
-        tile: { suit: "man", rank, isRed: false },
-      });
+      ).toBeNull();
     }
-    expect(
-      parseGameAction({
-        type: "discard",
-        tile: { suit: "man", rank: 10, isRed: false },
-      }),
-    ).toBeNull();
-    expect(
-      parseGameAction({
-        type: "discard",
-        tile: { suit: "pin", rank: 5, isRed: true },
-      }),
-    ).toEqual({
-      type: "discard",
-      tile: { suit: "pin", rank: 5, isRed: true },
-    });
   });
 
   it("旧席は自動ガリ、新capability席だけ明示北抜きとして混在できる", () => {
