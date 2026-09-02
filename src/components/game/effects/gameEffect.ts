@@ -227,10 +227,17 @@ export function gameEffectForTransition(
     return resolutionEffect(current.phase, summary, current);
   }
 
+  // A new round resets every player's meld/riichi state. Do not compare the
+  // first snapshot of the new round with the previous round's flags, or a
+  // player who declared riichi in both rounds would lose the second cue.
+  const sameRound = current.roundKey === previous.roundKey;
+
   // Scan structural changes before riichi so a call remains visible if a single
   // engine step also advances another player's state.
   for (const player of current.players) {
-    const previousPlayer = playerById(previous, player.playerId);
+    const previousPlayer = sameRound
+      ? playerById(previous, player.playerId)
+      : undefined;
     const maxMeldCount = Math.max(
       player.melds.length,
       previousPlayer?.melds.length ?? 0,
@@ -244,7 +251,7 @@ export function gameEffectForTransition(
   for (const player of current.players) {
     const riichi = effectForRiichi(
       player,
-      playerById(previous, player.playerId),
+      sameRound ? playerById(previous, player.playerId) : undefined,
     );
     if (riichi !== null) return riichi;
   }
