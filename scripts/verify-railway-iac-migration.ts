@@ -25,7 +25,13 @@ function localFilesystemEvidence(): RailwayIacFilesystemEvidence {
     ? readFileSync(generatedPath, "utf8")
     : null;
   const currentRepositorySource = currentRepositoryExists
-    ? readFileSync(currentRepositoryPath)
+    ? (() => {
+        try {
+          return readFileSync(currentRepositoryPath, "utf8");
+        } catch {
+          return null;
+        }
+      })()
     : null;
   const legacyFixtureSource = legacyFixtureExists
     ? (() => {
@@ -51,7 +57,10 @@ function localFilesystemEvidence(): RailwayIacFilesystemEvidence {
     currentRepositoryFileSha256:
       currentRepositorySource === null
         ? null
-        : createHash("sha256").update(currentRepositorySource).digest("hex"),
+        : createHash("sha256")
+            .update(currentRepositorySource, "utf8")
+            .digest("hex"),
+    currentRepositoryFileContent: currentRepositorySource,
     legacyFixturePresent: legacyFixtureExists,
     legacyFixtureSha256:
       legacyFixtureSource === null

@@ -38,10 +38,23 @@ const FILESYSTEM: RailwayIacFilesystemEvidence = {
   generatedIacSecretSafe: true,
   currentRepositoryFilePresent: true,
   currentRepositoryFileSha256: CURRENT_REPOSITORY_SHA,
+  currentRepositoryFileContent: CURRENT_REPOSITORY_SOURCE,
   legacyFixturePresent: true,
   legacyFixtureSha256: RAILWAY_LEGACY_FIXTURE_SHA256,
   legacyFixtureContent: LEGACY_FIXTURE_SOURCE,
 };
+
+function filesystemWithCurrentRepositorySource(
+  source: string,
+): RailwayIacFilesystemEvidence {
+  return {
+    ...FILESYSTEM,
+    currentRepositoryFileSha256: createHash("sha256")
+      .update(source, "utf8")
+      .digest("hex"),
+    currentRepositoryFileContent: source,
+  };
+}
 
 function validEvidence(nowMs = NOW) {
   const capturedAt = new Date(nowMs).toISOString();
@@ -210,6 +223,7 @@ describe("Railway IaC parity snapshot contract (#742)", () => {
       generatedIacSecretSafe: null,
       currentRepositoryFilePresent: FILESYSTEM.currentRepositoryFilePresent,
       currentRepositoryFileSha256: FILESYSTEM.currentRepositoryFileSha256,
+      currentRepositoryFileContent: FILESYSTEM.currentRepositoryFileContent,
       legacyFixturePresent: FILESYSTEM.legacyFixturePresent,
       legacyFixtureSha256: FILESYSTEM.legacyFixtureSha256,
       legacyFixtureContent: FILESYSTEM.legacyFixtureContent,
@@ -632,6 +646,39 @@ describe("Railway IaC parity snapshot contract (#742)", () => {
     });
   });
 
+  it.each([
+    ["/healthz", CURRENT_REPOSITORY_SOURCE.replace("/readyz", "/healthz")],
+    ["malformed", "{ not-json"],
+    ["empty", ""],
+    ["unrelated content", JSON.stringify({ hello: "world" })],
+  ])("holds when current railway.json is %s", (_label, source) => {
+    const result = validateRailwayIacMigrationEvidence(
+      validEvidence(),
+      filesystemWithCurrentRepositorySource(source),
+      NOW,
+    );
+    expect(result.migrationEvidence).toBe("hold");
+    expect(result.reasons).toContain("legacy-config-missing");
+  });
+
+  it("accepts only the strict current /readyz railway.json target", () => {
+    expect(
+      validateRailwayIacMigrationEvidence(
+        validEvidence(),
+        filesystemWithCurrentRepositorySource(CURRENT_REPOSITORY_SOURCE),
+        NOW,
+      ),
+    ).toEqual({
+      schemaVersion: 1,
+      migrationEvidence: "pass",
+      authorizesMigration: false,
+      authorizesApply: false,
+      authorizesDeployment: false,
+      externalMutationPerformed: false,
+      reasons: [],
+    });
+  });
+
   it("holds when the current /readyz railway.json is presented as legacy", () => {
     const evidence = validEvidence();
     evidence.ownershipCutover.legacyFileSha256 = CURRENT_REPOSITORY_SHA;
@@ -686,6 +733,7 @@ describe("Railway IaC parity snapshot contract (#742)", () => {
       generatedIacSecretSafe: null,
       currentRepositoryFilePresent: FILESYSTEM.currentRepositoryFilePresent,
       currentRepositoryFileSha256: FILESYSTEM.currentRepositoryFileSha256,
+      currentRepositoryFileContent: FILESYSTEM.currentRepositoryFileContent,
       legacyFixturePresent: false,
       legacyFixtureSha256: null,
       legacyFixtureContent: null,
