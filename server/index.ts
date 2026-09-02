@@ -154,6 +154,7 @@ export function createOnlineServer(
         const parsed = new URL(origin);
         if (
           (parsed.protocol !== "http:" && parsed.protocol !== "https:") ||
+          parsed.hostname.includes("*") ||
           parsed.origin !== origin
         ) {
           return null;
@@ -175,9 +176,7 @@ export function createOnlineServer(
     // An absent, empty, or invalid allowlist must never widen the WebSocket
     // boundary. Local and deployed environments must opt in with an explicit
     // Origin.
-    return (
-      allowed !== null && origin !== undefined && allowed.has(origin)
-    );
+    return allowed !== null && origin !== undefined && allowed.has(origin);
   }
 
   function send(client: Client, value: unknown): void {

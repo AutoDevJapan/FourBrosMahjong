@@ -56,7 +56,10 @@ function waitForMessage(
   });
 }
 
-function openRawUpgrade(port: number, origin = ORIGIN): {
+function openRawUpgrade(
+  port: number,
+  origin = ORIGIN,
+): {
   readonly socket: ReturnType<typeof createConnection>;
   readonly response: Promise<string>;
   readonly closed: Promise<void>;
@@ -157,6 +160,10 @@ describe("createOnlineServer lifecycle", () => {
 
   it.each([
     { configuredOrigins: "*", handshakeOrigin: "*" },
+    {
+      configuredOrigins: "https://*.vercel.app",
+      handshakeOrigin: "https://*.vercel.app",
+    },
     { configuredOrigins: `${ORIGIN}/path`, handshakeOrigin: `${ORIGIN}/path` },
     { configuredOrigins: `${ORIGIN},*`, handshakeOrigin: ORIGIN },
     {

@@ -5,9 +5,9 @@ import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
   generatedIacSourceIsSecretSafe,
+  RAILWAY_IAC_MIGRATION_REASONS,
   RAILWAY_LEGACY_FIXTURE_PATH,
   RAILWAY_LEGACY_FIXTURE_SHA256,
-  RAILWAY_IAC_MIGRATION_REASONS,
   type RailwayIacFilesystemEvidence,
   validateRailwayIacMigrationEvidence,
 } from "../../scripts/railway-iac-migration-contract";
@@ -618,17 +618,17 @@ describe("Railway IaC parity snapshot contract (#742)", () => {
     const evidence = validEvidence();
     expect(currentRailwayJson.deploy.healthcheckPath).toBe("/readyz");
     expect(preCutoverRailwayJson.deploy.healthcheckPath).toBe("/healthz");
-    expect(FILESYSTEM.legacyFixtureSha256).toBe(
-      RAILWAY_LEGACY_FIXTURE_SHA256,
-    );
+    expect(FILESYSTEM.legacyFixtureSha256).toBe(RAILWAY_LEGACY_FIXTURE_SHA256);
     expect(evidence.preCutoverReadback.config.healthcheckPath).toBe("/healthz");
     expect(evidence.preCutoverReadback.config).toMatchObject({
       builder: preCutoverRailwayJson.build.builder,
       dockerfilePath: preCutoverRailwayJson.build.dockerfilePath,
       startCommand: preCutoverRailwayJson.deploy.startCommand,
-      healthcheckTimeoutSeconds: preCutoverRailwayJson.deploy.healthcheckTimeout,
+      healthcheckTimeoutSeconds:
+        preCutoverRailwayJson.deploy.healthcheckTimeout,
       restartPolicyType: preCutoverRailwayJson.deploy.restartPolicyType,
-      restartPolicyMaxRetries: preCutoverRailwayJson.deploy.restartPolicyMaxRetries,
+      restartPolicyMaxRetries:
+        preCutoverRailwayJson.deploy.restartPolicyMaxRetries,
     });
   });
 

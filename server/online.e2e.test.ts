@@ -886,6 +886,10 @@ describe("online multiplayer local E2E (#629)", () => {
   it.each([
     { allowedOrigins: "*", handshakeOrigin: "*" },
     {
+      allowedOrigins: "https://*.vercel.app",
+      handshakeOrigin: "https://*.vercel.app",
+    },
+    {
       allowedOrigins: `${TEST_ORIGIN}/path`,
       handshakeOrigin: `${TEST_ORIGIN}/path`,
     },

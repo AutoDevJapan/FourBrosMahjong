@@ -14,7 +14,10 @@ const repositoryRoot = process.cwd();
 function localFilesystemEvidence(): RailwayIacFilesystemEvidence {
   const generatedPath = resolve(repositoryRoot, ".railway/railway.ts");
   const currentRepositoryPath = resolve(repositoryRoot, "railway.json");
-  const legacyFixturePath = resolve(repositoryRoot, RAILWAY_LEGACY_FIXTURE_PATH);
+  const legacyFixturePath = resolve(
+    repositoryRoot,
+    RAILWAY_LEGACY_FIXTURE_PATH,
+  );
   const generatedExists = existsSync(generatedPath);
   const currentRepositoryExists = existsSync(currentRepositoryPath);
   const legacyFixtureExists = existsSync(legacyFixturePath);
@@ -48,9 +51,7 @@ function localFilesystemEvidence(): RailwayIacFilesystemEvidence {
     currentRepositoryFileSha256:
       currentRepositorySource === null
         ? null
-        : createHash("sha256")
-            .update(currentRepositorySource)
-            .digest("hex"),
+        : createHash("sha256").update(currentRepositorySource).digest("hex"),
     legacyFixturePresent: legacyFixtureExists,
     legacyFixtureSha256:
       legacyFixtureSource === null

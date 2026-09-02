@@ -13,6 +13,14 @@ import {
 const ALLOWED_ORIGIN = "http://allowed.local";
 const DISALLOWED_ORIGIN = "http://disallowed.local";
 
+interface BoundaryFixtureOptions {
+  readonly allowMissingOrigin?: boolean;
+  readonly hangUpgrades?: boolean;
+  readonly healthBody?: string;
+  readonly readinessBody?: string;
+  readonly readinessStatus?: number;
+}
+
 interface BoundaryFixture {
   readonly baseUrl: string;
   readonly applicationBytes: Buffer[];
@@ -50,7 +58,7 @@ async function startBoundaryFixture({
   healthBody = JSON.stringify({ ok: true }),
   readinessBody,
   readinessStatus = 200,
-} = {}): Promise<BoundaryFixture> {
+}: BoundaryFixtureOptions = {}): Promise<BoundaryFixture> {
   const applicationBytes: Buffer[] = [];
   const origins: Array<string | undefined> = [];
   const sockets = new Set<Socket>();

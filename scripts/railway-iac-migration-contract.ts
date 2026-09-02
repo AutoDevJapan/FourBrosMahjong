@@ -1087,14 +1087,12 @@ export function validateRailwayIacMigrationEvidence(
     filesystem.legacyFixturePresent === true &&
     filesystem.legacyFixtureSha256 === RAILWAY_LEGACY_FIXTURE_SHA256 &&
     typeof filesystem.legacyFixtureContent === "string" &&
-    sha256(filesystem.legacyFixtureContent) ===
-      filesystem.legacyFixtureSha256;
+    sha256(filesystem.legacyFixtureContent) === filesystem.legacyFixtureSha256;
   const legacyFixtureValid =
     currentRepositoryFileValid &&
     legacyFixtureHashValid &&
     legacyFixtureContentIsKnown(filesystem.legacyFixtureContent);
-  if (!legacyFixtureValid)
-    reasons.push("legacy-config-missing");
+  if (!legacyFixtureValid) reasons.push("legacy-config-missing");
 
   const cutover = input.ownershipCutover;
   if (
