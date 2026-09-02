@@ -766,6 +766,9 @@ export default function GameBoard({
         secondaryPoliteMessage={
           gameEffect?.assertive === false ? gameEffect.announcement : ""
         }
+        secondaryPoliteMessageKey={
+          gameEffect?.assertive === false ? gameEffect.eventId : undefined
+        }
         assertiveMessage={assertive}
       />
     </div>

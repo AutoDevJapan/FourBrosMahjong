@@ -534,6 +534,102 @@ test.describe("状態駆動 a11y 監査(狭幅・モーダル / #148)", () => {
       ).toHaveCount(1);
     }
   });
+
+  test("同じ二次polite cueでも別eventならスクリーンリーダー用子ノードを交換する(#803)", async ({
+    page,
+  }) => {
+    test.setTimeout(60_000);
+    await openScreen(page, gameScreen, "ライト", "?seed=1");
+
+    // React keyそのものはDOMへ公開されないため、実ブラウザ上の同一要素identityを
+    // WeakMapで観測する。視覚cueのDOMやゲーム状態へテスト用属性は追加しない。
+    await page.evaluate(() => {
+      type SecondaryLiveRegionState = {
+        nextId: number;
+        nodeIds: WeakMap<Element, number>;
+      };
+      type TestWindow = Window & {
+        __secondaryLiveRegionState?: SecondaryLiveRegionState;
+      };
+      (window as TestWindow).__secondaryLiveRegionState = {
+        nextId: 0,
+        nodeIds: new WeakMap<Element, number>(),
+      };
+    });
+
+    const seen = new Map<string, { effectKey: string; nodeId: number }>();
+    type RepeatedCue = {
+      message: string;
+      previousNodeId: number;
+      currentNodeId: number;
+    };
+    const repeatedCue = { value: null as RepeatedCue | null };
+
+    await advanceUntil(
+      page,
+      async () => {
+        const sample = await page.evaluate(() => {
+          type SecondaryLiveRegionState = {
+            nextId: number;
+            nodeIds: WeakMap<Element, number>;
+          };
+          type TestWindow = Window & {
+            __secondaryLiveRegionState?: SecondaryLiveRegionState;
+          };
+          const testWindow = window as TestWindow;
+          const state = testWindow.__secondaryLiveRegionState;
+          const region = document.querySelectorAll<HTMLElement>(
+            '.sr-only[aria-live="polite"]',
+          )[1];
+          const overlay = document.querySelector<HTMLElement>(
+            '[data-testid="effect-overlay"]',
+          );
+          const child = region?.firstElementChild;
+          const effectKey = overlay?.getAttribute("data-effect-key") ?? "";
+          const message = region?.textContent?.trim() ?? "";
+          if (
+            !state ||
+            region === undefined ||
+            child === null ||
+            effectKey === "" ||
+            message === ""
+          ) {
+            return null;
+          }
+          let nodeId = state.nodeIds.get(child);
+          if (nodeId === undefined) {
+            nodeId = state.nextId;
+            state.nextId += 1;
+            state.nodeIds.set(child, nodeId);
+          }
+          return { effectKey, message, nodeId };
+        });
+        if (sample === null) return false;
+
+        const previous = seen.get(sample.message);
+        if (previous && previous.effectKey !== sample.effectKey) {
+          repeatedCue.value = {
+            message: sample.message,
+            previousNodeId: previous.nodeId,
+            currentNodeId: sample.nodeId,
+          };
+          return true;
+        }
+        seen.set(sample.message, {
+          effectKey: sample.effectKey,
+          nodeId: sample.nodeId,
+        });
+        return false;
+      },
+      { maxSteps: 600 },
+    );
+
+    expect(repeatedCue.value).not.toBeNull();
+    const duplicate = repeatedCue.value;
+    if (duplicate === null)
+      throw new Error("同じ二次polite cueを検出できなかった");
+    expect(duplicate.currentNodeId).not.toBe(duplicate.previousNodeId);
+  });
 });
 
 /**
