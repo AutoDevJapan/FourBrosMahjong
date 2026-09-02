@@ -141,17 +141,29 @@ function readWorkflow(): Workflow {
   return parse(source) as Workflow;
 }
 
+type WorkflowRunConclusion = "success" | "failure" | "cancelled" | "timed_out";
+
+type RepositoryPayload = {
+  full_name?: string;
+};
+
+type WorkflowRunPayload = {
+  conclusion?: WorkflowRunConclusion;
+  head_branch?: string;
+  head_repository?: RepositoryPayload;
+};
+
+type WorkflowRunEvent = {
+  workflow_run?: WorkflowRunPayload;
+  repository?: RepositoryPayload;
+};
+
 type WorkflowRunFixture = {
   label: string;
-  event: {
-    workflow_run: {
-      conclusion: "success" | "failure";
-      head_branch: string;
-      head_repository: { full_name: string };
-    };
-    repository: { full_name: string };
-  };
+  event?: WorkflowRunEvent;
+  compareResult: "success" | "failure" | "skipped";
   needsUpdate: boolean;
+  expectedTrigger: boolean;
   expectedCompare: boolean;
   expectedWrite: boolean;
 };
@@ -169,7 +181,9 @@ const WORKFLOW_RUN_FIXTURES: WorkflowRunFixture[] = [
       },
       repository: { full_name: GITLEAKS_REPOSITORY },
     },
+    compareResult: "success",
     needsUpdate: true,
+    expectedTrigger: true,
     expectedCompare: true,
     expectedWrite: true,
   },
@@ -183,7 +197,9 @@ const WORKFLOW_RUN_FIXTURES: WorkflowRunFixture[] = [
       },
       repository: { full_name: GITLEAKS_REPOSITORY },
     },
+    compareResult: "success",
     needsUpdate: false,
+    expectedTrigger: true,
     expectedCompare: true,
     expectedWrite: false,
   },
@@ -197,7 +213,9 @@ const WORKFLOW_RUN_FIXTURES: WorkflowRunFixture[] = [
       },
       repository: { full_name: GITLEAKS_REPOSITORY },
     },
+    compareResult: "success",
     needsUpdate: true,
+    expectedTrigger: false,
     expectedCompare: false,
     expectedWrite: false,
   },
@@ -211,7 +229,9 @@ const WORKFLOW_RUN_FIXTURES: WorkflowRunFixture[] = [
       },
       repository: { full_name: GITLEAKS_REPOSITORY },
     },
+    compareResult: "success",
     needsUpdate: true,
+    expectedTrigger: true,
     expectedCompare: false,
     expectedWrite: false,
   },
@@ -225,8 +245,199 @@ const WORKFLOW_RUN_FIXTURES: WorkflowRunFixture[] = [
       },
       repository: { full_name: GITLEAKS_REPOSITORY },
     },
+    compareResult: "success",
     needsUpdate: true,
+    expectedTrigger: true,
     expectedCompare: false,
+    expectedWrite: false,
+  },
+  {
+    label: "same-repository main cancelled",
+    event: {
+      workflow_run: {
+        conclusion: "cancelled",
+        head_branch: "main",
+        head_repository: { full_name: GITLEAKS_REPOSITORY },
+      },
+      repository: { full_name: GITLEAKS_REPOSITORY },
+    },
+    compareResult: "success",
+    needsUpdate: true,
+    expectedTrigger: true,
+    expectedCompare: false,
+    expectedWrite: false,
+  },
+  {
+    label: "same-repository main timed out",
+    event: {
+      workflow_run: {
+        conclusion: "timed_out",
+        head_branch: "main",
+        head_repository: { full_name: GITLEAKS_REPOSITORY },
+      },
+      repository: { full_name: GITLEAKS_REPOSITORY },
+    },
+    compareResult: "success",
+    needsUpdate: true,
+    expectedTrigger: true,
+    expectedCompare: false,
+    expectedWrite: false,
+  },
+  {
+    label: "workflow_run payload is missing",
+    event: {
+      repository: { full_name: GITLEAKS_REPOSITORY },
+    },
+    compareResult: "success",
+    needsUpdate: true,
+    expectedTrigger: false,
+    expectedCompare: false,
+    expectedWrite: false,
+  },
+  {
+    label: "workflow_run payload is undefined",
+    event: {
+      workflow_run: undefined,
+      repository: { full_name: GITLEAKS_REPOSITORY },
+    },
+    compareResult: "success",
+    needsUpdate: true,
+    expectedTrigger: false,
+    expectedCompare: false,
+    expectedWrite: false,
+  },
+  {
+    label: "event payload is undefined",
+    event: undefined,
+    compareResult: "success",
+    needsUpdate: true,
+    expectedTrigger: false,
+    expectedCompare: false,
+    expectedWrite: false,
+  },
+  {
+    label: "head_repository payload is missing",
+    event: {
+      workflow_run: {
+        conclusion: "success",
+        head_branch: "main",
+      },
+      repository: { full_name: GITLEAKS_REPOSITORY },
+    },
+    compareResult: "success",
+    needsUpdate: true,
+    expectedTrigger: true,
+    expectedCompare: false,
+    expectedWrite: false,
+  },
+  {
+    label: "head_repository payload is undefined",
+    event: {
+      workflow_run: {
+        conclusion: "success",
+        head_branch: "main",
+        head_repository: undefined,
+      },
+      repository: { full_name: GITLEAKS_REPOSITORY },
+    },
+    compareResult: "success",
+    needsUpdate: true,
+    expectedTrigger: true,
+    expectedCompare: false,
+    expectedWrite: false,
+  },
+  {
+    label: "repository payload is missing",
+    event: {
+      workflow_run: {
+        conclusion: "success",
+        head_branch: "main",
+        head_repository: { full_name: GITLEAKS_REPOSITORY },
+      },
+    },
+    compareResult: "success",
+    needsUpdate: true,
+    expectedTrigger: true,
+    expectedCompare: false,
+    expectedWrite: false,
+  },
+  {
+    label: "repository payload is undefined",
+    event: {
+      workflow_run: {
+        conclusion: "success",
+        head_branch: "main",
+        head_repository: { full_name: GITLEAKS_REPOSITORY },
+      },
+      repository: undefined,
+    },
+    compareResult: "success",
+    needsUpdate: true,
+    expectedTrigger: true,
+    expectedCompare: false,
+    expectedWrite: false,
+  },
+  {
+    label: "head_branch payload is missing",
+    event: {
+      workflow_run: {
+        conclusion: "success",
+        head_repository: { full_name: GITLEAKS_REPOSITORY },
+      },
+      repository: { full_name: GITLEAKS_REPOSITORY },
+    },
+    compareResult: "success",
+    needsUpdate: true,
+    expectedTrigger: false,
+    expectedCompare: false,
+    expectedWrite: false,
+  },
+  {
+    label: "conclusion payload is undefined",
+    event: {
+      workflow_run: {
+        conclusion: undefined,
+        head_branch: "main",
+        head_repository: { full_name: GITLEAKS_REPOSITORY },
+      },
+      repository: { full_name: GITLEAKS_REPOSITORY },
+    },
+    compareResult: "success",
+    needsUpdate: true,
+    expectedTrigger: true,
+    expectedCompare: false,
+    expectedWrite: false,
+  },
+  {
+    label: "event guard passes but compare job failed",
+    event: {
+      workflow_run: {
+        conclusion: "success",
+        head_branch: "main",
+        head_repository: { full_name: GITLEAKS_REPOSITORY },
+      },
+      repository: { full_name: GITLEAKS_REPOSITORY },
+    },
+    compareResult: "failure",
+    needsUpdate: true,
+    expectedTrigger: true,
+    expectedCompare: true,
+    expectedWrite: false,
+  },
+  {
+    label: "event guard passes but compare job was skipped",
+    event: {
+      workflow_run: {
+        conclusion: "success",
+        head_branch: "main",
+        head_repository: { full_name: GITLEAKS_REPOSITORY },
+      },
+      repository: { full_name: GITLEAKS_REPOSITORY },
+    },
+    compareResult: "skipped",
+    needsUpdate: true,
+    expectedTrigger: true,
+    expectedCompare: true,
     expectedWrite: false,
   },
 ];
@@ -241,14 +452,21 @@ const WORKFLOW_RUN_GUARDS: Record<
   (fixture: WorkflowRunFixture) => boolean
 > = {
   "github.event.workflow_run.conclusion == 'success'": (fixture) =>
-    fixture.event.workflow_run.conclusion === "success",
+    fixture.event?.workflow_run?.conclusion === "success",
   "github.event.workflow_run.head_branch == 'main'": (fixture) =>
-    fixture.event.workflow_run.head_branch === "main",
+    fixture.event?.workflow_run?.head_branch === "main",
   "github.event.workflow_run.head_repository.full_name == github.repository": (
     fixture,
-  ) =>
-    fixture.event.workflow_run.head_repository.full_name ===
-    fixture.event.repository.full_name,
+  ) => {
+    const headRepository =
+      fixture.event?.workflow_run?.head_repository?.full_name;
+    const repository = fixture.event?.repository?.full_name;
+    return (
+      headRepository !== undefined &&
+      repository !== undefined &&
+      headRepository === repository
+    );
+  },
 };
 
 function normalizeWorkflowExpression(expression: string): string {
@@ -298,6 +516,16 @@ function evaluateCompareGuard(
   );
 }
 
+function evaluateWorkflowRunBranchFilter(
+  branches: unknown,
+  fixture: WorkflowRunFixture,
+): boolean {
+  expect(branches, "workflow_run triggerにmain branch filterが無い").toEqual([
+    "main",
+  ]);
+  return fixture.event?.workflow_run?.head_branch === "main";
+}
+
 function evaluateWritePath(
   compareIf: string | undefined,
   openIf: string | undefined,
@@ -332,6 +560,7 @@ function evaluateWritePath(
 
   return (
     comparePassed &&
+    fixture.compareResult === "success" &&
     eventTerms.every((term) =>
       WORKFLOW_RUN_GUARDS[term as GuardTerm](fixture),
     ) &&
@@ -433,7 +662,14 @@ describe("GITHUB_TOKEN 生成PRのrequired checks", () => {
       const bump = readWorkflowFile("gitleaks-version-bump.yml");
       const compareJob = bump.jobs?.compare;
       const openJob = bump.jobs?.["open-bump-pr"];
+      const workflowRun = bump.on?.workflow_run as
+        | { branches?: unknown }
+        | undefined;
 
+      expect(
+        evaluateWorkflowRunBranchFilter(workflowRun?.branches, fixture),
+        `${fixture.label}: trigger-level branch filterの評価が想定外`,
+      ).toBe(fixture.expectedTrigger);
       expect(
         evaluateCompareGuard(compareJob?.if, fixture),
         `${fixture.label}: compare jobのguard評価が想定外`,
