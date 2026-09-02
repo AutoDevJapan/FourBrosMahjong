@@ -9,6 +9,8 @@ import {
 } from "react";
 import type { HandAnimationKind } from "./handAnimation";
 
+const HAND_ANIMATION_DURATION_MS = 200;
+
 interface HandTileAnimationProps
   extends Omit<LiHTMLAttributes<HTMLLIElement>, "children"> {
   /** A new value starts one entrance transition for this option. */
@@ -41,6 +43,9 @@ const HandTileAnimation = forwardRef<HTMLLIElement, HandTileAnimationProps>(
     const [completedAnimationKey, setCompletedAnimationKey] = useState<
       string | undefined
     >();
+    const [completedDelayKey, setCompletedDelayKey] = useState<
+      string | undefined
+    >();
 
     useEffect(() => {
       if (animationKey === undefined) return;
@@ -50,11 +55,24 @@ const HandTileAnimation = forwardRef<HTMLLIElement, HandTileAnimationProps>(
       const timer = window.setTimeout(() => {
         setCompletedAnimationKey(animationKey);
       }, 0);
-      return () => window.clearTimeout(timer);
-    }, [animationKey]);
+      const delayTimer =
+        animationDelayMs === undefined
+          ? undefined
+          : window.setTimeout(() => {
+              // Keep the staggered delay through the entrance transition, but
+              // do not let later selection/hover transforms inherit it.
+              setCompletedDelayKey(animationKey);
+            }, animationDelayMs + HAND_ANIMATION_DURATION_MS);
+      return () => {
+        window.clearTimeout(timer);
+        if (delayTimer !== undefined) window.clearTimeout(delayTimer);
+      };
+    }, [animationKey, animationDelayMs]);
 
     const entering =
       animationKey !== undefined && completedAnimationKey !== animationKey;
+    const hasAnimationDelay =
+      animationDelayMs !== undefined && completedDelayKey !== animationKey;
     const enteringClass =
       animationKind === "meld"
         ? "opacity-80 translate-x-1 motion-reduce:opacity-100 motion-reduce:translate-x-0"
@@ -66,7 +84,7 @@ const HandTileAnimation = forwardRef<HTMLLIElement, HandTileAnimationProps>(
         ref={ref}
         data-hand-animation={entering ? animationKind : undefined}
         style={
-          animationDelayMs === undefined
+          !hasAnimationDelay
             ? style
             : { ...style, transitionDelay: `${animationDelayMs}ms` }
         }

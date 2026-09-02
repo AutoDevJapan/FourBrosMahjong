@@ -62,4 +62,35 @@ describe("HandTileAnimation", () => {
       "motion-reduce:translate-x-0",
     );
   });
+
+  it("removes deal staggering after the entrance transition", () => {
+    vi.useFakeTimers();
+    try {
+      render(
+        <HandTileAnimation
+          animationKey="deal-1-3"
+          animationKind="deal"
+          animationDelayMs={60}
+        >
+          牌
+        </HandTileAnimation>,
+      );
+      const item = screen.getByText("牌").closest("li");
+      expect(item).not.toBeNull();
+      expect(item).toHaveStyle({ transitionDelay: "60ms" });
+
+      act(() => {
+        vi.advanceTimersByTime(0);
+      });
+      expect(item).toHaveClass("opacity-100");
+      expect(item).toHaveStyle({ transitionDelay: "60ms" });
+
+      act(() => {
+        vi.advanceTimersByTime(260);
+      });
+      expect(item).not.toHaveStyle({ transitionDelay: "60ms" });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });
