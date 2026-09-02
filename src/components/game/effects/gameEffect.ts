@@ -3,7 +3,7 @@ import { tileLabel } from "../../common/tileLabel";
 import type { GameViewState, MeldView, SeatPosition, TileData } from "../types";
 
 /** UI-only effect categories. They never participate in game decisions. */
-export type GameEffectKind =
+type GameEffectKind =
   | "discard"
   | "riichi"
   | "pon"
