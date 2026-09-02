@@ -144,30 +144,39 @@ export function createOnlineServer(
       .filter(Boolean);
   }
 
-  function configuredOriginsAreValid(): boolean {
+  function canonicalAllowedOrigins(): ReadonlySet<string> | null {
     const origins = allowedOrigins();
-    return (
-      origins.length > 0 &&
-      origins.every((origin) => {
-        try {
-          const parsed = new URL(origin);
-          return (
-            (parsed.protocol === "http:" || parsed.protocol === "https:") &&
-            parsed.origin === origin
-          );
-        } catch {
-          return false;
+    if (origins.length === 0) return null;
+
+    const canonicalOrigins = new Set<string>();
+    for (const origin of origins) {
+      try {
+        const parsed = new URL(origin);
+        if (
+          (parsed.protocol !== "http:" && parsed.protocol !== "https:") ||
+          parsed.origin !== origin
+        ) {
+          return null;
         }
-      })
-    );
+        canonicalOrigins.add(parsed.origin);
+      } catch {
+        return null;
+      }
+    }
+    return canonicalOrigins;
+  }
+
+  function configuredOriginsAreValid(): boolean {
+    return canonicalAllowedOrigins() !== null;
   }
 
   function originAllowed(origin: string | undefined): boolean {
-    const allowed = allowedOrigins();
-    // An absent or empty allowlist must never widen the WebSocket boundary.
-    // Local and deployed environments must opt in with an explicit Origin.
+    const allowed = canonicalAllowedOrigins();
+    // An absent, empty, or invalid allowlist must never widen the WebSocket
+    // boundary. Local and deployed environments must opt in with an explicit
+    // Origin.
     return (
-      allowed.length > 0 && origin !== undefined && allowed.includes(origin)
+      allowed !== null && origin !== undefined && allowed.has(origin)
     );
   }
 

@@ -56,7 +56,7 @@ function waitForMessage(
   });
 }
 
-function openRawUpgrade(port: number): {
+function openRawUpgrade(port: number, origin = ORIGIN): {
   readonly socket: ReturnType<typeof createConnection>;
   readonly response: Promise<string>;
   readonly closed: Promise<void>;
@@ -70,7 +70,7 @@ function openRawUpgrade(port: number): {
           `Host: 127.0.0.1:${port}\r\n` +
           "Connection: Upgrade\r\n" +
           "Upgrade: websocket\r\n" +
-          `Origin: ${ORIGIN}\r\n` +
+          `Origin: ${origin}\r\n` +
           `Sec-WebSocket-Key: ${Buffer.from("shutdown-pending").toString("base64")}\r\n` +
           "Sec-WebSocket-Version: 13\r\n\r\n",
       );
@@ -155,9 +155,17 @@ describe("createOnlineServer lifecycle", () => {
     }
   });
 
-  it.each(["*", `${ORIGIN}/path`])(
-    "reports not ready for a non-canonical Origin allowlist: %s",
-    async (configuredOrigins) => {
+  it.each([
+    { configuredOrigins: "*", handshakeOrigin: "*" },
+    { configuredOrigins: `${ORIGIN}/path`, handshakeOrigin: `${ORIGIN}/path` },
+    { configuredOrigins: `${ORIGIN},*`, handshakeOrigin: ORIGIN },
+    {
+      configuredOrigins: `${ORIGIN},${ORIGIN}/path`,
+      handshakeOrigin: ORIGIN,
+    },
+  ])(
+    "reports not ready and rejects a non-canonical Origin allowlist: $configuredOrigins",
+    async ({ configuredOrigins, handshakeOrigin }) => {
       const server = createOnlineServer({
         environment: {
           ...environment(false),
@@ -165,11 +173,17 @@ describe("createOnlineServer lifecycle", () => {
         },
       });
       const port = await listen(server);
+      const upgrade = openRawUpgrade(port, handshakeOrigin);
       try {
         const response = await fetch(`http://127.0.0.1:${port}/readyz`);
         expect(response.status).toBe(503);
         await expect(response.json()).resolves.toEqual({ ok: false });
+        await expect(upgrade.response).resolves.toMatch(
+          /^HTTP\/1\.1 403 Forbidden\r\n/,
+        );
       } finally {
+        upgrade.socket.destroy();
+        await upgrade.closed;
         await server.handleSignal("SIGTERM");
       }
     },

@@ -883,6 +883,37 @@ describe("online multiplayer local E2E (#629)", () => {
     TEST_TIMEOUT_MS,
   );
 
+  it.each([
+    { allowedOrigins: "*", handshakeOrigin: "*" },
+    {
+      allowedOrigins: `${TEST_ORIGIN}/path`,
+      handshakeOrigin: `${TEST_ORIGIN}/path`,
+    },
+    { allowedOrigins: `${TEST_ORIGIN},*`, handshakeOrigin: TEST_ORIGIN },
+    {
+      allowedOrigins: `${TEST_ORIGIN},${TEST_ORIGIN}/path`,
+      handshakeOrigin: TEST_ORIGIN,
+    },
+  ])(
+    "rejects a WebSocket handshake for invalid Origin allowlist $allowedOrigins",
+    async ({ allowedOrigins, handshakeOrigin }) => {
+      const developmentServer = await startLocalOnlineServer(allowedOrigins);
+      try {
+        await expect(
+          fetch(`${developmentServer.url}/readyz`),
+        ).resolves.toMatchObject({ status: 503 });
+        const response = await requestUpgrade(
+          developmentServer.url,
+          handshakeOrigin,
+        );
+        expect(response.statusCode).toBe(403);
+      } finally {
+        await stopLocalOnlineServer(developmentServer);
+      }
+    },
+    TEST_TIMEOUT_MS,
+  );
+
   it(
     "Originなし・禁止Originとstale versionをサーバー境界で拒否する",
     async () => {
