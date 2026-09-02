@@ -1,0 +1,65 @@
+import { act, render, screen } from "@testing-library/react";
+import { describe, expect, it, vi } from "vitest";
+import HandTileAnimation from "./HandTileAnimation";
+
+describe("HandTileAnimation", () => {
+  it("settles one stable animation key without changing option semantics", () => {
+    vi.useFakeTimers();
+    try {
+      const { rerender } = render(
+        <HandTileAnimation
+          animationKey="draw-1-2"
+          animationKind="draw"
+          role="option"
+          aria-label="五筒"
+        >
+          牌
+        </HandTileAnimation>,
+      );
+      const option = screen.getByRole("option", { name: "五筒" });
+
+      expect(option).toHaveAttribute("data-hand-animation", "draw");
+      expect(option).toHaveClass("opacity-0", "motion-reduce:opacity-100");
+      expect(vi.getTimerCount()).toBe(1);
+
+      rerender(
+        <HandTileAnimation
+          animationKey="draw-1-2"
+          animationKind="draw"
+          role="option"
+          aria-label="五筒"
+        >
+          牌
+        </HandTileAnimation>,
+      );
+      expect(vi.getTimerCount()).toBe(1);
+
+      act(() => {
+        vi.runAllTimers();
+      });
+      expect(option).toHaveClass("opacity-100");
+      expect(option).not.toHaveClass("translate-y-1");
+      expect(option).not.toHaveAttribute("data-hand-animation");
+      expect(option).toHaveAttribute("role", "option");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("uses a settling translation for melds and includes reduced-motion fallbacks", () => {
+    const { container } = render(
+      <HandTileAnimation animationKey="meld-1-0" animationKind="meld">
+        牌
+      </HandTileAnimation>,
+    );
+    const item = container.querySelector("li");
+    expect(item).not.toBeNull();
+    expect(item).toHaveAttribute("data-hand-animation", "meld");
+    expect(item).toHaveClass(
+      "opacity-80",
+      "translate-x-1",
+      "motion-reduce:transition-none",
+      "motion-reduce:translate-x-0",
+    );
+  });
+});

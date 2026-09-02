@@ -7,11 +7,16 @@ import {
   useEffect,
   useState,
 } from "react";
+import type { HandAnimationKind } from "./handAnimation";
 
 interface HandTileAnimationProps
   extends Omit<LiHTMLAttributes<HTMLLIElement>, "children"> {
   /** A new value starts one entrance transition for this option. */
   readonly animationKey?: string;
+  /** The transition controls the small movement used for a meld reflow. */
+  readonly animationKind?: HandAnimationKind;
+  /** Deal tiles use a stable index-based delay for deterministic staggering. */
+  readonly animationDelayMs?: number;
   readonly children: ReactNode;
 }
 
@@ -22,7 +27,15 @@ interface HandTileAnimationProps
  */
 const HandTileAnimation = forwardRef<HTMLLIElement, HandTileAnimationProps>(
   function HandTileAnimation(
-    { animationKey, children, className = "", ...props },
+    {
+      animationKey,
+      animationKind = "draw",
+      animationDelayMs,
+      children,
+      className = "",
+      style,
+      ...props
+    },
     ref,
   ) {
     const [completedAnimationKey, setCompletedAnimationKey] = useState<
@@ -42,16 +55,25 @@ const HandTileAnimation = forwardRef<HTMLLIElement, HandTileAnimationProps>(
 
     const entering =
       animationKey !== undefined && completedAnimationKey !== animationKey;
+    const enteringClass =
+      animationKind === "meld"
+        ? "opacity-80 translate-x-1 motion-reduce:opacity-100 motion-reduce:translate-x-0"
+        : "opacity-0 translate-y-1 motion-reduce:opacity-100 motion-reduce:translate-y-0";
 
     return (
       <li
         {...props}
         ref={ref}
-        data-hand-animation={animationKey !== undefined ? "draw" : undefined}
+        data-hand-animation={entering ? animationKind : undefined}
+        style={
+          animationDelayMs === undefined
+            ? style
+            : { ...style, transitionDelay: `${animationDelayMs}ms` }
+        }
         className={[
           className,
-          "transition-opacity duration-200 ease-out motion-reduce:transition-none motion-reduce:opacity-100",
-          entering ? "opacity-0" : "opacity-100",
+          "transition-opacity transition-transform duration-200 ease-out motion-reduce:transition-none motion-reduce:opacity-100",
+          entering ? enteringClass : "opacity-100",
         ]
           .filter(Boolean)
           .join(" ")}

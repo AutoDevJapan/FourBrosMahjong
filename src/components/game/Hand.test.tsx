@@ -247,6 +247,110 @@ describe("Hand (roving tabindex listbox, spec 5.2.2)", () => {
     ).not.toHaveAttribute("data-hand-animation");
   });
 
+  it("初回の配牌は牌順に決まった遅延で一度だけ入場表示する", () => {
+    render(<Hand tiles={tiles} />);
+
+    const options = screen.getAllByRole("option");
+    expect(options).toHaveLength(tiles.length);
+    for (const option of options) {
+      expect(option).toHaveAttribute("data-hand-animation", "deal");
+    }
+    expect(options[0]).toHaveClass("opacity-0", "translate-y-1");
+    expect(options[2]).toHaveStyle({ transitionDelay: "60ms" });
+  });
+
+  it("差替牌だけを replacement として表示し、既存牌を再演出しない", () => {
+    const before = [tiles[0], tiles[1], tiles[2]];
+    const replacement = { suit: "honor" as const, rank: 1 };
+    const { rerender } = render(<Hand tiles={before} />);
+
+    rerender(<Hand tiles={[tiles[0], replacement, tiles[2]]} />);
+
+    const options = screen.getAllByRole("option");
+    expect(options[1]).toHaveAttribute("data-hand-animation", "replacement");
+    expect(options[0]).not.toHaveAttribute("data-hand-animation");
+    expect(options[2]).not.toHaveAttribute("data-hand-animation");
+    expect(options[1]).toHaveClass("opacity-0", "motion-reduce:opacity-100");
+  });
+
+  it("鳴きで手牌が縮むと残った牌を meld reflow として表示する", () => {
+    const before = [
+      tiles[0],
+      tiles[1],
+      tiles[2],
+      { suit: "honor" as const, rank: 1 },
+    ];
+    const { rerender } = render(<Hand tiles={before} />);
+
+    rerender(<Hand tiles={[tiles[0], tiles[2]]} />);
+
+    const options = screen.getAllByRole("option");
+    expect(options).toHaveLength(2);
+    for (const option of options) {
+      expect(option).toHaveAttribute("data-hand-animation", "meld");
+      expect(option).toHaveClass("opacity-80", "translate-x-1");
+    }
+    expect(screen.getByRole("listbox")).toBeInTheDocument();
+  });
+
+  it("局境界の新しい配牌は一度だけ表示し、同じスナップショットでは再演出しない", () => {
+    const previous = [
+      ...Array.from({ length: 9 }, (_, index) => ({
+        suit: "man" as const,
+        rank: index + 1,
+      })),
+      ...Array.from({ length: 4 }, (_, index) => ({
+        suit: "pin" as const,
+        rank: index + 1,
+      })),
+    ];
+    const next = [
+      ...Array.from({ length: 9 }, (_, index) => ({
+        suit: "sou" as const,
+        rank: index + 1,
+      })),
+      ...Array.from({ length: 4 }, (_, index) => ({
+        suit: "honor" as const,
+        rank: index + 1,
+      })),
+    ];
+    const { rerender } = render(<Hand tiles={previous} />);
+
+    rerender(<Hand tiles={next} />);
+    expect(
+      screen
+        .getAllByRole("option")
+        .every(
+          (option) => option.getAttribute("data-hand-animation") === "deal",
+        ),
+    ).toBe(true);
+
+    rerender(<Hand tiles={[...next]} />);
+    expect(screen.queryAllByRole("option")).toHaveLength(next.length);
+    expect(
+      screen
+        .queryAllByRole("option")
+        .some((option) => option.hasAttribute("data-hand-animation")),
+    ).toBe(false);
+  });
+
+  it("閲覧専用の手牌も list semantics を保ったまま補充遷移を表示する", () => {
+    const before = [tiles[0], tiles[2]];
+    const after = [tiles[0], tiles[1], tiles[2]];
+    const { rerender } = render(<Hand tiles={before} readOnly />);
+
+    rerender(<Hand tiles={after} readOnly />);
+
+    const list = screen.getByRole("list", { name: "自家の手牌" });
+    expect(list).toHaveAttribute("role", "list");
+    expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
+    expect(screen.queryByRole("option")).not.toBeInTheDocument();
+    expect(screen.getAllByRole("listitem")[1]).toHaveAttribute(
+      "data-hand-animation",
+      "draw",
+    );
+  });
+
   it("キーボード打牌で手牌が更新されてもactive optionへ実フォーカスを戻す(#248)", async () => {
     const user = userEvent.setup();
     const { rerender } = render(<Hand tiles={tiles} />);

@@ -13,7 +13,10 @@ import { useCallback, useId, useLayoutEffect, useRef, useState } from "react";
 import Tile from "../common/Tile";
 import { tileLabel } from "../common/tileLabel";
 import HandTileAnimation from "./hand-animation/HandTileAnimation";
-import { findNewTileIndex } from "./hand-animation/handAnimation";
+import {
+  classifyHandTransition,
+  type HandTransition,
+} from "./hand-animation/handAnimation";
 import type { TileData } from "./types";
 
 export interface HandProps {
@@ -41,8 +44,10 @@ export interface HandTileState {
 
 interface HandAnimationState {
   readonly id: number;
-  readonly tileIndex: number | null;
+  readonly transition: HandTransition | null;
 }
+
+const DEAL_STAGGER_MS = 30;
 
 export default function Hand({
   tiles,
@@ -60,10 +65,12 @@ export default function Hand({
     null,
   );
   const [previousReadOnly, setPreviousReadOnly] = useState(readOnly);
-  const [previousTiles, setPreviousTiles] = useState(tiles);
+  const [previousTiles, setPreviousTiles] = useState<
+    readonly TileData[] | null
+  >(null);
   const [handAnimation, setHandAnimation] = useState<HandAnimationState>({
     id: 0,
-    tileIndex: null,
+    transition: null,
   });
   const optionRefs = useRef<(HTMLLIElement | null)[]>([]);
   const confirmButtonRef = useRef<HTMLButtonElement | null>(null);
@@ -72,19 +79,37 @@ export default function Hand({
   const pointerTypeRef = useRef<"touch" | "other" | null>(null);
   const touchSelectionStatusId = useId();
 
-  // 打牌・鳴き等で手牌が更新されたら、旧 index にあった牌の選択状態を持ち越さない。
-  // GameProvider の view は engine 更新時だけ新しい手牌配列を生成するため、参照比較により
-  // GameBoard 内の無関係な再レンダーでは選択を維持しつつ、手牌構成の更新を検出できる。
+  // GameProvider の view は engine 更新時だけ新しい手牌配列を生成するため、参照比較で
+  // 構成の更新だけを拾う。同じ配列参照の再レンダーでは transition key を維持し、同じ
+  // 演出を再スタートしない。新しい参照でも同じ牌面なら、過去の演出を再利用しない。
+  // これは Hand に既存の「props から導ける state を render 中に同期する」パターンに
+  // 合わせ、ref を render 中に読み書きしない React 19 の純粋性契約も保つ。
   if (previousTiles !== tiles) {
-    const newTileIndex = findNewTileIndex(previousTiles, tiles);
+    const transition = classifyHandTransition(previousTiles, tiles);
     setPreviousTiles(tiles);
     setHandAnimation({
       id: handAnimation.id + 1,
-      tileIndex: newTileIndex,
+      transition,
     });
     if (selectedIndex !== null) setSelectedIndex(null);
     if (touchSelectionIndex !== null) setTouchSelectionIndex(null);
   }
+
+  const animationPropsForIndex = (index: number) => {
+    const transition = handAnimation.transition;
+    if (
+      transition === null ||
+      !transition.affectedTileIndices.includes(index)
+    ) {
+      return {};
+    }
+    return {
+      animationKey: `${transition.kind}-${handAnimation.id}-${index}`,
+      animationKind: transition.kind,
+      animationDelayMs:
+        transition.kind === "deal" ? index * DEAL_STAGGER_MS : undefined,
+    } as const;
+  };
 
   // ポン・カン等で手牌が縮小して activeIndex が範囲外になると、tabIndex=0 の option が
   // 0個になりキーボードで手牌へ到達できなくなる。末尾へクランプしてロービングタブ
@@ -228,10 +253,11 @@ export default function Hand({
             ? `${tileLabel(tile)}、${state.indicator}`
             : tileLabel(tile);
           return (
-            <li
+            <HandTileAnimation
               key={`${tile.suit}-${tile.rank}-${index}`}
               aria-label={accessibleLabel}
               className="relative rounded-md"
+              {...animationPropsForIndex(index)}
             >
               <Tile tile={tile} decorative />
               {state?.indicator ? (
@@ -242,7 +268,7 @@ export default function Hand({
                   {state.indicator}
                 </span>
               ) : null}
-            </li>
+            </HandTileAnimation>
           );
         })}
       </ul>
@@ -301,15 +327,12 @@ export default function Hand({
             : tileLabel(tile);
         // 「リーチ可」と「選択中」は同じリングで、選択中だけ浮き上がりを足して区別する。
         const ringed = state?.highlighted === true || isSelected;
+        const animationProps = animationPropsForIndex(index);
         return (
           <HandTileAnimation
             // 同一牌が複数あるため index を key に含める。
             key={`${tile.suit}-${tile.rank}-${index}`}
-            animationKey={
-              handAnimation.tileIndex === index
-                ? `draw-${handAnimation.id}`
-                : undefined
-            }
+            {...animationProps}
             ref={(el) => {
               optionRefs.current[index] = el;
             }}
