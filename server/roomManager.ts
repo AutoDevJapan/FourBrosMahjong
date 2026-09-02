@@ -21,6 +21,7 @@ import type {
   OnlineHostNotice,
   OnlineHostTransitionReason,
 } from "../src/domain/online/types";
+import { createTile, type Suit } from "../src/domain/tiles/tile";
 import { sanitizePlayerName } from "../src/lib/playerName";
 import {
   normalizeRoomCode,
@@ -363,7 +364,7 @@ function isValidTile(value: unknown): value is {
   if (!(["man", "pin", "sou", "honor"] as const).includes(tile.suit as never)) {
     return false;
   }
-  const suit = tile.suit as string;
+  const suit = tile.suit as Suit;
   const rank = tile.rank;
   if (!Number.isInteger(rank)) return false;
   if ((rank as number) < 1) return false;
@@ -371,7 +372,7 @@ function isValidTile(value: unknown): value is {
   if (suit !== "honor" && (rank as number) > 9) return false;
   return (
     typeof tile.isRed === "boolean" &&
-    (!tile.isRed || (suit !== "honor" && rank === 5))
+    tile.isRed === createTile(suit, rank as number).isRed
   );
 }
 
