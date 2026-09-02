@@ -144,6 +144,24 @@ export function createOnlineServer(
       .filter(Boolean);
   }
 
+  function configuredOriginsAreValid(): boolean {
+    const origins = allowedOrigins();
+    return (
+      origins.length > 0 &&
+      origins.every((origin) => {
+        try {
+          const parsed = new URL(origin);
+          return (
+            (parsed.protocol === "http:" || parsed.protocol === "https:") &&
+            parsed.origin === origin
+          );
+        } catch {
+          return false;
+        }
+      })
+    );
+  }
+
   function originAllowed(origin: string | undefined): boolean {
     const allowed = allowedOrigins();
     // An absent or empty allowlist must never widen the WebSocket boundary.
@@ -766,8 +784,10 @@ export function createOnlineServer(
         !opsConfiguration.readinessBlocked &&
         // An empty allowlist rejects every WebSocket handshake. Do not report
         // a traffic-serving instance as ready while its online boundary is
-        // unusable due to this fail-closed configuration.
-        allowedOrigins().length > 0;
+        // unusable due to this fail-closed configuration. Invalid entries such
+        // as '*' or an origin with a path likewise cannot match a browser
+        // Origin header and must not make the instance appear ready.
+        configuredOriginsAreValid();
       writeJson(response, ready ? 200 : 503, { ok: ready });
       return;
     }

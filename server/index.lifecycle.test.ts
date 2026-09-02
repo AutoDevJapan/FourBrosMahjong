@@ -155,6 +155,26 @@ describe("createOnlineServer lifecycle", () => {
     }
   });
 
+  it.each(["*", `${ORIGIN}/path`])(
+    "reports not ready for a non-canonical Origin allowlist: %s",
+    async (configuredOrigins) => {
+      const server = createOnlineServer({
+        environment: {
+          ...environment(false),
+          ALLOWED_ORIGINS: configuredOrigins,
+        },
+      });
+      const port = await listen(server);
+      try {
+        const response = await fetch(`http://127.0.0.1:${port}/readyz`);
+        expect(response.status).toBe(503);
+        await expect(response.json()).resolves.toEqual({ ok: false });
+      } finally {
+        await server.handleSignal("SIGTERM");
+      }
+    },
+  );
+
   it("sends one deadline-aware terminal notice, then closes with 1012", async () => {
     const server = createOnlineServer({ environment: environment(true) });
     const port = await listen(server);

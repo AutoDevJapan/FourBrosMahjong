@@ -71,7 +71,7 @@ IaCの`github(...)` sourceはrepository/branch/rootを表し、full deployment r
 
 ## contingencyとlegacy file removal
 
-初回cutover時点には独立known-good IaCが存在しない。2026-12-01より前にparityが崩れた場合だけ、保持したexact `railway.json`と保存済みpre-cutover effective configを根拠に、authorized operatorがlegacy Config File settingを再有効化するcontingencyを使える。このvalidatorはその操作を実行も承認もしない。hard cutoff後はこのcontingencyに依存できない。
+初回cutover時点には独立known-good IaCが存在しない。2026-12-01より前にparityが崩れた場合だけ、保存済みpre-cutover effective configと、runtime hardening前の変更前commitから保存したlegacy `railway.json`（旧healthcheck `/healthz`）のimmutableなcommit/file hashを根拠に、authorized operatorがlegacy Config File settingを再有効化するcontingencyを使える。現在の`railway.json`は#726のrepository target `/readyz`であり、旧`/healthz`設定の復旧根拠として使用してはならない。変更前commitとfile hashを再照合してから操作し、このvalidatorはその操作を実行も承認もしない。hard cutoff後はこのcontingencyに依存できない。
 
 parity成功後、review済みgenerated file/hashを後続#726 runtime hardeningに対する独立known-good IaC baselineとして保存する。後続変更のrollbackはそのbaselineへのauthorized forward applyであり、room stateは復元しない。
 
