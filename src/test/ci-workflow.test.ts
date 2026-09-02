@@ -45,8 +45,10 @@ type Workflow = {
     string,
     {
       name?: string;
+      if?: string;
       "timeout-minutes"?: unknown;
       container?: { image?: string; options?: string };
+      permissions?: Record<string, string>;
       steps?: Step[];
     }
   >;
@@ -149,13 +151,53 @@ describe("GITHUB_TOKEN 生成PRのrequired checks", () => {
     expect(compare?.run).not.toContain("latest_tag#v");
   });
 
+  it("manual dispatchはread-only main検査に限定し、write処理をtrusted workflowへ分離する", () => {
+    const check = readWorkflowFile("gitleaks-version-check.yml");
+    expect(check.on).toHaveProperty("workflow_dispatch");
+    expect(check.on).toHaveProperty("schedule");
+    expect(check.permissions).toEqual({ contents: "read" });
+    expect(check.jobs?.["open-bump-pr"]).toBeUndefined();
+
+    const bump = readWorkflowFile("gitleaks-version-bump.yml");
+    expect(bump.on).toEqual({
+      workflow_run: {
+        workflows: ["gitleaks-version-check"],
+        types: ["completed"],
+      },
+    });
+    expect(bump.permissions).toEqual({ contents: "read" });
+    const openJob = bump.jobs?.["open-bump-pr"];
+    expect(openJob?.if).toContain(
+      "github.event.workflow_run.conclusion == 'success'",
+    );
+    expect(openJob?.if).toContain(
+      "github.event.workflow_run.head_branch == 'main'",
+    );
+    expect(openJob?.if).toContain(
+      "github.event.workflow_run.head_repository.full_name == github.repository",
+    );
+    expect(openJob?.permissions).toEqual({
+      contents: "write",
+      "pull-requests": "write",
+      actions: "write",
+    });
+    const checkCheckout = check.jobs?.["check-version"]?.steps?.find((step) =>
+      step.uses?.startsWith("actions/checkout@"),
+    );
+    expect(checkCheckout?.with?.ref).toBe("refs/heads/main");
+    const bumpCheckout = openJob?.steps?.find((step) =>
+      step.uses?.startsWith("actions/checkout@"),
+    );
+    expect(bumpCheckout?.with?.ref).toBe("refs/heads/main");
+  });
+
   it("version bump workflowはdispatch可能なgitleaksとCIを同じheadで起動する", () => {
     expect(readWorkflowFile("ci.yml").on).toHaveProperty("workflow_dispatch");
     expect(readWorkflowFile("gitleaks.yml").on).toHaveProperty(
       "workflow_dispatch",
     );
 
-    const updater = readWorkflowFile("gitleaks-version-check.yml");
+    const updater = readWorkflowFile("gitleaks-version-bump.yml");
     const trigger = updater.jobs?.["open-bump-pr"]?.steps?.find((step) =>
       step.run?.includes("gh workflow run"),
     );
@@ -178,7 +220,7 @@ describe("GITHUB_TOKEN 生成PRのrequired checks", () => {
   });
 
   it("更新branchをshell本文へ直接展開せずenv経由で引用する", () => {
-    const updater = readWorkflowFile("gitleaks-version-check.yml");
+    const updater = readWorkflowFile("gitleaks-version-bump.yml");
     const branchSteps = updater.jobs?.["open-bump-pr"]?.steps?.filter((step) =>
       step.run?.includes("$BRANCH"),
     );
