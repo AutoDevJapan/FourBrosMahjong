@@ -373,6 +373,161 @@ test.describe("状態駆動 a11y 監査(狭幅・モーダル / #148)", () => {
         (element) => getComputedStyle(element).outlineStyle,
       ),
     ).not.toBe("none");
+
+    // ツモ後の新規牌も即時に表示し、トランジションを残さない。seed=4 は開始時に
+    // 北抜き候補がなく、先頭牌の打牌から通常のツモ更新へ進む決定的な経路である。
+    await openScreen(page, gameScreen, "ライト", "?seed=4");
+    const reducedHand = page
+      .getByRole("listbox", { name: "自家の手牌" })
+      .filter({ visible: true })
+      .first();
+    await reducedHand.getByRole("option").first().click();
+    const reducedDrawnTile = page
+      .locator('[data-hand-animation="draw"]')
+      .filter({ visible: true })
+      .first();
+    await expect(reducedDrawnTile).toBeVisible();
+    await expect
+      .poll(() =>
+        reducedDrawnTile.evaluate((element) => {
+          const style = getComputedStyle(element);
+          return {
+            opacity: style.opacity,
+            transitionDuration: style.transitionDuration,
+            transitionProperty: style.transitionProperty,
+            animationName: style.animationName,
+          };
+        }),
+      )
+      .toEqual({
+        opacity: "1",
+        transitionDuration: "0s",
+        transitionProperty: "none",
+        animationName: "none",
+      });
+
+    // イベントcueも動かさずに表示し、意味のある文言は aria-hidden の装飾ではなく
+    // live region 側で通知されることを確認する。
+    await openScreen(page, gameScreen, "ライト", "?seed=1");
+    await advanceUntil(
+      page,
+      async () =>
+        (await page.locator('[data-testid="effect-overlay"]').count()) > 0,
+      { maxSteps: 600 },
+    );
+    const reducedOverlay = page
+      .locator('[data-testid="effect-overlay"]')
+      .filter({ visible: true });
+    await expect(reducedOverlay).toBeVisible();
+    await expect(reducedOverlay).toHaveAttribute("aria-hidden", "true");
+    await expect(reducedOverlay).toHaveCSS("pointer-events", "none");
+    const reducedAnimatedCue = reducedOverlay.locator(":scope > div");
+    await expect
+      .poll(() =>
+        reducedAnimatedCue.evaluate((element) => {
+          const style = getComputedStyle(element);
+          return {
+            animationName: style.animationName,
+            animationDuration: style.animationDuration,
+            transitionDuration: style.transitionDuration,
+            transitionProperty: style.transitionProperty,
+          };
+        }),
+      )
+      .toEqual({
+        animationName: "none",
+        animationDuration: "1e-05s",
+        transitionDuration: "0s",
+        transitionProperty: "none",
+      });
+
+    const reducedCueDetail = await reducedOverlay.evaluate(
+      (element) =>
+        element
+          .querySelector<HTMLElement>(
+            ":scope > div > span:nth-of-type(2) > span:nth-of-type(2)",
+          )
+          ?.textContent?.trim() ?? "",
+    );
+    if (reducedCueDetail) {
+      await expect(
+        page
+          .locator('[aria-live="polite"], [role="alert"]')
+          .filter({ hasText: reducedCueDetail }),
+      ).toHaveCount(1);
+    }
+  });
+
+  test("通常時はツモ牌とイベントcueの動きを表示し、cueの文言をlive regionへ渡す", async ({
+    page,
+  }) => {
+    // HandTileAnimation の入場トランジションが、reduced-motion の全体停止規則で
+    // 常時無効化されていないことを確認する。
+    await openScreen(page, gameScreen, "ライト", "?seed=4");
+    const hand = page
+      .getByRole("listbox", { name: "自家の手牌" })
+      .filter({ visible: true })
+      .first();
+    await hand.getByRole("option").first().click();
+    const drawnTile = page
+      .locator('[data-hand-animation="draw"]')
+      .filter({ visible: true })
+      .first();
+    await expect(drawnTile).toBeVisible();
+    await expect
+      .poll(() =>
+        drawnTile.evaluate((element) => {
+          const style = getComputedStyle(element);
+          return {
+            transitionDuration: style.transitionDuration,
+            transitionProperty: style.transitionProperty,
+          };
+        }),
+      )
+      .toEqual({
+        transitionDuration: "0.2s",
+        transitionProperty: "opacity",
+      });
+
+    // seed=1 は決定的なイベント状態を生む。演出は装飾として隠し、同じ詳細文を
+    // polite/assertive のいずれかの live region で利用者へ伝える。
+    await openScreen(page, gameScreen, "ライト", "?seed=1");
+    await advanceUntil(
+      page,
+      async () =>
+        (await page.locator('[data-testid="effect-overlay"]').count()) > 0,
+      { maxSteps: 600 },
+    );
+    const overlay = page
+      .locator('[data-testid="effect-overlay"]')
+      .filter({ visible: true });
+    await expect(overlay).toBeVisible();
+    await expect(overlay).toHaveAttribute("aria-hidden", "true");
+    await expect(overlay).toHaveCSS("pointer-events", "none");
+    await expect(overlay.locator(":scope > div")).toHaveCSS(
+      "animation-name",
+      "pulse",
+    );
+    await expect(overlay.locator(":scope > div")).toHaveCSS(
+      "animation-duration",
+      "2s",
+    );
+
+    const cueDetail = await overlay.evaluate(
+      (element) =>
+        element
+          .querySelector<HTMLElement>(
+            ":scope > div > span:nth-of-type(2) > span:nth-of-type(2)",
+          )
+          ?.textContent?.trim() ?? "",
+    );
+    if (cueDetail) {
+      await expect(
+        page
+          .locator('[aria-live="polite"], [role="alert"]')
+          .filter({ hasText: cueDetail }),
+      ).toHaveCount(1);
+    }
   });
 });
 
