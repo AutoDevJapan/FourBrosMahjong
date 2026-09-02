@@ -7,6 +7,7 @@ import { fileURLToPath } from "node:url";
 const DEFAULT_TIMEOUT_MS = 10_000;
 const MIN_TIMEOUT_MS = 100;
 const MAX_TIMEOUT_MS = 30_000;
+const MAX_HEALTH_BODY_BYTES = 4_096;
 const PROBE_EVIDENCE_SCHEMA_VERSION = 2;
 const ENVIRONMENT_KEYS = Object.freeze({
   baseUrl: "ONLINE_PROBE_BASE_URL",
@@ -177,6 +178,137 @@ function errorMessage(error) {
   return error instanceof Error ? error.message : String(error);
 }
 
+class ProbeBodyError extends Error {
+  constructor(code) {
+    super(code);
+    this.name = "ProbeBodyError";
+    this.code = code;
+  }
+}
+
+function bodyErrorCode(error) {
+  return error instanceof ProbeBodyError ? error.code : undefined;
+}
+
+function declaredContentLength(response) {
+  const value = response.headers.get("content-length");
+  if (value === null) return undefined;
+  if (!/^\d+$/.test(value)) {
+    throw new ProbeBodyError("invalid_body_length");
+  }
+  const length = Number(value);
+  if (!Number.isSafeInteger(length)) {
+    throw new ProbeBodyError("invalid_body_length");
+  }
+  return length;
+}
+
+async function cancelResponseBody(response) {
+  if (response.body === null) return;
+  try {
+    await response.body.cancel();
+  } catch {
+    // The body is already being rejected; cancellation failures are not useful
+    // evidence and must not replace the bounded-body result.
+  }
+}
+
+async function readBoundedResponseBody(response) {
+  const expectedLength = declaredContentLength(response);
+  if (expectedLength !== undefined && expectedLength > MAX_HEALTH_BODY_BYTES) {
+    await cancelResponseBody(response);
+    throw new ProbeBodyError("body_too_large");
+  }
+
+  if (response.body === null) {
+    if (expectedLength !== undefined && expectedLength !== 0) {
+      throw new ProbeBodyError("truncated_body");
+    }
+    return new Uint8Array();
+  }
+
+  const reader = response.body.getReader();
+  const chunks = [];
+  let receivedBytes = 0;
+  try {
+    while (true) {
+      let result;
+      try {
+        result = await reader.read();
+      } catch (error) {
+        if (errorMessage(error) === "timeout") throw error;
+        if (
+          expectedLength !== undefined &&
+          receivedBytes < expectedLength
+        ) {
+          throw new ProbeBodyError("truncated_body");
+        }
+        throw error;
+      }
+      if (result.done) break;
+      if (!(result.value instanceof Uint8Array)) {
+        throw new ProbeBodyError("invalid_body");
+      }
+      receivedBytes += result.value.byteLength;
+      if (receivedBytes > MAX_HEALTH_BODY_BYTES) {
+        try {
+          await reader.cancel();
+        } catch {
+          // The fixed body_too_large result is more useful than a cancellation
+          // error, and the request is no longer needed.
+        }
+        throw new ProbeBodyError("body_too_large");
+      }
+      chunks.push(result.value);
+    }
+  } finally {
+    reader.releaseLock();
+  }
+
+  if (expectedLength !== undefined && receivedBytes !== expectedLength) {
+    throw new ProbeBodyError(
+      receivedBytes < expectedLength ? "truncated_body" : "invalid_body_length",
+    );
+  }
+
+  const bytes = new Uint8Array(receivedBytes);
+  let offset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return bytes;
+}
+
+function parseHealthBody(bytes) {
+  let text;
+  try {
+    text = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+  } catch {
+    return { error: "invalid_json" };
+  }
+
+  let value;
+  try {
+    value = JSON.parse(text);
+  } catch {
+    return { error: "invalid_json" };
+  }
+
+  if (
+    value === null ||
+    typeof value !== "object" ||
+    Array.isArray(value) ||
+    Object.keys(value).length !== 1 ||
+    !Object.prototype.hasOwnProperty.call(value, "ok") ||
+    typeof value.ok !== "boolean"
+  ) {
+    return { error: "invalid_schema" };
+  }
+
+  return { body: { ok: value.ok } };
+}
+
 async function probeHttp(path, baseUrl, timeoutMs) {
   const startedAt = new Date().toISOString();
   try {
@@ -187,14 +319,17 @@ async function probeHttp(path, baseUrl, timeoutMs) {
       headers: { accept: "application/json" },
     });
     try {
-      const body = await response.json();
-      return { startedAt, statusCode: response.status, body };
+      const parsed = parseHealthBody(await readBoundedResponseBody(response));
+      return { startedAt, statusCode: response.status, ...parsed };
     } catch (error) {
       const message = errorMessage(error);
       return {
         startedAt,
         statusCode: response.status,
-        error: message === "timeout" ? "timeout" : "invalid_json",
+        error:
+          message === "timeout"
+            ? "timeout"
+            : (bodyErrorCode(error) ?? "invalid_json"),
       };
     }
   } catch (error) {

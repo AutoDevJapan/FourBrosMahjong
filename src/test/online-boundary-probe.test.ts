@@ -250,10 +250,12 @@ describe("online boundary probe", () => {
       statusCode: 200,
       body: { ok: true },
     });
+    expect(evidence.checks.health.body).toEqual({ ok: true });
     expect(evidence.checks.readiness).toMatchObject({
       statusCode: 200,
       body: { ok: true },
     });
+    expect(evidence.checks.readiness.body).toEqual({ ok: true });
     expect(evidence.checks.allowedOrigin.statusCode).toBe(101);
     expect(evidence.checks.disallowedOrigin.statusCode).toBe(403);
     expect(evidence.checks.missingOrigin.statusCode).toBe(403);
@@ -340,6 +342,80 @@ describe("online boundary probe", () => {
       statusCode: 200,
       error: "invalid_json",
     });
+  });
+
+  it("rejects unknown health fields without emitting their values", async () => {
+    const secret = "health-secret-must-not-appear";
+    const fixture = await startBoundaryFixture({
+      healthBody: JSON.stringify({ ok: true, secret }),
+    });
+    openFixtures.push(fixture);
+
+    const evidence = await runBoundaryProbe({
+      baseUrl: fixture.baseUrl,
+      allowedOrigin: ALLOWED_ORIGIN,
+      disallowedOrigin: DISALLOWED_ORIGIN,
+      timeoutMs: 1_000,
+    });
+
+    expect(evidence.schemaVersion).toBe(2);
+    expect(evidence.ok).toBe(false);
+    expect(evidence.checks.health).toMatchObject({
+      statusCode: 200,
+      error: "invalid_schema",
+    });
+    expect(evidence.checks.health.body).toBeUndefined();
+    expect(JSON.stringify(evidence)).not.toContain(secret);
+  });
+
+  it("rejects a nonboolean ok field without emitting the response object", async () => {
+    const fixture = await startBoundaryFixture({
+      readinessBody: JSON.stringify({ ok: "true" }),
+    });
+    openFixtures.push(fixture);
+
+    const evidence = await runBoundaryProbe({
+      baseUrl: fixture.baseUrl,
+      allowedOrigin: ALLOWED_ORIGIN,
+      disallowedOrigin: DISALLOWED_ORIGIN,
+      timeoutMs: 1_000,
+    });
+
+    expect(evidence.schemaVersion).toBe(2);
+    expect(evidence.ok).toBe(false);
+    expect(evidence.checks.readiness).toMatchObject({
+      statusCode: 200,
+      error: "invalid_schema",
+    });
+    expect(evidence.checks.readiness.body).toBeUndefined();
+  });
+
+  it("rejects oversized health bodies before they can enter evidence", async () => {
+    const secret = "oversized-health-secret-must-not-appear";
+    const fixture = await startBoundaryFixture({
+      healthBody: JSON.stringify({
+        ok: true,
+        payload: "x".repeat(8_192),
+        secret,
+      }),
+    });
+    openFixtures.push(fixture);
+
+    const evidence = await runBoundaryProbe({
+      baseUrl: fixture.baseUrl,
+      allowedOrigin: ALLOWED_ORIGIN,
+      disallowedOrigin: DISALLOWED_ORIGIN,
+      timeoutMs: 1_000,
+    });
+
+    expect(evidence.schemaVersion).toBe(2);
+    expect(evidence.ok).toBe(false);
+    expect(evidence.checks.health).toMatchObject({
+      statusCode: 200,
+      error: "body_too_large",
+    });
+    expect(evidence.checks.health.body).toBeUndefined();
+    expect(JSON.stringify(evidence)).not.toContain(secret);
   });
 
   it("reports drift and returns a non-zero CLI result", async () => {
