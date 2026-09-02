@@ -657,6 +657,7 @@ describe("online deployment boundary probe (#653)", () => {
 
         expect(evidence.ok).toBe(true);
         expect(evidence.checks.health.statusCode).toBe(200);
+        expect(evidence.checks.readiness.statusCode).toBe(200);
         expect(evidence.checks.allowedOrigin.statusCode).toBe(101);
         expect(evidence.checks.disallowedOrigin.statusCode).toBe(403);
         expect(evidence.checks.missingOrigin.statusCode).toBe(403);

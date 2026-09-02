@@ -173,7 +173,7 @@ Railway Dashboard または現在利用中の Railway CLI の read-only command 
 
 ### Public baseline
 
-以下の helper は `GET /healthz` と3回の有効な HTTP Upgrade handshake だけを行う。101 を受け取った socket は直ちに破棄し、`create` / `join` / `resume` / `action` / `ping` を含む WebSocket application frame は送らない。
+以下の helper は `GET /healthz`、`GET /readyz`、3回の有効な HTTP Upgrade handshake だけを行う。101 を受け取った socket は直ちに破棄し、`create` / `join` / `resume` / `action` / `ping` を含む WebSocket application frame は送らない。
 
 ```bash
 node scripts/probe-online-boundary.mjs \
@@ -192,7 +192,7 @@ ONLINE_PROBE_TIMEOUT_MS=10000 \
 node scripts/probe-online-boundary.mjs
 ```
 
-helper は timestamp と各 status を JSON で標準出力へ返す。期待値は health `200`、allowed Origin `101`、disallowed Origin `403`、missing Origin `403` である。すべて一致すれば exit code `0`、境界 drift や network error / timeout があれば `1`、引数不正なら `2` を返す。deploy 前の既知 drift がある場合も JSON を保存し、成功と読み替えない。
+helper は timestamp と各 status を JSON で標準出力へ返す。期待値は liveness `200`、readiness `200`、allowed Origin `101`、disallowed Origin `403`、missing Origin `403` である。すべて一致すれば exit code `0`、境界 drift や network error / timeout があれば `1`、引数不正なら `2` を返す。deploy 前の既知 drift がある場合も JSON を保存し、成功と読み替えない。
 
 ## 2. メンテナンスを開始する
 

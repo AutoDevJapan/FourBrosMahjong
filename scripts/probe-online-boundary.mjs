@@ -16,6 +16,7 @@ const ENVIRONMENT_KEYS = Object.freeze({
 
 const EXPECTED = Object.freeze({
   health: 200,
+  readiness: 200,
   allowedOrigin: 101,
   disallowedOrigin: 403,
   missingOrigin: 403,
@@ -30,7 +31,7 @@ function usage() {
     "    --disallowed-origin https://not-allowed.example \\",
     "    [--timeout-ms 10000]",
     "",
-    "The probe performs GET /healthz and three HTTP Upgrade handshakes only.",
+    "The probe performs GET /healthz, GET /readyz, and three HTTP Upgrade handshakes only.",
     "It never sends a WebSocket application message.",
     "CLI options override ONLINE_PROBE_BASE_URL, ONLINE_PROBE_ALLOWED_ORIGIN,",
     "ONLINE_PROBE_DISALLOWED_ORIGIN, and ONLINE_PROBE_TIMEOUT_MS.",
@@ -175,10 +176,10 @@ function errorMessage(error) {
   return error instanceof Error ? error.message : String(error);
 }
 
-async function probeHealth(baseUrl, timeoutMs) {
+async function probeHttp(path, baseUrl, timeoutMs) {
   const startedAt = new Date().toISOString();
   try {
-    const response = await fetch(new URL("/healthz", baseUrl), {
+    const response = await fetch(new URL(path, baseUrl), {
       method: "GET",
       redirect: "manual",
       signal: AbortSignal.timeout(timeoutMs),
@@ -189,6 +190,14 @@ async function probeHealth(baseUrl, timeoutMs) {
   } catch (error) {
     return { startedAt, statusCode: null, error: errorMessage(error) };
   }
+}
+
+async function probeHealth(baseUrl, timeoutMs) {
+  return probeHttp("/healthz", baseUrl, timeoutMs);
+}
+
+async function probeReadiness(baseUrl, timeoutMs) {
+  return probeHttp("/readyz", baseUrl, timeoutMs);
 }
 
 /**
@@ -268,11 +277,13 @@ export async function runBoundaryProbe({
 }) {
   const startedAt = new Date().toISOString();
   const health = await probeHealth(baseUrl, timeoutMs);
+  const readiness = await probeReadiness(baseUrl, timeoutMs);
   const allowed = await probeUpgrade(baseUrl, allowedOrigin, timeoutMs);
   const disallowed = await probeUpgrade(baseUrl, disallowedOrigin, timeoutMs);
   const missing = await probeUpgrade(baseUrl, undefined, timeoutMs);
   const checks = {
     health: { expectedStatus: EXPECTED.health, ...health },
+    readiness: { expectedStatus: EXPECTED.readiness, ...readiness },
     allowedOrigin: {
       origin: allowedOrigin,
       expectedStatus: EXPECTED.allowedOrigin,

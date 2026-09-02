@@ -190,10 +190,10 @@ async function hostPort(name) {
   return Number(match[1]);
 }
 
-async function waitForHealth(port) {
+async function waitForEndpoint(port, path, label) {
   return waitUntil(
     async () => {
-      const response = await fetch(`http://127.0.0.1:${port}/healthz`, {
+      const response = await fetch(`http://127.0.0.1:${port}${path}`, {
         signal: AbortSignal.timeout(500),
       });
       if (!response.ok) return null;
@@ -201,8 +201,13 @@ async function waitForHealth(port) {
       return body?.ok === true ? true : null;
     },
     START_TIMEOUT_MS,
-    "container health",
+    label,
   );
+}
+
+async function waitForHealth(port) {
+  await waitForEndpoint(port, "/healthz", "container liveness");
+  await waitForEndpoint(port, "/readyz", "container readiness");
 }
 
 async function assertPortClosed(port) {

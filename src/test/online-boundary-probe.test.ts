@@ -47,14 +47,16 @@ async function closeServer(
 async function startBoundaryFixture({
   allowMissingOrigin = false,
   hangUpgrades = false,
+  readinessStatus = 200,
 } = {}): Promise<BoundaryFixture> {
   const applicationBytes: Buffer[] = [];
   const origins: Array<string | undefined> = [];
   const sockets = new Set<Socket>();
   const server = createServer((request, response) => {
-    if (request.url === "/healthz") {
-      response.writeHead(200, { "content-type": "application/json" });
-      response.end('{"ok":true}');
+    if (request.url === "/healthz" || request.url === "/readyz") {
+      const status = request.url === "/readyz" ? readinessStatus : 200;
+      response.writeHead(status, { "content-type": "application/json" });
+      response.end(JSON.stringify({ ok: status === 200 }));
       return;
     }
     response.writeHead(404);
@@ -217,7 +219,7 @@ describe("online boundary probe arguments", () => {
 });
 
 describe("online boundary probe", () => {
-  it("checks health and the exact 101/403/403 boundary without sending a frame", async () => {
+  it("checks liveness, readiness, and the exact 101/403/403 boundary without sending a frame", async () => {
     const fixture = await startBoundaryFixture();
     openFixtures.push(fixture);
 
@@ -230,6 +232,7 @@ describe("online boundary probe", () => {
 
     expect(evidence.ok).toBe(true);
     expect(evidence.checks.health.statusCode).toBe(200);
+    expect(evidence.checks.readiness.statusCode).toBe(200);
     expect(evidence.checks.allowedOrigin.statusCode).toBe(101);
     expect(evidence.checks.disallowedOrigin.statusCode).toBe(403);
     expect(evidence.checks.missingOrigin.statusCode).toBe(403);
@@ -240,6 +243,25 @@ describe("online boundary probe", () => {
     ]);
     await new Promise((resolve) => setImmediate(resolve));
     expect(Buffer.concat(fixture.applicationBytes)).toHaveLength(0);
+  });
+
+  it("reports readiness drift separately from liveness", async () => {
+    const fixture = await startBoundaryFixture({ readinessStatus: 503 });
+    openFixtures.push(fixture);
+
+    const evidence = await runBoundaryProbe({
+      baseUrl: fixture.baseUrl,
+      allowedOrigin: ALLOWED_ORIGIN,
+      disallowedOrigin: DISALLOWED_ORIGIN,
+      timeoutMs: 1_000,
+    });
+
+    expect(evidence.ok).toBe(false);
+    expect(evidence.checks.health.statusCode).toBe(200);
+    expect(evidence.checks.readiness).toMatchObject({
+      expectedStatus: 200,
+      statusCode: 503,
+    });
   });
 
   it("reports drift and returns a non-zero CLI result", async () => {
@@ -261,6 +283,7 @@ describe("online boundary probe", () => {
     expect(exitCode).toBe(1);
     const evidence = JSON.parse(String(output.mock.calls.at(-1)?.[0]));
     expect(evidence.ok).toBe(false);
+    expect(evidence.checks.readiness.statusCode).toBe(200);
     expect(evidence.checks.missingOrigin).toMatchObject({
       expectedStatus: 403,
       statusCode: 101,
