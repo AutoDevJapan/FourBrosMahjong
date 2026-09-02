@@ -345,6 +345,17 @@
   border-style: dashed;
 }
 
+/*
+ * HandTileAnimation also receives Hand's transform transition utility. Keep the
+ * draw cue's entrance transition on opacity so a later utility cannot silently
+ * replace the property the animation is intended to animate.
+ */
+@media (prefers-reduced-motion: no-preference) {
+  .game-page [data-hand-animation="draw"] {
+    transition-property: opacity;
+  }
+}
+
 .game-page .game-focus-board {
   min-width: 0;
 }

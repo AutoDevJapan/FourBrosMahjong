@@ -8,6 +8,7 @@ import {
 } from "./helpers/onlineTest";
 
 const NARROW_WIDTHS = [320, 360] as const;
+const GAME_RESPONSIVE_WIDTHS = [320, 360, 393, 414, 460, 700] as const;
 const MIN_TOUCH_SIZE = 44;
 
 async function expectTouchTarget(
@@ -38,6 +39,59 @@ async function expectAxeClean(page: Page, include: string): Promise<void> {
   const results = await new AxeBuilder({ page }).include(include).analyze();
   expect(results.violations).toEqual([]);
 }
+
+test.describe("対局の全レスポンシブ帯タッチ操作(#799)", () => {
+  test.use({
+    isMobile: true,
+    hasTouch: true,
+  });
+
+  for (const width of GAME_RESPONSIVE_WIDTHS) {
+    test(`${width}pxで自家手牌を44px以上のタッチ領域から選択・確定できる`, async ({
+      page,
+    }) => {
+      await page.setViewportSize({ width, height: 800 });
+      await page.goto("/game?seed=0");
+      await expect(
+        page.getByRole("heading", { level: 1, name: "対局画面" }),
+      ).toBeVisible();
+
+      const hand = page
+        .getByRole("listbox", { name: "自家の手牌" })
+        .filter({ visible: true })
+        .first();
+      await expect(hand).toBeVisible();
+      const firstTile = hand.getByRole("option").first();
+      await expectTouchTarget(firstTile, `${width}pxの自家手牌先頭牌`);
+
+      const self = page
+        .getByRole("region", { name: /^粗悪品/ })
+        .filter({ visible: true })
+        .first();
+      const discards = self
+        .getByRole("list", { name: "捨て牌" })
+        .getByRole("listitem");
+      const initialDiscards = await discards.count();
+
+      await firstTile.tap();
+      await expect(
+        page.getByRole("status").filter({ visible: true }),
+      ).toContainText("を選択中です");
+      const confirm = page
+        .getByRole("button", { name: /で打牌を確定$/ })
+        .filter({ visible: true })
+        .first();
+      await expectTouchTarget(confirm, `${width}pxの打牌確定`);
+      await expect(confirm).toBeFocused();
+      await confirm.click();
+
+      await expect
+        .poll(async () => discards.count(), { timeout: 5_000 })
+        .toBeGreaterThan(initialDiscards);
+      await expectNoHorizontalOverflow(page);
+    });
+  }
+});
 
 test.describe("狭幅の主要操作タップ領域(#608)", () => {
   for (const width of NARROW_WIDTHS) {
