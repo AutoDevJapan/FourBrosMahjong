@@ -145,7 +145,7 @@ authorized enable後、POST前は `phase: "pre-drain"` とし、notice enabled�
 | client full revision / deployment ID / observedAt | Vercel Production exact deploymentとcanonical read-back |
 | compatibility anchors | client-first parser/bannerのreviewed [PR #729](https://github.com/AutoDevJapan/FourBrosMahjong/pull/729) とaccepting復帰のreviewed [PR #730](https://github.com/AutoDevJapan/FourBrosMahjong/pull/730) |
 
-stdoutは固定の `repoPreflight: "pass" | "hold"`、固定reason code、`authorizesDeployment: false`、`externalMutationPerformed: false`だけを返し、入力IDや値を反射しない。`pass`でも、入力元APIの真正性、read-back後の変更、maintenance承認、現在のactive room/blocker、production操作権限は証明しない。freshnessは入力timestampだけのbounded検査であり、authorized operatorによるread-only再確認と承認記録を代替しない。現行`railway.json`のdirect Node start commandと`/healthz`をそのまま転記しても、productionのread-back証拠がなければ正しく`hold`となる。
+stdoutは固定の `repoPreflight: "pass" | "hold"`、固定reason code、`authorizesDeployment: false`、`externalMutationPerformed: false`だけを返し、入力IDや値を反射しない。`pass`でも、入力元APIの真正性、read-back後の変更、maintenance承認、現在のactive room/blocker、production操作権限は証明しない。freshnessは入力timestampだけのbounded検査であり、authorized operatorによるread-only再確認と承認記録を代替しない。repository上の`railway.json`はdirect Node start commandと`/readyz`を宣言するが、それをproductionのeffective read-backへ読み替えてはならず、証拠がなければ正しく`hold`となる。
 
 ## 1. 変更前の証拠を保存する
 
@@ -289,7 +289,7 @@ test "$OPS_RELEASE_CODE" = 200
 5. new activeをprospective rollbackとしてfresh `pre-drain` evidenceを再構成し、offline validatorが`pass`であることを確認する。失敗は成功扱いにせずrollback判断へ進む。
 6. `ALLOWED_ORIGINS` が変更前の承認値と一致することを、無関係な secret を出力せず確認する。
 7. boundary probe helper を同じ引数で一度実行する。
-8. health `200`、allowed `101`、disallowed `403`、missing `403` の全一致を確認する。
+8. liveness `200`、readiness `200`、allowed `101`、disallowed `403`、missing `403` の全一致を確認する。
 9. Railway の deploy/runtime logs に crash、継続的な5xx、予期しないrestartがないことを確認する。
 10. abuse control の接続・message・action・room試行上限は local または隔離した staging で検証する。production へ負荷・game messageを送って完了証拠を作らない。
 11. Issue コメントには full source SHA、deployment ID / image digest、allowlist確認方法、probe JSON、時刻、local/staging test結果だけを記録し、secretを含めない。
@@ -298,7 +298,7 @@ test "$OPS_RELEASE_CODE" = 200
 
 次のいずれかが発生したら、新しい deploy を成功扱いにせず rollback を判断する。
 
-- health が `200` にならない、または deployment が `SUCCESS` にならない。
+- liveness または readiness が `200` にならない、または deployment が `SUCCESS` にならない。
 - deployment source の証拠が対象 full SHA と一致しない。
 - allowed Origin が `101` でない。
 - disallowed / missing Origin のいずれかが `403` でない。
@@ -306,7 +306,7 @@ test "$OPS_RELEASE_CODE" = 200
 
 Railway Dashboard から、事前に記録した rollback 可能な known-good deployment を選ぶ。Railway の rollback は以前の image と custom variables を復元するが、plan ごとの image retention を過ぎた deployment は選べない。その場合は事前に確認した正確な以前の source/config を redeploy する。曖昧な「latest」や別 resource を代替 target にしない。
 
-rollback 後も新しい deployment IDを記録し、health と3つの Origin probeを再実行する。サービスが復旧しても、ルームは復元されない。rollback target が missing-Origin を受け入れる既知の旧版なら #653 は未完了のまま `HOLD` とし、security drift を解消済みとは報告しない。
+rollback 後も新しい deployment IDを記録し、liveness/readiness と3つの Origin probeを再実行する。サービスが復旧しても、ルームは復元されない。rollback target が missing-Origin を受け入れる既知の旧版なら #653 は未完了のまま `HOLD` とし、security drift を解消済みとは報告しない。
 
 ## 公式 Railway 仕様
 
