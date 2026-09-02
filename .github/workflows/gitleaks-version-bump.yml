@@ -18,6 +18,10 @@ on:
     types:
       - completed
 
+concurrency:
+  group: gitleaks-version-bump
+  cancel-in-progress: false
+
 permissions:
   contents: read
 
@@ -182,6 +186,7 @@ jobs:
         if: steps.existing.outputs.skip == 'false'
         env:
           BRANCH: ${{ steps.existing.outputs.branch }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
           cat > pr-body.md <<EOF
