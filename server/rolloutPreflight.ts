@@ -187,6 +187,7 @@ function isSanitizedEvidenceUrl(value: unknown): boolean {
     return (
       url.protocol === "https:" &&
       url.hostname === "github.com" &&
+      url.port === "" &&
       /^\/AutoDevJapan\/FourBrosMahjong\/(?:issues|pull)\/\d+$/.test(
         url.pathname,
       ) &&

@@ -330,6 +330,16 @@ describe("online rollout preflight", () => {
     ]);
   });
 
+  it("rejects GitHub evidence URLs with a non-canonical port", () => {
+    const nonCanonical = cloneEvidence();
+    nonCanonical.client.compatibilityEvidenceUrls[0] =
+      "https://github.com:444/AutoDevJapan/FourBrosMahjong/pull/729";
+
+    expect(validateOnlineRolloutPreflight(nonCanonical, NOW).reasons).toEqual([
+      "client-evidence-invalid",
+    ]);
+  });
+
   it("keeps the direct command aligned with Docker and its runtime verifier", () => {
     expect(readFileSync("Dockerfile", "utf8")).toContain(
       'CMD ["node", "--import", "tsx", "server/start.ts"]',
