@@ -10,7 +10,7 @@ const RAILWAY_LEGACY_KNOWN_CONFIG = Object.freeze({
   builder: "DOCKERFILE",
   dockerfilePath: "Dockerfile",
   startCommand: "node --import tsx server/start.ts",
-  healthcheckPath: "/healthz",
+  healthcheckPath: "/readyz",
   healthcheckTimeoutSeconds: 60,
   restartPolicyType: "ON_FAILURE",
   restartPolicyMaxRetries: 10,

@@ -62,7 +62,7 @@ function validEvidence(nowMs = NOW) {
     builder: "DOCKERFILE",
     dockerfilePath: "Dockerfile",
     startCommand: "node --import tsx server/start.ts",
-    healthcheckPath: "/healthz",
+    healthcheckPath: "/readyz",
     healthcheckTimeoutSeconds: 60,
     replicaCount: 1,
     restartPolicyType: "ON_FAILURE",
@@ -593,6 +593,7 @@ describe("Railway IaC parity snapshot contract (#742)", () => {
       readFileSync(resolve(process.cwd(), "railway.json"), "utf8"),
     );
     const evidence = validEvidence();
+    expect(railwayJson.deploy.healthcheckPath).toBe("/readyz");
     expect(evidence.preCutoverReadback.config).toMatchObject({
       builder: railwayJson.build.builder,
       dockerfilePath: railwayJson.build.dockerfilePath,
