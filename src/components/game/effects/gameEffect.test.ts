@@ -90,6 +90,22 @@ describe("gameEffectForTransition", () => {
     });
   });
 
+  it("局替わり後は前局のリーチ状態に関係なく新局のリーチを演出する", () => {
+    const previousView = view({ selfRiichi: true });
+    const currentView = {
+      ...view({ selfRiichi: true }),
+      tableInfo: { ...previousView.tableInfo, handNumber: 2 },
+    };
+    const previous = snapshot(previousView, "roundEnd");
+    const current = snapshot(currentView);
+
+    expect(gameEffectForTransition(previous, current, null)).toMatchObject({
+      kind: "riichi",
+      announcement: "粗悪品がリーチを宣言しました。",
+      assertive: false,
+    });
+  });
+
   it("新しいポンとポンからカンへの変化を区別する", () => {
     const pon = {
       type: "pon" as const,
