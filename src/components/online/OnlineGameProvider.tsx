@@ -42,8 +42,28 @@ interface OnlineGameProviderProps {
   readonly onSendError?: (message: string) => void;
 }
 
+const SOCKET_SEND_ERROR_MESSAGE =
+  "オンラインサーバーとの接続が切れています。再接続を待っています。";
+
 function wireTile(tile: TileData) {
   return { suit: tile.suit, rank: tile.rank, isRed: isRedDora(tile) };
+}
+
+function sendSocketMessage(
+  socket: WebSocket | null,
+  message: string,
+  onSendError?: (message: string) => void,
+): void {
+  if (socket?.readyState !== WebSocket.OPEN) {
+    onSendError?.(SOCKET_SEND_ERROR_MESSAGE);
+    return;
+  }
+
+  try {
+    socket.send(message);
+  } catch {
+    onSendError?.(SOCKET_SEND_ERROR_MESSAGE);
+  }
 }
 
 export function onlineSocketUrl(): string {
@@ -69,18 +89,14 @@ export default function OnlineGameProvider({
 
   const sendAction = useCallback(
     (action: GameAction) => {
-      if (socket?.readyState !== WebSocket.OPEN) {
-        onSendError?.(
-          "オンラインサーバーとの接続が切れています。再接続を待っています。",
-        );
-        return;
-      }
-      socket.send(
+      sendSocketMessage(
+        socket,
         JSON.stringify({
           type: "action",
           version: snapshot.version,
           action,
         }),
+        onSendError,
       );
     },
     [onSendError, snapshot.version, socket],
@@ -123,13 +139,11 @@ export default function OnlineGameProvider({
       },
       newGame: () => {
         if (!isHost || newGameDisabled) return;
-        if (socket?.readyState !== WebSocket.OPEN) {
-          onSendError?.(
-            "オンラインサーバーとの接続が切れています。再接続を待っています。",
-          );
-          return;
-        }
-        socket.send(JSON.stringify({ type: "newGame" }));
+        sendSocketMessage(
+          socket,
+          JSON.stringify({ type: "newGame" }),
+          onSendError,
+        );
       },
     }),
     [

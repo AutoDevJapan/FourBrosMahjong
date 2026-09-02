@@ -259,4 +259,38 @@ describe("OnlineGameProvider", () => {
       "オンラインサーバーとの接続が切れています。再接続を待っています。",
     );
   });
+
+  it("does not let a failed socket send escape the action event", async () => {
+    const onSendError = vi.fn();
+    const send = vi.fn(() => {
+      throw new Error("socket closed while sending");
+    });
+    const socket = { readyState: WebSocket.OPEN, send } as unknown as WebSocket;
+    render(
+      <OnlineGameProvider
+        socket={socket}
+        snapshot={snapshotFixture()}
+        onSendError={onSendError}
+      >
+        <ActionProbe />
+        <PermissionProbe />
+      </OnlineGameProvider>,
+    );
+
+    await userEvent.click(screen.getByRole("button", { name: "打牌" }));
+    await userEvent.click(
+      screen.getByRole("button", { name: "新しい半荘を開始" }),
+    );
+
+    expect(send).toHaveBeenCalledTimes(2);
+    expect(onSendError).toHaveBeenCalledTimes(2);
+    expect(onSendError).toHaveBeenNthCalledWith(
+      1,
+      "オンラインサーバーとの接続が切れています。再接続を待っています。",
+    );
+    expect(onSendError).toHaveBeenNthCalledWith(
+      2,
+      "オンラインサーバーとの接続が切れています。再接続を待っています。",
+    );
+  });
 });
