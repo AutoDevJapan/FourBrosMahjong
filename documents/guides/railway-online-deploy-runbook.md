@@ -13,7 +13,7 @@
 - リポジトリ上のサーバーにはdefault-offのmaintenance drainと利用者通知、bounded graceful shutdownを段階実装している。ただし、現在のRailway productionへ反映・有効化した証拠はない。Railway の overlap / draining time を設定するだけでもこれらを補えない。特に、プロセスメモリを共有しない旧・新 deployment の overlap は既存ルームへの `resume` を保証しない。
 - rollback はサービスの稼働コードと変数を戻す障害復旧であり、消失したルームを戻す操作ではない。既知の古い deployment へ戻すと、missing-Origin を受け入れる既存の drift も戻り得る。
 
-Docker imageの既定 `CMD` は `node --import tsx server/start.ts` とし、production相当imageのPID 1とsignal/shutdown契約をlocal containerで自動検証する。一方、現行 `railway.json` の `startCommand` は `pnpm server:start` であり、Railwayではimage commandを上書きする。authorized operatorによる後続のdirect Node command変更とread-backが完了するまで、local Docker証拠をRailway productionのsignal forwarding証拠へ読み替えてはならない。
+Docker imageの既定 `CMD` と `railway.json` の `startCommand` はともに `node --import tsx server/start.ts` とし、production相当imageのPID 1とsignal/shutdown契約をlocal containerで自動検証する。Railwayでは `startCommand` がimage commandを上書きするため、repository上の設定が一致していても、productionの実効commandとread-backが一致するまではlocal Docker証拠をRailway productionのsignal forwarding証拠へ読み替えてはならない。
 
 active room観測、maintenance drain、アプリ内告知、graceful shutdownの設計・残るrollout条件は [issue #726](https://github.com/AutoDevJapan/FourBrosMahjong/issues/726) で扱う。この runbook は、repo-local実装とproductionで有効な設定・deploy証拠を分離し、明示的なメンテナンスとして一回のdeployを判断するためのものとする。
 
@@ -28,7 +28,7 @@ active room観測、maintenance drain、アプリ内告知、graceful shutdown�
 - active room 数を観測できないという現行制約を関係者へ伝えていない、または全ルーム消失を伴うメンテナンスの承認がない。
 - メンテナンス時刻と既存の外部告知手段が決まっていない。アプリ内告知が存在するかのように扱ってはならない。
 - deploy 前の health / Origin baseline、deploy 後の検証担当、rollback 判断者のいずれかが未定である。
-- Railwayの実効start commandがdirect Nodeであること、NodeがPID 1としてSIGTERMを一度受信すること、期限内にport/process treeが消滅することをproduction相当の検証とdeploy read-backで確認できない。現行`pnpm server:start`をsignal-safeと仮定してはならない。
+- Railwayの実効start commandがdirect Nodeであること、NodeがPID 1としてSIGTERMを一度受信すること、期限内にport/process treeが消滅することをproduction相当の検証とdeploy read-backで確認できない。repositoryのDockerfileと`railway.json`がdirect Nodeを宣言していても、productionの実効設定をsignal-safeと仮定してはならない。
 - Railwayの実効replica数、`drainingSeconds`、app shutdown総予算との大小関係をread-backできない、またはreplicaが1以外、`drainingSeconds`が`ceil(ONLINE_SHUTDOWN_GRACE_MS / 1000) + 5`未満である。
 
 ## offline read-back preflight
@@ -122,7 +122,7 @@ pnpm verify:server:rollout-preflight < /path/outside/repository/sanitized-readba
 }
 ```
 
-旧 `pnpm server:start` / `/healthz` / ops optional のproductionから最初のsafe baselineを作るmigrationは、このvalidatorで`pass`させない。notice default-offのinfra-only migrationとしてauthorized operatorが別途承認し、HOLD条件・#653境界を満たして実施する必要がある。migration後にdirect Node、`/readyz`、single replica、required ops、source/identityをfresh read-backできるまで、このrunbookのdrain/notice/deployへ進まない。
+旧 `/healthz` / ops optional のproductionから最初のsafe baselineを作るmigrationは、このvalidatorで`pass`させない。repositoryのstart commandはdirect Nodeへ修正済みだが、notice default-offのinfra-only migrationとしてauthorized operatorが別途承認し、HOLD条件・#653境界を満たして実施する必要がある。migration後にdirect Node、`/readyz`、single replica、required ops、source/identityをfresh read-backできるまで、このrunbookのdrain/notice/deployへ進まない。
 
 `pre-enable` はclient-firstのexact Production revisionを確認し、server noticeがまだdefault-off、ops required、`accepting`、`/readyz=200`である段階だけを表す。`rollback`は現在rollback可能だという自己申告ではなく、承認済みの次変更後にprospective rollbackとなる操作前current activeを表す。そのためactiveと同じdeployment ID / full source / effective start / health / draining / shutdown / ops / noticesをexactに持ち、retention対象であることをread-backする。
 
@@ -145,7 +145,7 @@ authorized enable後、POST前は `phase: "pre-drain"` とし、notice enabled�
 | client full revision / deployment ID / observedAt | Vercel Production exact deploymentとcanonical read-back |
 | compatibility anchors | client-first parser/bannerのreviewed [PR #729](https://github.com/AutoDevJapan/FourBrosMahjong/pull/729) とaccepting復帰のreviewed [PR #730](https://github.com/AutoDevJapan/FourBrosMahjong/pull/730) |
 
-stdoutは固定の `repoPreflight: "pass" | "hold"`、固定reason code、`authorizesDeployment: false`、`externalMutationPerformed: false`だけを返し、入力IDや値を反射しない。`pass`でも、入力元APIの真正性、read-back後の変更、maintenance承認、現在のactive room/blocker、production操作権限は証明しない。freshnessは入力timestampだけのbounded検査であり、authorized operatorによるread-only再確認と承認記録を代替しない。現行`railway.json`の`pnpm server:start`と`/healthz`をそのまま転記すれば正しく`hold`となる。
+stdoutは固定の `repoPreflight: "pass" | "hold"`、固定reason code、`authorizesDeployment: false`、`externalMutationPerformed: false`だけを返し、入力IDや値を反射しない。`pass`でも、入力元APIの真正性、read-back後の変更、maintenance承認、現在のactive room/blocker、production操作権限は証明しない。freshnessは入力timestampだけのbounded検査であり、authorized operatorによるread-only再確認と承認記録を代替しない。現行`railway.json`のdirect Node start commandと`/healthz`をそのまま転記しても、productionのread-back証拠がなければ正しく`hold`となる。
 
 ## 1. 変更前の証拠を保存する
 

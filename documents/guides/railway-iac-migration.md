@@ -60,12 +60,12 @@ ownership cutoverでは次を変更しない。
 | setting | parity value |
 | --- | --- |
 | builder/path | `DOCKERFILE` / `Dockerfile` |
-| start | current effective value（checked-in legacyは`pnpm server:start`） |
+| start | current effective value（checked-in legacyは`node --import tsx server/start.ts`） |
 | health | current effective value（checked-in legacyは`/healthz`, 60秒） |
 | restart | current effective value（checked-in legacyは`ON_FAILURE`, 10） |
 | replica/overlap/draining/watch/source | cutover直前とcutover直後でexact同値 |
 
-direct Node、`/readyz`、全region合計single replica、overlap 0、draining 30秒、ops/drain有効化は後続#726の別承認・別read-back・別deployment gateである。IaC parity cutoverと同時に変更しない。
+実効direct Node、`/readyz`、全region合計single replica、overlap 0、draining 30秒、ops/drain有効化は後続#726の別承認・別read-back・別deployment gateである。IaC parity cutoverと同時に変更しない。
 
 IaCの`github(...)` sourceはrepository/branch/rootを表し、full deployment revisionをpinしない。generated sourceはその3項目だけをread-backへsubset一致させ、cutover前後のfull revisionはeffective read-back同士でexact一致させる。後続#726は実deploy revisionを別証拠として検証する。
 

@@ -347,6 +347,14 @@ describe("online rollout preflight", () => {
     expect(
       readFileSync("scripts/verify-online-container-signal.mjs", "utf8"),
     ).toContain(`const EXPECTED_CMDLINE = "${ONLINE_DIRECT_START_COMMAND}";`);
+    const railway = JSON.parse(readFileSync("railway.json", "utf8")) as {
+      deploy?: { startCommand?: unknown };
+    };
+    expect(railway.deploy?.startCommand).toBe(ONLINE_DIRECT_START_COMMAND);
+    const runtimePackage = JSON.parse(
+      readFileSync("container/online/package.json", "utf8"),
+    ) as { scripts?: unknown };
+    expect(runtimePackage.scripts).toBeUndefined();
   });
 
   it("keeps the runbook secret-safe and makes release an abort-only branch", () => {
