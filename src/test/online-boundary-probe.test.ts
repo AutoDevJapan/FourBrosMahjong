@@ -47,6 +47,8 @@ async function closeServer(
 async function startBoundaryFixture({
   allowMissingOrigin = false,
   hangUpgrades = false,
+  healthBody = JSON.stringify({ ok: true }),
+  readinessBody,
   readinessStatus = 200,
 } = {}): Promise<BoundaryFixture> {
   const applicationBytes: Buffer[] = [];
@@ -56,7 +58,11 @@ async function startBoundaryFixture({
     if (request.url === "/healthz" || request.url === "/readyz") {
       const status = request.url === "/readyz" ? readinessStatus : 200;
       response.writeHead(status, { "content-type": "application/json" });
-      response.end(JSON.stringify({ ok: status === 200 }));
+      response.end(
+        request.url === "/healthz"
+          ? healthBody
+          : (readinessBody ?? JSON.stringify({ ok: status === 200 })),
+      );
       return;
     }
     response.writeHead(404);
@@ -230,9 +236,16 @@ describe("online boundary probe", () => {
       timeoutMs: 1_000,
     });
 
+    expect(evidence.schemaVersion).toBe(2);
     expect(evidence.ok).toBe(true);
-    expect(evidence.checks.health.statusCode).toBe(200);
-    expect(evidence.checks.readiness.statusCode).toBe(200);
+    expect(evidence.checks.health).toMatchObject({
+      statusCode: 200,
+      body: { ok: true },
+    });
+    expect(evidence.checks.readiness).toMatchObject({
+      statusCode: 200,
+      body: { ok: true },
+    });
     expect(evidence.checks.allowedOrigin.statusCode).toBe(101);
     expect(evidence.checks.disallowedOrigin.statusCode).toBe(403);
     expect(evidence.checks.missingOrigin.statusCode).toBe(403);
@@ -261,6 +274,63 @@ describe("online boundary probe", () => {
     expect(evidence.checks.readiness).toMatchObject({
       expectedStatus: 200,
       statusCode: 503,
+      body: { ok: false },
+    });
+  });
+
+  it.each([
+    [
+      "liveness",
+      { healthBody: JSON.stringify({ ok: false }), readinessBody: undefined },
+    ],
+    [
+      "readiness",
+      { healthBody: undefined, readinessBody: JSON.stringify({ ok: false }) },
+    ],
+  ])("rejects a 200 %s response with ok:false", async (_name, options) => {
+    const fixture = await startBoundaryFixture(options);
+    openFixtures.push(fixture);
+
+    const evidence = await runBoundaryProbe({
+      baseUrl: fixture.baseUrl,
+      allowedOrigin: ALLOWED_ORIGIN,
+      disallowedOrigin: DISALLOWED_ORIGIN,
+      timeoutMs: 1_000,
+    });
+
+    expect(evidence.schemaVersion).toBe(2);
+    expect(evidence.ok).toBe(false);
+    expect(evidence.checks.health.body).toEqual(
+      options.healthBody === undefined ? { ok: true } : { ok: false },
+    );
+    expect(evidence.checks.readiness.body).toEqual(
+      options.readinessBody === undefined ? { ok: true } : { ok: false },
+    );
+  });
+
+  it("rejects malformed liveness and readiness JSON while retaining status evidence", async () => {
+    const fixture = await startBoundaryFixture({
+      healthBody: "{malformed",
+      readinessBody: "not-json",
+    });
+    openFixtures.push(fixture);
+
+    const evidence = await runBoundaryProbe({
+      baseUrl: fixture.baseUrl,
+      allowedOrigin: ALLOWED_ORIGIN,
+      disallowedOrigin: DISALLOWED_ORIGIN,
+      timeoutMs: 1_000,
+    });
+
+    expect(evidence.schemaVersion).toBe(2);
+    expect(evidence.ok).toBe(false);
+    expect(evidence.checks.health).toMatchObject({
+      statusCode: 200,
+      error: "invalid_json",
+    });
+    expect(evidence.checks.readiness).toMatchObject({
+      statusCode: 200,
+      error: "invalid_json",
     });
   });
 
@@ -282,6 +352,7 @@ describe("online boundary probe", () => {
 
     expect(exitCode).toBe(1);
     const evidence = JSON.parse(String(output.mock.calls.at(-1)?.[0]));
+    expect(evidence.schemaVersion).toBe(2);
     expect(evidence.ok).toBe(false);
     expect(evidence.checks.readiness.statusCode).toBe(200);
     expect(evidence.checks.missingOrigin).toMatchObject({

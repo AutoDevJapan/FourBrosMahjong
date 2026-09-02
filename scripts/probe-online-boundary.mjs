@@ -7,6 +7,7 @@ import { fileURLToPath } from "node:url";
 const DEFAULT_TIMEOUT_MS = 10_000;
 const MIN_TIMEOUT_MS = 100;
 const MAX_TIMEOUT_MS = 30_000;
+const PROBE_EVIDENCE_SCHEMA_VERSION = 2;
 const ENVIRONMENT_KEYS = Object.freeze({
   baseUrl: "ONLINE_PROBE_BASE_URL",
   allowedOrigin: "ONLINE_PROBE_ALLOWED_ORIGIN",
@@ -185,8 +186,17 @@ async function probeHttp(path, baseUrl, timeoutMs) {
       signal: AbortSignal.timeout(timeoutMs),
       headers: { accept: "application/json" },
     });
-    await response.body?.cancel();
-    return { startedAt, statusCode: response.status };
+    try {
+      const body = await response.json();
+      return { startedAt, statusCode: response.status, body };
+    } catch (error) {
+      const message = errorMessage(error);
+      return {
+        startedAt,
+        statusCode: response.status,
+        error: message === "timeout" ? "timeout" : "invalid_json",
+      };
+    }
   } catch (error) {
     return { startedAt, statusCode: null, error: errorMessage(error) };
   }
@@ -266,7 +276,11 @@ export async function probeUpgrade(
 }
 
 function matches(result, expectedStatus) {
-  return result.error === undefined && result.statusCode === expectedStatus;
+  return (
+    result.error === undefined &&
+    result.statusCode === expectedStatus &&
+    (expectedStatus !== 200 || result.body?.ok === true)
+  );
 }
 
 export async function runBoundaryProbe({
@@ -303,7 +317,7 @@ export async function runBoundaryProbe({
     matches(result, EXPECTED[name]),
   );
   return {
-    schemaVersion: 1,
+    schemaVersion: PROBE_EVIDENCE_SCHEMA_VERSION,
     ok,
     startedAt,
     finishedAt: new Date().toISOString(),
