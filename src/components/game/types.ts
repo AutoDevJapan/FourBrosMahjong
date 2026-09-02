@@ -6,6 +6,7 @@ export type {
   GameViewState,
   MeldView,
   ResultPlayerView,
+  RiverTileData,
   SeatedPlayerView,
   SeatPosition,
   SeatWind,

@@ -1,9 +1,13 @@
 import { render, screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
-import Discards from "./Discards";
-import type { TileData } from "./types";
+import Discards, { getRiverTileLayout } from "./Discards";
+import type { RiverTileData } from "./types";
 
-const tile = (rank: number): TileData => ({ suit: "man", rank });
+const tile = (rank: number, isRiichi = false): RiverTileData => ({
+  suit: "man",
+  rank,
+  ...(isRiichi ? { isRiichi: true } : {}),
+});
 
 describe("Discards", () => {
   it("捨て牌を捨て順どおりにすべて表示する", () => {
@@ -16,7 +20,7 @@ describe("Discards", () => {
   });
 
   it("limit 指定時は直近の枚数だけを表示する", () => {
-    const tiles = [1, 2, 3, 4, 5, 6, 7, 8].map(tile);
+    const tiles = [1, 2, 3, 4, 5, 6, 7, 8].map((rank) => tile(rank));
     render(<Discards tiles={tiles} limit={6} />);
     const list = screen.getByRole("list", { name: "捨て牌" });
     expect(list.querySelectorAll("li")).toHaveLength(6);
@@ -30,5 +34,53 @@ describe("Discards", () => {
     render(<Discards tiles={[tile(1)]} />);
     const list = screen.getByRole("list", { name: "捨て牌" });
     expect(list).toHaveClass("river-grid");
+  });
+
+  it("リーチ宣言牌を読み上げ可能な横置き対象として表示する", () => {
+    render(<Discards tiles={[tile(1), tile(2, true), tile(3), tile(4)]} />);
+    const list = screen.getByRole("list", { name: "捨て牌" });
+    const riichi = list.querySelector('[data-riichi="true"]');
+
+    expect(list).toHaveAttribute("data-has-riichi", "true");
+    expect(riichi).not.toBeNull();
+    expect(riichi).toHaveAttribute("data-river-index", "1");
+    expect(riichi).toHaveTextContent("リーチ宣言牌");
+  });
+
+  it("横詰めはリーチ宣言牌と同じ段の後続牌だけに適用する", () => {
+    const layout = getRiverTileLayout(
+      [tile(1), tile(2, true), tile(3), tile(4), tile(5), tile(6)],
+      4,
+    );
+
+    expect(layout.map((item) => item.shiftsAfterRiichi)).toEqual([
+      false,
+      false,
+      true,
+      true,
+      false,
+      false,
+    ]);
+  });
+
+  it("表示上限で宣言牌が隠れる場合は河をリーチ扱いにしない", () => {
+    render(
+      <Discards
+        tiles={[
+          tile(1, true),
+          tile(2),
+          tile(3),
+          tile(4),
+          tile(5),
+          tile(6),
+          tile(7),
+        ]}
+        limit={6}
+      />,
+    );
+
+    expect(screen.getByRole("list", { name: "捨て牌" })).not.toHaveAttribute(
+      "data-has-riichi",
+    );
   });
 });

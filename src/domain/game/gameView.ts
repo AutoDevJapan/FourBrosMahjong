@@ -23,6 +23,7 @@ import type {
   DoraData,
   GameResultView,
   GameViewState,
+  RiverTileData,
   SeatedPlayerView,
   SeatPosition,
   SeatWind,
@@ -34,6 +35,19 @@ import type {
 /** ドメイン `Tile` → 表示 `TileData`(構造互換の写像)。 */
 function toTileData(tile: Tile): TileData {
   return { suit: tile.suit, rank: tile.rank, isRed: tile.isRed };
+}
+
+/**
+ * ドメインの河牌を表示用へ写像する。宣言牌の位置は engine が記録した表示メタデータ
+ * だけを参照し、合法性や得点の再判定は行わない。
+ */
+function toRiverTileData(
+  tile: Tile,
+  index: number,
+  riichiDiscardIndex: number | null,
+): RiverTileData {
+  const data = toTileData(tile);
+  return index === riichiDiscardIndex ? { ...data, isRiichi: true } : data;
 }
 
 /** 表示 `TileData` → ドメイン `Tile`(打牌をエンジンへ戻す際に使用)。 */
@@ -144,7 +158,11 @@ function buildSlotContent(
     },
     ...(melds.length > 0 ? { melds } : {}),
     kitaCount: hand?.kita[seat] ?? 0,
-    discards: hand ? hand.discards[seat].map(toTileData) : [],
+    discards: hand
+      ? hand.discards[seat].map((tile, index) =>
+          toRiverTileData(tile, index, hand.riichiDiscardIndex[seat]),
+        )
+      : [],
     ...(isSelf && hand
       ? {
           hand: sortTiles([

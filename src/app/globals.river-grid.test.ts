@@ -56,4 +56,14 @@ describe(".river-grid のトラック定義(#258 / #387)", () => {
     expect(CSS.match(/--tile-river-w\s*:/g) ?? []).toHaveLength(1);
     expect(block(".river-grid")).toContain("--tile-river-w:");
   });
+
+  it("リーチ宣言牌の横置き幅を予約し、同段の後続牌を詰める", () => {
+    const riichi = block('.river-grid[data-has-riichi="true"]');
+    expect(riichi).toContain("--river-tile-extra");
+    expect(riichi).toContain("padding-inline-end");
+    expect(CSS).toContain(
+      '.river-grid > li[data-riichi="true"] > .game-tile--river',
+    );
+    expect(CSS).toContain('.river-grid > li[data-after-riichi="true"]');
+  });
 });
