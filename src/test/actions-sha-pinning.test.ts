@@ -17,6 +17,7 @@ import { parse } from "yaml";
 const REPOSITORY_ROOT = process.cwd();
 const EXPECTED_WORKFLOWS = [
   "ci.yml",
+  "gitleaks-version-bump.yml",
   "gitleaks-version-check.yml",
   "gitleaks.yml",
   "release.yml",
@@ -328,7 +329,7 @@ describe("GitHub Actions SHA pinning policy (#663)", () => {
       expect.arrayContaining([...EXPECTED_WORKFLOWS]),
     );
     expect(auditActionReferences(REPOSITORY_ROOT)).toEqual({
-      externalReferenceCount: 19,
+      externalReferenceCount: 20,
       localReferenceCount: 0,
       violations: [],
     });

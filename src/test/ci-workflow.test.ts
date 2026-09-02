@@ -45,8 +45,13 @@ type Workflow = {
     string,
     {
       name?: string;
+      if?: string;
+      needs?: string | string[];
+      outputs?: Record<string, string>;
       "timeout-minutes"?: unknown;
       container?: { image?: string; options?: string };
+      permissions?: Record<string, string>;
+      env?: Record<string, string>;
       steps?: Step[];
     }
   >;
@@ -136,6 +141,433 @@ function readWorkflow(): Workflow {
   return parse(source) as Workflow;
 }
 
+type WorkflowRunConclusion = "success" | "failure" | "cancelled" | "timed_out";
+
+type RepositoryPayload = {
+  full_name?: string;
+};
+
+type WorkflowRunPayload = {
+  conclusion?: WorkflowRunConclusion;
+  head_branch?: string;
+  head_repository?: RepositoryPayload;
+};
+
+type WorkflowRunEvent = {
+  workflow_run?: WorkflowRunPayload;
+  repository?: RepositoryPayload;
+};
+
+type WorkflowRunFixture = {
+  label: string;
+  event?: WorkflowRunEvent;
+  compareResult: "success" | "failure" | "skipped";
+  needsUpdate: boolean;
+  expectedTrigger: boolean;
+  expectedCompare: boolean;
+  expectedWrite: boolean;
+};
+
+const GITLEAKS_REPOSITORY = "AutoDevJapan/FourBrosMahjong";
+
+const WORKFLOW_RUN_FIXTURES: WorkflowRunFixture[] = [
+  {
+    label: "same-repository main success with an update",
+    event: {
+      workflow_run: {
+        conclusion: "success",
+        head_branch: "main",
+        head_repository: { full_name: GITLEAKS_REPOSITORY },
+      },
+      repository: { full_name: GITLEAKS_REPOSITORY },
+    },
+    compareResult: "success",
+    needsUpdate: true,
+    expectedTrigger: true,
+    expectedCompare: true,
+    expectedWrite: true,
+  },
+  {
+    label: "same-repository main success without an update",
+    event: {
+      workflow_run: {
+        conclusion: "success",
+        head_branch: "main",
+        head_repository: { full_name: GITLEAKS_REPOSITORY },
+      },
+      repository: { full_name: GITLEAKS_REPOSITORY },
+    },
+    compareResult: "success",
+    needsUpdate: false,
+    expectedTrigger: true,
+    expectedCompare: true,
+    expectedWrite: false,
+  },
+  {
+    label: "same-repository non-main success",
+    event: {
+      workflow_run: {
+        conclusion: "success",
+        head_branch: "feature/actor-controlled",
+        head_repository: { full_name: GITLEAKS_REPOSITORY },
+      },
+      repository: { full_name: GITLEAKS_REPOSITORY },
+    },
+    compareResult: "success",
+    needsUpdate: true,
+    expectedTrigger: false,
+    expectedCompare: false,
+    expectedWrite: false,
+  },
+  {
+    label: "fork main success",
+    event: {
+      workflow_run: {
+        conclusion: "success",
+        head_branch: "main",
+        head_repository: { full_name: "untrusted-fork/FourBrosMahjong" },
+      },
+      repository: { full_name: GITLEAKS_REPOSITORY },
+    },
+    compareResult: "success",
+    needsUpdate: true,
+    expectedTrigger: true,
+    expectedCompare: false,
+    expectedWrite: false,
+  },
+  {
+    label: "same-repository main failure",
+    event: {
+      workflow_run: {
+        conclusion: "failure",
+        head_branch: "main",
+        head_repository: { full_name: GITLEAKS_REPOSITORY },
+      },
+      repository: { full_name: GITLEAKS_REPOSITORY },
+    },
+    compareResult: "success",
+    needsUpdate: true,
+    expectedTrigger: true,
+    expectedCompare: false,
+    expectedWrite: false,
+  },
+  {
+    label: "same-repository main cancelled",
+    event: {
+      workflow_run: {
+        conclusion: "cancelled",
+        head_branch: "main",
+        head_repository: { full_name: GITLEAKS_REPOSITORY },
+      },
+      repository: { full_name: GITLEAKS_REPOSITORY },
+    },
+    compareResult: "success",
+    needsUpdate: true,
+    expectedTrigger: true,
+    expectedCompare: false,
+    expectedWrite: false,
+  },
+  {
+    label: "same-repository main timed out",
+    event: {
+      workflow_run: {
+        conclusion: "timed_out",
+        head_branch: "main",
+        head_repository: { full_name: GITLEAKS_REPOSITORY },
+      },
+      repository: { full_name: GITLEAKS_REPOSITORY },
+    },
+    compareResult: "success",
+    needsUpdate: true,
+    expectedTrigger: true,
+    expectedCompare: false,
+    expectedWrite: false,
+  },
+  {
+    label: "workflow_run payload is missing",
+    event: {
+      repository: { full_name: GITLEAKS_REPOSITORY },
+    },
+    compareResult: "success",
+    needsUpdate: true,
+    expectedTrigger: false,
+    expectedCompare: false,
+    expectedWrite: false,
+  },
+  {
+    label: "workflow_run payload is undefined",
+    event: {
+      workflow_run: undefined,
+      repository: { full_name: GITLEAKS_REPOSITORY },
+    },
+    compareResult: "success",
+    needsUpdate: true,
+    expectedTrigger: false,
+    expectedCompare: false,
+    expectedWrite: false,
+  },
+  {
+    label: "event payload is undefined",
+    event: undefined,
+    compareResult: "success",
+    needsUpdate: true,
+    expectedTrigger: false,
+    expectedCompare: false,
+    expectedWrite: false,
+  },
+  {
+    label: "head_repository payload is missing",
+    event: {
+      workflow_run: {
+        conclusion: "success",
+        head_branch: "main",
+      },
+      repository: { full_name: GITLEAKS_REPOSITORY },
+    },
+    compareResult: "success",
+    needsUpdate: true,
+    expectedTrigger: true,
+    expectedCompare: false,
+    expectedWrite: false,
+  },
+  {
+    label: "head_repository payload is undefined",
+    event: {
+      workflow_run: {
+        conclusion: "success",
+        head_branch: "main",
+        head_repository: undefined,
+      },
+      repository: { full_name: GITLEAKS_REPOSITORY },
+    },
+    compareResult: "success",
+    needsUpdate: true,
+    expectedTrigger: true,
+    expectedCompare: false,
+    expectedWrite: false,
+  },
+  {
+    label: "repository payload is missing",
+    event: {
+      workflow_run: {
+        conclusion: "success",
+        head_branch: "main",
+        head_repository: { full_name: GITLEAKS_REPOSITORY },
+      },
+    },
+    compareResult: "success",
+    needsUpdate: true,
+    expectedTrigger: true,
+    expectedCompare: false,
+    expectedWrite: false,
+  },
+  {
+    label: "repository payload is undefined",
+    event: {
+      workflow_run: {
+        conclusion: "success",
+        head_branch: "main",
+        head_repository: { full_name: GITLEAKS_REPOSITORY },
+      },
+      repository: undefined,
+    },
+    compareResult: "success",
+    needsUpdate: true,
+    expectedTrigger: true,
+    expectedCompare: false,
+    expectedWrite: false,
+  },
+  {
+    label: "head_branch payload is missing",
+    event: {
+      workflow_run: {
+        conclusion: "success",
+        head_repository: { full_name: GITLEAKS_REPOSITORY },
+      },
+      repository: { full_name: GITLEAKS_REPOSITORY },
+    },
+    compareResult: "success",
+    needsUpdate: true,
+    expectedTrigger: false,
+    expectedCompare: false,
+    expectedWrite: false,
+  },
+  {
+    label: "conclusion payload is undefined",
+    event: {
+      workflow_run: {
+        conclusion: undefined,
+        head_branch: "main",
+        head_repository: { full_name: GITLEAKS_REPOSITORY },
+      },
+      repository: { full_name: GITLEAKS_REPOSITORY },
+    },
+    compareResult: "success",
+    needsUpdate: true,
+    expectedTrigger: true,
+    expectedCompare: false,
+    expectedWrite: false,
+  },
+  {
+    label: "event guard passes but compare job failed",
+    event: {
+      workflow_run: {
+        conclusion: "success",
+        head_branch: "main",
+        head_repository: { full_name: GITLEAKS_REPOSITORY },
+      },
+      repository: { full_name: GITLEAKS_REPOSITORY },
+    },
+    compareResult: "failure",
+    needsUpdate: true,
+    expectedTrigger: true,
+    expectedCompare: true,
+    expectedWrite: false,
+  },
+  {
+    label: "event guard passes but compare job was skipped",
+    event: {
+      workflow_run: {
+        conclusion: "success",
+        head_branch: "main",
+        head_repository: { full_name: GITLEAKS_REPOSITORY },
+      },
+      repository: { full_name: GITLEAKS_REPOSITORY },
+    },
+    compareResult: "skipped",
+    needsUpdate: true,
+    expectedTrigger: true,
+    expectedCompare: true,
+    expectedWrite: false,
+  },
+];
+
+type GuardTerm =
+  | "github.event.workflow_run.conclusion == 'success'"
+  | "github.event.workflow_run.head_branch == 'main'"
+  | "github.event.workflow_run.head_repository.full_name == github.repository";
+
+const WORKFLOW_RUN_GUARDS: Record<
+  GuardTerm,
+  (fixture: WorkflowRunFixture) => boolean
+> = {
+  "github.event.workflow_run.conclusion == 'success'": (fixture) =>
+    fixture.event?.workflow_run?.conclusion === "success",
+  "github.event.workflow_run.head_branch == 'main'": (fixture) =>
+    fixture.event?.workflow_run?.head_branch === "main",
+  "github.event.workflow_run.head_repository.full_name == github.repository": (
+    fixture,
+  ) => {
+    const headRepository =
+      fixture.event?.workflow_run?.head_repository?.full_name;
+    const repository = fixture.event?.repository?.full_name;
+    return (
+      headRepository !== undefined &&
+      repository !== undefined &&
+      headRepository === repository
+    );
+  },
+};
+
+function normalizeWorkflowExpression(expression: string): string {
+  return expression
+    .replace(/^\s*\$\{\{\s*/, "")
+    .replace(/\s*\}\}\s*$/, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function readCompareGuard(compareIf: string | undefined): GuardTerm[] {
+  expect(compareIf, "compare jobにworkflow_runのguardが無い").toBeTypeOf(
+    "string",
+  );
+
+  const terms = normalizeWorkflowExpression(compareIf ?? "")
+    .split(/\s*&&\s*/)
+    .map((term) => term.trim())
+    .filter(Boolean);
+  const expectedTerms = Object.keys(WORKFLOW_RUN_GUARDS) as GuardTerm[];
+
+  expect(
+    terms,
+    "compare jobのguardは既知のworkflow_run条件を&&で全て指定しなければならない",
+  ).toHaveLength(expectedTerms.length);
+  expect(
+    new Set(terms),
+    "compare jobのguardに重複した条件がある",
+  ).toHaveProperty("size", expectedTerms.length);
+  for (const term of terms) {
+    expect(
+      WORKFLOW_RUN_GUARDS[term as GuardTerm],
+      `compare jobのguardに未知の条件があります: ${term}`,
+    ).toBeTypeOf("function");
+  }
+  expect([...terms].sort()).toEqual([...expectedTerms].sort());
+
+  return terms as GuardTerm[];
+}
+
+function evaluateCompareGuard(
+  compareIf: string | undefined,
+  fixture: WorkflowRunFixture,
+): boolean {
+  return readCompareGuard(compareIf).every((term) =>
+    WORKFLOW_RUN_GUARDS[term](fixture),
+  );
+}
+
+function evaluateWorkflowRunBranchFilter(
+  branches: unknown,
+  fixture: WorkflowRunFixture,
+): boolean {
+  expect(branches, "workflow_run triggerにmain branch filterが無い").toEqual([
+    "main",
+  ]);
+  return fixture.event?.workflow_run?.head_branch === "main";
+}
+
+function evaluateWritePath(
+  compareIf: string | undefined,
+  openIf: string | undefined,
+  fixture: WorkflowRunFixture,
+): boolean {
+  const comparePassed = evaluateCompareGuard(compareIf, fixture);
+  expect(openIf, "open-bump-pr jobにneeds_update gateが無い").toBeTypeOf(
+    "string",
+  );
+  const openTerms = normalizeWorkflowExpression(openIf ?? "")
+    .split(/\s*&&\s*/)
+    .map((term) => term.trim())
+    .filter(Boolean);
+  const needsUpdateTerm = "needs.compare.outputs.needs_update == 'true'";
+  const needsResultTerm = "needs.compare.result == 'success'";
+  expect(openTerms).toContain(needsUpdateTerm);
+  expect(openTerms).toContain(needsResultTerm);
+  expect(openTerms).toHaveLength(Object.keys(WORKFLOW_RUN_GUARDS).length + 2);
+  const eventTerms = openTerms.filter(
+    (term) => term !== needsUpdateTerm && term !== needsResultTerm,
+  );
+  expect(
+    eventTerms.sort(),
+    "write jobにもcompareと同じevent guardを要求する",
+  ).toEqual((Object.keys(WORKFLOW_RUN_GUARDS) as GuardTerm[]).sort());
+  for (const term of eventTerms) {
+    expect(
+      WORKFLOW_RUN_GUARDS[term as GuardTerm],
+      `write jobのguardに未知の条件があります: ${term}`,
+    ).toBeTypeOf("function");
+  }
+
+  return (
+    comparePassed &&
+    fixture.compareResult === "success" &&
+    eventTerms.every((term) =>
+      WORKFLOW_RUN_GUARDS[term as GuardTerm](fixture),
+    ) &&
+    fixture.needsUpdate
+  );
+}
+
 describe("GITHUB_TOKEN 生成PRのrequired checks", () => {
   it("release tag・asset・archive hashをoutputやbranchへ渡す前に検証する", () => {
     const updater = readWorkflowFile("gitleaks-version-check.yml");
@@ -149,13 +581,135 @@ describe("GITHUB_TOKEN 生成PRのrequired checks", () => {
     expect(compare?.run).not.toContain("latest_tag#v");
   });
 
+  it("manual dispatchはread-only main検査に限定し、write処理をtrusted workflowへ分離する", () => {
+    const check = readWorkflowFile("gitleaks-version-check.yml");
+    expect(check.on).toHaveProperty("workflow_dispatch");
+    expect(check.on).toHaveProperty("schedule");
+    expect(check.permissions).toEqual({ contents: "read" });
+    expect(check.jobs?.["open-bump-pr"]).toBeUndefined();
+
+    const bump = readWorkflowFile("gitleaks-version-bump.yml");
+    const workflowRun = bump.on?.workflow_run as
+      | {
+          workflows?: unknown;
+          types?: unknown;
+          branches?: unknown;
+        }
+      | undefined;
+    expect(workflowRun).toEqual({
+      workflows: ["gitleaks-version-check"],
+      types: ["completed"],
+      branches: ["main"],
+    });
+    expect(bump.permissions).toEqual({ contents: "read" });
+
+    const compareJob = bump.jobs?.compare;
+    const openJob = bump.jobs?.["open-bump-pr"];
+    expect(compareJob, "read-only compare jobが無い").toBeDefined();
+    expect(openJob, "write jobが無い").toBeDefined();
+    expect(compareJob?.needs).toBeUndefined();
+    expect(openJob?.needs).toBe("compare");
+    expect(compareJob?.permissions).toEqual({ contents: "read" });
+    expect(openJob?.permissions).toEqual({
+      contents: "write",
+      "pull-requests": "write",
+      actions: "write",
+    });
+
+    const compareOutputKeys = [
+      "current_version",
+      "current_archive",
+      "current_sha256",
+      "latest_version",
+      "latest_archive",
+      "latest_archive_sha256",
+      "latest_archive_url",
+      "latest_upstream_url",
+      "needs_update",
+    ];
+    for (const key of compareOutputKeys) {
+      expect(
+        compareJob?.outputs?.[key],
+        `compare jobの${key} outputが無い`,
+      ).toBe(`\${{ steps.compare.outputs.${key} }}`);
+    }
+
+    const checkCheckout = check.jobs?.["check-version"]?.steps?.find((step) =>
+      step.uses?.startsWith("actions/checkout@"),
+    );
+    expect(checkCheckout?.with?.ref).toBe("refs/heads/main");
+
+    const compareCheckout = compareJob?.steps?.find((step) =>
+      step.uses?.startsWith("actions/checkout@"),
+    );
+    expect(compareCheckout?.with?.ref).toBe("refs/heads/main");
+    const bumpCheckout = openJob?.steps?.find((step) =>
+      step.uses?.startsWith("actions/checkout@"),
+    );
+    expect(bumpCheckout?.with?.ref).toBe("refs/heads/main");
+
+    const compareCommands = (compareJob?.steps ?? [])
+      .map((step) => step.run ?? "")
+      .join("\n");
+    expect(compareCommands).not.toMatch(
+      /(?:git\s+(?:push|checkout\s+-b)|gh\s+(?:workflow\s+run|pr\s+create)|--update-pinned)/,
+    );
+  });
+
+  it.each(WORKFLOW_RUN_FIXTURES)(
+    "$label: 実際のcompare guardからwrite経路到達可否を評価する",
+    (fixture) => {
+      const bump = readWorkflowFile("gitleaks-version-bump.yml");
+      const compareJob = bump.jobs?.compare;
+      const openJob = bump.jobs?.["open-bump-pr"];
+      const workflowRun = bump.on?.workflow_run as
+        | { branches?: unknown }
+        | undefined;
+
+      expect(
+        evaluateWorkflowRunBranchFilter(workflowRun?.branches, fixture),
+        `${fixture.label}: trigger-level branch filterの評価が想定外`,
+      ).toBe(fixture.expectedTrigger);
+      expect(
+        evaluateCompareGuard(compareJob?.if, fixture),
+        `${fixture.label}: compare jobのguard評価が想定外`,
+      ).toBe(fixture.expectedCompare);
+      expect(
+        evaluateWritePath(compareJob?.if, openJob?.if, fixture),
+        `${fixture.label}: write経路の到達可否が想定外`,
+      ).toBe(fixture.expectedWrite);
+    },
+  );
+
+  it("compare guardは未知の条件・欠落・余計な条件を受け入れない", () => {
+    const trustedGuard = Object.keys(WORKFLOW_RUN_GUARDS).join(" && ");
+    const fixture = WORKFLOW_RUN_FIXTURES[0];
+
+    expect(() => readCompareGuard(undefined)).toThrow();
+    expect(() =>
+      readCompareGuard(`${trustedGuard} && github.actor == 'attacker'`),
+    ).toThrow();
+    expect(() =>
+      evaluateCompareGuard(
+        trustedGuard.replace(
+          "github.event.workflow_run.head_branch == 'main'",
+          "github.event.workflow_run.head_branch == 'release'",
+        ),
+        fixture,
+      ),
+    ).toThrow();
+    expect(() =>
+      evaluateCompareGuard(trustedGuard.replace(" && ", " || "), fixture),
+    ).toThrow();
+  });
+
   it("version bump workflowはdispatch可能なgitleaksとCIを同じheadで起動する", () => {
     expect(readWorkflowFile("ci.yml").on).toHaveProperty("workflow_dispatch");
     expect(readWorkflowFile("gitleaks.yml").on).toHaveProperty(
       "workflow_dispatch",
     );
 
-    const updater = readWorkflowFile("gitleaks-version-check.yml");
+    const updater = readWorkflowFile("gitleaks-version-bump.yml");
     const trigger = updater.jobs?.["open-bump-pr"]?.steps?.find((step) =>
       step.run?.includes("gh workflow run"),
     );
@@ -178,8 +732,9 @@ describe("GITHUB_TOKEN 生成PRのrequired checks", () => {
   });
 
   it("更新branchをshell本文へ直接展開せずenv経由で引用する", () => {
-    const updater = readWorkflowFile("gitleaks-version-check.yml");
-    const branchSteps = updater.jobs?.["open-bump-pr"]?.steps?.filter((step) =>
+    const updater = readWorkflowFile("gitleaks-version-bump.yml");
+    const openJob = updater.jobs?.["open-bump-pr"];
+    const branchSteps = openJob?.steps?.filter((step) =>
       step.run?.includes("$BRANCH"),
     );
     expect(branchSteps).toHaveLength(3);
@@ -187,9 +742,28 @@ describe("GITHUB_TOKEN 生成PRのrequired checks", () => {
       expect(step.env?.BRANCH).toBe("${{ steps.existing.outputs.branch }}");
       expect(step.run).not.toContain("${{ steps.existing.outputs.branch }}");
     }
-    expect(
-      updater.jobs?.["open-bump-pr"]?.steps?.map((step) => step.run).join("\n"),
-    ).not.toContain("${{ steps.existing.outputs.branch }}");
+    expect(openJob?.steps?.map((step) => step.run).join("\n")).not.toContain(
+      "${{ steps.existing.outputs.branch }}",
+    );
+
+    const expectedNeedsOutputs: Record<string, string> = {
+      LATEST_VERSION: "latest_version",
+      CURRENT_VERSION: "current_version",
+      CURRENT_ARCHIVE: "current_archive",
+      CURRENT_SHA256: "current_sha256",
+      LATEST_ARCHIVE: "latest_archive",
+      LATEST_ARCHIVE_SHA256: "latest_archive_sha256",
+      LATEST_ARCHIVE_URL: "latest_archive_url",
+      LATEST_UPSTREAM_URL: "latest_upstream_url",
+    };
+    for (const [name, output] of Object.entries(expectedNeedsOutputs)) {
+      expect(openJob?.env?.[name], `${name}のjob envが無い`).toBe(
+        `\${{ needs.compare.outputs.${output} }}`,
+      );
+    }
+    expect(openJob?.steps?.map((step) => step.run).join("\n")).not.toContain(
+      "steps.compare.outputs",
+    );
   });
 });
 
