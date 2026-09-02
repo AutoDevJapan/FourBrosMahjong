@@ -763,7 +763,11 @@ export function createOnlineServer(
     if (path === "/readyz") {
       const ready =
         observeDrainStatus().phase === "accepting" &&
-        !opsConfiguration.readinessBlocked;
+        !opsConfiguration.readinessBlocked &&
+        // An empty allowlist rejects every WebSocket handshake. Do not report
+        // a traffic-serving instance as ready while its online boundary is
+        // unusable due to this fail-closed configuration.
+        allowedOrigins().length > 0;
       writeJson(response, ready ? 200 : 503, { ok: ready });
       return;
     }
