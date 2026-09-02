@@ -152,6 +152,8 @@ const ALLOWED_RAW_IS_RED_READS: readonly string[] = [
   // 打牌候補の同一性一致(赤・非赤を取り違えないための比較)。
   "components/game/GameBoard.tsx: candidate.isRed === !!tile.isRed,",
   "components/game/GameBoard.tsx: candidate.isRed === !!tile.isRed,",
+  // 手牌のツモ差分キー。赤・非赤を別牌として扱うための値そのものの識別。
+  'components/game/hand-animation/handAnimation.ts: return `${tile.suit}:${tile.rank}:${tile.isRed === true ? "red" : "normal"}`;',
   // 復元ジャーナルの保存値検証(不変条件を破った値を fail-closed で弾く)。
   'domain/game/gamePersistence.ts: typeof tile.isRed === "boolean" &&',
   "domain/game/gamePersistence.ts: tile.isRed === createTile(suit, rank).isRed",
