@@ -354,6 +354,10 @@
   .game-page [data-hand-animation="draw"] {
     transition-property: opacity;
   }
+
+  .game-page [data-hand-animation="replacement"] {
+    transition-property: opacity, transform;
+  }
 }
 
 .game-page .game-focus-board {
