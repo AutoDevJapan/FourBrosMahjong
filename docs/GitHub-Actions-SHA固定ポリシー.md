@@ -41,7 +41,7 @@ Issue #663 の受け入れ条件に基づき、外部 Action と reusable workfl
 
 2026-08-27 の `origin/main` (`df55a38465b6e7e80451d7e214b2a6b26b47c772`) では、4 workflow の外部 `uses:` 18 件がすべて 40 桁 commit SHA に固定されています。local Action / reusable workflow の参照は 0 件です。
 
-Issue #747 では Release 公開jobからcheckoutとrepository管理shellを撤去するため、`actions/download-artifact` v8.0.1 (`3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c`) を1件追加しました。上記18件は2026-08-27時点の監査値として維持し、現在のstatic contractは外部参照19件を期待します。Issue #804では、任意refでdispatch可能なread-only検査と、default branchの`workflow_run`からのみ書き込むgitleaks updaterを分離しました。
+Issue #747 では Release 公開jobからcheckoutとrepository管理shellを撤去するため、`actions/download-artifact` v8.0.1 (`3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c`) を1件追加しました。上記18件は2026-08-27時点の監査値として維持し、現在のstatic contractは外部参照20件を期待します。Issue #804では、任意refでdispatch可能なread-only検査（`gitleaks-version-check.yml`）と、同一リポジトリの`main`からの成功した`workflow_run`に限って書き込む`gitleaks-version-bump.yml`を分離しました。
 
 対象 workflow:
 
