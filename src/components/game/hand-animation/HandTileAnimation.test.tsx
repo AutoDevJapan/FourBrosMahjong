@@ -39,8 +39,15 @@ describe("HandTileAnimation", () => {
       });
       expect(option).toHaveClass("opacity-100");
       expect(option).not.toHaveClass("translate-y-1");
-      expect(option).not.toHaveAttribute("data-hand-animation");
+      expect(option).toHaveAttribute("data-hand-animation", "draw");
       expect(option).toHaveAttribute("role", "option");
+
+      rerender(
+        <HandTileAnimation role="option" aria-label="五筒">
+          牌
+        </HandTileAnimation>,
+      );
+      expect(option).not.toHaveAttribute("data-hand-animation");
     } finally {
       vi.useRealTimers();
     }

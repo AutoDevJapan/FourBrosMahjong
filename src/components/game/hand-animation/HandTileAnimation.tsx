@@ -82,7 +82,13 @@ const HandTileAnimation = forwardRef<HTMLLIElement, HandTileAnimationProps>(
       <li
         {...props}
         ref={ref}
-        data-hand-animation={entering ? animationKind : undefined}
+        // Keep the cue kind discoverable for the duration of this committed
+        // hand transition. The settled classes are controlled by
+        // `completedAnimationKey`; clearing the data marker at the 0ms timer
+        // makes real-browser event assertions race the DOM update.
+        data-hand-animation={
+          animationKey !== undefined ? animationKind : undefined
+        }
         style={
           !hasAnimationDelay
             ? style

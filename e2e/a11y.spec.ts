@@ -374,22 +374,25 @@ test.describe("状態駆動 a11y 監査(狭幅・モーダル / #148)", () => {
       ),
     ).not.toBe("none");
 
-    // ツモ後の新規牌も即時に表示し、トランジションを残さない。seed=4 は開始時に
-    // 北抜き候補がなく、先頭牌の打牌から通常のツモ更新へ進む決定的な経路である。
+    // ツモ/差替後の新規牌も即時に表示し、トランジションを残さない。表示スナップショット
+    // だけでは通常の「打牌+次のツモ」と北抜き/カンの差替を区別できないため、どちらの
+    // 一枚入場cueも対象にする。seed=4 は先頭牌の打牌から更新へ進む決定的な経路である。
     await openScreen(page, gameScreen, "ライト", "?seed=4");
     const reducedHand = page
       .getByRole("listbox", { name: "自家の手牌" })
       .filter({ visible: true })
       .first();
     await reducedHand.getByRole("option").first().click();
-    const reducedDrawnTile = page
-      .locator('[data-hand-animation="draw"]')
+    const reducedHandEntrance = page
+      .locator(
+        '[data-hand-animation="draw"], [data-hand-animation="replacement"]',
+      )
       .filter({ visible: true })
       .first();
-    await expect(reducedDrawnTile).toBeVisible();
+    await expect(reducedHandEntrance).toBeVisible();
     await expect
       .poll(() =>
-        reducedDrawnTile.evaluate((element) => {
+        reducedHandEntrance.evaluate((element) => {
           const style = getComputedStyle(element);
           return {
             opacity: style.opacity,
@@ -469,24 +472,26 @@ test.describe("状態駆動 a11y 監査(狭幅・モーダル / #148)", () => {
       .filter({ visible: true })
       .first();
     await hand.getByRole("option").first().click();
-    const drawnTile = page
-      .locator('[data-hand-animation="draw"]')
+    const handEntrance = page
+      .locator(
+        '[data-hand-animation="draw"], [data-hand-animation="replacement"]',
+      )
       .filter({ visible: true })
       .first();
-    await expect(drawnTile).toBeVisible();
+    await expect(handEntrance).toBeVisible();
     await expect
       .poll(() =>
-        drawnTile.evaluate((element) => {
+        handEntrance.evaluate((element) => {
           const style = getComputedStyle(element);
           return {
             transitionDuration: style.transitionDuration,
-            transitionProperty: style.transitionProperty,
+            animatesOpacity: style.transitionProperty.includes("opacity"),
           };
         }),
       )
       .toEqual({
         transitionDuration: "0.2s",
-        transitionProperty: "opacity",
+        animatesOpacity: true,
       });
 
     // seed=1 は決定的なイベント状態を生む。演出は装飾として隠し、同じ詳細文を
