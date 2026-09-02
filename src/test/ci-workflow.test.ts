@@ -51,6 +51,7 @@ type Workflow = {
       "timeout-minutes"?: unknown;
       container?: { image?: string; options?: string };
       permissions?: Record<string, string>;
+      env?: Record<string, string>;
       steps?: Step[];
     }
   >;
@@ -311,8 +312,13 @@ function evaluateWritePath(
     .map((term) => term.trim())
     .filter(Boolean);
   const needsUpdateTerm = "needs.compare.outputs.needs_update == 'true'";
+  const needsResultTerm = "needs.compare.result == 'success'";
   expect(openTerms).toContain(needsUpdateTerm);
-  const eventTerms = openTerms.filter((term) => term !== needsUpdateTerm);
+  expect(openTerms).toContain(needsResultTerm);
+  expect(openTerms).toHaveLength(Object.keys(WORKFLOW_RUN_GUARDS).length + 2);
+  const eventTerms = openTerms.filter(
+    (term) => term !== needsUpdateTerm && term !== needsResultTerm,
+  );
   expect(
     eventTerms.sort(),
     "write jobにもcompareと同じevent guardを要求する",
@@ -515,15 +521,9 @@ describe("GITHUB_TOKEN 生成PRのrequired checks", () => {
       LATEST_UPSTREAM_URL: "latest_upstream_url",
     };
     for (const [name, output] of Object.entries(expectedNeedsOutputs)) {
-      const steps = openJob?.steps?.filter((step) =>
-        Object.hasOwn(step.env ?? {}, name),
+      expect(openJob?.env?.[name], `${name}のjob envが無い`).toBe(
+        `\${{ needs.compare.outputs.${output} }}`,
       );
-      expect(steps, `${name}を参照するstepが無い`).not.toHaveLength(0);
-      for (const step of steps ?? []) {
-        expect(step.env?.[name]).toBe(
-          `\${{ needs.compare.outputs.${output} }}`,
-        );
-      }
     }
     expect(openJob?.steps?.map((step) => step.run).join("\n")).not.toContain(
       "steps.compare.outputs",
