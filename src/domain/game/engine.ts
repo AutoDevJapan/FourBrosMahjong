@@ -174,6 +174,12 @@ interface HandState {
    */
   discards: Record<SeatKey, Tile[]>;
   /**
+   * 河の表示上、リーチ宣言牌が現在何番目にあるか。表示メタデータのみであり、
+   * リーチ合法性・得点・フリテン判定には使わない。鳴きで表示河から牌が消えるときは
+   * 同じ表示位置へ追従させるか、宣言牌自身なら null にする。
+   */
+  riichiDiscardIndex: Record<SeatKey, number | null>;
+  /**
    * 席ごとの全打牌履歴(#395)。鳴かれても取り除かない**判定用**の SSOT。
    *
    * 捨て牌フリテンは恒久(`hand/furiten.ts`)であり、他家の鳴きという自分の意思と
@@ -555,6 +561,11 @@ function removeCalledTileFromRiver(
   for (let i = river.length - 1; i >= 0; i--) {
     if (sameKind(river[i], tile)) {
       hand.discards[discarder] = [...river.slice(0, i), ...river.slice(i + 1)];
+      const riichiIndex = hand.riichiDiscardIndex[discarder];
+      if (riichiIndex === i) hand.riichiDiscardIndex[discarder] = null;
+      else if (riichiIndex !== null && riichiIndex > i) {
+        hand.riichiDiscardIndex[discarder] = riichiIndex - 1;
+      }
       return;
     }
   }
@@ -789,6 +800,7 @@ function beginRound(state: EngineState): EngineState {
     hands: { east: dealt[0], south: dealt[1], west: dealt[2] },
     melds: { east: [], south: [], west: [] },
     discards: { east: [], south: [], west: [] },
+    riichiDiscardIndex: { east: null, south: null, west: null },
     discardHistory: { east: [], south: [], west: [] },
     kita: { east: 0, south: 0, west: 0 },
     turn: "east",
@@ -1046,6 +1058,7 @@ function applyAiRiichi(state: EngineState, seat: SeatKey): EngineState {
     // 「まだ一度も打牌していない」= 履歴が空(表示用の河は鳴きで減りうる / #395)。
     hand.discardHistory[seat].length === 0 && !hand.callsMade;
   hand.pendingRiichiSeat = seat;
+  hand.riichiDiscardIndex[seat] = hand.discards[seat].length;
   const callsMadeBeforeDeclaration = hand.callsMade;
   const discarded = applyDiscard(state, seat, tile);
   if (
@@ -1991,6 +2004,7 @@ function settleWin(state: EngineState, win: WinInput): EngineState {
     hand.riichi[declarer] = false;
     hand.doubleRiichi[declarer] = false;
     hand.ippatsu[declarer] = false;
+    hand.riichiDiscardIndex[declarer] = null;
     hand.pendingRiichiSeat = null;
   }
   const winnerId = seatOccupant(hand.seating, winnerSeat);
@@ -2766,6 +2780,7 @@ function declareRiichiImpl(
     // 「まだ一度も打牌していない」= 履歴が空(表示用の河は鳴きで減りうる / #395)。
     hand.discardHistory[seat].length === 0 && !hand.callsMade;
   hand.pendingRiichiSeat = seat;
+  hand.riichiDiscardIndex[seat] = hand.discards[seat].length;
   const callsMadeBeforeDeclaration = hand.callsMade;
 
   const s1: EngineState = {

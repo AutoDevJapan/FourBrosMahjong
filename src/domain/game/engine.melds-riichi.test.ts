@@ -173,6 +173,7 @@ describe("engine: 鳴き・リーチ・裏ドラ・一発(#97)", () => {
     expect(after.riichiSticks).toBe(beforeSticks + 1);
     expect(after.points.p0).toBe(beforePoints - 1000);
     expect(after.hand?.riichi[seat]).toBe(true);
+    expect(after.hand?.riichiDiscardIndex[seat]).toBe(0);
   });
 
   it("ポン宣言で明刻が晒され、門前手牌が2枚減り手番が自家に移る", () => {

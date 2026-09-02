@@ -33,6 +33,16 @@ export interface TileData {
 }
 
 /**
+ * 河に表示する牌の追加メタデータ。
+ *
+ * `isRiichi` は宣言牌の見た目だけを表す。リーチの合法性・供託・得点やフリテンの
+ * 判定は `TileData`/この型には含めず、engine の判定結果を UI が表示するだけにする。
+ */
+export interface RiverTileData extends TileData {
+  readonly isRiichi?: boolean;
+}
+
+/**
  * 卓上の物理スロット(4方向)。四人回しでは常に3人着席+1人抜け番。
  * レイアウトはスペック6 6.4.3: 自家=下段 / 上家=左 / 対面=上 / 下家=右。
  */
@@ -80,7 +90,7 @@ export interface SeatedPlayerView {
   /** 公開された抜き北(ガリ)の枚数。全員が常時確認できる公開情報。 */
   readonly kitaCount: number;
   /** 河(捨て牌)。着席3人分表示する。 */
-  readonly discards: readonly TileData[];
+  readonly discards: readonly RiverTileData[];
 }
 
 /** 副露1組の表示データ(スペック4 `Meld`)。 */

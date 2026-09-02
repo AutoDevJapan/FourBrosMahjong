@@ -740,6 +740,8 @@ body {
 .river-grid {
   /* 牌間隔(従来の gap-0.5 相当)。列数の上限計算にも使うため名前を付ける。 */
   --river-gap: 0.125rem;
+  /* 横置きしたリーチ宣言牌が占める、通常牌幅との差分。 */
+  --river-tile-extra: calc(var(--u) * (2.2 - var(--tile-river-ratio)));
   /*
    * --u は「この要素で有効な値」(卓内なら .board-cross の clamp())で解決される。
    * :root 側で var(--u) ごと確定させてはならない理由は --tile-river-ratio の注記を参照。
@@ -757,6 +759,42 @@ body {
    * `w + gap`(> gap)が必要なので、この余裕で 7 列になることはない。
    */
   max-width: calc(6 * (var(--tile-river-w) + var(--river-gap)));
+}
+
+/*
+ * リーチ宣言牌は OSS の河配置にならい横置きにする。transform は見た目だけを回転し、
+ * li の固定トラック幅と後続牌の位置は変えないため、牌素材/牌の意味は変更しない。
+ * 右端の余白は回転で増える幅を予約し、6列上限と狭幅の横スクロールなしを維持する。
+ */
+.river-grid[data-has-riichi="true"] {
+  max-width: calc(
+    6 *
+    (var(--tile-river-w) + var(--river-gap)) +
+    var(--river-tile-extra)
+  );
+  padding-inline-end: var(--river-tile-extra);
+}
+
+.river-grid > li {
+  position: relative;
+  display: inline-flex;
+  width: var(--tile-river-w);
+  height: calc(var(--u) * 2.2);
+  align-items: center;
+  justify-content: center;
+}
+
+.river-grid > li[data-riichi="true"] {
+  z-index: 1;
+  transform: translateX(calc(var(--river-tile-extra) / 2));
+}
+
+.river-grid > li[data-riichi="true"] > .game-tile--river {
+  transform: rotate(90deg);
+}
+
+.river-grid > li[data-after-riichi="true"] {
+  transform: translateX(var(--river-tile-extra));
 }
 
 .game-tile--dora {
