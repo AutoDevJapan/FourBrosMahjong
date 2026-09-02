@@ -46,6 +46,8 @@ type Workflow = {
     {
       name?: string;
       if?: string;
+      needs?: string | string[];
+      outputs?: Record<string, string>;
       "timeout-minutes"?: unknown;
       container?: { image?: string; options?: string };
       permissions?: Record<string, string>;
@@ -138,6 +140,199 @@ function readWorkflow(): Workflow {
   return parse(source) as Workflow;
 }
 
+type WorkflowRunFixture = {
+  label: string;
+  event: {
+    workflow_run: {
+      conclusion: "success" | "failure";
+      head_branch: string;
+      head_repository: { full_name: string };
+    };
+    repository: { full_name: string };
+  };
+  needsUpdate: boolean;
+  expectedCompare: boolean;
+  expectedWrite: boolean;
+};
+
+const GITLEAKS_REPOSITORY = "AutoDevJapan/FourBrosMahjong";
+
+const WORKFLOW_RUN_FIXTURES: WorkflowRunFixture[] = [
+  {
+    label: "same-repository main success with an update",
+    event: {
+      workflow_run: {
+        conclusion: "success",
+        head_branch: "main",
+        head_repository: { full_name: GITLEAKS_REPOSITORY },
+      },
+      repository: { full_name: GITLEAKS_REPOSITORY },
+    },
+    needsUpdate: true,
+    expectedCompare: true,
+    expectedWrite: true,
+  },
+  {
+    label: "same-repository main success without an update",
+    event: {
+      workflow_run: {
+        conclusion: "success",
+        head_branch: "main",
+        head_repository: { full_name: GITLEAKS_REPOSITORY },
+      },
+      repository: { full_name: GITLEAKS_REPOSITORY },
+    },
+    needsUpdate: false,
+    expectedCompare: true,
+    expectedWrite: false,
+  },
+  {
+    label: "same-repository non-main success",
+    event: {
+      workflow_run: {
+        conclusion: "success",
+        head_branch: "feature/actor-controlled",
+        head_repository: { full_name: GITLEAKS_REPOSITORY },
+      },
+      repository: { full_name: GITLEAKS_REPOSITORY },
+    },
+    needsUpdate: true,
+    expectedCompare: false,
+    expectedWrite: false,
+  },
+  {
+    label: "fork main success",
+    event: {
+      workflow_run: {
+        conclusion: "success",
+        head_branch: "main",
+        head_repository: { full_name: "untrusted-fork/FourBrosMahjong" },
+      },
+      repository: { full_name: GITLEAKS_REPOSITORY },
+    },
+    needsUpdate: true,
+    expectedCompare: false,
+    expectedWrite: false,
+  },
+  {
+    label: "same-repository main failure",
+    event: {
+      workflow_run: {
+        conclusion: "failure",
+        head_branch: "main",
+        head_repository: { full_name: GITLEAKS_REPOSITORY },
+      },
+      repository: { full_name: GITLEAKS_REPOSITORY },
+    },
+    needsUpdate: true,
+    expectedCompare: false,
+    expectedWrite: false,
+  },
+];
+
+type GuardTerm =
+  | "github.event.workflow_run.conclusion == 'success'"
+  | "github.event.workflow_run.head_branch == 'main'"
+  | "github.event.workflow_run.head_repository.full_name == github.repository";
+
+const WORKFLOW_RUN_GUARDS: Record<
+  GuardTerm,
+  (fixture: WorkflowRunFixture) => boolean
+> = {
+  "github.event.workflow_run.conclusion == 'success'": (fixture) =>
+    fixture.event.workflow_run.conclusion === "success",
+  "github.event.workflow_run.head_branch == 'main'": (fixture) =>
+    fixture.event.workflow_run.head_branch === "main",
+  "github.event.workflow_run.head_repository.full_name == github.repository": (
+    fixture,
+  ) =>
+    fixture.event.workflow_run.head_repository.full_name ===
+    fixture.event.repository.full_name,
+};
+
+function normalizeWorkflowExpression(expression: string): string {
+  return expression
+    .replace(/^\s*\$\{\{\s*/, "")
+    .replace(/\s*\}\}\s*$/, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function readCompareGuard(compareIf: string | undefined): GuardTerm[] {
+  expect(compareIf, "compare jobにworkflow_runのguardが無い").toBeTypeOf(
+    "string",
+  );
+
+  const terms = normalizeWorkflowExpression(compareIf ?? "")
+    .split(/\s*&&\s*/)
+    .map((term) => term.trim())
+    .filter(Boolean);
+  const expectedTerms = Object.keys(WORKFLOW_RUN_GUARDS) as GuardTerm[];
+
+  expect(
+    terms,
+    "compare jobのguardは既知のworkflow_run条件を&&で全て指定しなければならない",
+  ).toHaveLength(expectedTerms.length);
+  expect(
+    new Set(terms),
+    "compare jobのguardに重複した条件がある",
+  ).toHaveProperty("size", expectedTerms.length);
+  for (const term of terms) {
+    expect(
+      WORKFLOW_RUN_GUARDS[term as GuardTerm],
+      `compare jobのguardに未知の条件があります: ${term}`,
+    ).toBeTypeOf("function");
+  }
+  expect([...terms].sort()).toEqual([...expectedTerms].sort());
+
+  return terms as GuardTerm[];
+}
+
+function evaluateCompareGuard(
+  compareIf: string | undefined,
+  fixture: WorkflowRunFixture,
+): boolean {
+  return readCompareGuard(compareIf).every((term) =>
+    WORKFLOW_RUN_GUARDS[term](fixture),
+  );
+}
+
+function evaluateWritePath(
+  compareIf: string | undefined,
+  openIf: string | undefined,
+  fixture: WorkflowRunFixture,
+): boolean {
+  const comparePassed = evaluateCompareGuard(compareIf, fixture);
+  expect(openIf, "open-bump-pr jobにneeds_update gateが無い").toBeTypeOf(
+    "string",
+  );
+  const openTerms = normalizeWorkflowExpression(openIf ?? "")
+    .split(/\s*&&\s*/)
+    .map((term) => term.trim())
+    .filter(Boolean);
+  const needsUpdateTerm = "needs.compare.outputs.needs_update == 'true'";
+  expect(openTerms).toContain(needsUpdateTerm);
+  const eventTerms = openTerms.filter((term) => term !== needsUpdateTerm);
+  expect(
+    eventTerms.sort(),
+    "write jobにもcompareと同じevent guardを要求する",
+  ).toEqual((Object.keys(WORKFLOW_RUN_GUARDS) as GuardTerm[]).sort());
+  for (const term of eventTerms) {
+    expect(
+      WORKFLOW_RUN_GUARDS[term as GuardTerm],
+      `write jobのguardに未知の条件があります: ${term}`,
+    ).toBeTypeOf("function");
+  }
+
+  return (
+    comparePassed &&
+    eventTerms.every((term) =>
+      WORKFLOW_RUN_GUARDS[term as GuardTerm](fixture),
+    ) &&
+    fixture.needsUpdate
+  );
+}
+
 describe("GITHUB_TOKEN 生成PRのrequired checks", () => {
   it("release tag・asset・archive hashをoutputやbranchへ渡す前に検証する", () => {
     const updater = readWorkflowFile("gitleaks-version-check.yml");
@@ -159,36 +354,111 @@ describe("GITHUB_TOKEN 生成PRのrequired checks", () => {
     expect(check.jobs?.["open-bump-pr"]).toBeUndefined();
 
     const bump = readWorkflowFile("gitleaks-version-bump.yml");
-    expect(bump.on).toEqual({
-      workflow_run: {
-        workflows: ["gitleaks-version-check"],
-        types: ["completed"],
-      },
+    const workflowRun = bump.on?.workflow_run as
+      | {
+          workflows?: unknown;
+          types?: unknown;
+          branches?: unknown;
+        }
+      | undefined;
+    expect(workflowRun).toEqual({
+      workflows: ["gitleaks-version-check"],
+      types: ["completed"],
+      branches: ["main"],
     });
     expect(bump.permissions).toEqual({ contents: "read" });
+
+    const compareJob = bump.jobs?.compare;
     const openJob = bump.jobs?.["open-bump-pr"];
-    expect(openJob?.if).toContain(
-      "github.event.workflow_run.conclusion == 'success'",
-    );
-    expect(openJob?.if).toContain(
-      "github.event.workflow_run.head_branch == 'main'",
-    );
-    expect(openJob?.if).toContain(
-      "github.event.workflow_run.head_repository.full_name == github.repository",
-    );
+    expect(compareJob, "read-only compare jobが無い").toBeDefined();
+    expect(openJob, "write jobが無い").toBeDefined();
+    expect(compareJob?.needs).toBeUndefined();
+    expect(openJob?.needs).toBe("compare");
+    expect(compareJob?.permissions).toEqual({ contents: "read" });
     expect(openJob?.permissions).toEqual({
       contents: "write",
       "pull-requests": "write",
       actions: "write",
     });
+
+    const compareOutputKeys = [
+      "current_version",
+      "current_archive",
+      "current_sha256",
+      "latest_version",
+      "latest_archive",
+      "latest_archive_sha256",
+      "latest_archive_url",
+      "latest_upstream_url",
+      "needs_update",
+    ];
+    for (const key of compareOutputKeys) {
+      expect(
+        compareJob?.outputs?.[key],
+        `compare jobの${key} outputが無い`,
+      ).toBe(`\${{ steps.compare.outputs.${key} }}`);
+    }
+
     const checkCheckout = check.jobs?.["check-version"]?.steps?.find((step) =>
       step.uses?.startsWith("actions/checkout@"),
     );
     expect(checkCheckout?.with?.ref).toBe("refs/heads/main");
+
+    const compareCheckout = compareJob?.steps?.find((step) =>
+      step.uses?.startsWith("actions/checkout@"),
+    );
+    expect(compareCheckout?.with?.ref).toBe("refs/heads/main");
     const bumpCheckout = openJob?.steps?.find((step) =>
       step.uses?.startsWith("actions/checkout@"),
     );
     expect(bumpCheckout?.with?.ref).toBe("refs/heads/main");
+
+    const compareCommands = (compareJob?.steps ?? [])
+      .map((step) => step.run ?? "")
+      .join("\n");
+    expect(compareCommands).not.toMatch(
+      /(?:git\s+(?:push|checkout\s+-b)|gh\s+(?:workflow\s+run|pr\s+create)|--update-pinned)/,
+    );
+  });
+
+  it.each(WORKFLOW_RUN_FIXTURES)(
+    "$label: 実際のcompare guardからwrite経路到達可否を評価する",
+    (fixture) => {
+      const bump = readWorkflowFile("gitleaks-version-bump.yml");
+      const compareJob = bump.jobs?.compare;
+      const openJob = bump.jobs?.["open-bump-pr"];
+
+      expect(
+        evaluateCompareGuard(compareJob?.if, fixture),
+        `${fixture.label}: compare jobのguard評価が想定外`,
+      ).toBe(fixture.expectedCompare);
+      expect(
+        evaluateWritePath(compareJob?.if, openJob?.if, fixture),
+        `${fixture.label}: write経路の到達可否が想定外`,
+      ).toBe(fixture.expectedWrite);
+    },
+  );
+
+  it("compare guardは未知の条件・欠落・余計な条件を受け入れない", () => {
+    const trustedGuard = Object.keys(WORKFLOW_RUN_GUARDS).join(" && ");
+    const fixture = WORKFLOW_RUN_FIXTURES[0];
+
+    expect(() => readCompareGuard(undefined)).toThrow();
+    expect(() =>
+      readCompareGuard(`${trustedGuard} && github.actor == 'attacker'`),
+    ).toThrow();
+    expect(() =>
+      evaluateCompareGuard(
+        trustedGuard.replace(
+          "github.event.workflow_run.head_branch == 'main'",
+          "github.event.workflow_run.head_branch == 'release'",
+        ),
+        fixture,
+      ),
+    ).toThrow();
+    expect(() =>
+      evaluateCompareGuard(trustedGuard.replace(" && ", " || "), fixture),
+    ).toThrow();
   });
 
   it("version bump workflowはdispatch可能なgitleaksとCIを同じheadで起動する", () => {
@@ -221,7 +491,8 @@ describe("GITHUB_TOKEN 生成PRのrequired checks", () => {
 
   it("更新branchをshell本文へ直接展開せずenv経由で引用する", () => {
     const updater = readWorkflowFile("gitleaks-version-bump.yml");
-    const branchSteps = updater.jobs?.["open-bump-pr"]?.steps?.filter((step) =>
+    const openJob = updater.jobs?.["open-bump-pr"];
+    const branchSteps = openJob?.steps?.filter((step) =>
       step.run?.includes("$BRANCH"),
     );
     expect(branchSteps).toHaveLength(3);
@@ -229,9 +500,34 @@ describe("GITHUB_TOKEN 生成PRのrequired checks", () => {
       expect(step.env?.BRANCH).toBe("${{ steps.existing.outputs.branch }}");
       expect(step.run).not.toContain("${{ steps.existing.outputs.branch }}");
     }
-    expect(
-      updater.jobs?.["open-bump-pr"]?.steps?.map((step) => step.run).join("\n"),
-    ).not.toContain("${{ steps.existing.outputs.branch }}");
+    expect(openJob?.steps?.map((step) => step.run).join("\n")).not.toContain(
+      "${{ steps.existing.outputs.branch }}",
+    );
+
+    const expectedNeedsOutputs: Record<string, string> = {
+      LATEST_VERSION: "latest_version",
+      CURRENT_VERSION: "current_version",
+      CURRENT_ARCHIVE: "current_archive",
+      CURRENT_SHA256: "current_sha256",
+      LATEST_ARCHIVE: "latest_archive",
+      LATEST_ARCHIVE_SHA256: "latest_archive_sha256",
+      LATEST_ARCHIVE_URL: "latest_archive_url",
+      LATEST_UPSTREAM_URL: "latest_upstream_url",
+    };
+    for (const [name, output] of Object.entries(expectedNeedsOutputs)) {
+      const steps = openJob?.steps?.filter((step) =>
+        Object.hasOwn(step.env ?? {}, name),
+      );
+      expect(steps, `${name}を参照するstepが無い`).not.toHaveLength(0);
+      for (const step of steps ?? []) {
+        expect(step.env?.[name]).toBe(
+          `\${{ needs.compare.outputs.${output} }}`,
+        );
+      }
+    }
+    expect(openJob?.steps?.map((step) => step.run).join("\n")).not.toContain(
+      "steps.compare.outputs",
+    );
   });
 });
 
