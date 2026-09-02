@@ -254,12 +254,17 @@ function playerNameChanged(
 function addHumanPlayer(room: Room, player: RoomPlayer): void {
   const playerId = player.id;
   room.humanPlayerIds.add(playerId);
-  if (player.explicitKita) {
-    room.state = setExplicitKitaPlayerIds(room.state, [
-      ...(room.state.explicitKitaPlayerIds ?? []),
-      playerId,
-    ]);
-  }
+  // A reused seat may still be present in the engine capability roster from
+  // its previous occupant. Assign the replacement's capability explicitly so
+  // a non-capable player cannot inherit the old occupant's North controls.
+  const currentExplicitKitaPlayerIds =
+    room.state.explicitKitaPlayerIds ??
+    room.state.humanPlayerIds ??
+    (["p0"] as const);
+  room.state = setExplicitKitaPlayerIds(room.state, [
+    ...currentExplicitKitaPlayerIds.filter((id) => id !== playerId),
+    ...(player.explicitKita ? [playerId] : []),
+  ]);
   room.state = setHumanPlayerIds(room.state, [
     ...(room.state.humanPlayerIds ?? ["p0"]),
     playerId,

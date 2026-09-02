@@ -807,6 +807,47 @@ describe("online room manager", () => {
     expect(manager.resume(host.room.code, guest.player.token)).toBeNull();
   });
 
+  it("退出席を明示北抜きなしのguestが再利用してもcapabilityを引き継がない", () => {
+    const manager = new RoomManager();
+    const host = manager.create("ホスト");
+    const oldGuest = manager.join(host.room.code, "旧ゲスト", true);
+    if (!oldGuest) throw new Error("old guest should join");
+
+    // seed=4はp0の初回打牌後、p1が北をツモって明示北抜きを選べる局面。
+    host.room.state = createGame({
+      seed: 4,
+      humanPlayerIds: ["p0", "p1"],
+      explicitKitaPlayerIds: ["p1"],
+    });
+    manager.leave(host.room, oldGuest.player);
+
+    const replacement = manager.join(host.room.code, "新ゲスト", false);
+    if (!replacement) throw new Error("replacement guest should join");
+    expect(replacement.player.id).toBe("p1");
+    expect(
+      manager.snapshot(replacement.room, replacement.player).explicitKita,
+    ).toBe(false);
+    expect(host.room.state.explicitKitaPlayerIds).not.toContain("p1");
+
+    const hostDraw = host.room.state.hand?.drawn?.tile;
+    if (!hostDraw) throw new Error("host draw expected");
+    expect(
+      manager.apply(
+        host.room,
+        host.player,
+        { type: "discard", tile: hostDraw },
+        host.room.version,
+      ),
+    ).toMatchObject({ ok: true, stateChanged: true });
+    expect(
+      manager.snapshot(replacement.room, replacement.player).pending,
+    ).toMatchObject({
+      kind: "humanDiscard",
+      playerId: "p1",
+      canKita: false,
+    });
+  });
+
   it("newGameは接続中席の北抜きcapability rosterを維持する", () => {
     const manager = new RoomManager();
     const host = manager.create("ホスト", true);
