@@ -10,6 +10,9 @@
 
 - ルーム、座席、対局状態は `RoomManager` のプロセスメモリだけに存在する。restart、redeploy、rollback のいずれでも進行中のルームは復元されない。
 - `/healthz` はプロセスの起動を示すだけで、active room 数、接続数、drain 状態、source SHA を返さない。現行ログにも active room 数の集計はない。Railway の CPU / network graph や一般ログだけから「active room が 0」とは証明できない。
+- `GET /` は endpoint discovery として `liveness: "/healthz"`、`readiness: "/readyz"`、`websocket: "/ws"` を返す。旧 `health: "/healthz"` は liveness の互換 alias であり、readiness の意味には使わない。
+- `GET /healthz` は liveness、`GET /readyz` は readiness / Railway healthcheck である。プロセスが起動していても、drain 中または必須設定が不正なら前者は `200` のまま後者は `503` になり得る。
+- `ALLOWED_ORIGINS` は canonical な完全一致 HTTP(S) Origin のカンマ区切りだけを受け付ける。`*`、wildcard subdomain、path（`/path`）、query（`?x=1`）、HTTP(S) 以外、または valid entry と invalid entry の混在は不可である。1件でも不正なら allowlist 全体を fail-closed とし、`/readyz` は `503`、許可されているように見える Origin を含む全 WebSocket upgrade は `403` になる。空・未設定も同じ扱いである。
 - リポジトリ上のサーバーにはdefault-offのmaintenance drainと利用者通知、bounded graceful shutdownを段階実装している。ただし、現在のRailway productionへ反映・有効化した証拠はない。Railway の overlap / draining time を設定するだけでもこれらを補えない。特に、プロセスメモリを共有しない旧・新 deployment の overlap は既存ルームへの `resume` を保証しない。
 - rollback はサービスの稼働コードと変数を戻す障害復旧であり、消失したルームを戻す操作ではない。既知の古い deployment へ戻すと、missing-Origin を受け入れる既存の drift も戻り得る。
 
@@ -165,7 +168,7 @@ Railway Dashboard または現在利用中の Railway CLI の read-only command 
 - account / workspace
 - 既存 project / service / environment の名前と ID
 - active deployment の ID、status、作成時刻、source marker、image digest
-- `ALLOWED_ORIGINS` が許可する production frontend Origin。変数一覧全体や無関係な secret はログ・Issueへ出力しない。
+- `ALLOWED_ORIGINS` が許可する production frontend の canonical な完全一致 HTTP(S) Origin。`*`、wildcard、path/query、valid/invalid混在を許可値として記録しない。変数一覧全体や無関係な secret はログ・Issueへ出力しない。
 - manual recovery evidenceとして、直前の known-good deployment の ID、source/config、現時点の`canRollback`相当の可否
 - 利用 plan の image retention 内で rollback できる期限
 
@@ -173,7 +176,7 @@ Railway Dashboard または現在利用中の Railway CLI の read-only command 
 
 ### Public baseline
 
-以下の helper は `GET /healthz`、`GET /readyz`、3回の有効な HTTP Upgrade handshake だけを行う。101 を受け取った socket は直ちに破棄し、`create` / `join` / `resume` / `action` / `ping` を含む WebSocket application frame は送らない。
+以下の helper は `GET /healthz`（liveness）、`GET /readyz`（readiness）、3回の有効な HTTP Upgrade handshake だけを行う。101 を受け取った socket は直ちに破棄し、`create` / `join` / `resume` / `action` / `ping` を含む WebSocket application frame は送らない。
 
 ```bash
 node scripts/probe-online-boundary.mjs \
@@ -192,7 +195,7 @@ ONLINE_PROBE_TIMEOUT_MS=10000 \
 node scripts/probe-online-boundary.mjs
 ```
 
-helper は `schemaVersion: 2` の timestamp、各 status、liveness/readiness の解析済み JSON body を標準出力へ返す。期待値は liveness `200` かつ body `{"ok":true}`、readiness `200` かつ body `{"ok":true}`、allowed Origin `101`、disallowed Origin `403`、missing Origin `403` である。200 response の body が malformed、`ok` が boolean でない、または `ok: false` の場合も exit code `1` になる。non-200 response の `{"ok":false}` body は drift の有用な証拠として JSON に残る。すべて一致すれば exit code `0`、境界 drift や network error / timeout があれば `1`、引数不正なら `2` を返す。deploy 前の既知 drift がある場合も JSON を保存し、成功と読み替えない。
+helper は `schemaVersion: 2` の timestamp、各 status、liveness/readiness の解析済み JSON body を標準出力へ返す。期待値は liveness `200` かつ body `{"ok":true}`、readiness `200` かつ body `{"ok":true}`、allowed Origin `101`、disallowed Origin `403`、missing Origin `403` である。`--allowed-origin` と Railway の `ALLOWED_ORIGINS` は同じ canonical な完全一致 HTTP(S) Origin とし、wildcard、path/query、invalid entry の混在を使わない。不正な実効設定なら readiness `503` と upgrade `403` を失敗証拠として扱う。200 response の body が malformed、`ok` が boolean でない、または `ok: false` の場合も exit code `1` になる。non-200 response の `{"ok":false}` body は drift の有用な証拠として JSON に残る。すべて一致すれば exit code `0`、境界 drift や network error / timeout があれば `1`、引数不正なら `2` を返す。deploy 前の既知 drift がある場合も JSON を保存し、成功と読み替えない。
 
 ## 2. メンテナンスを開始する
 
@@ -287,7 +290,7 @@ test "$OPS_RELEASE_CODE" = 200
 3. Railwayのeffective start / healthcheck / draining、全region topology、stable deployment setをfresh read-backする。
 4. authenticated `GET /ops/status`からnew deploymentId / replicaId / sourceRevision / observedAt / `accepting`を確認する。Railway effective runtime variable read-backからops required / notices enabledを別に確認し、`/readyz=200`と同じ時点で突合する。ops payloadに存在しないvariable値をGETから取得したと扱わない。POSTは再実行しない。
 5. new activeをprospective rollbackとしてfresh `pre-drain` evidenceを再構成し、offline validatorが`pass`であることを確認する。失敗は成功扱いにせずrollback判断へ進む。
-6. `ALLOWED_ORIGINS` が変更前の承認値と一致することを、無関係な secret を出力せず確認する。
+6. `ALLOWED_ORIGINS` が変更前の承認済み canonical 完全一致 HTTP(S) Origin と一致することを確認する。wildcard、path/query、invalid entry の混在がなく、無関係な secret を出力しない。
 7. boundary probe helper を同じ引数で一度実行する。
 8. probe evidence が `schemaVersion: 2` であり、liveness `200` + body `{"ok":true}`、readiness `200` + body `{"ok":true}`、allowed `101`、disallowed `403`、missing `403` の全一致を確認する。malformed body や boolean でない / false の `ok` は成功扱いにしない。
 9. Railway の deploy/runtime logs に crash、継続的な5xx、予期しないrestartがないことを確認する。

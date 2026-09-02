@@ -595,6 +595,35 @@ async function advanceVersion(
   return [first, second];
 }
 
+describe("online root discovery and health contracts", () => {
+  it(
+    "advertises distinct liveness and readiness endpoints while preserving the health alias",
+    async () => {
+      const server = await startLocalOnlineServer();
+      try {
+        const root = await fetch(`${server.url}/`);
+        expect(root.status).toBe(200);
+        await expect(root.json()).resolves.toEqual({
+          service: "four-bros-mahjong-online",
+          websocket: "/ws",
+          liveness: "/healthz",
+          readiness: "/readyz",
+          health: "/healthz",
+        });
+        await expect(fetch(`${server.url}/healthz`)).resolves.toMatchObject({
+          status: 200,
+        });
+        await expect(fetch(`${server.url}/readyz`)).resolves.toMatchObject({
+          status: 200,
+        });
+      } finally {
+        await stopLocalOnlineServer(server);
+      }
+    },
+    TEST_TIMEOUT_MS,
+  );
+});
+
 describe("online HTTP request-target fallback (#704)", () => {
   it(
     "HTTPとWebSocket upgradeの不正targetを400へ変換し、その後もhealth checkへ応答する",
@@ -893,6 +922,14 @@ describe("online multiplayer local E2E (#629)", () => {
       allowedOrigins: `${TEST_ORIGIN}/path`,
       handshakeOrigin: `${TEST_ORIGIN}/path`,
     },
+    {
+      allowedOrigins: `${TEST_ORIGIN}?probe=1`,
+      handshakeOrigin: `${TEST_ORIGIN}?probe=1`,
+    },
+    {
+      allowedOrigins: "ftp://online-e2e.local",
+      handshakeOrigin: "ftp://online-e2e.local",
+    },
     { allowedOrigins: `${TEST_ORIGIN},*`, handshakeOrigin: TEST_ORIGIN },
     {
       allowedOrigins: `${TEST_ORIGIN},${TEST_ORIGIN}/path`,
@@ -903,6 +940,9 @@ describe("online multiplayer local E2E (#629)", () => {
     async ({ allowedOrigins, handshakeOrigin }) => {
       const developmentServer = await startLocalOnlineServer(allowedOrigins);
       try {
+        await expect(
+          fetch(`${developmentServer.url}/healthz`),
+        ).resolves.toMatchObject({ status: 200 });
         await expect(
           fetch(`${developmentServer.url}/readyz`),
         ).resolves.toMatchObject({ status: 503 });

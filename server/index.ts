@@ -803,6 +803,10 @@ export function createOnlineServer(
       writeJson(response, 200, {
         service: "four-bros-mahjong-online",
         websocket: "/ws",
+        liveness: "/healthz",
+        readiness: "/readyz",
+        // Keep the original discovery key as a liveness alias for clients
+        // that still look up `health`.
         health: "/healthz",
       });
       return;
