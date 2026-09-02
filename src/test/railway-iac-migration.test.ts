@@ -61,7 +61,7 @@ function validEvidence(nowMs = NOW) {
   const config = {
     builder: "DOCKERFILE",
     dockerfilePath: "Dockerfile",
-    startCommand: "pnpm server:start",
+    startCommand: "node --import tsx server/start.ts",
     healthcheckPath: "/healthz",
     healthcheckTimeoutSeconds: 60,
     replicaCount: 1,
@@ -237,8 +237,7 @@ describe("Railway IaC parity snapshot contract (#742)", () => {
     [
       "generated-service-parity-mismatch",
       (e: ReturnType<typeof validEvidence>) => {
-        e.generatedIac.targetServiceConfig.startCommand =
-          "node --import tsx server/start.ts";
+        e.generatedIac.targetServiceConfig.startCommand = "pnpm server:start";
       },
     ],
     [
@@ -262,8 +261,7 @@ describe("Railway IaC parity snapshot contract (#742)", () => {
     [
       "parity-readback-mismatch",
       (e: ReturnType<typeof validEvidence>) => {
-        e.effectiveReadback.config.startCommand =
-          "node --import tsx server/start.ts";
+        e.effectiveReadback.config.startCommand = "pnpm server:start";
       },
     ],
     [

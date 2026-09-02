@@ -9,7 +9,7 @@ const REVIEWED_RAILWAY_SDK_SCHEMA_REVISION =
 const RAILWAY_LEGACY_KNOWN_CONFIG = Object.freeze({
   builder: "DOCKERFILE",
   dockerfilePath: "Dockerfile",
-  startCommand: "pnpm server:start",
+  startCommand: "node --import tsx server/start.ts",
   healthcheckPath: "/healthz",
   healthcheckTimeoutSeconds: 60,
   restartPolicyType: "ON_FAILURE",
