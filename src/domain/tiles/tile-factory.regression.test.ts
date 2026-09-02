@@ -154,6 +154,8 @@ const ALLOWED_RAW_IS_RED_READS: readonly string[] = [
   "components/game/GameBoard.tsx: candidate.isRed === !!tile.isRed,",
   // 手牌のツモ差分キー。赤・非赤を別牌として扱うための値そのものの識別。
   'components/game/hand-animation/handAnimation.ts: return `${tile.suit}:${tile.rank}:${tile.isRed === true ? "red" : "normal"}`;',
+  // 河牌のReact描画キー。リーチ状態と赤フラグを含む表示ノードの同一性識別。
+  'components/game/Discards.tsx: return `${tile.suit}-${tile.rank}-${tile.isRed === true ? "red" : "normal"}-${tile.isRiichi === true ? "riichi" : "plain"}`;',
   // 演出遷移スナップショットの副露キー。赤・通常牌を別牌として扱う値そのものの識別。
   'components/game/effects/gameEffect.ts: return `${tile.suit}-${tile.rank}-${tile.isRed ? "red" : "normal"}`;',
   // 復元ジャーナルの保存値検証(不変条件を破った値を fail-closed で弾く)。

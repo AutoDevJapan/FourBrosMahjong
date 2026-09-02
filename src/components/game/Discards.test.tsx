@@ -1,6 +1,11 @@
 import { render, screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
-import Discards, { getRiverTileLayout } from "./Discards";
+import Discards, {
+  getRiverTileLayout,
+  riverCueForTransition,
+  riverStateKey,
+  riverTileKey,
+} from "./Discards";
 import type { RiverTileData } from "./types";
 
 const tile = (rank: number, isRiichi = false): RiverTileData => ({
@@ -82,5 +87,69 @@ describe("Discards", () => {
     expect(screen.getByRole("list", { name: "捨て牌" })).not.toHaveAttribute(
       "data-has-riichi",
     );
+  });
+
+  it("初回描画/復元では静かにし、1枚追加のコミットだけを河入場cueにする", () => {
+    const { rerender } = render(<Discards tiles={[tile(1)]} />);
+    const list = screen.getByRole("list", { name: "捨て牌" });
+
+    expect(list).not.toHaveAttribute("data-river-event-key");
+    expect(list.querySelector('[data-river-animation="discard"]')).toBeNull();
+
+    const current = [tile(1), tile(2)];
+    rerender(<Discards tiles={current} />);
+
+    expect(list).toHaveAttribute(
+      "data-river-event-key",
+      `discard:1:${riverTileKey(tile(2))}:${riverStateKey(current)}`,
+    );
+    expect(list.querySelector('[data-river-index="1"]')).toHaveAttribute(
+      "data-river-animation",
+      "discard",
+    );
+  });
+
+  it("狭幅の直近表示でも全河の追加イベントを表示上の末尾へ写像する", () => {
+    const initial = [1, 2, 3, 4, 5, 6].map((rank) => tile(rank));
+    const { rerender } = render(<Discards tiles={initial} limit={3} />);
+
+    rerender(<Discards tiles={[...initial, tile(7)]} limit={3} />);
+
+    const list = screen.getByRole("list", { name: "捨て牌" });
+    const entering = list.querySelector('[data-river-animation="discard"]');
+    expect(entering).toHaveAttribute("data-river-index", "2");
+    expect(entering).toHaveTextContent("七萬");
+  });
+
+  it("河のリセットでは前局のcueを残さず、次の局の追加から再び基準化する", () => {
+    const { rerender } = render(<Discards tiles={[tile(1)]} />);
+    rerender(<Discards tiles={[tile(1), tile(2)]} />);
+    rerender(<Discards tiles={[]} />);
+
+    const list = screen.getByRole("list", { name: "捨て牌" });
+    expect(list).not.toHaveAttribute("data-river-event-key");
+    expect(list.querySelector('[data-river-animation="discard"]')).toBeNull();
+
+    rerender(<Discards tiles={[tile(3)]} />);
+    expect(
+      list.querySelector('[data-river-animation="discard"]'),
+    ).not.toBeNull();
+  });
+
+  it("河cueは初回、複数枚の飛び越し、並べ替えをイベントとして扱わない", () => {
+    const first = [tile(1)];
+    const second = [tile(1), tile(2)];
+
+    expect(riverCueForTransition(null, first)).toBeNull();
+    expect(riverCueForTransition(first, second)).toMatchObject({
+      tileIndex: 1,
+      stateKey: riverStateKey(second),
+    });
+    expect(
+      riverCueForTransition(first, [tile(1), tile(2), tile(3)]),
+    ).toBeNull();
+    expect(
+      riverCueForTransition(second, [tile(2), tile(1), tile(3)]),
+    ).toBeNull();
   });
 });

@@ -1,6 +1,7 @@
 import type { ActiveGameEffect } from "./useGameEffects";
 
 const EFFECT_CLASS: Record<ActiveGameEffect["kind"], string> = {
+  discard: "border-control-border text-tile-ink",
   riichi: "border-tile-badge-red text-tile-badge-red",
   pon: "border-turn-highlight text-turn-highlight-ink",
   kan: "border-focus-ring text-focus-ring",
@@ -23,6 +24,7 @@ export default function EffectOverlay({ effect }: EffectOverlayProps) {
       aria-hidden="true"
       className="pointer-events-none absolute inset-x-0 top-1/2 z-20 flex -translate-y-1/2 justify-center px-4"
       data-effect-id={effect.eventId}
+      data-effect-key={effect.eventKey}
       data-effect-overlay="true"
       data-effect-type={effect.kind}
       data-testid="effect-overlay"

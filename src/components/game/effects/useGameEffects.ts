@@ -27,21 +27,28 @@ export function useGameEffects(
     [view, phase, roundSummary],
   );
   const previousSnapshotRef = useRef<typeof snapshot | null>(null);
+  const processedStateKeyRef = useRef<string | null>(null);
   const nextEventIdRef = useRef(0);
   const [activeEffect, setActiveEffect] = useState<ActiveGameEffect | null>(
     null,
   );
 
   useEffect(() => {
+    // Context providers may publish a new object for a semantically identical
+    // view. Treat the state key as the commit boundary so StrictMode and
+    // unrelated renders cannot manufacture a second cue.
+    if (processedStateKeyRef.current === snapshot.stateKey) return;
+    processedStateKeyRef.current = snapshot.stateKey;
+
     const previous = previousSnapshotRef.current;
     previousSnapshotRef.current = snapshot;
     if (previous === null) return;
 
     const next = gameEffectForTransition(previous, snapshot, roundSummary);
     if (next === null) {
-      // Starting a new round or a new game should not leave the previous cue
-      // floating over the fresh table.
-      setActiveEffect(null);
+      // An untracked same-round update should not cut a cue short. A scope
+      // change, however, is a hard reset for the previous round/game.
+      if (previous.scopeKey !== snapshot.scopeKey) setActiveEffect(null);
       return;
     }
 
@@ -58,5 +65,8 @@ export function useGameEffects(
     return () => window.clearTimeout(timer);
   }, [activeEffect]);
 
-  return activeEffect;
+  // The effect state update runs after the new table has rendered. Scope the
+  // return value as well so a previous-round overlay cannot flash over a fresh
+  // round during that one render.
+  return activeEffect?.scopeKey === snapshot.scopeKey ? activeEffect : null;
 }

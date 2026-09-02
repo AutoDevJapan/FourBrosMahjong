@@ -13,6 +13,7 @@ function view(
   overrides: Partial<{
     selfRiichi: boolean;
     selfMelds: readonly MeldView[];
+    selfDiscards: readonly Tile[];
   }> = {},
 ): GameViewState {
   const self = {
@@ -24,7 +25,7 @@ function view(
       hasDeclaredRiichi: overrides.selfRiichi ?? false,
     },
     kitaCount: 0,
-    discards: [],
+    discards: overrides.selfDiscards ?? [],
     ...(overrides.selfMelds ? { melds: overrides.selfMelds } : {}),
   };
   const opponent = (playerId: "p1" | "p2", name: string) => ({
@@ -88,6 +89,41 @@ describe("gameEffectForTransition", () => {
       announcement: "粗悪品がリーチを宣言しました。",
       assertive: false,
     });
+  });
+
+  it("1枚追加された打牌を状態由来のevent key付きcueへ変換する", () => {
+    const previous = snapshot(view());
+    const current = snapshot(view({ selfDiscards: [tile] }));
+
+    const effect = gameEffectForTransition(previous, current, null);
+
+    expect(effect).toMatchObject({
+      kind: "discard",
+      title: "打牌",
+      detail: "粗悪品が五筒を捨てました。",
+      announcement: "粗悪品が五筒を捨てました。",
+      assertive: false,
+      playerId: "p0",
+    });
+    expect(effect?.eventKey).toContain("|discard|p0:discard:0:pin-5-normal|");
+    expect(effect?.scopeKey).toBe("east-1-0|playing");
+  });
+
+  it("複数枚を飛ばした復元と河のリセットは打牌cueを推測しない", () => {
+    const previous = snapshot(view({ selfDiscards: [tile] }));
+    const skipped = snapshot(
+      view({
+        selfDiscards: [
+          tile,
+          { suit: "man", rank: 1, isRed: false },
+          { suit: "sou", rank: 9, isRed: false },
+        ],
+      }),
+    );
+    const reset = snapshot(view());
+
+    expect(gameEffectForTransition(previous, skipped, null)).toBeNull();
+    expect(gameEffectForTransition(previous, reset, null)).toBeNull();
   });
 
   it("局替わり後は前局のリーチ状態に関係なく新局のリーチを演出する", () => {
