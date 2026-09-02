@@ -3,7 +3,7 @@
   "private": true,
   "type": "module",
   "dependencies": {
-    "tsx": "^4.23.12",
+    "tsx": "^4.23.13",
     "ws": "^8.21.3"
   }
 }
