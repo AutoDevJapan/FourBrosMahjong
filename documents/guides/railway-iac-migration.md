@@ -61,7 +61,7 @@ ownership cutoverでは次を変更しない。
 | --- | --- |
 | builder/path | `DOCKERFILE` / `Dockerfile` |
 | start | current effective value（checked-in legacyは`node --import tsx server/start.ts`） |
-| health | checked-in legacy baselineは`/readyz`, 60秒（`/healthz`はliveness）。Railway productionのeffective valueはauthorized read-backで別途確認する |
+| health | #742のpre-cutover parity baselineは`/healthz`, 60秒（liveness）。#726のrepository target `/readyz`は別のruntime変更であり、Railway productionのeffective valueとはread-backまで同一視しない |
 | restart | current effective value（checked-in legacyは`ON_FAILURE`, 10） |
 | replica/overlap/draining/watch/source | cutover直前とcutover直後でexact同値 |
 

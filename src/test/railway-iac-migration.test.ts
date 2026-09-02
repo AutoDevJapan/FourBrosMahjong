@@ -62,7 +62,9 @@ function validEvidence(nowMs = NOW) {
     builder: "DOCKERFILE",
     dockerfilePath: "Dockerfile",
     startCommand: "node --import tsx server/start.ts",
-    healthcheckPath: "/readyz",
+    // #742 models the pre-cutover effective Railway baseline. #726's
+    // repository target is /readyz, but no external deployment is assumed.
+    healthcheckPath: "/healthz",
     healthcheckTimeoutSeconds: 60,
     replicaCount: 1,
     restartPolicyType: "ON_FAILURE",
@@ -594,11 +596,11 @@ describe("Railway IaC parity snapshot contract (#742)", () => {
     );
     const evidence = validEvidence();
     expect(railwayJson.deploy.healthcheckPath).toBe("/readyz");
+    expect(evidence.preCutoverReadback.config.healthcheckPath).toBe("/healthz");
     expect(evidence.preCutoverReadback.config).toMatchObject({
       builder: railwayJson.build.builder,
       dockerfilePath: railwayJson.build.dockerfilePath,
       startCommand: railwayJson.deploy.startCommand,
-      healthcheckPath: railwayJson.deploy.healthcheckPath,
       healthcheckTimeoutSeconds: railwayJson.deploy.healthcheckTimeout,
       restartPolicyType: railwayJson.deploy.restartPolicyType,
       restartPolicyMaxRetries: railwayJson.deploy.restartPolicyMaxRetries,

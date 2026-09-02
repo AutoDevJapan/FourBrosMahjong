@@ -6,11 +6,15 @@ const RAILWAY_IAC_EVIDENCE_MAX_FUTURE_SKEW_MS = 30 * 1_000;
 const RAILWAY_IAC_MINIMUM_CLI_VERSION = "5.42.1";
 const REVIEWED_RAILWAY_SDK_SCHEMA_REVISION =
   "c1b6ea8dd3e815e57257b1f17637e59d31db73b5";
+// This is the last known pre-cutover effective legacy baseline for #742. The
+// repository's desired runtime healthcheck is /readyz (#726), but changing the
+// checked-in file must not rewrite the external pre-cutover evidence expected
+// by the separate IaC ownership-cutover contract.
 const RAILWAY_LEGACY_KNOWN_CONFIG = Object.freeze({
   builder: "DOCKERFILE",
   dockerfilePath: "Dockerfile",
   startCommand: "node --import tsx server/start.ts",
-  healthcheckPath: "/readyz",
+  healthcheckPath: "/healthz",
   healthcheckTimeoutSeconds: 60,
   restartPolicyType: "ON_FAILURE",
   restartPolicyMaxRetries: 10,
