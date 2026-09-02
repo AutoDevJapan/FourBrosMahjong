@@ -17,6 +17,7 @@ import { parse } from "yaml";
 const REPOSITORY_ROOT = process.cwd();
 const EXPECTED_WORKFLOWS = [
   "ci.yml",
+  "gitleaks-version-bump.yml",
   "gitleaks-version-check.yml",
   "gitleaks.yml",
   "release.yml",

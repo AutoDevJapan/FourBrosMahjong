@@ -1,0 +1,192 @@
+name: gitleaks-version-bump
+
+# The dispatchable gitleaks-version-check workflow is intentionally read-only.
+# A workflow_run workflow is evaluated from the default branch, so this file is
+# the reviewed write boundary for the automatic updater (#804).
+#
+# Only a successful check run whose source is the repository's main branch may
+# reach the write job. The job checks out main again and re-resolves all release
+# metadata, so no output or script from the triggering ref is trusted.
+
+on:
+  workflow_run:
+    workflows:
+      - gitleaks-version-check
+    types:
+      - completed
+
+permissions:
+  contents: read
+
+jobs:
+  open-bump-pr:
+    name: Open version bump PR
+    # workflow_run uses the default-branch workflow definition. Keep this
+    # explicit guard as a second fail-closed boundary for non-main dispatches.
+    if: >-
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.head_branch == 'main' &&
+      github.event.workflow_run.head_repository.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+      pull-requests: write
+      actions: write
+    steps:
+      - name: Checkout reviewed main
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: refs/heads/main
+
+      - name: Compare pinned version with latest release
+        id: compare
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          pinned_output="$(node .github/scripts/gitleaks-release.mjs --read-pinned .github/workflows/gitleaks.yml)"
+          printf '%s\n' "$pinned_output" >> "$GITHUB_OUTPUT"
+          current_version="$(printf '%s\n' "$pinned_output" | sed -n 's/^current_version=//p')"
+          current_archive="$(printf '%s\n' "$pinned_output" | sed -n 's/^current_archive=//p')"
+          current_sha256="$(printf '%s\n' "$pinned_output" | sed -n 's/^current_sha256=//p')"
+
+          release_output="$(gh api repos/gitleaks/gitleaks/releases/latest | node .github/scripts/gitleaks-release.mjs --resolve-release)"
+          printf '%s\n' "$release_output" >> "$GITHUB_OUTPUT"
+          latest_version="$(printf '%s\n' "$release_output" | sed -n 's/^latest_version=//p')"
+          latest_archive="$(printf '%s\n' "$release_output" | sed -n 's/^latest_archive=//p')"
+          latest_archive_sha256="$(printf '%s\n' "$release_output" | sed -n 's/^latest_archive_sha256=//p')"
+          latest_archive_url="$(printf '%s\n' "$release_output" | sed -n 's/^latest_archive_url=//p')"
+          latest_upstream_url="$(printf '%s\n' "$release_output" | sed -n 's/^latest_upstream_url=//p')"
+
+          for value in "$current_version" "$current_archive" "$current_sha256" "$latest_version" "$latest_archive" "$latest_archive_sha256" "$latest_archive_url" "$latest_upstream_url"; do
+            if [ -z "$value" ]; then
+              echo "::error::gitleaks release metadata output is incomplete" >&2
+              exit 1
+            fi
+          done
+
+          if [ "$current_version" = "$latest_version" ] && [ "$current_sha256" = "$latest_archive_sha256" ]; then
+            echo "gitleaks は最新 (v$current_version) です。更新不要。"
+            echo "needs_update=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "gitleaks の更新候補があります: v$current_version -> v$latest_version"
+            echo "needs_update=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Skip if a bump PR is already open
+        id: existing
+        if: steps.compare.outputs.needs_update == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          LATEST_VERSION: ${{ steps.compare.outputs.latest_version }}
+        run: |
+          set -euo pipefail
+          branch="chore/gitleaks-version-bump-v$LATEST_VERSION"
+          existing="$(gh pr list --state open --head "$branch" --json number --jq 'length')"
+          echo "branch=$branch" >> "$GITHUB_OUTPUT"
+          if [ "$existing" -gt 0 ]; then
+            echo "既に v$LATEST_VERSION への更新 PR が存在するためスキップします。"
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Bump GITLEAKS_VERSION and archive SHA-256
+        if: steps.compare.outputs.needs_update == 'true' && steps.existing.outputs.skip == 'false'
+        env:
+          CURRENT_VERSION: ${{ steps.compare.outputs.current_version }}
+          CURRENT_SHA256: ${{ steps.compare.outputs.current_sha256 }}
+          LATEST_VERSION: ${{ steps.compare.outputs.latest_version }}
+          LATEST_ARCHIVE_SHA256: ${{ steps.compare.outputs.latest_archive_sha256 }}
+        run: |
+          set -euo pipefail
+          node .github/scripts/gitleaks-release.mjs --update-pinned \
+            .github/workflows/gitleaks.yml \
+            "$CURRENT_VERSION" "$CURRENT_SHA256" \
+            "$LATEST_VERSION" "$LATEST_ARCHIVE_SHA256"
+          git diff --check
+          grep -q "GITLEAKS_VERSION: \"$LATEST_VERSION\"" .github/workflows/gitleaks.yml
+          grep -q "GITLEAKS_ARCHIVE_SHA256: \"$LATEST_ARCHIVE_SHA256\"" .github/workflows/gitleaks.yml
+
+      - name: Commit and push
+        if: steps.compare.outputs.needs_update == 'true' && steps.existing.outputs.skip == 'false'
+        env:
+          BRANCH: ${{ steps.existing.outputs.branch }}
+          LATEST_VERSION: ${{ steps.compare.outputs.latest_version }}
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git checkout -b "$BRANCH"
+          git add .github/workflows/gitleaks.yml
+          git commit -m "chore: bump gitleaks CLI to v$LATEST_VERSION"
+          # force-with-lease: 前回の更新提案が未マージのままクローズされ、同名
+          # ブランチが remote に残っているケースでも安全に上書きできるようにする。
+          # checkout はその remote branch を fetch しないため、引数なしの lease では
+          # 期待 tip が無く既存 branch を更新できない。直前に観測した tip を明示し、
+          # 観測後に別 actor が更新していれば push を拒否する。
+          node .github/scripts/push-branch-with-lease.mjs "$BRANCH"
+
+      - name: Trigger required checks on the new branch
+        if: steps.compare.outputs.needs_update == 'true' && steps.existing.outputs.skip == 'false'
+        env:
+          BRANCH: ${{ steps.existing.outputs.branch }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          # GITHUB_TOKEN による push は他ワークフローの pull_request/push トリガーを
+          # 自動発火しないため、required checksをこのブランチに対して明示的に起動する。
+          # 実行結果は同じコミット SHA に紐づき、作成されたPRのチェック欄に表示される。
+          gh workflow run gitleaks.yml --ref "$BRANCH"
+          gh workflow run ci.yml --ref "$BRANCH"
+
+      - name: Open PR
+        if: steps.compare.outputs.needs_update == 'true' && steps.existing.outputs.skip == 'false'
+        env:
+          BRANCH: ${{ steps.existing.outputs.branch }}
+          CURRENT_VERSION: ${{ steps.compare.outputs.current_version }}
+          CURRENT_ARCHIVE: ${{ steps.compare.outputs.current_archive }}
+          CURRENT_SHA256: ${{ steps.compare.outputs.current_sha256 }}
+          LATEST_VERSION: ${{ steps.compare.outputs.latest_version }}
+          LATEST_ARCHIVE: ${{ steps.compare.outputs.latest_archive }}
+          LATEST_ARCHIVE_SHA256: ${{ steps.compare.outputs.latest_archive_sha256 }}
+          LATEST_ARCHIVE_URL: ${{ steps.compare.outputs.latest_archive_url }}
+          LATEST_UPSTREAM_URL: ${{ steps.compare.outputs.latest_upstream_url }}
+        run: |
+          set -euo pipefail
+          cat > pr-body.md <<EOF
+          ## 概要
+
+          gitleaks CLI の新しいリリースを検出しました: v$CURRENT_VERSION -> v$LATEST_VERSION
+
+          | 項目 | 更新前 | 更新後 |
+          | --- | --- | --- |
+          | Version | v$CURRENT_VERSION | v$LATEST_VERSION |
+          | Archive | $CURRENT_ARCHIVE | $LATEST_ARCHIVE |
+          | SHA-256 | $CURRENT_SHA256 | $LATEST_ARCHIVE_SHA256 |
+
+          upstream release: $LATEST_UPSTREAM_URL
+          archive download: $LATEST_ARCHIVE_URL
+
+          このPRは .github/workflows/gitleaks-version-bump.yml (#24, #804) により
+          review済みmainから自動生成されました。
+
+          ## 検証について
+
+          既定の GITHUB_TOKEN による push/PR 作成は他ワークフローの自動トリガーを発火しないため、
+          このworkflowが明示的に gitleaks.yml と ci.yml をこのブランチに対して
+          workflow_dispatch 起動しています。新バージョンのダウンロード・チェックサム検証・
+          gitleaks detect と全CIの実行結果は、このPRのチェック欄に反映されます。
+          required checks がすべて green になっていることを確認してからマージしてください。
+
+          リリースノート: https://github.com/gitleaks/gitleaks/releases/tag/v$LATEST_VERSION
+          EOF
+
+          gh pr create \
+            --title "chore: gitleaks CLIをv$LATEST_VERSIONへ更新" \
+            --body-file pr-body.md \
+            --base main \
+            --head "$BRANCH" \
+            --label ci
