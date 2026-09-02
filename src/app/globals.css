@@ -762,6 +762,30 @@ body {
 }
 
 /*
+ * 河へ追加された1枚だけを入場させる。opacityだけを動かすため、リーチ牌の回転や
+ * 同段後続牌の横詰め(transform)を上書きせず、河の配置計算と独立して完了する。
+ */
+@keyframes river-discard-enter {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.river-grid > li[data-river-animation="discard"] {
+  animation: river-discard-enter 180ms ease-out both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .river-grid > li[data-river-animation="discard"] {
+    animation: none;
+    opacity: 1;
+  }
+}
+
+/*
  * リーチ宣言牌は OSS の河配置にならい横置きにする。transform は見た目だけを回転し、
  * li の固定トラック幅と後続牌の位置は変えないため、牌素材/牌の意味は変更しない。
  * 右端の余白は回転で増える幅を予約し、6列上限と狭幅の横スクロールなしを維持する。

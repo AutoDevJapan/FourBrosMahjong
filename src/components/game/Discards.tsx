@@ -5,7 +5,7 @@
 
 "use client";
 
-import { useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import Tile from "../common/Tile";
 import type { RiverTileData } from "./types";
 
@@ -19,6 +19,71 @@ export interface RiverTileLayout {
   readonly isRiichi: boolean;
   /** リーチ宣言牌と同じ段にある後続牌だけを横へ詰める。 */
   readonly shiftsAfterRiichi: boolean;
+}
+
+export interface RiverCue {
+  /** 同じ捨て牌でも捨て順が変われば別イベントになる、状態由来のキー。 */
+  readonly eventKey: string;
+  /** `tiles`(表示上限を適用する前)における入場牌の位置。 */
+  readonly tileIndex: number;
+  /** この cue が導出された河の状態キー。 */
+  readonly stateKey: string;
+}
+
+/** 河牌の意味とリーチ状態を含む、DOM/React再描画に依存しない牌キー。 */
+export function riverTileKey(tile: RiverTileData): string {
+  return `${tile.suit}-${tile.rank}-${tile.isRed === true ? "red" : "normal"}-${tile.isRiichi === true ? "riichi" : "plain"}`;
+}
+
+/** 河の順序も含めた状態キー。初回描画・復元を過去イベントとして扱わないために使う。 */
+export function riverStateKey(tiles: readonly RiverTileData[]): string {
+  return tiles.map((tile, index) => `${index}:${riverTileKey(tile)}`).join("|");
+}
+
+/**
+ * 1つのコミット済み状態遷移が「河へ1枚追加」だった場合だけ cue を返す。
+ *
+ * - 初回描画/復元は `previous === null` なので静かにする。
+ * - 鳴きによる牌の取り除き、局替わりのリセット、複数状態を飛ばした再接続は
+ *   途中の牌を推測せず、次の状態を基準にする。
+ * - リーチ宣言牌も同じ追加イベントとして扱う。横置きは state の `isRiichi`、
+ *   入場はこの cue から導出するため、ルール処理を待たせない。
+ */
+export function riverCueForTransition(
+  previous: readonly RiverTileData[] | null,
+  current: readonly RiverTileData[],
+): RiverCue | null {
+  if (previous === null || current.length !== previous.length + 1) return null;
+
+  for (let index = 0; index < previous.length; index += 1) {
+    if (riverTileKey(previous[index]) !== riverTileKey(current[index])) {
+      return null;
+    }
+  }
+
+  const tileIndex = current.length - 1;
+  const tile = current[tileIndex];
+  if (tile === undefined) return null;
+
+  const stateKey = riverStateKey(current);
+  return {
+    eventKey: `discard:${tileIndex}:${riverTileKey(tile)}:${stateKey}`,
+    tileIndex,
+    stateKey,
+  };
+}
+
+/** 同種牌の削除で後続牌のDOMノードを不必要に全交換しないための表示キー。 */
+function riverTileRenderKey(
+  tiles: readonly RiverTileData[],
+  index: number,
+): string {
+  const identity = riverTileKey(tiles[index]);
+  let occurrence = 0;
+  for (let previousIndex = 0; previousIndex < index; previousIndex += 1) {
+    if (riverTileKey(tiles[previousIndex]) === identity) occurrence += 1;
+  }
+  return `${identity}:${occurrence}`;
 }
 
 /**
@@ -46,8 +111,23 @@ export function getRiverTileLayout(
 export default function Discards({ tiles, limit }: DiscardsProps) {
   const shown =
     typeof limit === "number" && limit >= 0 ? tiles.slice(-limit) : tiles;
+  const stateKey = riverStateKey(tiles);
   const listRef = useRef<HTMLUListElement>(null);
   const [columnCount, setColumnCount] = useState<number | null>(null);
+  const [riverCue, setRiverCue] = useState<RiverCue | null>(null);
+  const previousTilesRef = useRef<readonly RiverTileData[] | null>(null);
+  const processedStateKeyRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    // `tiles` can be a new array on an unrelated parent render. The semantic
+    // key is the gate that makes one committed river state one cue decision.
+    if (processedStateKeyRef.current === stateKey) return;
+    processedStateKeyRef.current = stateKey;
+
+    const previous = previousTilesRef.current;
+    previousTilesRef.current = tiles;
+    setRiverCue(riverCueForTransition(previous, tiles));
+  }, [stateKey, tiles]);
 
   useLayoutEffect(() => {
     const list = listRef.current;
@@ -77,6 +157,11 @@ export default function Discards({ tiles, limit }: DiscardsProps) {
 
   const layout = getRiverTileLayout(shown, columnCount);
   const hasRiichi = layout.some((item) => item.isRiichi);
+  const shownStartIndex = tiles.length - shown.length;
+  const enteringIndex =
+    riverCue?.stateKey === stateKey && riverCue.tileIndex >= shownStartIndex
+      ? riverCue.tileIndex - shownStartIndex
+      : null;
 
   // role="list" は冗長だが明示する — Tailwind preflight の list-style 除去により Safari が
   // list セマンティクスを落とし、VoiceOver がリスト名ごと読まなくなる既知挙動への対処
@@ -89,18 +174,28 @@ export default function Discards({ tiles, limit }: DiscardsProps) {
       role="list"
       aria-label="捨て牌"
       data-has-riichi={hasRiichi ? "true" : undefined}
+      data-river-event-key={
+        riverCue?.stateKey === stateKey ? riverCue.eventKey : undefined
+      }
+      data-river-state-key={stateKey}
       // 列幅を牌1枚ぶんの固定幅にして密に並べる(#258)。列数はスロット幅に入るぶんだけ
       // 作られ上限 6 列(#387: 6 列固定だと狭いスロットでページが横スクロールしていた)。
       // グリッド定義は `.river-grid`(globals.css)— 牌寸法と列幅の定義元を一本化するため。
       className="game-river river-grid"
     >
       {shown.map((tile, i) => (
-        // 河は同一牌が複数並ぶため index を key に含める(捨て順の同一性は保持不要)。
+        // 河は同一牌が複数並ぶため、同種牌の出現順を含むキーにする。
         <li
-          key={`${tile.suit}-${tile.rank}-${i}`}
+          key={riverTileRenderKey(shown, i)}
           data-river-index={i}
           data-riichi={layout[i].isRiichi ? "true" : undefined}
           data-after-riichi={layout[i].shiftsAfterRiichi ? "true" : undefined}
+          data-river-animation={enteringIndex === i ? "discard" : undefined}
+          className={
+            enteringIndex === i
+              ? "river-discard-enter motion-reduce:animate-none"
+              : undefined
+          }
         >
           {layout[i].isRiichi ? (
             <span className="sr-only">リーチ宣言牌</span>

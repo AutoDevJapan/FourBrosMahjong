@@ -5,6 +5,8 @@ import type { ActiveGameEffect } from "./useGameEffects";
 
 const effect: ActiveGameEffect = {
   eventId: 3,
+  eventKey: "east-1-0|playing|riichi|p0|state-2",
+  scopeKey: "east-1-0|playing",
   kind: "riichi",
   icon: "宣",
   title: "リーチ",
@@ -21,6 +23,10 @@ describe("EffectOverlay", () => {
     const overlay = screen.getByTestId("effect-overlay");
     expect(overlay).toHaveAttribute("data-effect-type", "riichi");
     expect(overlay).toHaveAttribute("data-effect-id", "3");
+    expect(overlay).toHaveAttribute(
+      "data-effect-key",
+      "east-1-0|playing|riichi|p0|state-2",
+    );
     expect(overlay).toHaveAttribute("aria-hidden", "true");
     expect(overlay).toHaveClass("pointer-events-none");
     expect(overlay).toHaveTextContent("リーチ");
