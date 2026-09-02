@@ -5,6 +5,8 @@ import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
   generatedIacSourceIsSecretSafe,
+  RAILWAY_LEGACY_FIXTURE_PATH,
+  RAILWAY_LEGACY_FIXTURE_SHA256,
   RAILWAY_IAC_MIGRATION_REASONS,
   type RailwayIacFilesystemEvidence,
   validateRailwayIacMigrationEvidence,
@@ -19,12 +21,26 @@ const GENERATED_SOURCE = `
 const GENERATED_SHA = createHash("sha256")
   .update(GENERATED_SOURCE)
   .digest("hex");
+const CURRENT_REPOSITORY_SOURCE = readFileSync(
+  resolve(process.cwd(), "railway.json"),
+  "utf8",
+);
+const CURRENT_REPOSITORY_SHA = createHash("sha256")
+  .update(CURRENT_REPOSITORY_SOURCE, "utf8")
+  .digest("hex");
+const LEGACY_FIXTURE_SOURCE = readFileSync(
+  resolve(process.cwd(), RAILWAY_LEGACY_FIXTURE_PATH),
+  "utf8",
+);
 const FILESYSTEM: RailwayIacFilesystemEvidence = {
   generatedIacPath: ".railway/railway.ts",
   generatedIacSha256: GENERATED_SHA,
   generatedIacSecretSafe: true,
-  legacyRepositoryFilePresent: true,
-  legacyRepositoryFileSha256: "f".repeat(64),
+  currentRepositoryFilePresent: true,
+  currentRepositoryFileSha256: CURRENT_REPOSITORY_SHA,
+  legacyFixturePresent: true,
+  legacyFixtureSha256: RAILWAY_LEGACY_FIXTURE_SHA256,
+  legacyFixtureContent: LEGACY_FIXTURE_SOURCE,
 };
 
 function validEvidence(nowMs = NOW) {
@@ -122,7 +138,7 @@ function validEvidence(nowMs = NOW) {
       method: "authorized-manual-clear",
       ...targetFields,
       evidenceSha256: "e".repeat(64),
-      legacyFileSha256: FILESYSTEM.legacyRepositoryFileSha256,
+      legacyFileSha256: FILESYSTEM.legacyFixtureSha256,
       configFileSettingCleared: true,
       repositoryFileRetained: true,
       deleteFilesUsed: false,
@@ -192,8 +208,11 @@ describe("Railway IaC parity snapshot contract (#742)", () => {
       generatedIacPath: null,
       generatedIacSha256: null,
       generatedIacSecretSafe: null,
-      legacyRepositoryFilePresent: true,
-      legacyRepositoryFileSha256: FILESYSTEM.legacyRepositoryFileSha256,
+      currentRepositoryFilePresent: FILESYSTEM.currentRepositoryFilePresent,
+      currentRepositoryFileSha256: FILESYSTEM.currentRepositoryFileSha256,
+      legacyFixturePresent: FILESYSTEM.legacyFixturePresent,
+      legacyFixtureSha256: FILESYSTEM.legacyFixtureSha256,
+      legacyFixtureContent: FILESYSTEM.legacyFixtureContent,
     } satisfies RailwayIacFilesystemEvidence;
     expect(
       validateRailwayIacMigrationEvidence(
@@ -290,14 +309,15 @@ describe("Railway IaC parity snapshot contract (#742)", () => {
     expect(reasonsFor(mutate)).toContain(reason);
   });
 
-  it("requires the retained legacy repository file", () => {
+  it("requires the immutable pre-cutover legacy fixture", () => {
     expect(
       validateRailwayIacMigrationEvidence(
         validEvidence(),
         {
           ...FILESYSTEM,
-          legacyRepositoryFilePresent: false,
-          legacyRepositoryFileSha256: null,
+          legacyFixturePresent: false,
+          legacyFixtureSha256: null,
+          legacyFixtureContent: null,
         },
         NOW,
       ).reasons,
@@ -590,21 +610,58 @@ describe("Railway IaC parity snapshot contract (#742)", () => {
     ).toContain("secret-safety-unverified");
   });
 
-  it("keeps the checked-in legacy mapping at parity", () => {
-    const railwayJson = JSON.parse(
+  it("keeps current readiness and immutable pre-cutover liveness separate", () => {
+    const currentRailwayJson = JSON.parse(
       readFileSync(resolve(process.cwd(), "railway.json"), "utf8"),
     );
+    const preCutoverRailwayJson = JSON.parse(LEGACY_FIXTURE_SOURCE);
     const evidence = validEvidence();
-    expect(railwayJson.deploy.healthcheckPath).toBe("/readyz");
+    expect(currentRailwayJson.deploy.healthcheckPath).toBe("/readyz");
+    expect(preCutoverRailwayJson.deploy.healthcheckPath).toBe("/healthz");
+    expect(FILESYSTEM.legacyFixtureSha256).toBe(
+      RAILWAY_LEGACY_FIXTURE_SHA256,
+    );
     expect(evidence.preCutoverReadback.config.healthcheckPath).toBe("/healthz");
     expect(evidence.preCutoverReadback.config).toMatchObject({
-      builder: railwayJson.build.builder,
-      dockerfilePath: railwayJson.build.dockerfilePath,
-      startCommand: railwayJson.deploy.startCommand,
-      healthcheckTimeoutSeconds: railwayJson.deploy.healthcheckTimeout,
-      restartPolicyType: railwayJson.deploy.restartPolicyType,
-      restartPolicyMaxRetries: railwayJson.deploy.restartPolicyMaxRetries,
+      builder: preCutoverRailwayJson.build.builder,
+      dockerfilePath: preCutoverRailwayJson.build.dockerfilePath,
+      startCommand: preCutoverRailwayJson.deploy.startCommand,
+      healthcheckTimeoutSeconds: preCutoverRailwayJson.deploy.healthcheckTimeout,
+      restartPolicyType: preCutoverRailwayJson.deploy.restartPolicyType,
+      restartPolicyMaxRetries: preCutoverRailwayJson.deploy.restartPolicyMaxRetries,
     });
+  });
+
+  it("holds when the current /readyz railway.json is presented as legacy", () => {
+    const evidence = validEvidence();
+    evidence.ownershipCutover.legacyFileSha256 = CURRENT_REPOSITORY_SHA;
+
+    const result = validateRailwayIacMigrationEvidence(
+      evidence,
+      FILESYSTEM,
+      NOW,
+    );
+    expect(result.migrationEvidence).toBe("hold");
+    expect(result.reasons).toContain("ownership-cutover-unverified");
+  });
+
+  it.each([
+    ["tampered content", `${LEGACY_FIXTURE_SOURCE}\n`],
+    ["wrong health path", LEGACY_FIXTURE_SOURCE.replace("/healthz", "/readyz")],
+  ])("holds for an invalid immutable fixture: %s", (_label, content) => {
+    const result = validateRailwayIacMigrationEvidence(
+      validEvidence(),
+      {
+        ...FILESYSTEM,
+        legacyFixtureSha256: createHash("sha256")
+          .update(content, "utf8")
+          .digest("hex"),
+        legacyFixtureContent: content,
+      },
+      NOW,
+    );
+    expect(result.migrationEvidence).toBe("hold");
+    expect(result.reasons).toContain("legacy-config-missing");
   });
 
   it("covers every fixed reason", () => {
@@ -627,8 +684,11 @@ describe("Railway IaC parity snapshot contract (#742)", () => {
       generatedIacPath: null,
       generatedIacSha256: null,
       generatedIacSecretSafe: null,
-      legacyRepositoryFilePresent: false,
-      legacyRepositoryFileSha256: null,
+      currentRepositoryFilePresent: FILESYSTEM.currentRepositoryFilePresent,
+      currentRepositoryFileSha256: FILESYSTEM.currentRepositoryFileSha256,
+      legacyFixturePresent: false,
+      legacyFixtureSha256: null,
+      legacyFixtureContent: null,
     });
     const invalid = validEvidence();
     invalid.capturedAt = new Date(NOW - 300_001).toISOString();
@@ -650,9 +710,7 @@ describe("Railway IaC parity snapshot contract (#742)", () => {
   it("CLI is non-reflective and holds the current repository", () => {
     const secret = "SECRET_SENTINEL";
     const currentEvidence = validEvidence(Date.now());
-    currentEvidence.ownershipCutover.legacyFileSha256 = createHash("sha256")
-      .update(readFileSync(resolve(process.cwd(), "railway.json")))
-      .digest("hex");
+    currentEvidence.ownershipCutover.legacyFileSha256 = CURRENT_REPOSITORY_SHA;
     const currentResult = spawnSync(
       process.execPath,
       ["--import", "tsx", "scripts/verify-railway-iac-migration.ts"],
@@ -671,7 +729,11 @@ describe("Railway IaC parity snapshot contract (#742)", () => {
       authorizesApply: false,
       authorizesDeployment: false,
       externalMutationPerformed: false,
-      reasons: ["generated-iac-missing", "secret-safety-unverified"],
+      reasons: [
+        "generated-iac-missing",
+        "ownership-cutover-unverified",
+        "secret-safety-unverified",
+      ],
     });
 
     const malformedResult = spawnSync(

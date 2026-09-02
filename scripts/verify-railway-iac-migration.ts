@@ -3,6 +3,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import {
   generatedIacSourceIsSecretSafe,
+  RAILWAY_LEGACY_FIXTURE_PATH,
   type RailwayIacFilesystemEvidence,
   validateRailwayIacMigrationEvidence,
 } from "./railway-iac-migration-contract";
@@ -12,11 +13,25 @@ const repositoryRoot = process.cwd();
 
 function localFilesystemEvidence(): RailwayIacFilesystemEvidence {
   const generatedPath = resolve(repositoryRoot, ".railway/railway.ts");
-  const legacyPath = resolve(repositoryRoot, "railway.json");
+  const currentRepositoryPath = resolve(repositoryRoot, "railway.json");
+  const legacyFixturePath = resolve(repositoryRoot, RAILWAY_LEGACY_FIXTURE_PATH);
   const generatedExists = existsSync(generatedPath);
-  const legacyExists = existsSync(legacyPath);
+  const currentRepositoryExists = existsSync(currentRepositoryPath);
+  const legacyFixtureExists = existsSync(legacyFixturePath);
   const generatedSource = generatedExists
     ? readFileSync(generatedPath, "utf8")
+    : null;
+  const currentRepositorySource = currentRepositoryExists
+    ? readFileSync(currentRepositoryPath)
+    : null;
+  const legacyFixtureSource = legacyFixtureExists
+    ? (() => {
+        try {
+          return readFileSync(legacyFixturePath, "utf8");
+        } catch {
+          return null;
+        }
+      })()
     : null;
   return {
     generatedIacPath: generatedExists ? ".railway/railway.ts" : null,
@@ -29,10 +44,21 @@ function localFilesystemEvidence(): RailwayIacFilesystemEvidence {
       generatedSource === null
         ? null
         : generatedIacSourceIsSecretSafe(generatedSource),
-    legacyRepositoryFilePresent: legacyExists,
-    legacyRepositoryFileSha256: legacyExists
-      ? createHash("sha256").update(readFileSync(legacyPath)).digest("hex")
-      : null,
+    currentRepositoryFilePresent: currentRepositoryExists,
+    currentRepositoryFileSha256:
+      currentRepositorySource === null
+        ? null
+        : createHash("sha256")
+            .update(currentRepositorySource)
+            .digest("hex"),
+    legacyFixturePresent: legacyFixtureExists,
+    legacyFixtureSha256:
+      legacyFixtureSource === null
+        ? null
+        : createHash("sha256")
+            .update(legacyFixtureSource, "utf8")
+            .digest("hex"),
+    legacyFixtureContent: legacyFixtureSource,
   };
 }
 
