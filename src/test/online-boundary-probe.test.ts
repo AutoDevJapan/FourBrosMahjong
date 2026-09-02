@@ -217,6 +217,28 @@ describe("online boundary probe arguments", () => {
     [
       [
         "--base-url",
+        "https://*.online.example.com",
+        "--allowed-origin",
+        "https://app.example.com",
+        "--disallowed-origin",
+        "https://blocked.example",
+      ],
+      "wildcard host",
+    ],
+    [
+      [
+        "--base-url",
+        "https://online.example.com",
+        "--allowed-origin",
+        "https://*.example.com",
+        "--disallowed-origin",
+        "https://blocked.example",
+      ],
+      "wildcard host",
+    ],
+    [
+      [
+        "--base-url",
         "https://online.example.com",
         "--allowed-origin",
         "https://app.example.com",
@@ -250,12 +272,10 @@ describe("online boundary probe", () => {
       statusCode: 200,
       body: { ok: true },
     });
-    expect(evidence.checks.health.body).toEqual({ ok: true });
     expect(evidence.checks.readiness).toMatchObject({
       statusCode: 200,
       body: { ok: true },
     });
-    expect(evidence.checks.readiness.body).toEqual({ ok: true });
     expect(evidence.checks.allowedOrigin.statusCode).toBe(101);
     expect(evidence.checks.disallowedOrigin.statusCode).toBe(403);
     expect(evidence.checks.missingOrigin.statusCode).toBe(403);
@@ -310,12 +330,12 @@ describe("online boundary probe", () => {
 
     expect(evidence.schemaVersion).toBe(2);
     expect(evidence.ok).toBe(false);
-    expect(evidence.checks.health.body).toEqual(
-      options.healthBody === undefined ? { ok: true } : { ok: false },
-    );
-    expect(evidence.checks.readiness.body).toEqual(
-      options.readinessBody === undefined ? { ok: true } : { ok: false },
-    );
+    expect(evidence.checks.health).toMatchObject({
+      body: options.healthBody === undefined ? { ok: true } : { ok: false },
+    });
+    expect(evidence.checks.readiness).toMatchObject({
+      body: options.readinessBody === undefined ? { ok: true } : { ok: false },
+    });
   });
 
   it("rejects malformed liveness and readiness JSON while retaining status evidence", async () => {
@@ -364,7 +384,7 @@ describe("online boundary probe", () => {
       statusCode: 200,
       error: "invalid_schema",
     });
-    expect(evidence.checks.health.body).toBeUndefined();
+    expect(evidence.checks.health).not.toHaveProperty("body");
     expect(JSON.stringify(evidence)).not.toContain(secret);
   });
 
@@ -387,7 +407,7 @@ describe("online boundary probe", () => {
       statusCode: 200,
       error: "invalid_schema",
     });
-    expect(evidence.checks.readiness.body).toBeUndefined();
+    expect(evidence.checks.readiness).not.toHaveProperty("body");
   });
 
   it("rejects oversized health bodies before they can enter evidence", async () => {
@@ -414,7 +434,7 @@ describe("online boundary probe", () => {
       statusCode: 200,
       error: "body_too_large",
     });
-    expect(evidence.checks.health.body).toBeUndefined();
+    expect(evidence.checks.health).not.toHaveProperty("body");
     expect(JSON.stringify(evidence)).not.toContain(secret);
   });
 

@@ -154,6 +154,9 @@ function parseHttpUrl(value, option) {
   if (!["http:", "https:"].includes(url.protocol)) {
     throw new Error(`${option} must use http or https`);
   }
+  if (url.hostname.includes("*")) {
+    throw new Error(`${option} must not contain a wildcard host`);
+  }
   if (url.username || url.password) {
     throw new Error(`${option} must not contain credentials`);
   }
@@ -237,10 +240,7 @@ async function readBoundedResponseBody(response) {
         result = await reader.read();
       } catch (error) {
         if (errorMessage(error) === "timeout") throw error;
-        if (
-          expectedLength !== undefined &&
-          receivedBytes < expectedLength
-        ) {
+        if (expectedLength !== undefined && receivedBytes < expectedLength) {
           throw new ProbeBodyError("truncated_body");
         }
         throw error;
@@ -280,7 +280,7 @@ async function readBoundedResponseBody(response) {
   return bytes;
 }
 
-function parseHealthBody(bytes) {
+function parseHealthBody(bytes, path) {
   let text;
   try {
     text = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
@@ -295,13 +295,17 @@ function parseHealthBody(bytes) {
     return { error: "invalid_json" };
   }
 
+  if (value === null || typeof value !== "object" || Array.isArray(value)) {
+    return { error: "invalid_schema" };
+  }
+  const keys = Object.keys(value);
+  const allowedKeys = path === "/healthz" ? ["ok", "service"] : ["ok"];
   if (
-    value === null ||
-    typeof value !== "object" ||
-    Array.isArray(value) ||
-    Object.keys(value).length !== 1 ||
     !Object.prototype.hasOwnProperty.call(value, "ok") ||
-    typeof value.ok !== "boolean"
+    keys.some((key) => !allowedKeys.includes(key)) ||
+    typeof value.ok !== "boolean" ||
+    (Object.prototype.hasOwnProperty.call(value, "service") &&
+      value.service !== "four-bros-mahjong-online")
   ) {
     return { error: "invalid_schema" };
   }
@@ -319,7 +323,10 @@ async function probeHttp(path, baseUrl, timeoutMs) {
       headers: { accept: "application/json" },
     });
     try {
-      const parsed = parseHealthBody(await readBoundedResponseBody(response));
+      const parsed = parseHealthBody(
+        await readBoundedResponseBody(response),
+        path,
+      );
       return { startedAt, statusCode: response.status, ...parsed };
     } catch (error) {
       const message = errorMessage(error);
