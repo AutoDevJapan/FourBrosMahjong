@@ -99,6 +99,12 @@ describe("sanitizePlayerName", () => {
     expect(sanitizePlayerName(value)).toBeNull();
   });
 
+  it("可視文字が12書記素上限の外側にある生入力はnullへフォールバックする", () => {
+    const raw = ("\u0301 ").repeat(MAX_PLAYER_NAME_LENGTH - 1) + "A";
+
+    expect(sanitizePlayerName(raw)).toBeNull();
+  });
+
   it("Bidi制御文字を除去し、RTL名・ZWJ絵文字・結合文字は保持する", () => {
     expect(sanitizePlayerName("A\u202EB")).toBe("AB");
     expect(sanitizePlayerName("עברית")).toBe("עברית");
