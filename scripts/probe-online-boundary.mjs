@@ -1,6 +1,8 @@
 import { randomBytes } from "node:crypto";
+import { lookup } from "node:dns/promises";
 import { request as httpRequest } from "node:http";
 import { request as httpsRequest } from "node:https";
+import { BlockList, isIP } from "node:net";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -10,6 +12,53 @@ const MAX_TIMEOUT_MS = 30_000;
 const MAX_HEALTH_BODY_BYTES = 4_096;
 const PROBE_EVIDENCE_SCHEMA_VERSION = 2;
 const EXPECTED_HEALTH_SERVICE = "four-bros-mahjong-online";
+const UNSAFE_HOSTNAMES = new Set([
+  "localhost",
+  "metadata",
+  "metadata.google.internal",
+  "instance-data.ec2.internal",
+]);
+function blockList(ranges, family) {
+  const list = new BlockList();
+  for (const [address, prefix] of ranges) {
+    list.addSubnet(address, prefix, family);
+  }
+  return list;
+}
+const UNSAFE_IPV4 = blockList(
+  [
+    ["0.0.0.0", 8],
+    ["10.0.0.0", 8],
+    ["100.64.0.0", 10],
+    ["127.0.0.0", 8],
+    ["169.254.0.0", 16],
+    ["172.16.0.0", 12],
+    ["192.0.0.0", 24],
+    ["192.0.2.0", 24],
+    ["192.168.0.0", 16],
+    ["198.18.0.0", 15],
+    ["198.51.100.0", 24],
+    ["203.0.113.0", 24],
+    ["224.0.0.0", 4],
+    ["240.0.0.0", 4],
+  ],
+  "ipv4",
+);
+const UNSAFE_IPV6 = blockList(
+  [
+    ["::", 96],
+    ["::1", 128],
+    ["::ffff:0:0", 96],
+    ["2001:db8::", 32],
+    ["fc00::", 7],
+    ["fe80::", 10],
+    ["fec0::", 10],
+    ["ff00::", 8],
+  ],
+  "ipv6",
+);
+const LOOPBACK_IPV4 = blockList([["127.0.0.0", 8]], "ipv4");
+const LOOPBACK_IPV6 = blockList([["::1", 128]], "ipv6");
 const ENVIRONMENT_KEYS = Object.freeze({
   baseUrl: "ONLINE_PROBE_BASE_URL",
   allowedOrigin: "ONLINE_PROBE_ALLOWED_ORIGIN",
@@ -32,10 +81,12 @@ function usage() {
     "    --base-url https://online.example.com \\",
     "    --allowed-origin https://app.example.com \\",
     "    --disallowed-origin https://not-allowed.example \\",
-    "    [--timeout-ms 10000]",
+    "    [--timeout-ms 10000] [--allow-local-target]",
     "",
     "The probe performs GET /healthz, GET /readyz, and three HTTP Upgrade handshakes only.",
     "It never sends a WebSocket application message.",
+    "Production targets must resolve only to public IP addresses.",
+    "--allow-local-target is for controlled loopback-only local tests.",
     "CLI options override ONLINE_PROBE_BASE_URL, ONLINE_PROBE_ALLOWED_ORIGIN,",
     "ONLINE_PROBE_DISALLOWED_ORIGIN, and ONLINE_PROBE_TIMEOUT_MS.",
   ].join("\n");
@@ -95,11 +146,20 @@ export function parseProbeArguments(args, environment = process.env) {
       index += 1;
       continue;
     }
+    if (option === "--allow-local-target") {
+      if (options.allowLocalTarget === true) {
+        throw new Error(`${option} must not be repeated`);
+      }
+      options.allowLocalTarget = true;
+      continue;
+    }
     throw new Error(`unknown option: ${option}`);
   }
 
+  const allowLocalTarget = options.allowLocalTarget === true;
   const baseUrl = parseBaseUrl(
     options.baseUrl ?? environment[ENVIRONMENT_KEYS.baseUrl],
+    allowLocalTarget,
   );
   const allowedOrigin = parseOrigin(
     options.allowedOrigin ?? environment[ENVIRONMENT_KEYS.allowedOrigin],
@@ -122,10 +182,11 @@ export function parseProbeArguments(args, environment = process.env) {
     allowedOrigin,
     disallowedOrigin,
     timeoutMs,
+    allowLocalTarget,
   };
 }
 
-function parseBaseUrl(value) {
+function parseBaseUrl(value, allowLocalTarget = false) {
   if (typeof value !== "string") throw new Error("--base-url is required");
   const url = parseHttpUrl(value, "--base-url");
   if (url.pathname !== "/" || url.search || url.hash) {
@@ -133,6 +194,7 @@ function parseBaseUrl(value) {
       "--base-url must be an origin without a path, query, or hash",
     );
   }
+  validateTargetHostname(url, "--base-url", allowLocalTarget);
   return url.origin;
 }
 
@@ -162,6 +224,71 @@ function parseHttpUrl(value, option) {
     throw new Error(`${option} must not contain credentials`);
   }
   return url;
+}
+
+function normalizedHostname(url) {
+  return url.hostname
+    .toLowerCase()
+    .replace(/^\[|\]$/g, "")
+    .replace(/\.$/, "");
+}
+
+function isUnsafeIp(address) {
+  const family = isIP(address);
+  if (family === 4) return UNSAFE_IPV4.check(address, "ipv4");
+  if (family === 6) return UNSAFE_IPV6.check(address, "ipv6");
+  return true;
+}
+
+function isLoopbackHostname(hostname) {
+  const normalized = hostname.toLowerCase().replace(/\.$/, "");
+  if (normalized === "localhost") return true;
+  const family = isIP(normalized);
+  if (family === 4) return LOOPBACK_IPV4.check(normalized, "ipv4");
+  return family === 6 && LOOPBACK_IPV6.check(normalized, "ipv6");
+}
+
+function validateTargetHostname(url, option, allowLocalTarget) {
+  const hostname = normalizedHostname(url);
+  const family = isIP(hostname);
+  if (allowLocalTarget) {
+    if (!isLoopbackHostname(hostname)) {
+      throw new Error(
+        `${option} local opt-in only permits localhost or loopback addresses`,
+      );
+    }
+    return;
+  }
+  if (
+    UNSAFE_HOSTNAMES.has(hostname) ||
+    hostname.endsWith(".localhost") ||
+    hostname.endsWith(".local") ||
+    hostname.endsWith(".internal") ||
+    (family !== 0 && isUnsafeIp(hostname))
+  ) {
+    throw new Error(`${option} must target a public, non-private host`);
+  }
+  if (hostname.length === 0 || !hostname.includes(".")) {
+    throw new Error(`${option} must target a public hostname`);
+  }
+}
+
+async function validateProductionTarget(baseUrl) {
+  const url = new URL(baseUrl);
+  const hostname = normalizedHostname(url);
+  if (isIP(hostname) !== 0) return;
+  let addresses;
+  try {
+    addresses = await lookup(hostname, { all: true, verbatim: true });
+  } catch {
+    throw new Error("--base-url hostname could not be resolved safely");
+  }
+  if (
+    addresses.length === 0 ||
+    addresses.some(({ address }) => isUnsafeIp(address))
+  ) {
+    throw new Error("--base-url must resolve only to public, non-private IPs");
+  }
 }
 
 function parseTimeout(value) {
@@ -217,8 +344,14 @@ async function cancelResponseBody(response) {
   }
 }
 
-async function readBoundedResponseBody(response) {
-  const expectedLength = declaredContentLength(response);
+export async function readBoundedResponseBody(response) {
+  let expectedLength;
+  try {
+    expectedLength = declaredContentLength(response);
+  } catch (error) {
+    await cancelResponseBody(response);
+    throw error;
+  }
   if (expectedLength !== undefined && expectedLength > MAX_HEALTH_BODY_BYTES) {
     await cancelResponseBody(response);
     throw new ProbeBodyError("body_too_large");
@@ -226,14 +359,22 @@ async function readBoundedResponseBody(response) {
 
   if (response.body === null) {
     if (expectedLength !== undefined && expectedLength !== 0) {
+      await cancelResponseBody(response);
       throw new ProbeBodyError("truncated_body");
     }
     return new Uint8Array();
   }
 
-  const reader = response.body.getReader();
+  let reader;
+  try {
+    reader = response.body.getReader();
+  } catch (error) {
+    await cancelResponseBody(response);
+    throw error;
+  }
   const chunks = [];
   let receivedBytes = 0;
+  let completed = false;
   try {
     while (true) {
       let result;
@@ -252,33 +393,40 @@ async function readBoundedResponseBody(response) {
       }
       receivedBytes += result.value.byteLength;
       if (receivedBytes > MAX_HEALTH_BODY_BYTES) {
-        try {
-          await reader.cancel();
-        } catch {
-          // The fixed body_too_large result is more useful than a cancellation
-          // error, and the request is no longer needed.
-        }
         throw new ProbeBodyError("body_too_large");
       }
       chunks.push(result.value);
     }
+    if (expectedLength !== undefined && receivedBytes !== expectedLength) {
+      throw new ProbeBodyError(
+        receivedBytes < expectedLength
+          ? "truncated_body"
+          : "invalid_body_length",
+      );
+    }
+
+    const bytes = new Uint8Array(receivedBytes);
+    let offset = 0;
+    for (const chunk of chunks) {
+      bytes.set(chunk, offset);
+      offset += chunk.byteLength;
+    }
+    completed = true;
+    return bytes;
   } finally {
-    reader.releaseLock();
+    if (!completed) {
+      try {
+        await reader.cancel();
+      } catch {
+        // Preserve the bounded-body error even if the stream is already closed.
+      }
+    }
+    try {
+      reader.releaseLock();
+    } catch {
+      // Preserve the original body error when the reader is already released.
+    }
   }
-
-  if (expectedLength !== undefined && receivedBytes !== expectedLength) {
-    throw new ProbeBodyError(
-      receivedBytes < expectedLength ? "truncated_body" : "invalid_body_length",
-    );
-  }
-
-  const bytes = new Uint8Array(receivedBytes);
-  let offset = 0;
-  for (const chunk of chunks) {
-    bytes.set(chunk, offset);
-    offset += chunk.byteLength;
-  }
-  return bytes;
 }
 
 function parseHealthBody(bytes, path) {
@@ -319,7 +467,7 @@ function parseJsonWithUniqueKeys(text) {
   const cursor = { index: 0 };
 
   function skipWhitespace() {
-    while (/[^\S\r\n]/.test(text[cursor.index] ?? "")) {
+    while (/[ \t\r\n]/.test(text[cursor.index] ?? "")) {
       cursor.index += 1;
     }
   }
@@ -541,13 +689,24 @@ export async function runBoundaryProbe({
   allowedOrigin,
   disallowedOrigin,
   timeoutMs = DEFAULT_TIMEOUT_MS,
+  allowLocalTarget = false,
 }) {
+  const normalizedBaseUrl = parseBaseUrl(baseUrl, allowLocalTarget);
+  if (!allowLocalTarget) await validateProductionTarget(normalizedBaseUrl);
   const startedAt = new Date().toISOString();
-  const health = await probeHealth(baseUrl, timeoutMs);
-  const readiness = await probeReadiness(baseUrl, timeoutMs);
-  const allowed = await probeUpgrade(baseUrl, allowedOrigin, timeoutMs);
-  const disallowed = await probeUpgrade(baseUrl, disallowedOrigin, timeoutMs);
-  const missing = await probeUpgrade(baseUrl, undefined, timeoutMs);
+  const health = await probeHealth(normalizedBaseUrl, timeoutMs);
+  const readiness = await probeReadiness(normalizedBaseUrl, timeoutMs);
+  const allowed = await probeUpgrade(
+    normalizedBaseUrl,
+    allowedOrigin,
+    timeoutMs,
+  );
+  const disallowed = await probeUpgrade(
+    normalizedBaseUrl,
+    disallowedOrigin,
+    timeoutMs,
+  );
+  const missing = await probeUpgrade(normalizedBaseUrl, undefined, timeoutMs);
   const checks = {
     health: { expectedStatus: EXPECTED.health, ...health },
     readiness: { expectedStatus: EXPECTED.readiness, ...readiness },
@@ -574,7 +733,7 @@ export async function runBoundaryProbe({
     ok,
     startedAt,
     finishedAt: new Date().toISOString(),
-    baseUrl,
+    baseUrl: normalizedBaseUrl,
     checks,
   };
 }

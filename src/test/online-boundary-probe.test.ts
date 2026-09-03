@@ -7,6 +7,7 @@ import {
   main,
   parseProbeArguments,
   probeUpgrade,
+  readBoundedResponseBody,
   runBoundaryProbe,
 } from "../../scripts/probe-online-boundary.mjs";
 
@@ -140,6 +141,7 @@ describe("online boundary probe arguments", () => {
       allowedOrigin: "https://app.example.com",
       disallowedOrigin: "https://blocked.example",
       timeoutMs: 2500,
+      allowLocalTarget: false,
     });
   });
 
@@ -156,6 +158,7 @@ describe("online boundary probe arguments", () => {
       allowedOrigin: "https://env-app.example.com",
       disallowedOrigin: "https://env-blocked.example",
       timeoutMs: 2000,
+      allowLocalTarget: false,
     });
     expect(
       parseProbeArguments(
@@ -172,7 +175,7 @@ describe("online boundary probe arguments", () => {
   ])("fails closed when required environment %s is empty", (key, option) => {
     expect(() =>
       parseProbeArguments([], {
-        ONLINE_PROBE_BASE_URL: "http://online.local",
+        ONLINE_PROBE_BASE_URL: "https://online.example.com",
         ONLINE_PROBE_ALLOWED_ORIGIN: ALLOWED_ORIGIN,
         ONLINE_PROBE_DISALLOWED_ORIGIN: DISALLOWED_ORIGIN,
         [key]: "",
@@ -253,6 +256,157 @@ describe("online boundary probe arguments", () => {
   ])("fails closed for invalid arguments %#", (args, message) => {
     expect(() => parseProbeArguments(args, {})).toThrow(message);
   });
+
+  it.each([
+    ["127.0.0.1", "loopback"],
+    ["10.0.0.1", "private"],
+    ["172.16.0.1", "private"],
+    ["192.168.1.1", "private"],
+    ["169.254.169.254", "link-local metadata"],
+    ["[::1]", "loopback"],
+    ["[fe80::1]", "link-local"],
+    ["[fd00::1]", "private"],
+    ["metadata.google.internal", "metadata hostname"],
+  ])("rejects %s as a production probe target (%s)", (hostname) => {
+    expect(() =>
+      parseProbeArguments(
+        [
+          "--base-url",
+          `https://${hostname}`,
+          "--allowed-origin",
+          "https://app.example.com",
+          "--disallowed-origin",
+          "https://blocked.example",
+        ],
+        {},
+      ),
+    ).toThrow("public");
+  });
+
+  it("allows only loopback targets through an explicit local-test opt-in", () => {
+    expect(
+      parseProbeArguments(
+        [
+          "--base-url",
+          "http://127.0.0.1:4321",
+          "--allowed-origin",
+          "https://app.example.com",
+          "--disallowed-origin",
+          "https://blocked.example",
+          "--allow-local-target",
+        ],
+        {},
+      ),
+    ).toMatchObject({
+      baseUrl: "http://127.0.0.1:4321",
+      allowLocalTarget: true,
+    });
+    expect(() =>
+      parseProbeArguments(
+        [
+          "--base-url",
+          "http://10.0.0.1",
+          "--allowed-origin",
+          "https://app.example.com",
+          "--disallowed-origin",
+          "https://blocked.example",
+          "--allow-local-target",
+        ],
+        {},
+      ),
+    ).toThrow("only permits");
+  });
+});
+
+describe("online boundary response body cleanup", () => {
+  it("cancels a body when Content-Length is invalid before reader acquisition", async () => {
+    const cancel = vi.fn().mockResolvedValue(undefined);
+    const getReader = vi.fn();
+    const response = {
+      headers: new Headers({ "content-length": "not-a-number" }),
+      body: { cancel, getReader },
+    };
+
+    await expect(readBoundedResponseBody(response)).rejects.toMatchObject({
+      code: "invalid_body_length",
+    });
+    expect(cancel).toHaveBeenCalledOnce();
+    expect(getReader).not.toHaveBeenCalled();
+  });
+
+  it("cancels the body when getReader fails", async () => {
+    const cancel = vi.fn().mockResolvedValue(undefined);
+    const response = {
+      headers: new Headers(),
+      body: {
+        cancel,
+        getReader: vi.fn(() => {
+          throw new Error("reader unavailable");
+        }),
+      },
+    };
+
+    await expect(readBoundedResponseBody(response)).rejects.toThrow(
+      "reader unavailable",
+    );
+    expect(cancel).toHaveBeenCalledOnce();
+  });
+
+  it("cancels and releases the reader when a read fails", async () => {
+    const reader = {
+      read: vi.fn().mockRejectedValue(new Error("stream failed")),
+      cancel: vi.fn().mockResolvedValue(undefined),
+      releaseLock: vi.fn(),
+    };
+    const response = {
+      headers: new Headers(),
+      body: { getReader: vi.fn(() => reader) },
+    };
+
+    await expect(readBoundedResponseBody(response)).rejects.toThrow(
+      "stream failed",
+    );
+    expect(reader.cancel).toHaveBeenCalledOnce();
+    expect(reader.releaseLock).toHaveBeenCalledOnce();
+  });
+
+  it("cancels and releases the reader for oversized bodies", async () => {
+    const reader = {
+      read: vi
+        .fn()
+        .mockResolvedValue({ done: false, value: new Uint8Array(4_097) }),
+      cancel: vi.fn().mockResolvedValue(undefined),
+      releaseLock: vi.fn(),
+    };
+    const response = {
+      headers: new Headers(),
+      body: { getReader: vi.fn(() => reader) },
+    };
+
+    await expect(readBoundedResponseBody(response)).rejects.toMatchObject({
+      code: "body_too_large",
+    });
+    expect(reader.cancel).toHaveBeenCalledOnce();
+    expect(reader.releaseLock).toHaveBeenCalledOnce();
+  });
+
+  it("cancels and releases the reader for truncated bodies", async () => {
+    const reader = {
+      read: vi.fn().mockResolvedValue({ done: true, value: undefined }),
+      cancel: vi.fn().mockResolvedValue(undefined),
+      releaseLock: vi.fn(),
+    };
+    const response = {
+      headers: new Headers({ "content-length": "2" }),
+      body: { getReader: vi.fn(() => reader) },
+    };
+
+    await expect(readBoundedResponseBody(response)).rejects.toMatchObject({
+      code: "truncated_body",
+    });
+    expect(reader.cancel).toHaveBeenCalledOnce();
+    expect(reader.releaseLock).toHaveBeenCalledOnce();
+  });
 });
 
 describe("online boundary probe", () => {
@@ -261,6 +415,7 @@ describe("online boundary probe", () => {
     openFixtures.push(fixture);
 
     const evidence = await runBoundaryProbe({
+      allowLocalTarget: true,
       baseUrl: fixture.baseUrl,
       allowedOrigin: ALLOWED_ORIGIN,
       disallowedOrigin: DISALLOWED_ORIGIN,
@@ -307,6 +462,33 @@ describe("online boundary probe", () => {
     openFixtures.push(fixture);
 
     const evidence = await runBoundaryProbe({
+      allowLocalTarget: true,
+      baseUrl: fixture.baseUrl,
+      allowedOrigin: ALLOWED_ORIGIN,
+      disallowedOrigin: DISALLOWED_ORIGIN,
+      timeoutMs: 1_000,
+    });
+
+    expect(evidence.ok).toBe(true);
+    expect(evidence.checks.health).toMatchObject({
+      statusCode: 200,
+      body: { ok: true },
+    });
+    expect(evidence.checks.readiness).toMatchObject({
+      statusCode: 200,
+      body: { ok: true },
+    });
+  });
+
+  it("accepts all JSON whitespace characters around exact health fields", async () => {
+    const fixture = await startBoundaryFixture({
+      healthBody: `\r\n{\r\n\t"ok" \t:\t true,\r\n "service"\t:\t"${HEALTH_SERVICE}"\r\n}\r\n`,
+      readinessBody: ` \r\n{\n\t"ok"\t:\ttrue\r\n}\t`,
+    });
+    openFixtures.push(fixture);
+
+    const evidence = await runBoundaryProbe({
+      allowLocalTarget: true,
       baseUrl: fixture.baseUrl,
       allowedOrigin: ALLOWED_ORIGIN,
       disallowedOrigin: DISALLOWED_ORIGIN,
@@ -331,6 +513,7 @@ describe("online boundary probe", () => {
     openFixtures.push(fixture);
 
     const evidence = await runBoundaryProbe({
+      allowLocalTarget: true,
       baseUrl: fixture.baseUrl,
       allowedOrigin: ALLOWED_ORIGIN,
       disallowedOrigin: DISALLOWED_ORIGIN,
@@ -352,6 +535,7 @@ describe("online boundary probe", () => {
     openFixtures.push(fixture);
 
     const evidence = await runBoundaryProbe({
+      allowLocalTarget: true,
       baseUrl: fixture.baseUrl,
       allowedOrigin: ALLOWED_ORIGIN,
       disallowedOrigin: DISALLOWED_ORIGIN,
@@ -371,6 +555,7 @@ describe("online boundary probe", () => {
     openFixtures.push(fixture);
 
     const evidence = await runBoundaryProbe({
+      allowLocalTarget: true,
       baseUrl: fixture.baseUrl,
       allowedOrigin: ALLOWED_ORIGIN,
       disallowedOrigin: DISALLOWED_ORIGIN,
@@ -403,6 +588,7 @@ describe("online boundary probe", () => {
     openFixtures.push(fixture);
 
     const evidence = await runBoundaryProbe({
+      allowLocalTarget: true,
       baseUrl: fixture.baseUrl,
       allowedOrigin: ALLOWED_ORIGIN,
       disallowedOrigin: DISALLOWED_ORIGIN,
@@ -432,6 +618,7 @@ describe("online boundary probe", () => {
     openFixtures.push(fixture);
 
     const evidence = await runBoundaryProbe({
+      allowLocalTarget: true,
       baseUrl: fixture.baseUrl,
       allowedOrigin: ALLOWED_ORIGIN,
       disallowedOrigin: DISALLOWED_ORIGIN,
@@ -456,6 +643,7 @@ describe("online boundary probe", () => {
     openFixtures.push(fixture);
 
     const evidence = await runBoundaryProbe({
+      allowLocalTarget: true,
       baseUrl: fixture.baseUrl,
       allowedOrigin: ALLOWED_ORIGIN,
       disallowedOrigin: DISALLOWED_ORIGIN,
@@ -482,6 +670,7 @@ describe("online boundary probe", () => {
     openFixtures.push(fixture);
 
     const evidence = await runBoundaryProbe({
+      allowLocalTarget: true,
       baseUrl: fixture.baseUrl,
       allowedOrigin: ALLOWED_ORIGIN,
       disallowedOrigin: DISALLOWED_ORIGIN,
@@ -505,6 +694,7 @@ describe("online boundary probe", () => {
     openFixtures.push(fixture);
 
     const evidence = await runBoundaryProbe({
+      allowLocalTarget: true,
       baseUrl: fixture.baseUrl,
       allowedOrigin: ALLOWED_ORIGIN,
       disallowedOrigin: DISALLOWED_ORIGIN,
@@ -532,6 +722,7 @@ describe("online boundary probe", () => {
     openFixtures.push(fixture);
 
     const evidence = await runBoundaryProbe({
+      allowLocalTarget: true,
       baseUrl: fixture.baseUrl,
       allowedOrigin: ALLOWED_ORIGIN,
       disallowedOrigin: DISALLOWED_ORIGIN,
@@ -562,6 +753,7 @@ describe("online boundary probe", () => {
       DISALLOWED_ORIGIN,
       "--timeout-ms",
       "1000",
+      "--allow-local-target",
     ]);
 
     expect(exitCode).toBe(1);
@@ -580,6 +772,7 @@ describe("online boundary probe", () => {
     openFixtures.push(fixture);
 
     const evidence = await runBoundaryProbe({
+      allowLocalTarget: true,
       baseUrl: fixture.baseUrl,
       allowedOrigin: ALLOWED_ORIGIN,
       disallowedOrigin: DISALLOWED_ORIGIN,
