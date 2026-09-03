@@ -12,6 +12,7 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   generatedIacSourceIsSecretSafe,
+  RAILWAY_LEGACY_FIXTURE_PATH,
   type RailwayIacFilesystemEvidence,
   validateRailwayIacMigrationEvidence,
 } from "./railway-iac-migration-contract";
@@ -219,14 +220,20 @@ export function localFilesystemEvidence(
   rootDirectory = repositoryRoot,
 ): RailwayIacFilesystemEvidence {
   const generatedPath = resolve(rootDirectory, ".railway/railway.ts");
-  const legacyPath = resolve(rootDirectory, "railway.json");
+  const currentRepositoryPath = resolve(rootDirectory, "railway.json");
+  const legacyFixturePath = resolve(rootDirectory, RAILWAY_LEGACY_FIXTURE_PATH);
   const generatedSource = readBoundedTextFile(
     generatedPath,
     MAX_GENERATED_IAC_BYTES,
     rootDirectory,
   );
-  const legacySource = readBoundedFile(
-    legacyPath,
+  const currentRepositorySource = readBoundedTextFile(
+    currentRepositoryPath,
+    MAX_LEGACY_CONFIG_BYTES,
+    rootDirectory,
+  );
+  const legacyFixtureSource = readBoundedTextFile(
+    legacyFixturePath,
     MAX_LEGACY_CONFIG_BYTES,
     rootDirectory,
   );
@@ -240,11 +247,18 @@ export function localFilesystemEvidence(
       generatedSource === null
         ? null
         : generatedIacSourceIsSecretSafe(generatedSource),
-    legacyRepositoryFilePresent: legacySource !== null,
-    legacyRepositoryFileSha256:
-      legacySource === null
+    currentRepositoryFilePresent: currentRepositorySource !== null,
+    currentRepositoryFileSha256:
+      currentRepositorySource === null
         ? null
-        : createHash("sha256").update(legacySource).digest("hex"),
+        : createHash("sha256").update(currentRepositorySource).digest("hex"),
+    currentRepositoryFileContent: currentRepositorySource,
+    legacyFixturePresent: legacyFixtureSource !== null,
+    legacyFixtureSha256:
+      legacyFixtureSource === null
+        ? null
+        : createHash("sha256").update(legacyFixtureSource).digest("hex"),
+    legacyFixtureContent: legacyFixtureSource,
   };
 }
 

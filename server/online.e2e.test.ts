@@ -595,6 +595,35 @@ async function advanceVersion(
   return [first, second];
 }
 
+describe("online root discovery and health contracts", () => {
+  it(
+    "advertises distinct liveness and readiness endpoints while preserving the health alias",
+    async () => {
+      const server = await startLocalOnlineServer();
+      try {
+        const root = await fetch(`${server.url}/`);
+        expect(root.status).toBe(200);
+        await expect(root.json()).resolves.toEqual({
+          service: "four-bros-mahjong-online",
+          websocket: "/ws",
+          liveness: "/healthz",
+          readiness: "/readyz",
+          health: "/healthz",
+        });
+        await expect(fetch(`${server.url}/healthz`)).resolves.toMatchObject({
+          status: 200,
+        });
+        await expect(fetch(`${server.url}/readyz`)).resolves.toMatchObject({
+          status: 200,
+        });
+      } finally {
+        await stopLocalOnlineServer(server);
+      }
+    },
+    TEST_TIMEOUT_MS,
+  );
+});
+
 describe("online HTTP request-target fallback (#704)", () => {
   it(
     "HTTPとWebSocket upgradeの不正targetを400へ変換し、その後もhealth checkへ応答する",
@@ -650,6 +679,7 @@ describe("online deployment boundary probe (#653)", () => {
       try {
         const evidence = await runBoundaryProbe({
           baseUrl: server.url,
+          allowLocalTarget: true,
           allowedOrigin: TEST_ORIGIN,
           disallowedOrigin: UNAUTHORIZED_ORIGIN,
           timeoutMs: 1_000,
@@ -657,6 +687,7 @@ describe("online deployment boundary probe (#653)", () => {
 
         expect(evidence.ok).toBe(true);
         expect(evidence.checks.health.statusCode).toBe(200);
+        expect(evidence.checks.readiness.statusCode).toBe(200);
         expect(evidence.checks.allowedOrigin.statusCode).toBe(101);
         expect(evidence.checks.disallowedOrigin.statusCode).toBe(403);
         expect(evidence.checks.missingOrigin.statusCode).toBe(403);
@@ -877,6 +908,58 @@ describe("online multiplayer local E2E (#629)", () => {
         if (explicitOrigin !== undefined) await explicitOrigin.close();
         if (developmentServer !== undefined)
           await stopLocalOnlineServer(developmentServer);
+      }
+    },
+    TEST_TIMEOUT_MS,
+  );
+
+  it.each([
+    { allowedOrigins: "*", handshakeOrigin: "*" },
+    {
+      allowedOrigins: "https://*.vercel.app",
+      handshakeOrigin: "https://*.vercel.app",
+    },
+    {
+      allowedOrigins: `${TEST_ORIGIN}/path`,
+      handshakeOrigin: `${TEST_ORIGIN}/path`,
+    },
+    {
+      allowedOrigins: `${TEST_ORIGIN}?probe=1`,
+      handshakeOrigin: `${TEST_ORIGIN}?probe=1`,
+    },
+    {
+      allowedOrigins: "ftp://online-e2e.local",
+      handshakeOrigin: "ftp://online-e2e.local",
+    },
+    { allowedOrigins: `${TEST_ORIGIN},*`, handshakeOrigin: TEST_ORIGIN },
+    {
+      allowedOrigins: `${TEST_ORIGIN},${TEST_ORIGIN}/path`,
+      handshakeOrigin: TEST_ORIGIN,
+    },
+    { allowedOrigins: `${TEST_ORIGIN},`, handshakeOrigin: TEST_ORIGIN },
+    { allowedOrigins: `,${TEST_ORIGIN}`, handshakeOrigin: TEST_ORIGIN },
+    {
+      allowedOrigins: `${TEST_ORIGIN},,${TEST_ORIGIN}`,
+      handshakeOrigin: TEST_ORIGIN,
+    },
+  ])(
+    "rejects a WebSocket handshake for invalid Origin allowlist $allowedOrigins",
+    async ({ allowedOrigins, handshakeOrigin }) => {
+      const developmentServer = await startLocalOnlineServer(allowedOrigins);
+      try {
+        await expect(
+          fetch(`${developmentServer.url}/healthz`),
+        ).resolves.toMatchObject({ status: 200 });
+        await expect(
+          fetch(`${developmentServer.url}/readyz`),
+        ).resolves.toMatchObject({ status: 503 });
+        const response = await requestUpgrade(
+          developmentServer.url,
+          handshakeOrigin,
+        );
+        expect(response.statusCode).toBe(403);
+      } finally {
+        await stopLocalOnlineServer(developmentServer);
       }
     },
     TEST_TIMEOUT_MS,

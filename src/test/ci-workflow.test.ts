@@ -12,11 +12,14 @@ import { dirname, join, relative, resolve, sep } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { parse } from "yaml";
 import {
+  CHECK_RUN_EVIDENCE_MAX_LOOKUPS,
+  CHECK_RUN_EVIDENCE_TIMEOUT_MS,
   changedPaths,
   changedPathsFromApi,
   classifyPath,
   DOCUMENTATION_EXCEPTIONS,
   EVIDENCE_IO_TIMEOUT_MS,
+  GITHUB_API_RESPONSE_MAX_BYTES,
   githubApi,
   protectedPushBranch,
   resolveChangedPaths,
@@ -1078,6 +1081,30 @@ describe("変更パスによる実行範囲の絞り込み (#491)", () => {
     },
   );
 
+  it("E2E scopeは最初のGit操作前にworkspace限定のsafe.directoryを設定する", () => {
+    const steps = readWorkflowFile("ci.yml").jobs?.e2e?.steps ?? [];
+    const scope = steps.find((step) => step.id === SCOPE_STEP_ID);
+    const safeDirectoryCommand =
+      'git config --global --add safe.directory "$GITHUB_WORKSPACE"';
+    const resolverCommand = "node .github/scripts/verification-scope.mjs";
+
+    expect(scope, "e2e: scope stepが無い").toBeDefined();
+    expect(scope?.run?.trim()).toBe(
+      `${safeDirectoryCommand}\n${resolverCommand}`,
+    );
+
+    const safeDirectoryCommands = steps
+      .map((step) => step.run?.trim() ?? "")
+      .filter((run) => run.includes("safe.directory"));
+    expect(safeDirectoryCommands).toEqual([
+      `${safeDirectoryCommand}\n${resolverCommand}`,
+      'git -c safe.directory="$GITHUB_WORKSPACE" sparse-checkout disable',
+    ]);
+    expect(safeDirectoryCommands.join("\n")).not.toMatch(
+      /safe\.directory\s*=\s*\*/,
+    );
+  });
+
   it.each(Object.keys(SCOPED_JOBS))(
     "%s job の checkout は判定に必要な履歴を取得している",
     (jobName) => {
@@ -1091,6 +1118,53 @@ describe("変更パスによる実行範囲の絞り込み (#491)", () => {
         checkout?.with?.["fetch-depth"],
         `${jobName}: fetch-depth: 0 が無いと merge-base を計算できず判定が常に無効化される`,
       ).toBe(0);
+    },
+  );
+
+  it.each(Object.keys(SCOPED_JOBS))(
+    "%s job はscope中だけsparseにし、検証前に完全なworktreeへ戻す",
+    (jobName) => {
+      const steps = readWorkflowFile("ci.yml").jobs?.[jobName]?.steps ?? [];
+      const checkout = steps.find((step) =>
+        step.uses?.startsWith("actions/checkout@"),
+      );
+      expect(checkout?.with?.filter, `${jobName}: blob filter が無い`).toBe(
+        "blob:none",
+      );
+      expect(checkout?.with?.["sparse-checkout-cone-mode"]).toBe(false);
+      const sparsePaths = String(checkout?.with?.["sparse-checkout"] ?? "")
+        .split("\n")
+        .map((path) => path.trim())
+        .filter(Boolean);
+      expect(sparsePaths).toEqual(
+        expect.arrayContaining([
+          "/.github/scripts/verification-scope.mjs",
+          "/.npmrc",
+          "/.nvmrc",
+          "/package.json",
+          "/pnpm-lock.yaml",
+          "/pnpm-workspace.yaml",
+        ]),
+      );
+
+      const expectedMaterializeCommand =
+        jobName === "e2e"
+          ? 'git -c safe.directory="$GITHUB_WORKSPACE" sparse-checkout disable'
+          : "git sparse-checkout disable";
+      const materialize = steps.find(
+        (step) => step.run?.trim() === expectedMaterializeCommand,
+      );
+      expect(
+        materialize,
+        `${jobName}: 完全worktree復元stepが無い`,
+      ).toBeDefined();
+      expect(materialize?.if).toBe("steps.scope.outputs.setup == 'true'");
+      expect(steps.indexOf(materialize as Step)).toBeGreaterThan(
+        steps.findIndex((step) => step.id === SCOPE_STEP_ID),
+      );
+      expect(steps.indexOf(materialize as Step)).toBeLessThan(
+        steps.findIndex((step) => step.run?.includes("pnpm install")),
+      );
     },
   );
 
@@ -1374,6 +1448,11 @@ describe("verification-scope の分類契約 (#491)", () => {
     // [説明, パス, 期待する分類]
     ["仕様書", "documents/spec/game-flow.md", "documentation"],
     ["ルートの md", "CLAUDE.md", "documentation"],
+    [
+      "immutable pre-cutover fixture",
+      "documents/fixtures/railway-pre-cutover.json",
+      "unit-test",
+    ],
     ["単体テスト", "src/domain/game/engine.test.ts", "unit-test"],
     ["コンポーネントテスト", "src/components/game/Board.test.tsx", "unit-test"],
     [
@@ -1486,7 +1565,9 @@ describe("verification-scope の分類契約 (#491)", () => {
 describe("テスト入力資産をdocs-onlyで黙殺しない (#745)", () => {
   /**
    * テストコードがどう解決しているかに関係なく、文字列リテラルとして現れる
-   * リポジトリ相対の docs/documents/README/CHANGELOG 入力を集める。
+   * リポジトリ相対の docs/documents/README/CHANGELOG 入力を集める。テストが
+   * importする検証契約モジュールに入力パス定数がある場合は、そのモジュールも
+   * 明示的に走査する。
    *
    * `resolve(process.cwd(), "…")`、`readFileSync("…")`、`new URL("…", import.meta.url)`、
    * JSON import、ディレクトリコピーのどれかへ限定すると、新しい参照形式を追加した
@@ -1508,6 +1589,19 @@ describe("テスト入力資産をdocs-onlyで黙殺しない (#745)", () => {
         ? relativePath.replace(/\/$/, "")
         : null;
     };
+    const collect = (file: string) => {
+      const source = readFileSync(file, "utf8");
+      for (const match of source.matchAll(/(["'])([^"'\\\n]+)\1/g)) {
+        const literal = match[2];
+        if (
+          !/(^|\/)(?:docs|documents)\//.test(literal) &&
+          !/^(?:README|CHANGELOG)\.md$/.test(literal)
+        )
+          continue;
+        const path = sourcePath(file, literal);
+        if (path) found.add(path);
+      }
+    };
     const walk = (dir: string) => {
       for (const entry of readdirSync(dir, { withFileTypes: true })) {
         const file = resolve(dir, entry.name);
@@ -1520,22 +1614,16 @@ describe("テスト入力資産をdocs-onlyで黙殺しない (#745)", () => {
         // このファイル自身は分類テストの入力データとしてパスを並べるため除外する。
         // 判定対象はあくまで「他のテストが参照している入力資産」。
         if (entry.name === "ci-workflow.test.ts") continue;
-        const source = readFileSync(file, "utf8");
-        for (const match of source.matchAll(/(["'])([^"'\\\n]+)\1/g)) {
-          const literal = match[2];
-          if (
-            !/(^|\/)(?:docs|documents)\//.test(literal) &&
-            !/^(?:README|CHANGELOG)\.md$/.test(literal)
-          )
-            continue;
-          const path = sourcePath(file, literal);
-          if (path) found.add(path);
-        }
+        collect(file);
       }
     };
     // server/ のrunbook、src/ のJSON import、e2e/ のfixtureを同じ検査対象にする。
     for (const root of ["server", "src", "e2e"])
       walk(resolve(repositoryRoot, root));
+    // railway-iac-migration.test.ts が import する契約モジュールのfixture定数も検査する。
+    collect(
+      resolve(repositoryRoot, "scripts/railway-iac-migration-contract.ts"),
+    );
     return [...found];
   }
 
@@ -1552,6 +1640,7 @@ describe("テスト入力資産をdocs-onlyで黙殺しない (#745)", () => {
         "documents/guides/railway-online-deploy-runbook.md",
         "documents/assets/ui-refresh/manifest.json",
         "documents/assets/ui-refresh",
+        "documents/fixtures/railway-pre-cutover.json",
       ]),
     );
 
@@ -1586,6 +1675,7 @@ describe("テスト入力資産をdocs-onlyで黙殺しない (#745)", () => {
     "documents/assets/ui-refresh/manifest.json",
     "documents/assets/ui-refresh/originals/lobby.png",
     "documents/assets/ui-refresh/originals/new-reference.png",
+    "documents/fixtures/railway-pre-cutover.json",
     "README.md",
     "CHANGELOG.md",
     "docs/四兄弟麻雀ルール.md",
@@ -2296,6 +2386,157 @@ describe("マージ後 push のスキップ前提を実行時に検証する (#4
     });
   });
 
+  it("成功したPR checkを見つけたら後続の同名runを照会しない", async () => {
+    const paths: string[] = [];
+    const dependencies = happyPath({
+      apiError: "/actions/runs/456",
+      checkRuns: {
+        check_runs: [
+          {
+            name: CHECK,
+            conclusion: "success",
+            app: { slug: "github-actions" },
+            details_url: "https://github.com/o/r/actions/runs/123/job/1",
+          },
+          {
+            name: CHECK,
+            conclusion: "success",
+            app: { slug: "github-actions" },
+            details_url: "https://github.com/o/r/actions/runs/456/job/2",
+          },
+        ],
+      },
+    });
+    const result = await resolvePostMergeEvidence({
+      repo: REPO,
+      sha: SHA,
+      before: BEFORE,
+      forced: false,
+      branch: "main",
+      checkName: CHECK,
+      api: async (path) => {
+        paths.push(path);
+        return dependencies.api(path);
+      },
+    });
+
+    expect(result).toEqual({
+      skip: true,
+      reason: "verified-by-merged-pull-request",
+    });
+    expect(paths).not.toContain(`/repos/${REPO}/actions/runs/456`);
+  });
+
+  it("同じActions run IDは一度だけ照会し、重複checkの成功判定は保持する", async () => {
+    const paths: string[] = [];
+    const dependencies = happyPath({
+      checkRuns: {
+        check_runs: [
+          {
+            name: CHECK,
+            conclusion: "failure",
+            app: { slug: "github-actions" },
+            details_url: "https://github.com/o/r/actions/runs/123/job/1",
+          },
+          {
+            name: CHECK,
+            conclusion: "success",
+            app: { slug: "github-actions" },
+            details_url: "https://github.com/o/r/actions/runs/123/job/2",
+          },
+        ],
+      },
+    });
+    const result = await resolvePostMergeEvidence({
+      repo: REPO,
+      sha: SHA,
+      before: BEFORE,
+      forced: false,
+      branch: "main",
+      checkName: CHECK,
+      api: async (path) => {
+        paths.push(path);
+        return dependencies.api(path);
+      },
+    });
+
+    expect(result.skip).toBe(true);
+    expect(
+      paths.filter((path) => path === `/repos/${REPO}/actions/runs/123`),
+    ).toHaveLength(1);
+  });
+
+  it("Actions run照会の件数上限を超えた未確認証拠はスキップに使わない", async () => {
+    const paths: string[] = [];
+    const dependencies = happyPath({
+      checkRuns: {
+        check_runs: Array.from(
+          { length: CHECK_RUN_EVIDENCE_MAX_LOOKUPS + 1 },
+          (_, index) => ({
+            name: CHECK,
+            conclusion: "failure",
+            app: { slug: "github-actions" },
+            details_url: `https://github.com/o/r/actions/runs/${1000 + index}/job/1`,
+          }),
+        ),
+      },
+      workflowRun: {
+        event: "push",
+        path: ".github/workflows/ci.yml",
+        head_sha: HEAD,
+        conclusion: "failure",
+      },
+    });
+    const result = await resolvePostMergeEvidence({
+      repo: REPO,
+      sha: SHA,
+      before: BEFORE,
+      forced: false,
+      branch: "main",
+      checkName: CHECK,
+      api: async (path) => {
+        paths.push(path);
+        return dependencies.api(path);
+      },
+    });
+
+    expect(result).toEqual({
+      skip: false,
+      reason: "own-check-run-not-successful",
+    });
+    expect(
+      paths.filter((path) => /\/actions\/runs\/\d+$/.test(path)),
+    ).toHaveLength(CHECK_RUN_EVIDENCE_MAX_LOOKUPS);
+  });
+
+  it("Actions run照会の累積timeoutで応答しないAPIをfail-closedする", async () => {
+    vi.useFakeTimers();
+    try {
+      const dependencies = happyPath();
+      const resultPromise = resolvePostMergeEvidence({
+        repo: REPO,
+        sha: SHA,
+        before: BEFORE,
+        forced: false,
+        branch: "main",
+        checkName: CHECK,
+        api: async (path) => {
+          if (path === `/repos/${REPO}/actions/runs/123`)
+            return new Promise(() => {});
+          return dependencies.api(path);
+        },
+      });
+
+      await vi.advanceTimersByTimeAsync(CHECK_RUN_EVIDENCE_TIMEOUT_MS);
+      await expect(resultPromise).resolves.toEqual({
+        skip: false,
+        reason: "check-runs-api-failed",
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it.each([
     [
       "force push",
@@ -2640,7 +2881,7 @@ describe("マージ後証拠の外部 I/O timeout (#496)", () => {
   it("GitHub API fetch に短い AbortSignal timeout を渡す", async () => {
     const fetchMock = vi
       .fn()
-      .mockResolvedValue({ ok: true, json: async () => [] });
+      .mockResolvedValue(new Response("[]", { status: 200 }));
     const timeoutMock = vi.fn().mockReturnValue({ aborted: false });
     vi.stubEnv("GITHUB_TOKEN", "test-token");
     vi.stubGlobal("fetch", fetchMock);
@@ -2656,6 +2897,63 @@ describe("マージ後証拠の外部 I/O timeout (#496)", () => {
       vi.unstubAllEnvs();
     }
   });
+
+  it("GitHub API の非2xx本文をcancelし、変更パス判定はfail-openする", async () => {
+    const cancel = vi.fn().mockRejectedValue(new Error("cancel failed"));
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 403,
+      body: { cancel },
+    });
+    vi.stubEnv("GITHUB_TOKEN", "test-token");
+    vi.stubGlobal("fetch", fetchMock);
+    try {
+      await expect(
+        resolveChangedPaths({
+          repo: "AutoDevJapan/FourBrosMahjong",
+          baseSha: "a".repeat(40),
+          headSha: "b".repeat(40),
+          local: () => null,
+          api: githubApi,
+        }),
+      ).resolves.toEqual({ paths: null, source: "unresolved" });
+      expect(cancel).toHaveBeenCalledOnce();
+    } finally {
+      vi.unstubAllGlobals();
+      vi.unstubAllEnvs();
+    }
+  });
+
+  it.each([
+    [
+      "上限超過",
+      `{"files":[{"filename":"src/app.ts","patch":"${"x".repeat(GITHUB_API_RESPONSE_MAX_BYTES)}"}]}`,
+    ],
+    ["不正JSON", '{"files":'],
+  ])(
+    "Compare API fallbackの%s本文は全検証側へfail-openする",
+    async (_label, body) => {
+      const fetchMock = vi
+        .fn()
+        .mockResolvedValue(new Response(body, { status: 200 }));
+      vi.stubEnv("GITHUB_TOKEN", "test-token");
+      vi.stubGlobal("fetch", fetchMock);
+      try {
+        await expect(
+          resolveChangedPaths({
+            repo: "AutoDevJapan/FourBrosMahjong",
+            baseSha: "a".repeat(40),
+            headSha: "b".repeat(40),
+            local: () => null,
+            api: githubApi,
+          }),
+        ).resolves.toEqual({ paths: null, source: "unresolved" });
+      } finally {
+        vi.unstubAllGlobals();
+        vi.unstubAllEnvs();
+      }
+    },
+  );
 });
 
 /**

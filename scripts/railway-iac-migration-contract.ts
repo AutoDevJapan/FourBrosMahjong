@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import ts from "typescript";
 
 const RAILWAY_IAC_EVIDENCE_SCHEMA_VERSION = 1 as const;
@@ -6,11 +7,30 @@ const RAILWAY_IAC_EVIDENCE_MAX_FUTURE_SKEW_MS = 30 * 1_000;
 const RAILWAY_IAC_MINIMUM_CLI_VERSION = "5.42.1";
 const REVIEWED_RAILWAY_SDK_SCHEMA_REVISION =
   "c1b6ea8dd3e815e57257b1f17637e59d31db73b5";
+export const RAILWAY_LEGACY_FIXTURE_PATH =
+  "documents/fixtures/railway-pre-cutover.json";
+// SHA-256 of RAILWAY_LEGACY_FIXTURE_PATH. The fixture is the immutable
+// pre-cutover artifact; the current root railway.json is a separate target.
+export const RAILWAY_LEGACY_FIXTURE_SHA256 =
+  "2d772749d488b99e39f2428d80e9f8301214312835bc3d744250ec9d6742d84d";
+// This is the last known pre-cutover effective legacy baseline for #742. The
+// repository's desired runtime healthcheck is /readyz (#726), but changing the
+// checked-in file must not rewrite the external pre-cutover evidence expected
+// by the separate IaC ownership-cutover contract.
 const RAILWAY_LEGACY_KNOWN_CONFIG = Object.freeze({
   builder: "DOCKERFILE",
   dockerfilePath: "Dockerfile",
   startCommand: "node --import tsx server/start.ts",
   healthcheckPath: "/healthz",
+  healthcheckTimeoutSeconds: 60,
+  restartPolicyType: "ON_FAILURE",
+  restartPolicyMaxRetries: 10,
+});
+const RAILWAY_CURRENT_KNOWN_CONFIG = Object.freeze({
+  builder: "DOCKERFILE",
+  dockerfilePath: "Dockerfile",
+  startCommand: "node --import tsx server/start.ts",
+  healthcheckPath: "/readyz",
   healthcheckTimeoutSeconds: 60,
   restartPolicyType: "ON_FAILURE",
   restartPolicyMaxRetries: 10,
@@ -52,8 +72,12 @@ export interface RailwayIacFilesystemEvidence {
   generatedIacPath: string | null;
   generatedIacSha256: string | null;
   generatedIacSecretSafe: boolean | null;
-  legacyRepositoryFilePresent: boolean;
-  legacyRepositoryFileSha256: string | null;
+  currentRepositoryFilePresent: boolean;
+  currentRepositoryFileSha256: string | null;
+  currentRepositoryFileContent: string | null;
+  legacyFixturePresent: boolean;
+  legacyFixtureSha256: string | null;
+  legacyFixtureContent: string | null;
 }
 
 const ROOT_KEYS = [
@@ -314,6 +338,69 @@ function configEquals(
       ? sameStrings(leftValue, rightValue)
       : leftValue === rightValue;
   });
+}
+
+const RAILWAY_FILE_KEYS = ["$schema", "build", "deploy"] as const;
+const RAILWAY_BUILD_KEYS = ["builder", "dockerfilePath"] as const;
+const RAILWAY_DEPLOY_KEYS = [
+  "startCommand",
+  "healthcheckPath",
+  "healthcheckTimeout",
+  "restartPolicyType",
+  "restartPolicyMaxRetries",
+] as const;
+
+type RailwayKnownConfig = {
+  builder: string;
+  dockerfilePath: string;
+  startCommand: string;
+  healthcheckPath: string;
+  healthcheckTimeoutSeconds: number;
+  restartPolicyType: string;
+  restartPolicyMaxRetries: number;
+};
+
+function sha256(source: string): string {
+  return createHash("sha256").update(source, "utf8").digest("hex");
+}
+
+function railwayJsonContentIsKnown(
+  source: string | null,
+  expected: RailwayKnownConfig,
+): boolean {
+  if (source === null || Buffer.byteLength(source, "utf8") > 16 * 1_024)
+    return false;
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(source);
+  } catch {
+    return false;
+  }
+  if (!hasExactKeys(parsed, RAILWAY_FILE_KEYS)) return false;
+
+  const build = parsed.build;
+  const deploy = parsed.deploy;
+  return (
+    parsed.$schema === "https://railway.com/railway.schema.json" &&
+    hasExactKeys(build, RAILWAY_BUILD_KEYS) &&
+    build.builder === expected.builder &&
+    build.dockerfilePath === expected.dockerfilePath &&
+    hasExactKeys(deploy, RAILWAY_DEPLOY_KEYS) &&
+    deploy.startCommand === expected.startCommand &&
+    deploy.healthcheckPath === expected.healthcheckPath &&
+    deploy.healthcheckTimeout === expected.healthcheckTimeoutSeconds &&
+    deploy.restartPolicyType === expected.restartPolicyType &&
+    deploy.restartPolicyMaxRetries === expected.restartPolicyMaxRetries
+  );
+}
+
+function legacyFixtureContentIsKnown(source: string | null): boolean {
+  return railwayJsonContentIsKnown(source, RAILWAY_LEGACY_KNOWN_CONFIG);
+}
+
+function currentRepositoryFileContentIsKnown(source: string | null): boolean {
+  return railwayJsonContentIsKnown(source, RAILWAY_CURRENT_KNOWN_CONFIG);
 }
 
 function legacyKnownFieldsMatch(value: Record<string, unknown>): boolean {
@@ -1078,6 +1165,22 @@ export function generatedIacSourceIsSecretSafe(source: string): boolean {
       safe = false;
       return;
     }
+    if (
+      ts.isShorthandPropertyAssignment(node) &&
+      secretLikePropertyName.test(node.name.text)
+    ) {
+      safe = false;
+      return;
+    }
+    if (
+      (ts.isMethodDeclaration(node) ||
+        ts.isGetAccessorDeclaration(node) ||
+        ts.isSetAccessorDeclaration(node)) &&
+      secretLikePropertyName.test(propertyNameText(node.name) ?? "")
+    ) {
+      safe = false;
+      return;
+    }
     if (ts.isCallExpression(node)) {
       if (!callExpressionIsAllowed(node)) {
         safe = false;
@@ -1092,6 +1195,16 @@ export function generatedIacSourceIsSecretSafe(source: string): boolean {
     ) {
       safe = false;
       return;
+    }
+    if (ts.isElementAccessExpression(node)) {
+      if (
+        node.argumentExpression === undefined ||
+        !ts.isStringLiteral(node.argumentExpression) ||
+        !isBoundedName(node.argumentExpression.text)
+      ) {
+        safe = false;
+        return;
+      }
     }
     if (
       (ts.isPropertyAccessExpression(node) ||
@@ -1294,7 +1407,25 @@ export function validateRailwayIacMigrationEvidence(
   ) {
     reasons.push("secret-safety-unverified");
   }
-  if (!filesystem.legacyRepositoryFilePresent)
+
+  const currentRepositoryFileSource = filesystem.currentRepositoryFileContent;
+  const currentRepositoryFileSha256 = filesystem.currentRepositoryFileSha256;
+  const currentRepositoryFileValid =
+    filesystem.currentRepositoryFilePresent === true &&
+    typeof currentRepositoryFileSource === "string" &&
+    isSha256(currentRepositoryFileSha256) &&
+    sha256(currentRepositoryFileSource) === currentRepositoryFileSha256 &&
+    currentRepositoryFileContentIsKnown(currentRepositoryFileSource) &&
+    currentRepositoryFileSha256 !== RAILWAY_LEGACY_FIXTURE_SHA256;
+  const legacyFixtureHashValid =
+    filesystem.legacyFixturePresent === true &&
+    filesystem.legacyFixtureSha256 === RAILWAY_LEGACY_FIXTURE_SHA256 &&
+    typeof filesystem.legacyFixtureContent === "string" &&
+    sha256(filesystem.legacyFixtureContent) === filesystem.legacyFixtureSha256;
+  const legacyFixtureValid =
+    legacyFixtureHashValid &&
+    legacyFixtureContentIsKnown(filesystem.legacyFixtureContent);
+  if (!currentRepositoryFileValid || !legacyFixtureValid)
     reasons.push("legacy-config-missing");
 
   const cutover = input.ownershipCutover;
@@ -1304,7 +1435,11 @@ export function validateRailwayIacMigrationEvidence(
     !targetFieldsMatch(cutover, target) ||
     !isSha256(cutover.evidenceSha256) ||
     !isSha256(cutover.legacyFileSha256) ||
-    cutover.legacyFileSha256 !== filesystem.legacyRepositoryFileSha256 ||
+    !currentRepositoryFileValid ||
+    !legacyFixtureValid ||
+    cutover.legacyFileSha256 !== RAILWAY_LEGACY_FIXTURE_SHA256 ||
+    cutover.legacyFileSha256 !== filesystem.legacyFixtureSha256 ||
+    cutover.legacyFileSha256 === filesystem.currentRepositoryFileSha256 ||
     cutover.method !== "authorized-manual-clear" ||
     cutover.configFileSettingCleared !== true ||
     cutover.repositoryFileRetained !== true ||
