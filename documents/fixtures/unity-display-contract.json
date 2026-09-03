@@ -1,0 +1,185 @@
+{
+  "schema": "com.autodevjapan.four-bros-mahjong/unity-display",
+  "schemaVersion": 1,
+  "source": {
+    "messageTypes": ["session", "snapshot"],
+    "snapshotVersion": 42,
+    "ruleAuthority": "server-and-domain",
+    "displayAuthority": "unity-client"
+  },
+  "rotationCases": [
+    {
+      "name": "east-1",
+      "before": {
+        "east": "p0",
+        "south": "p1",
+        "west": "p2",
+        "bench": "p3"
+      },
+      "after": {
+        "east": "p1",
+        "south": "p2",
+        "west": "p3",
+        "bench": "p0"
+      }
+    },
+    {
+      "name": "east-2",
+      "before": {
+        "east": "p1",
+        "south": "p2",
+        "west": "p3",
+        "bench": "p0"
+      },
+      "after": {
+        "east": "p2",
+        "south": "p3",
+        "west": "p0",
+        "bench": "p1"
+      }
+    },
+    {
+      "name": "east-3",
+      "before": {
+        "east": "p2",
+        "south": "p3",
+        "west": "p0",
+        "bench": "p1"
+      },
+      "after": {
+        "east": "p3",
+        "south": "p0",
+        "west": "p1",
+        "bench": "p2"
+      }
+    },
+    {
+      "name": "east-4-to-south-1",
+      "before": {
+        "east": "p3",
+        "south": "p0",
+        "west": "p1",
+        "bench": "p2"
+      },
+      "after": {
+        "east": "p0",
+        "south": "p1",
+        "west": "p2",
+        "bench": "p3"
+      }
+    }
+  ],
+  "progressionCases": [
+    {
+      "name": "renchan-keeps-seats",
+      "outcome": "dealerContinues",
+      "beforeRound": {
+        "wind": "east",
+        "handNumber": 1,
+        "honba": 0
+      },
+      "afterRound": {
+        "wind": "east",
+        "handNumber": 1,
+        "honba": 1
+      },
+      "beforeSeats": {
+        "east": "p0",
+        "south": "p1",
+        "west": "p2",
+        "bench": "p3"
+      },
+      "afterSeats": {
+        "east": "p0",
+        "south": "p1",
+        "west": "p2",
+        "bench": "p3"
+      },
+      "pointsRemainWithPlayer": true
+    },
+    {
+      "name": "east-4-to-south-1",
+      "outcome": "dealerPasses",
+      "beforeRound": {
+        "wind": "east",
+        "handNumber": 4,
+        "honba": 0
+      },
+      "afterRound": {
+        "wind": "south",
+        "handNumber": 1,
+        "honba": 0
+      },
+      "beforeSeats": {
+        "east": "p3",
+        "south": "p0",
+        "west": "p1",
+        "bench": "p2"
+      },
+      "afterSeats": {
+        "east": "p0",
+        "south": "p1",
+        "west": "p2",
+        "bench": "p3"
+      },
+      "pointsRemainWithPlayer": true
+    }
+  ],
+  "visualCases": [
+    {
+      "id": "river-wrap-and-riichi",
+      "sourceComponent": "Discards",
+      "assertions": {
+        "directionalSlot": "self-left-across-right",
+        "gridWrap": true,
+        "riichiTileIsSideways": true,
+        "discardOrderIsPreserved": true
+      }
+    },
+    {
+      "id": "hand-deal-draw-replacement-meld",
+      "sourceComponent": "HandTileAnimation",
+      "assertions": {
+        "transitionKinds": ["deal", "draw", "replacement", "meld"],
+        "drawEntranceDurationMs": 200,
+        "dealDelayIsDeterministic": true,
+        "tileOrderIsNotUsedForDomainDecisions": true
+      }
+    },
+    {
+      "id": "major-effects",
+      "sourceComponent": "gameEffect",
+      "assertions": {
+        "kinds": [
+          "discard",
+          "riichi",
+          "pon",
+          "kan",
+          "tsumo",
+          "ron",
+          "draw",
+          "roundEnd"
+        ],
+        "effectIsDerivedFromCommittedView": true,
+        "resolutionIsAssertive": true
+      }
+    },
+    {
+      "id": "bench-warmers",
+      "sourceComponent": "PlayerSlot",
+      "assertions": {
+        "slotCount": 4,
+        "seatedCount": 3,
+        "benchCount": 1,
+        "benchHasNoSeatWind": true,
+        "pointsRemainWithPlayer": true
+      }
+    }
+  ],
+  "negativeCases": [
+    "Unity must not calculate legal actions, shanten, furiten, score, dora, or settlement.",
+    "Unity must not copy OSS or third-party assets without a separately verified license.",
+    "A stale snapshot version must not overwrite a newer applied snapshot in the same room.",
+    "Reload/resume credentials are transport concerns and must not be embedded in a display fixture."
+  ]
+}
