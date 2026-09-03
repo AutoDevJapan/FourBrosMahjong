@@ -585,9 +585,7 @@ describe("OnlineLobby の参加条件", () => {
 
     expect(nameInput).toHaveValue("麻雀😀");
     expect(nameInput).toHaveAttribute("aria-invalid", "false");
-    expect(nameInput).toHaveAccessibleDescription(
-      /表示名は入力されています/,
-    );
+    expect(nameInput).toHaveAccessibleDescription(/表示名は入力されています/);
     expect(createButton).toBeEnabled();
     expect(joinButton).toBeEnabled();
     expect(joinButton).toHaveAccessibleDescription(
