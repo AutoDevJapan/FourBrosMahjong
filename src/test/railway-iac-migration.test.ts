@@ -911,6 +911,54 @@ describe("Railway IaC parity snapshot contract (#742)", () => {
     ).toBe(false);
   });
 
+  it("keeps resource and context approvals bound to their lexical declaration", () => {
+    expect(
+      generatedIacSourceIsSecretSafe(
+        `import { postgres, service } from "railway/iac"; { const db = postgres("db"); } service("fixture", { env: { VALUE: db.env.SECRET } });`,
+      ),
+    ).toBe(false);
+    expect(
+      generatedIacSourceIsSecretSafe(
+        `import { postgres, ref, service } from "railway/iac"; { const db = postgres("db"); } service("fixture", { env: { VALUE: ref(db, "output") } });`,
+      ),
+    ).toBe(false);
+    expect(
+      generatedIacSourceIsSecretSafe(
+        `import { postgres, project } from "railway/iac"; { const db = postgres("db"); } project("fixture", { resources: [db] });`,
+      ),
+    ).toBe(false);
+    expect(
+      generatedIacSourceIsSecretSafe(
+        `import { postgres, service } from "railway/iac"; const db = postgres("db"); { service("fixture", { env: { VALUE: db.env.SECRET } }); }`,
+      ),
+    ).toBe(true);
+    expect(
+      generatedIacSourceIsSecretSafe(
+        `import { defineRailway, postgres, project, service } from "railway/iac"; const db = postgres("db"); export default defineRailway(function db() { return project("fixture", { resources: [] }); }); service("fixture", { env: { VALUE: db.env.SECRET } });`,
+      ),
+    ).toBe(true);
+    expect(
+      generatedIacSourceIsSecretSafe(
+        `import { defineRailway, postgres, service } from "railway/iac"; const db = postgres("db"); export default defineRailway(function db() { return service("fixture", { env: { VALUE: db.env.SECRET } }); });`,
+      ),
+    ).toBe(false);
+    expect(
+      generatedIacSourceIsSecretSafe(
+        `import { defineRailway, service } from "railway/iac"; export default defineRailway((...ctx) => service("fixture", { env: { VALUE: ctx.shared.SECRET } }));`,
+      ),
+    ).toBe(false);
+    expect(
+      generatedIacSourceIsSecretSafe(
+        `import { defineRailway, project } from "railway/iac"; export default defineRailway((ctx = {}) => project("fixture", { resources: [] }));`,
+      ),
+    ).toBe(false);
+    expect(
+      generatedIacSourceIsSecretSafe(
+        `import { defineRailway, project } from "railway/iac"; export default defineRailway(({ shared }) => project("fixture", { resources: [] }));`,
+      ),
+    ).toBe(false);
+  });
+
   it("keeps the checked-in legacy mapping at parity", () => {
     const railwayJson = JSON.parse(
       readFileSync(resolve(process.cwd(), "railway.json"), "utf8"),

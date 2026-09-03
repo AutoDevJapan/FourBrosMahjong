@@ -470,115 +470,225 @@ export function generatedIacSourceIsSecretSafe(source: string): boolean {
     "service",
     "volume",
   ]);
-  const resourceBindings = new Set<string>();
-  const nonResourceBindings = new Set<string>();
+  type BindingKind = "import" | "non-resource" | "resource" | "trusted-context";
+  type Binding = {
+    name: string;
+    kind: BindingKind;
+    declaration: ts.Node;
+  };
+  type Scope = {
+    parent: Scope | null;
+    functionScope: Scope;
+    bindings: Map<string, Binding>;
+  };
+  const createScope = (
+    parent: Scope | null,
+    isFunctionScope = false,
+  ): Scope => {
+    const scope = {
+      parent,
+      functionScope: undefined as unknown as Scope,
+      bindings: new Map<string, Binding>(),
+    };
+    scope.functionScope = isFunctionScope
+      ? scope
+      : (parent?.functionScope ?? scope);
+    return scope;
+  };
+  const sourceScope = createScope(null, true);
+  const scopeAtNode = new Map<ts.Node, Scope>();
+  const variableBindings = new Map<ts.VariableDeclaration, Binding>();
+  const parameterBindings = new Map<ts.ParameterDeclaration, Binding>();
+  const functionLikeNodes: Array<ts.ArrowFunction | ts.FunctionExpression> = [];
   let unsupportedBindingPattern = false;
-  const addBindingNames = (
-    name: ts.BindingName,
-    destination: Set<string>,
-  ): void => {
-    if (ts.isIdentifier(name)) {
-      destination.add(name.text);
+  const declareBinding = (
+    scope: Scope,
+    name: string,
+    kind: BindingKind,
+    declaration: ts.Node,
+  ): Binding => {
+    const existing = scope.bindings.get(name);
+    if (existing !== undefined) {
+      unsupportedBindingPattern = true;
+      return existing;
+    }
+    const binding: Binding = { name, kind, declaration };
+    scope.bindings.set(name, binding);
+    return binding;
+  };
+  const isSupportedParameter = (node: ts.ParameterDeclaration): boolean =>
+    ts.isIdentifier(node.name) &&
+    node.dotDotDotToken === undefined &&
+    node.initializer === undefined &&
+    node.questionToken === undefined;
+  function collectParameter(
+    node: ts.ParameterDeclaration,
+    functionScope: Scope,
+  ): void {
+    scopeAtNode.set(node, functionScope);
+    if (!isSupportedParameter(node)) unsupportedBindingPattern = true;
+    if (ts.isIdentifier(node.name)) {
+      scopeAtNode.set(node.name, functionScope);
+      const binding = declareBinding(
+        functionScope,
+        node.name.text,
+        "non-resource",
+        node,
+      );
+      parameterBindings.set(node, binding);
+    }
+    ts.forEachChild(node, (child) => {
+      if (child === node.name) {
+        scopeAtNode.set(child, functionScope);
+        return;
+      }
+      collectScopesAndBindings(child, functionScope);
+    });
+  }
+  function collectFunctionLike(
+    node: ts.ArrowFunction | ts.FunctionExpression,
+    parentScope: Scope,
+  ): void {
+    scopeAtNode.set(node, parentScope);
+    functionLikeNodes.push(node);
+    const functionScope = createScope(parentScope, true);
+    if (ts.isFunctionExpression(node) && node.name !== undefined) {
+      scopeAtNode.set(node.name, functionScope);
+      declareBinding(functionScope, node.name.text, "non-resource", node.name);
+    }
+    for (const parameter of node.parameters) {
+      collectParameter(parameter, functionScope);
+    }
+    ts.forEachChild(node, (child) => {
+      if (
+        (ts.isFunctionExpression(node) && child === node.name) ||
+        node.parameters.some((parameter) => parameter === child)
+      ) {
+        return;
+      }
+      collectScopesAndBindings(child, functionScope);
+    });
+  }
+  function collectScopesAndBindings(node: ts.Node, parentScope: Scope): void {
+    scopeAtNode.set(node, parentScope);
+    if (ts.isArrowFunction(node) || ts.isFunctionExpression(node)) {
+      collectFunctionLike(node, parentScope);
       return;
     }
-    for (const element of name.elements) {
-      if (ts.isBindingElement(element)) {
-        addBindingNames(element.name, destination);
+    if (ts.isBlock(node) || ts.isCaseBlock(node)) {
+      const blockScope = createScope(parentScope);
+      scopeAtNode.set(node, blockScope);
+      ts.forEachChild(node, (child) =>
+        collectScopesAndBindings(child, blockScope),
+      );
+      return;
+    }
+    if (ts.isVariableDeclaration(node)) {
+      const declarationList = node.parent;
+      const isVarDeclaration =
+        ts.isVariableDeclarationList(declarationList) &&
+        (declarationList.flags & (ts.NodeFlags.Const | ts.NodeFlags.Let)) === 0;
+      const declarationScope = isVarDeclaration
+        ? parentScope.functionScope
+        : parentScope;
+      if (!ts.isIdentifier(node.name)) {
+        unsupportedBindingPattern = true;
+      } else {
+        scopeAtNode.set(node.name, parentScope);
+        const binding = declareBinding(
+          declarationScope,
+          node.name.text,
+          "non-resource",
+          node,
+        );
+        variableBindings.set(node, binding);
       }
+      ts.forEachChild(node, (child) => {
+        if (child === node.name) {
+          scopeAtNode.set(child, parentScope);
+          return;
+        }
+        collectScopesAndBindings(child, parentScope);
+      });
+      return;
     }
+    if (ts.isParameter(node)) {
+      collectParameter(node, parentScope.functionScope);
+      return;
+    }
+    if (ts.isImportDeclaration(node)) return;
+    ts.forEachChild(node, (child) =>
+      collectScopesAndBindings(child, parentScope),
+    );
+  }
+  scopeAtNode.set(sourceFile, sourceScope);
+  for (const statement of sourceFile.statements) {
+    collectScopesAndBindings(statement, sourceScope);
+  }
+  const resolveBinding = (node: ts.Identifier): Binding | null => {
+    let scope = scopeAtNode.get(node);
+    while (scope !== undefined) {
+      const binding = scope.bindings.get(node.text);
+      if (binding !== undefined) return binding;
+      scope = scope.parent ?? undefined;
+    }
+    return null;
   };
-  // Fail closed for the whole source when a local binding reuses an approved
-  // name; partial scope analysis could otherwise approve the wrong binding.
-  const shadowedImportedBindings = new Set<string>();
-  const trustedContextBindings = new Set<string>();
-  const shadowedContextBindings = new Set<string>();
-  const isTrustedContextParameter = (
-    node: ts.ParameterDeclaration,
-  ): boolean => {
-    const callback = node.parent;
-    if (
-      (!ts.isArrowFunction(callback) && !ts.isFunctionExpression(callback)) ||
-      callback.parameters[0] !== node
-    ) {
-      return false;
+  for (const statement of sourceFile.statements) {
+    if (!ts.isImportDeclaration(statement)) continue;
+    const clause = statement.importClause;
+    if (clause?.namedBindings === undefined) continue;
+    if (!ts.isNamedImports(clause.namedBindings)) continue;
+    for (const element of clause.namedBindings.elements) {
+      declareBinding(sourceScope, element.name.text, "import", element.name);
+      scopeAtNode.set(element.name, sourceScope);
     }
-    const call = callback.parent;
+  }
+  for (const [node, binding] of variableBindings) {
+    const initializer = node.initializer;
+    if (
+      initializer !== undefined &&
+      ts.isCallExpression(initializer) &&
+      ts.isIdentifier(initializer.expression) &&
+      resourceFactoryNames.has(initializer.expression.text) &&
+      resolveBinding(initializer.expression)?.kind === "import"
+    ) {
+      binding.kind = "resource";
+    }
+  }
+  const isDefineRailwayCallback = (
+    node: ts.ArrowFunction | ts.FunctionExpression,
+  ): boolean => {
+    const call = node.parent;
     return (
       ts.isCallExpression(call) &&
-      call.arguments[0] === callback &&
+      call.arguments[0] === node &&
       ts.isIdentifier(call.expression) &&
       call.expression.text === "defineRailway" &&
-      importedBindings.has("defineRailway")
+      resolveBinding(call.expression)?.kind === "import"
     );
   };
-  const collectBindingShadows = (node: ts.Node): void => {
-    if (ts.isFunctionExpression(node) && node.name !== undefined) {
-      if (importedBindings.has(node.name.text)) {
-        shadowedImportedBindings.add(node.name.text);
-      }
-      shadowedContextBindings.add(node.name.text);
+  for (const callback of functionLikeNodes) {
+    if (!isDefineRailwayCallback(callback)) continue;
+    if (
+      callback.parameters.length > 1 ||
+      callback.parameters.some((parameter) => !isSupportedParameter(parameter))
+    ) {
+      unsupportedBindingPattern = true;
+      continue;
     }
-    if (ts.isVariableDeclaration(node)) {
-      if (!ts.isIdentifier(node.name)) {
-        unsupportedBindingPattern = true;
-      } else {
-        if (importedBindings.has(node.name.text)) {
-          shadowedImportedBindings.add(node.name.text);
-        }
-        shadowedContextBindings.add(node.name.text);
-      }
-    }
-    if (ts.isParameter(node)) {
-      if (!ts.isIdentifier(node.name)) {
-        unsupportedBindingPattern = true;
-      } else {
-        if (importedBindings.has(node.name.text)) {
-          shadowedImportedBindings.add(node.name.text);
-        }
-        if (isTrustedContextParameter(node)) {
-          trustedContextBindings.add(node.name.text);
-        } else {
-          shadowedContextBindings.add(node.name.text);
-        }
-      }
-    }
-    ts.forEachChild(node, collectBindingShadows);
-  };
-  collectBindingShadows(sourceFile);
-  const isImportedBindingUsable = (name: string): boolean =>
-    importedBindings.has(name) && !shadowedImportedBindings.has(name);
-  const isTrustedContextBinding = (name: string): boolean =>
-    trustedContextBindings.has(name) &&
-    !shadowedContextBindings.has(name) &&
-    isImportedBindingUsable("defineRailway");
-  const collectResourceBindings = (node: ts.Node): void => {
-    if (ts.isVariableDeclaration(node)) {
-      if (!ts.isIdentifier(node.name)) unsupportedBindingPattern = true;
-      const isResourceDeclaration =
-        ts.isIdentifier(node.name) &&
-        node.initializer !== undefined &&
-        ts.isCallExpression(node.initializer) &&
-        ts.isIdentifier(node.initializer.expression) &&
-        resourceFactoryNames.has(node.initializer.expression.text) &&
-        isImportedBindingUsable(node.initializer.expression.text);
-      if (isResourceDeclaration) {
-        resourceBindings.add(node.name.text);
-      } else {
-        addBindingNames(node.name, nonResourceBindings);
-      }
-    }
-    if (ts.isParameter(node)) {
-      if (!ts.isIdentifier(node.name)) unsupportedBindingPattern = true;
-      addBindingNames(node.name, nonResourceBindings);
-    }
-    ts.forEachChild(node, collectResourceBindings);
-  };
-  collectResourceBindings(sourceFile);
-  // Destructuring can alias resource.env or ctx.shared without retaining
-  // provenance, so reject it instead of attempting incomplete flow analysis.
+    const parameter = callback.parameters[0];
+    const binding =
+      parameter === undefined ? undefined : parameterBindings.get(parameter);
+    if (binding !== undefined) binding.kind = "trusted-context";
+  }
+  // Destructuring, rest/default parameters, and other unsupported bindings
+  // cannot retain resource/context provenance, so reject the whole source.
   if (unsupportedBindingPattern) return false;
-  const isResourceBinding = (name: string): boolean =>
-    resourceBindings.has(name) && !nonResourceBindings.has(name);
+  const isResourceBinding = (node: ts.Node): boolean =>
+    ts.isIdentifier(node) && resolveBinding(node)?.kind === "resource";
+  const isTrustedContextBinding = (node: ts.Node): boolean =>
+    ts.isIdentifier(node) && resolveBinding(node)?.kind === "trusted-context";
   const unwrapParenthesizedExpression = (
     node: ts.Expression,
   ): ts.Expression => {
@@ -615,7 +725,7 @@ export function generatedIacSourceIsSecretSafe(source: string): boolean {
     path !== null &&
     path.names.length > 0 &&
     path.names.every((name) => isBoundedName(name));
-  const resourceEnvOwner = (node: ts.Node): string | null => {
+  const resourceEnvOwner = (node: ts.Node): Binding | null => {
     if (
       !ts.isPropertyAccessExpression(node) &&
       !ts.isElementAccessExpression(node)
@@ -627,17 +737,16 @@ export function generatedIacSourceIsSecretSafe(source: string): boolean {
       memberPathIsBounded(path) &&
       path.names[0] === "env" &&
       ts.isIdentifier(path.root) &&
-      isResourceBinding(path.root.text)
+      isResourceBinding(path.root)
     ) {
-      return path.root.text;
+      return resolveBinding(path.root);
     }
     return null;
   };
   const propertyUsesUnboundEnvironment = (node: ts.Node): boolean => {
     if (ts.isPropertyAccessExpression(node) && node.name.text === "env") {
       return !(
-        ts.isIdentifier(node.expression) &&
-        isResourceBinding(node.expression.text)
+        ts.isIdentifier(node.expression) && isResourceBinding(node.expression)
       );
     }
     if (ts.isElementAccessExpression(node)) {
@@ -645,8 +754,7 @@ export function generatedIacSourceIsSecretSafe(source: string): boolean {
       if (argument === undefined) return true;
       if (ts.isStringLiteral(argument) && argument.text === "env") {
         return !(
-          ts.isIdentifier(node.expression) &&
-          isResourceBinding(node.expression.text)
+          ts.isIdentifier(node.expression) && isResourceBinding(node.expression)
         );
       }
       if (!ts.isStringLiteral(argument) && !ts.isNumericLiteral(argument)) {
@@ -664,15 +772,17 @@ export function generatedIacSourceIsSecretSafe(source: string): boolean {
   };
   const refCallIsSafe = (node: ts.CallExpression): boolean =>
     node.arguments.length === 2 &&
-    isImportedBindingUsable("ref") &&
+    ts.isIdentifier(node.expression) &&
+    node.expression.text === "ref" &&
+    resolveBinding(node.expression)?.kind === "import" &&
     ts.isIdentifier(node.arguments[0]!) &&
-    isResourceBinding(node.arguments[0]!.text) &&
+    isResourceBinding(node.arguments[0]!) &&
     ts.isStringLiteral(node.arguments[1]!) &&
     isBoundedName(node.arguments[1]!.text);
   const isPreserveCall = (node: ts.CallExpression): boolean =>
-    isImportedBindingUsable("preserve") &&
     ts.isIdentifier(node.expression) &&
     node.expression.text === "preserve" &&
+    resolveBinding(node.expression)?.kind === "import" &&
     node.arguments.length === 0;
   const isAllowedVariableValue = (node: ts.Expression): boolean => {
     const unwrapped = unwrapParenthesizedExpression(node);
@@ -690,14 +800,14 @@ export function generatedIacSourceIsSecretSafe(source: string): boolean {
     if (
       path.names[0] === "env" &&
       ts.isIdentifier(path.root) &&
-      isResourceBinding(path.root.text)
+      isResourceBinding(path.root)
     ) {
       return true;
     }
     return (
       path.names[0] === "shared" &&
       ts.isIdentifier(path.root) &&
-      isTrustedContextBinding(path.root.text)
+      isTrustedContextBinding(path.root)
     );
   };
   const propertyNameText = (name: ts.PropertyName): string | null => {
@@ -794,7 +904,7 @@ export function generatedIacSourceIsSecretSafe(source: string): boolean {
   const isResourceEnvironmentAccess = (node: ts.Node): boolean => {
     const owner = resourceEnvOwner(node);
     if (owner !== null) {
-      return isResourceBinding(owner);
+      return true;
     }
     if (
       (ts.isPropertyAccessExpression(node) ||
@@ -809,7 +919,7 @@ export function generatedIacSourceIsSecretSafe(source: string): boolean {
     if (
       ts.isPropertyAccessExpression(node) &&
       node.name.text === "shared" &&
-      ts.isIdentifier(node.expression)
+      isTrustedContextBinding(node.expression)
     ) {
       return true;
     }
@@ -817,7 +927,7 @@ export function generatedIacSourceIsSecretSafe(source: string): boolean {
       ts.isElementAccessExpression(node) &&
       ts.isStringLiteral(node.argumentExpression) &&
       node.argumentExpression.text === "shared" &&
-      ts.isIdentifier(node.expression)
+      isTrustedContextBinding(node.expression)
     ) {
       return true;
     }
@@ -833,7 +943,7 @@ export function generatedIacSourceIsSecretSafe(source: string): boolean {
   const callExpressionIsAllowed = (node: ts.CallExpression): boolean =>
     ts.isIdentifier(node.expression) &&
     allowedImportsAndCalls.has(node.expression.text) &&
-    isImportedBindingUsable(node.expression.text) &&
+    resolveBinding(node.expression)?.kind === "import" &&
     (node.expression.text !== "preserve" || node.arguments.length === 0) &&
     (node.expression.text !== "ref" || refCallIsSafe(node));
   const isIdentifierDeclarationName = (node: ts.Identifier): boolean => {
@@ -869,11 +979,11 @@ export function generatedIacSourceIsSecretSafe(source: string): boolean {
       ts.isIdentifier(parent.expression) &&
       parent.expression.text === "ref" &&
       refCallIsSafe(parent) &&
-      isResourceBinding(node.text)
+      isResourceBinding(node)
     ) {
       return true;
     }
-    if (isResourceBinding(node.text) && isResourceCollectionReference(node)) {
+    if (isResourceBinding(node) && isResourceCollectionReference(node)) {
       return true;
     }
     const member = memberExpressionRootedAt(node);
@@ -919,14 +1029,10 @@ export function generatedIacSourceIsSecretSafe(source: string): boolean {
       return;
     }
     if (ts.isArrowFunction(node) || ts.isFunctionExpression(node)) {
-      const parent = node.parent;
       if (
-        !ts.isCallExpression(parent) ||
-        parent.arguments[0] !== node ||
-        !ts.isIdentifier(parent.expression) ||
-        parent.expression.text !== "defineRailway" ||
-        !isImportedBindingUsable("defineRailway") ||
-        node.parameters.length > 1
+        !isDefineRailwayCallback(node) ||
+        node.parameters.length > 1 ||
+        node.parameters.some((parameter) => !isSupportedParameter(parameter))
       ) {
         safe = false;
         return;
