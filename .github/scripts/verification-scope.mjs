@@ -53,6 +53,8 @@ export const TEST_INPUT_PATHS = [
   "documents/assets/ui-refresh/manifest.json",
   // src/test/railway-iac-migration.test.ts が契約モジュール経由で不変fixtureを検証する。
   "documents/fixtures/railway-pre-cutover.json",
+  // src/test/unity-display-contract.test.ts がUnity表示契約と席回転を検証する。
+  "documents/fixtures/unity-display-contract.json",
 ];
 
 /** テストがディレクトリ単位で列挙する入力資産。追加・削除も同じ分類にする。 */
