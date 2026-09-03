@@ -752,6 +752,11 @@ describe("Railway IaC parity snapshot contract (#742)", () => {
     ).toBe(false);
     expect(
       generatedIacSourceIsSecretSafe(
+        `import { service } from "railway/iac"; service("fixture", { source: super.shared.SECRET });`,
+      ),
+    ).toBe(false);
+    expect(
+      generatedIacSourceIsSecretSafe(
         `import { postgres, service } from "railway/iac"; const db = postgres("db"); service("fixture", { source: db.env.SECRET });`,
       ),
     ).toBe(false);
@@ -1097,13 +1102,15 @@ describe("Railway IaC parity snapshot contract (#742)", () => {
 
   it("collects large unsupported parameter lists without quadratic scanning", () => {
     const parameters = Array.from(
-      { length: 2_048 },
+      { length: 20_000 },
       (_, index) => `p${index}`,
     ).join(",");
+    const startedAt = performance.now();
     expect(
       generatedIacSourceIsSecretSafe(`const build = (${parameters}) => 0;`),
     ).toBe(false);
-  });
+    expect(performance.now() - startedAt).toBeLessThan(2_000);
+  }, 5_000);
 
   it("keeps current readiness and immutable pre-cutover liveness separate", () => {
     const currentRailwayJson = JSON.parse(
