@@ -49,6 +49,12 @@ const RUNTIME_SOURCE_SCAN_ROOTS = ["/app/server", "/app/src"];
 const MAX_RUNTIME_SOURCE_ENTRIES = 10_000;
 const MAX_RUNTIME_SOURCE_DEPTH = 32;
 const MAX_HEALTH_BODY_BYTES = 4_096;
+const MAX_PROCESS_OUTPUT_BYTES = 64 * 1024;
+const PROCESS_OUTPUT_TRUNCATION_MARKER = Buffer.from(
+  "\n...[process output truncated]",
+  "utf8",
+);
+const MAX_UPGRADE_RESPONSE_BYTES = 16 * 1024;
 
 function usage() {
   throw new Error(
@@ -72,6 +78,42 @@ function parseArguments(argv) {
   return Object.freeze({ image });
 }
 
+function createBoundedOutputCollector(maxBytes = MAX_PROCESS_OUTPUT_BYTES) {
+  const chunks = [];
+  let byteLength = 0;
+  let truncated = false;
+
+  return Object.freeze({
+    append(chunk) {
+      if (truncated) return;
+      const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+      const remaining = maxBytes - byteLength;
+      if (buffer.byteLength <= remaining) {
+        if (buffer.byteLength > 0) {
+          chunks.push(Buffer.from(buffer));
+          byteLength += buffer.byteLength;
+        }
+        return;
+      }
+
+      truncated = true;
+      const markerLength = PROCESS_OUTPUT_TRUNCATION_MARKER.byteLength;
+      const contentLength = Math.max(0, remaining - markerLength);
+      if (contentLength > 0) {
+        chunks.push(Buffer.from(buffer.subarray(0, contentLength)));
+        byteLength += contentLength;
+      }
+      if (byteLength + markerLength <= maxBytes) {
+        chunks.push(PROCESS_OUTPUT_TRUNCATION_MARKER);
+        byteLength += markerLength;
+      }
+    },
+    text() {
+      return Buffer.concat(chunks, byteLength).toString("utf8");
+    },
+  });
+}
+
 function run(command, args, options = {}) {
   const timeoutMs = options.timeoutMs ?? COMMAND_TIMEOUT_MS;
   return new Promise((resolve, reject) => {
@@ -80,19 +122,29 @@ function run(command, args, options = {}) {
       env: process.env,
       stdio: ["ignore", "pipe", "pipe"],
     });
-    const stdout = [];
-    const stderr = [];
+    const stdout = createBoundedOutputCollector();
+    const stderr = createBoundedOutputCollector();
     let settled = false;
     let timedOut = false;
+    const diagnosticOutput = () => {
+      const output = [];
+      const stdoutText = stdout.text();
+      const stderrText = stderr.text();
+      if (stdoutText.length > 0) output.push(`stdout:\n${stdoutText}`);
+      if (stderrText.length > 0) output.push(`stderr:\n${stderrText}`);
+      return output.length > 0 ? `\n${output.join("\n")}` : "";
+    };
     const timeoutError = () =>
-      new Error(`${command} timed out after ${timeoutMs}ms: ${args.join(" ")}`);
+      new Error(
+        `${command} timed out after ${timeoutMs}ms: ${args.join(" ")}${diagnosticOutput()}`,
+      );
     const timer = setTimeout(() => {
       if (settled) return;
       timedOut = true;
       child.kill("SIGKILL");
     }, timeoutMs);
-    child.stdout.on("data", (chunk) => stdout.push(chunk));
-    child.stderr.on("data", (chunk) => stderr.push(chunk));
+    child.stdout.on("data", (chunk) => stdout.append(chunk));
+    child.stderr.on("data", (chunk) => stderr.append(chunk));
     child.once("error", (error) => {
       if (settled) return;
       settled = true;
@@ -106,8 +158,8 @@ function run(command, args, options = {}) {
       const result = Object.freeze({
         code,
         signal,
-        stdout: Buffer.concat(stdout).toString("utf8"),
-        stderr: Buffer.concat(stderr).toString("utf8"),
+        stdout: stdout.text(),
+        stderr: stderr.text(),
       });
       if (timedOut) {
         reject(timeoutError());
@@ -303,9 +355,13 @@ async function waitForEndpoint(port, path, label) {
   return waitUntil(
     async () => {
       const response = await fetch(`http://127.0.0.1:${port}${path}`, {
+        redirect: "manual",
         signal: AbortSignal.timeout(500),
       });
-      if (!response.ok) return null;
+      if (response.status !== 200) {
+        await cancelResponseBody(response);
+        return null;
+      }
       const body = await readBoundedResponseBody(response);
       return isExactHealthBody(body, path) ? true : null;
     },
@@ -323,9 +379,11 @@ async function assertPortClosed(port) {
   await waitUntil(
     async () => {
       try {
-        await fetch(`http://127.0.0.1:${port}/healthz`, {
+        const response = await fetch(`http://127.0.0.1:${port}/healthz`, {
+          redirect: "manual",
           signal: AbortSignal.timeout(250),
         });
+        await cancelResponseBody(response);
         return null;
       } catch {
         return true;
@@ -756,23 +814,65 @@ function openUncooperativeWebSocket(port) {
   const socket = createConnection({ host: "127.0.0.1", port });
   const closed = new Promise((resolve) => socket.once("close", resolve));
   const opened = new Promise((resolve, reject) => {
-    let response = "";
-    const onData = (chunk) => {
-      response += chunk.toString("latin1");
-      const end = response.indexOf("\r\n\r\n");
-      if (end === -1) return;
+    const response = Buffer.allocUnsafe(MAX_UPGRADE_RESPONSE_BYTES);
+    let responseLength = 0;
+    let settled = false;
+    let onData;
+    const fail = (error) => {
+      if (settled) return;
+      settled = true;
       socket.off("data", onData);
-      if (!response.startsWith("HTTP/1.1 101 ")) {
-        reject(
-          new Error(`WebSocket upgrade failed: ${response.slice(0, end)}`),
-        );
-        return;
-      }
-      // Deliberately never parse or acknowledge the server close frame.
+      socket.destroy();
+      reject(error);
+    };
+    const succeed = () => {
+      if (settled) return;
+      settled = true;
+      socket.off("data", onData);
       socket.pause();
       resolve();
     };
-    socket.once("error", reject);
+    const responseText = () =>
+      response.subarray(0, responseLength).toString("latin1");
+    onData = (chunk) => {
+      if (settled) return;
+      for (const byte of chunk) {
+        if (responseLength >= MAX_UPGRADE_RESPONSE_BYTES) {
+          fail(
+            new Error(
+              `WebSocket upgrade response exceeded ${MAX_UPGRADE_RESPONSE_BYTES} bytes`,
+            ),
+          );
+          return;
+        }
+        response[responseLength] = byte;
+        responseLength += 1;
+        if (
+          responseLength >= 4 &&
+          response[responseLength - 4] === 13 &&
+          response[responseLength - 3] === 10 &&
+          response[responseLength - 2] === 13 &&
+          response[responseLength - 1] === 10
+        ) {
+          const header = responseText();
+          if (!header.startsWith("HTTP/1.1 101 ")) {
+            fail(new Error(`WebSocket upgrade failed: ${header}`));
+            return;
+          }
+          // Deliberately never parse or acknowledge the server close frame.
+          succeed();
+          return;
+        }
+      }
+      if (responseLength >= MAX_UPGRADE_RESPONSE_BYTES) {
+        fail(
+          new Error(
+            `WebSocket upgrade response exceeded ${MAX_UPGRADE_RESPONSE_BYTES} bytes`,
+          ),
+        );
+      }
+    };
+    socket.once("error", fail);
     socket.on("data", onData);
     socket.once("connect", () => {
       socket.write(
