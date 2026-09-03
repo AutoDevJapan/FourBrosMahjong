@@ -255,9 +255,10 @@ async function requireResponse(response, url) {
  * @param {Response} response
  * @param {string} url
  * @param {number} maxBytes
+ * @param {AbortSignal} [signal]
  * @returns {Promise<Buffer>}
  */
-async function readBoundedResponse(response, url, maxBytes) {
+async function readBoundedResponse(response, url, maxBytes, signal) {
   await requireResponse(response, url);
 
   let contentLength;
@@ -291,12 +292,40 @@ async function readBoundedResponse(response, url, maxBytes) {
     throw new Error(`download response body is unavailable for ${url}`);
   }
 
+  let readerCancelled = false;
+  const cancelReader = async () => {
+    if (readerCancelled) return;
+    readerCancelled = true;
+    try {
+      await reader.cancel?.();
+    } catch {
+      // Preserve the original response or stream failure.
+    }
+  };
+  let abortListener;
+  const abortPromise =
+    signal === undefined
+      ? null
+      : new Promise((_, reject) => {
+          abortListener = () => {
+            void cancelReader();
+            reject(new Error(`download aborted for ${url}`));
+          };
+          if (signal.aborted) abortListener();
+          else signal.addEventListener("abort", abortListener, { once: true });
+        });
+
+  const readChunk = () => {
+    const read = reader.read();
+    return abortPromise === null ? read : Promise.race([read, abortPromise]);
+  };
+
   /** @type {Uint8Array[]} */
   const chunks = [];
   let totalBytes = 0;
   try {
     while (true) {
-      const { done, value } = await reader.read();
+      const { done, value } = await readChunk();
       if (done) break;
       if (!(value instanceof Uint8Array)) {
         throw new Error(`download response body is invalid for ${url}`);
@@ -308,13 +337,12 @@ async function readBoundedResponse(response, url, maxBytes) {
       chunks.push(value);
     }
   } catch (error) {
-    try {
-      await reader.cancel();
-    } catch {
-      // Preserve the original response or stream failure.
-    }
+    await cancelReader();
     throw error;
   } finally {
+    if (signal !== undefined && abortListener !== undefined) {
+      signal.removeEventListener("abort", abortListener);
+    }
     try {
       reader.releaseLock();
     } catch {
@@ -340,36 +368,54 @@ export async function resolveGitleaksRelease(release, options = {}) {
     throw new Error("fetch is unavailable for gitleaks release verification");
   }
 
-  const signal = AbortSignal.timeout(GITLEAKS_RELEASE_FETCH_TIMEOUT_MS);
-  const [checksumResponse, archiveResponse] = await Promise.all([
+  const controller = new AbortController();
+  const signal = AbortSignal.any([
+    controller.signal,
+    AbortSignal.timeout(GITLEAKS_RELEASE_FETCH_TIMEOUT_MS),
+  ]);
+  const fetches = [
     fetchImpl(metadata.checksumUrl, { signal }),
     fetchImpl(metadata.archiveUrl, { signal }),
-  ]);
-  const [checksumBytes, archiveBytes] = await Promise.all([
-    readBoundedResponse(
-      checksumResponse,
-      metadata.checksumUrl,
-      GITLEAKS_CHECKSUM_MANIFEST_MAX_BYTES,
-    ),
-    readBoundedResponse(
-      archiveResponse,
-      metadata.archiveUrl,
-      GITLEAKS_ARCHIVE_MAX_BYTES,
-    ),
-  ]);
-  const checksumText = checksumBytes.toString("utf8");
-  const manifestSha256 = parseGitleaksChecksumManifest(
-    checksumText,
-    metadata.archive,
-  );
-  const archiveSha256 = sha256Hex(archiveBytes);
-  if (archiveSha256 !== manifestSha256) {
-    throw new Error(
-      `downloaded gitleaks archive SHA-256 ${archiveSha256} does not match upstream checksum ${manifestSha256}`,
+  ];
+  /** @type {Promise<Buffer>[]} */
+  let reads = [];
+  try {
+    const [checksumResponse, archiveResponse] = await Promise.all(fetches);
+    reads = [
+      readBoundedResponse(
+        checksumResponse,
+        metadata.checksumUrl,
+        GITLEAKS_CHECKSUM_MANIFEST_MAX_BYTES,
+        signal,
+      ),
+      readBoundedResponse(
+        archiveResponse,
+        metadata.archiveUrl,
+        GITLEAKS_ARCHIVE_MAX_BYTES,
+        signal,
+      ),
+    ];
+    const [checksumBytes, archiveBytes] = await Promise.all(reads);
+    const checksumText = checksumBytes.toString("utf8");
+    const manifestSha256 = parseGitleaksChecksumManifest(
+      checksumText,
+      metadata.archive,
     );
-  }
+    const archiveSha256 = sha256Hex(archiveBytes);
+    if (archiveSha256 !== manifestSha256) {
+      throw new Error(
+        `downloaded gitleaks archive SHA-256 ${archiveSha256} does not match upstream checksum ${manifestSha256}`,
+      );
+    }
 
-  return { ...metadata, archiveSha256 };
+    return { ...metadata, archiveSha256 };
+  } catch (error) {
+    // Stop the sibling fetch/body immediately; Promise.all already attached
+    // rejection handlers, so late abort errors cannot become unhandled noise.
+    controller.abort();
+    void Promise.allSettled([...fetches, ...reads]);
+    throw error;
+  }
 }
 
 /** @param {string} source @param {string} key */

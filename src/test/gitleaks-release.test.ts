@@ -214,6 +214,48 @@ describe("gitleaks release metadata and updater verification", () => {
     expect(reader.releaseLock).toHaveBeenCalledOnce();
   });
 
+  it("aborts a sibling download when one response exceeds its bound", async () => {
+    const release = releaseFixture();
+    const signals: Array<AbortSignal | null | undefined> = [];
+    const cancel = vi.fn().mockResolvedValue(undefined);
+    const reader = {
+      read: vi.fn(() => new Promise(() => {})),
+      cancel,
+      releaseLock: vi.fn(),
+    };
+    const oversized = {
+      ok: true,
+      status: 200,
+      headers: new Headers({
+        "content-length": String(GITLEAKS_CHECKSUM_MANIFEST_MAX_BYTES + 1),
+      }),
+      body: { cancel: vi.fn().mockResolvedValue(undefined) },
+    } as unknown as Response;
+    const stalled = {
+      ok: true,
+      status: 200,
+      headers: new Headers(),
+      body: { getReader: () => reader },
+    } as unknown as Response;
+
+    await expect(
+      resolveGitleaksRelease(release, {
+        fetchImpl: async (input, init) => {
+          signals.push(init?.signal);
+          return String(input).endsWith(CANDIDATE_CHECKSUM_ASSET)
+            ? oversized
+            : stalled;
+        },
+      }),
+    ).rejects.toThrow(/too large/);
+
+    expect(signals).toHaveLength(2);
+    expect(signals[0]).toBe(signals[1]);
+    expect(signals[0]).toBeInstanceOf(AbortSignal);
+    expect(signals[0]).toHaveProperty("aborted", true);
+    expect(cancel).toHaveBeenCalledOnce();
+  });
+
   it("rejects oversized release metadata before parsing it", () => {
     const result = spawnSync(
       process.execPath,
