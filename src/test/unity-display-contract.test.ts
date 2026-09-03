@@ -161,7 +161,7 @@ describe("Unity display contract fixture", () => {
     );
     expect(fixture.schemaVersion).toBe(1);
     expect(fixture.source.messageTypes).toEqual(["session", "snapshot"]);
-    expect(fixture.source.snapshotVersion).toBeGreaterThan(0);
+    expect(fixture.source.snapshotVersion).toBe(42);
     expect(fixture.source.ruleAuthority).toBe("server-and-domain");
     expect(fixture.source.displayAuthority).toBe("unity-client");
   });
