@@ -135,6 +135,7 @@ function validEvidence(nowMs = NOW) {
       pullSupported: true,
       planSupported: true,
       planJsonSupported: true,
+      planOutSupported: true,
       detailedExitCodeSupported: true,
     },
     target,
@@ -185,9 +186,11 @@ function validEvidence(nowMs = NOW) {
       capturedAt: planCapturedAt,
       sourceSha256: GENERATED_SHA,
       planOutputSha256: "c".repeat(64),
+      pinnedPlanArtifactSha256: "f".repeat(64),
+      pinnedPlanStoredOutsideRepository: true,
       cliVersion: "5.42.1",
       invocation:
-        "railway config plan --json --detailed-exit-code --file .railway/railway.ts",
+        "railway config plan --json --detailed-exit-code --file .railway/railway.ts --out <outside-repository>/railway-plan.json",
       exitCode: 0,
       ...targetFields,
       additions: [] as string[],
@@ -555,6 +558,13 @@ describe("Railway IaC parity snapshot contract (#742)", () => {
       (e: ReturnType<typeof validEvidence>) => {
         e.parityPlan.exitCode = 2;
         e.parityPlan.changes.push("service.deploy.startCommand");
+      },
+    ],
+    [
+      "pinned-plan-unverified",
+      (e: ReturnType<typeof validEvidence>) => {
+        e.parityPlan.pinnedPlanArtifactSha256 = "not-a-sha256";
+        e.parityPlan.pinnedPlanStoredOutsideRepository = false;
       },
     ],
     [
@@ -1257,6 +1267,7 @@ describe("Railway IaC parity snapshot contract (#742)", () => {
     invalid.parityPlan.projectId = "other";
     invalid.parityPlan.exitCode = 2;
     invalid.parityPlan.destructions.push("service.deleted");
+    invalid.parityPlan.pinnedPlanArtifactSha256 = "bad";
     invalid.parityPlan.showValuesUsed = true;
     collect(invalid, FILESYSTEM, Number.NaN);
     expect([...observed].sort()).toEqual([...RAILWAY_IAC_MIGRATION_REASONS]);

@@ -27,11 +27,11 @@ placeholder IDやsecretを含むsnapshotをcommitしてvalidatorを通しては�
 
 このcontractはfull-project ownershipだけを扱う。partial migrationと`config migrate --apply`を混ぜない。
 
-1. authorized operatorが保存済みproduction targetをDashboardまたは認可済みread-only取得結果と照合する。CLIの`config --help`、`config pull --help`、`config plan --help`を保存し、CLI 5.42.1以上と必要subcommand/optionsを確認する。
+1. authorized operatorが保存済みproduction targetをDashboardまたは認可済みread-only取得結果と照合する。CLIの`config --help`、`config pull --help`、`config plan --help`を保存し、CLI 5.42.1以上と`--json`、`--detailed-exit-code`、`--out`を含む必要optionsを確認する。
 2. authorized `config pull`からfull-project `.railway/railway.ts`と全resource address inventoryを生成する。generated source、inventory、target membershipをreviewする。この時点ではConfig File settingを変更しない。raw variables取得につながる`--decrypt-variables`とpreserved variablesをomitするoptionは使用しない。
 3. generated sourceのSHA-256、review済みSDK revision、CLI version、全resource address集合、target serviceのnormalized source/configを保存する。variablesは`preserve()`または生成されたreferenceのままで、raw値をsource、plan、terminal capture、Issueへ出さない。Config as Codeのdeploy overrideはDashboard値を更新しないため、generated target configをcutover前後のeffective read-backとfieldごとexact比較する。
 4. 別途明示承認されたoperatorだけがlegacy Config File settingをmanual clearする。`migrate --apply`、`--delete-files`、非対話のdestructive flagはこの経路で使わない。current targetのroot `railway.json`とimmutable pre-cutover fixtureは必ず保持する。
-5. 同じtargetについてfresh effective read-backと`railway config plan --json --detailed-exit-code --file .railway/railway.ts`を実行する。exact invocation、CLI version、redacted raw plan artifactのSHA-256、`--detailed-exit-code`使用を証拠化する。planはexit 0でadd/change/destroy/unrelated changeがすべて0でなければHOLDする。
+5. 同じtargetについてfresh effective read-backと`railway config plan --json --detailed-exit-code --file .railway/railway.ts --out <outside-repository>/railway-plan.json`を実行する。`--out`が生成するpinned plan artifactをrepository外へ保存し、そのSHA-256、CLI version、正規化したexact invocation、`--detailed-exit-code`使用を証拠化する。以後applyが必要になった場合も、再planではなく同じartifactを`railway config apply --plan <outside-repository>/railway-plan.json`で適用する。planはexit 0でadd/change/destroy/unrelated changeがすべて0でなければHOLDする。
 6. cutover前後のeffective source/configがexact parity、全証拠が5分以内、targetとgenerated hashが一致するsnapshotだけをoffline validatorへ渡す。
 
 validatorの`pass`はauthorized cutover後のparity証拠が内部整合したことだけを表す。Railway APIの真正性/currentness、operator権限、active load、maintenance approval、migration/apply/deploy許可は証明しない。target identityとmanual secret reviewは、authorized operatorが原証拠と照合する独立gateである。
@@ -52,7 +52,7 @@ validatorの`pass`はauthorized cutover後のparity証拠が内部整合した�
 
 normalized JSONは64KiB以下とし、raw variables、token、Authorization、cookie、full environment dumpをschema外にする。static source scanは`env`/`variables` objectのliteral値を拒否するが、secret不存在の完全な証明ではない。manual review完了を別fieldで要求し、どちらか一方だけではpassしない。
 
-redacted raw plan artifactはrepository外へ保存し、review evidenceへSHA-256だけを記録する。validatorはnormalized hashの形式とfile hashとの結合を確認するが、artifactの真正性や内容を独立取得して証明しない。
+`--out`のpinned plan artifactはrepository外へ保存し、review evidenceへSHA-256だけを記録する。`--json`のstdoutを別途保存する場合もredacted outputだけを扱う。validatorはnormalized hash、外部保存、生成sourceとの証拠上の結合を確認するが、artifactの真正性や内容を独立取得して証明しない。artifact pathはsecret・token・個人パスを反映しない`<outside-repository>/railway-plan.json`へ正規化する。
 
 ## parityと後続runtime hardeningの分離
 
