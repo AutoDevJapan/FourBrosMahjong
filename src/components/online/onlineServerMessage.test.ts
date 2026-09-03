@@ -480,33 +480,66 @@ describe("parseOnlineServerMessage", () => {
         points: slot.player.points,
       };
     }
+    allBench.currentTurn = null;
     expect(
       parseOnlineServerMessage({ type: "snapshot", snapshot: allBench }),
     ).toBeNull();
+  });
 
-    const benchPlayerSlot = Object.values(snapshot.view.slots).find(
-      (slot) => slot.kind === "bench",
-    );
-    if (!benchPlayerSlot) throw new Error("bench slot expected");
+  it("rejects duplicate slot player IDs while currentTurn remains seated p0", () => {
+    const duplicateSlot = mutableSlotSnapshot(snapshotFixture());
+    expect(duplicateSlot.currentTurn).toBe("p0");
+    duplicateSlot.view.slots.left.player.playerId = "p0";
+
+    expect(
+      parseOnlineServerMessage({ type: "snapshot", snapshot: duplicateSlot }),
+    ).toBeNull();
+  });
+
+  it("rejects bench p3 as currentTurn with the complete distinct slot ID ring", () => {
+    const benchTurn = mutableSlotSnapshot(snapshotFixture());
+    expect(
+      ["self", "right", "across", "left"].map(
+        (position) => benchTurn.view.slots[position]?.player.playerId,
+      ),
+    ).toEqual(["p0", "p1", "p2", "p3"]);
+    expect(benchTurn.view.slots.left?.kind).toBe("bench");
+    benchTurn.currentTurn = "p3";
+
+    expect(
+      parseOnlineServerMessage({ type: "snapshot", snapshot: benchTurn }),
+    ).toBeNull();
+  });
+
+  it("rejects a currentTurn ID outside the slot player ID domain", () => {
     expect(
       parseOnlineServerMessage({
         type: "snapshot",
-        snapshot: { ...snapshot, currentTurn: benchPlayerSlot.player.playerId },
+        snapshot: { ...snapshotFixture(), currentTurn: "p9" },
       }),
     ).toBeNull();
+  });
 
-    const outsideSlot = mutableSlotSnapshot(snapshot);
-    outsideSlot.currentTurn = "p3";
-    outsideSlot.view.slots.left.player.playerId = "p0";
+  it("accepts a partial top-level players roster for p0 and non-p0 viewpoints", () => {
+    const p0Snapshot = snapshotFixture();
+    expect(p0Snapshot.players).toHaveLength(1);
     expect(
-      parseOnlineServerMessage({ type: "snapshot", snapshot: outsideSlot }),
-    ).toBeNull();
+      parseOnlineServerMessage({ type: "snapshot", snapshot: p0Snapshot }),
+    ).toEqual({ type: "snapshot", snapshot: p0Snapshot });
+
+    const manager = new RoomManager();
+    const host = manager.create("ホスト");
+    const guest = manager.join(host.room.code, "ゲスト");
+    if (!guest) throw new Error("guest should join");
+    const nonP0Snapshot = manager.snapshot(guest.room, guest.player);
+    expect(nonP0Snapshot.you).toBe("p1");
+    expect(nonP0Snapshot.players).toHaveLength(2);
     expect(
       parseOnlineServerMessage({
         type: "snapshot",
-        snapshot: { ...snapshot, currentTurn: "p9" },
+        snapshot: nonP0Snapshot,
       }),
-    ).toBeNull();
+    ).toEqual({ type: "snapshot", snapshot: nonP0Snapshot });
   });
 
   it("validates real playing, win/draw roundEnd, and gameEnd snapshots", () => {
