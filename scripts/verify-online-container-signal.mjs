@@ -9,8 +9,12 @@ const CONTAINER_PORT = 8080;
 const COMMAND_TIMEOUT_MS = 15_000;
 const START_TIMEOUT_MS = 15_000;
 const STOP_MARGIN_MS = 1_500;
+const PORT_PROBE_TIMEOUT_MS = 250;
 const EXPECTED_CMDLINE = "node --import tsx server/start.ts";
 const OWNERSHIP_LABEL = "com.fourbrosmahjong.signal-verifier-run";
+const CONTAINER_MEMORY_LIMIT = "512m";
+const CONTAINER_CPU_LIMIT = "1";
+const CONTAINER_PIDS_LIMIT = "128";
 const REQUIRED_RUNTIME_PACKAGES = ["tsx", "ws"];
 const FORBIDDEN_RUNTIME_PACKAGES = [
   "vitest",
@@ -50,11 +54,19 @@ const MAX_RUNTIME_SOURCE_ENTRIES = 10_000;
 const MAX_RUNTIME_SOURCE_DEPTH = 32;
 const MAX_HEALTH_BODY_BYTES = 4_096;
 const MAX_PROCESS_OUTPUT_BYTES = 64 * 1024;
+const MAX_DOCKER_LOG_BYTES = 64 * 1024;
+const MAX_TIMEOUT_DIAGNOSTIC_BYTES = 4 * 1024;
 const PROCESS_OUTPUT_TRUNCATION_MARKER = Buffer.from(
   "\n...[process output truncated]",
   "utf8",
 );
 const MAX_UPGRADE_RESPONSE_BYTES = 16 * 1024;
+const CLOSED_PORT_ERROR_CODES = new Set(["ECONNREFUSED", "ECONNRESET"]);
+
+const SENSITIVE_DIAGNOSTIC_PATTERN =
+  /(["']?(?:token|secret|password|passwd|authorization|cookie|api[_-]?key)[^"'=\s]*["']?\s*[:=]\s*["']?)[^"',\s}\]]+/gi;
+const SENSITIVE_ARGUMENT_PATTERN =
+  /(?:token|secret|password|passwd|authorization|cookie|api[_-]?key)[^=\s]*=/i;
 
 function usage() {
   throw new Error(
@@ -78,15 +90,53 @@ function parseArguments(argv) {
   return Object.freeze({ image });
 }
 
-function createBoundedOutputCollector(maxBytes = MAX_PROCESS_OUTPUT_BYTES) {
+function createBoundedOutputCollector(
+  maxBytes = MAX_PROCESS_OUTPUT_BYTES,
+  retention = "head",
+) {
   const chunks = [];
   let byteLength = 0;
   let truncated = false;
 
+  if (retention !== "head" && retention !== "tail") {
+    throw new Error(`unsupported output retention: ${retention}`);
+  }
+
   return Object.freeze({
     append(chunk) {
-      if (truncated) return;
+      if (truncated && retention === "head") return;
       const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+
+      if (retention === "tail") {
+        if (buffer.byteLength >= maxBytes) {
+          chunks.splice(
+            0,
+            chunks.length,
+            Buffer.from(buffer.subarray(buffer.byteLength - maxBytes)),
+          );
+          byteLength = maxBytes;
+          truncated = true;
+          return;
+        }
+        if (buffer.byteLength > 0) {
+          chunks.push(Buffer.from(buffer));
+          byteLength += buffer.byteLength;
+        }
+        while (byteLength > maxBytes) {
+          const excess = byteLength - maxBytes;
+          const first = chunks[0];
+          if (first.byteLength <= excess) {
+            chunks.shift();
+            byteLength -= first.byteLength;
+          } else {
+            chunks[0] = first.subarray(excess);
+            byteLength -= excess;
+          }
+        }
+        if (buffer.byteLength > 0) truncated = true;
+        return;
+      }
+
       const remaining = maxBytes - byteLength;
       if (buffer.byteLength <= remaining) {
         if (buffer.byteLength > 0) {
@@ -114,6 +164,33 @@ function createBoundedOutputCollector(maxBytes = MAX_PROCESS_OUTPUT_BYTES) {
   });
 }
 
+function sanitizeDiagnosticText(value) {
+  const withoutControlSequences = value
+    .replace(/\u001b\[[0-?]*[ -/]*[@-~]/g, "")
+    .replace(SENSITIVE_DIAGNOSTIC_PATTERN, "$1[redacted]")
+    .replace(/[^\t\n\r\x20-\x7e]/g, "?");
+  const bytes = Buffer.from(withoutControlSequences, "utf8");
+  if (bytes.byteLength <= MAX_TIMEOUT_DIAGNOSTIC_BYTES) {
+    return withoutControlSequences;
+  }
+  const marker = "\n...[diagnostic truncated]";
+  const contentLength = Math.max(
+    0,
+    MAX_TIMEOUT_DIAGNOSTIC_BYTES - Buffer.byteLength(marker),
+  );
+  return `${bytes.subarray(0, contentLength).toString("utf8")}${marker}`;
+}
+
+function safeCommandArguments(args) {
+  return args
+    .map((argument) => {
+      const match = argument.match(SENSITIVE_ARGUMENT_PATTERN);
+      if (match === null || match.index === undefined) return argument;
+      return `${argument.slice(0, match.index + match[0].length)}[redacted]`;
+    })
+    .join(" ");
+}
+
 function run(command, args, options = {}) {
   const timeoutMs = options.timeoutMs ?? COMMAND_TIMEOUT_MS;
   return new Promise((resolve, reject) => {
@@ -122,21 +199,25 @@ function run(command, args, options = {}) {
       env: process.env,
       stdio: ["ignore", "pipe", "pipe"],
     });
-    const stdout = createBoundedOutputCollector();
-    const stderr = createBoundedOutputCollector();
+    const outputMaxBytes = options.outputMaxBytes ?? MAX_PROCESS_OUTPUT_BYTES;
+    const outputRetention = options.outputRetention ?? "head";
+    const stdout = createBoundedOutputCollector(
+      outputMaxBytes,
+      outputRetention,
+    );
+    const stderr = createBoundedOutputCollector(
+      outputMaxBytes,
+      outputRetention,
+    );
     let settled = false;
     let timedOut = false;
-    const diagnosticOutput = () => {
-      const output = [];
-      const stdoutText = stdout.text();
-      const stderrText = stderr.text();
-      if (stdoutText.length > 0) output.push(`stdout:\n${stdoutText}`);
-      if (stderrText.length > 0) output.push(`stderr:\n${stderrText}`);
-      return output.length > 0 ? `\n${output.join("\n")}` : "";
+    const timeoutDiagnosticOutput = () => {
+      const stderrText = sanitizeDiagnosticText(stderr.text());
+      return stderrText.length > 0 ? `\nstderr:\n${stderrText}` : "";
     };
     const timeoutError = () =>
       new Error(
-        `${command} timed out after ${timeoutMs}ms: ${args.join(" ")}${diagnosticOutput()}`,
+        `${command} timed out after ${timeoutMs}ms: ${safeCommandArguments(args)}${timeoutDiagnosticOutput()}`,
       );
     const timer = setTimeout(() => {
       if (settled) return;
@@ -263,8 +344,22 @@ async function cancelResponseBody(response) {
   }
 }
 
+async function cancelResponseReader(reader) {
+  try {
+    await reader.cancel();
+  } catch {
+    // The bounded-body result is more useful than a cancellation error.
+  }
+}
+
 async function readBoundedResponseBody(response) {
-  const expectedLength = declaredContentLength(response);
+  let expectedLength;
+  try {
+    expectedLength = declaredContentLength(response);
+  } catch (error) {
+    await cancelResponseBody(response);
+    throw error;
+  }
   if (expectedLength !== undefined && expectedLength > MAX_HEALTH_BODY_BYTES) {
     await cancelResponseBody(response);
     throw new Error("response body too large");
@@ -277,28 +372,34 @@ async function readBoundedResponseBody(response) {
     return new Uint8Array();
   }
 
-  const reader = response.body.getReader();
+  let reader;
+  try {
+    reader = response.body.getReader();
+  } catch (error) {
+    await cancelResponseBody(response);
+    throw error;
+  }
   const chunks = [];
   let receivedBytes = 0;
+  let bodyConsumed = false;
   try {
     while (true) {
       const result = await reader.read();
-      if (result.done) break;
+      if (result.done) {
+        bodyConsumed = true;
+        break;
+      }
       if (!(result.value instanceof Uint8Array)) {
         throw new Error("invalid response body");
       }
       receivedBytes += result.value.byteLength;
       if (receivedBytes > MAX_HEALTH_BODY_BYTES) {
-        try {
-          await reader.cancel();
-        } catch {
-          // The bounded-body result is more useful than a cancellation error.
-        }
         throw new Error("response body too large");
       }
       chunks.push(result.value);
     }
   } finally {
+    if (!bodyConsumed) await cancelResponseReader(reader);
     reader.releaseLock();
   }
 
@@ -319,11 +420,120 @@ async function readBoundedResponseBody(response) {
   return bytes;
 }
 
+function parseJsonWithUniqueKeys(text) {
+  const cursor = { index: 0 };
+
+  function skipWhitespace() {
+    while (/[\t\n\r ]/.test(text[cursor.index] ?? "")) {
+      cursor.index += 1;
+    }
+  }
+
+  function scanString() {
+    const start = cursor.index;
+    if (text[cursor.index] !== '"') {
+      throw new Error("JSON string expected");
+    }
+    cursor.index += 1;
+    while (cursor.index < text.length) {
+      const code = text.charCodeAt(cursor.index);
+      if (code === 0x22) {
+        cursor.index += 1;
+        return JSON.parse(text.slice(start, cursor.index));
+      }
+      if (code === 0x5c) {
+        cursor.index += 1;
+        if (cursor.index >= text.length) throw new Error("invalid JSON escape");
+        if (text[cursor.index] === "u") cursor.index += 5;
+        else cursor.index += 1;
+        continue;
+      }
+      if (code < 0x20) throw new Error("invalid JSON string");
+      cursor.index += 1;
+    }
+    throw new Error("unterminated JSON string");
+  }
+
+  function scanPrimitive() {
+    const start = cursor.index;
+    while (
+      cursor.index < text.length &&
+      !/[\t\n\r ,\]}]/.test(text[cursor.index])
+    ) {
+      cursor.index += 1;
+    }
+    if (cursor.index === start) throw new Error("JSON value expected");
+  }
+
+  function scanValue() {
+    skipWhitespace();
+    const character = text[cursor.index];
+    if (character === "{") return scanObject();
+    if (character === "[") return scanArray();
+    if (character === '"') {
+      scanString();
+      return;
+    }
+    scanPrimitive();
+  }
+
+  function scanObject() {
+    cursor.index += 1;
+    skipWhitespace();
+    const keys = new Set();
+    if (text[cursor.index] === "}") {
+      cursor.index += 1;
+      return;
+    }
+    while (true) {
+      skipWhitespace();
+      const key = scanString();
+      if (keys.has(key)) throw new Error(`duplicate JSON object key: ${key}`);
+      keys.add(key);
+      skipWhitespace();
+      if (text[cursor.index] !== ":") throw new Error("JSON colon expected");
+      cursor.index += 1;
+      scanValue();
+      skipWhitespace();
+      if (text[cursor.index] === "}") {
+        cursor.index += 1;
+        return;
+      }
+      if (text[cursor.index] !== ",") throw new Error("JSON comma expected");
+      cursor.index += 1;
+    }
+  }
+
+  function scanArray() {
+    cursor.index += 1;
+    skipWhitespace();
+    if (text[cursor.index] === "]") {
+      cursor.index += 1;
+      return;
+    }
+    while (true) {
+      scanValue();
+      skipWhitespace();
+      if (text[cursor.index] === "]") {
+        cursor.index += 1;
+        return;
+      }
+      if (text[cursor.index] !== ",") throw new Error("JSON comma expected");
+      cursor.index += 1;
+    }
+  }
+
+  scanValue();
+  skipWhitespace();
+  if (cursor.index !== text.length) throw new Error("trailing JSON data");
+  return JSON.parse(text);
+}
+
 function isExactHealthBody(bytes, path) {
   let value;
   try {
     const text = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
-    value = JSON.parse(text);
+    value = parseJsonWithUniqueKeys(text);
   } catch {
     return false;
   }
@@ -375,19 +585,66 @@ async function waitForHealth(port) {
   await waitForEndpoint(port, "/readyz", "container readiness");
 }
 
+function errorCode(error) {
+  const visited = new Set();
+  let current = error;
+  while (
+    current !== null &&
+    typeof current === "object" &&
+    !visited.has(current)
+  ) {
+    visited.add(current);
+    if (typeof current.code === "string") return current.code;
+    current = current.cause;
+  }
+  return undefined;
+}
+
+function probePortClosed(port) {
+  return new Promise((resolve, reject) => {
+    const socket = createConnection({ host: "127.0.0.1", port });
+    let settled = false;
+    let connected = false;
+    const finish = (callback, value) => {
+      if (settled) return;
+      settled = true;
+      socket.destroy();
+      callback(value);
+    };
+
+    socket.setTimeout(PORT_PROBE_TIMEOUT_MS, () => {
+      finish(
+        reject,
+        new Error(`port ${port} close probe timed out; closure is unverified`),
+      );
+    });
+    socket.once("connect", () => {
+      connected = true;
+      finish(resolve, false);
+    });
+    socket.once("error", (error) => {
+      if (settled) return;
+      if (!connected && CLOSED_PORT_ERROR_CODES.has(errorCode(error))) {
+        finish(resolve, true);
+        return;
+      }
+      finish(reject, error);
+    });
+    socket.once("close", () => {
+      if (settled) return;
+      finish(
+        reject,
+        new Error(`port ${port} closed without a refusal/reset error`),
+      );
+    });
+  });
+}
+
 async function assertPortClosed(port) {
   await waitUntil(
     async () => {
-      try {
-        const response = await fetch(`http://127.0.0.1:${port}/healthz`, {
-          redirect: "manual",
-          signal: AbortSignal.timeout(250),
-        });
-        await cancelResponseBody(response);
-        return null;
-      } catch {
-        return true;
-      }
+      const closed = await probePortClosed(port);
+      return closed ? true : null;
     },
     STOP_MARGIN_MS,
     "published port close",
@@ -412,7 +669,7 @@ function assertExplicitNonRootImageUser(value) {
 function runtimeSecurityProbeSource() {
   return `
 import { constants } from "node:fs";
-import { access, readFile, readdir, stat } from "node:fs/promises";
+import { access, opendir, readFile, stat } from "node:fs/promises";
 import { join } from "node:path";
 
 const requiredPackages = ${JSON.stringify(REQUIRED_RUNTIME_PACKAGES)};
@@ -422,7 +679,20 @@ const absentPaths = ${JSON.stringify(ABSENT_RUNTIME_PATHS)};
 const sourceScanRoots = ${JSON.stringify(RUNTIME_SOURCE_SCAN_ROOTS)};
 const maxSourceEntries = ${MAX_RUNTIME_SOURCE_ENTRIES};
 const maxSourceDepth = ${MAX_RUNTIME_SOURCE_DEPTH};
-const pnpmStoreEntries = await readdir("/app/node_modules/.pnpm");
+
+async function forEachDirectoryEntry(path, onEntry) {
+  const directory = await opendir(path);
+  try {
+    while (true) {
+      const entry = await directory.read();
+      if (entry === null) return;
+      const shouldContinue = await onEntry(entry);
+      if (shouldContinue === false) return;
+    }
+  } finally {
+    await directory.close();
+  }
+}
 
 async function pathExists(path) {
   try {
@@ -438,11 +708,19 @@ function directPackageExists(packageName) {
   return pathExists(join("/app/node_modules", packageName, "package.json"));
 }
 
-function pnpmStoreContains(packageName) {
+async function pnpmStoreContains(packageName) {
   const prefix = packageName.startsWith("@")
     ? packageName.replace("/", "+") + "@"
     : packageName + "@";
-  return pnpmStoreEntries.some((entry) => entry.startsWith(prefix));
+  let found = false;
+  await forEachDirectoryEntry("/app/node_modules/.pnpm", async (entry) => {
+    if (entry.name.startsWith(prefix)) {
+      found = true;
+      return false;
+    }
+    return true;
+  });
+  return found;
 }
 
 function isTestOnlySource(path, entry) {
@@ -463,8 +741,7 @@ async function findUnexpectedSourceEntries(roots) {
   let visited = 0;
   while (pending.length > 0) {
     const current = pending.pop();
-    const entries = await readdir(current.path, { withFileTypes: true });
-    for (const entry of entries) {
+    await forEachDirectoryEntry(current.path, async (entry) => {
       visited += 1;
       if (visited > maxSourceEntries) {
         throw new Error("runtime source scan exceeded entry limit");
@@ -472,14 +749,15 @@ async function findUnexpectedSourceEntries(roots) {
       const path = join(current.path, entry.name);
       if (isTestOnlySource(path, entry)) {
         unexpected.push(path);
-        continue;
+        return true;
       }
-      if (!entry.isDirectory()) continue;
+      if (!entry.isDirectory()) return true;
       if (current.depth >= maxSourceDepth) {
         throw new Error("runtime source scan exceeded depth limit");
       }
       pending.push({ depth: current.depth + 1, path });
-    }
+      return true;
+    });
   }
   return unexpected.sort();
 }
@@ -510,7 +788,7 @@ const forbidden = Object.fromEntries(
       name,
       {
         direct: await directPackageExists(name),
-        pnpmStore: pnpmStoreContains(name),
+        pnpmStore: await pnpmStoreContains(name),
       },
     ]),
   ),
@@ -664,6 +942,14 @@ async function runContainer(
     await docker([
       "run",
       "--detach",
+      "--memory",
+      CONTAINER_MEMORY_LIMIT,
+      "--cpus",
+      CONTAINER_CPU_LIMIT,
+      "--pids-limit",
+      CONTAINER_PIDS_LIMIT,
+      "--cap-drop",
+      "ALL",
       "--name",
       name,
       "--label",
@@ -766,7 +1052,11 @@ function assertCommonEvents(records, expectedSignalCount = 1) {
 }
 
 async function logsFor(name) {
-  const result = await docker(["logs", name], { allowFailure: true });
+  const result = await docker(["logs", name], {
+    allowFailure: true,
+    outputMaxBytes: MAX_DOCKER_LOG_BYTES,
+    outputRetention: "tail",
+  });
   return `${result.stdout}${result.stderr}`;
 }
 
