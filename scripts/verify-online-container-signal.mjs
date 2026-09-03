@@ -72,11 +72,27 @@ const MAX_WEBSOCKET_MESSAGE_BYTES = 16 * 1024;
 const PROCESS_REAP_TIMEOUT_MS = 1_000;
 const SIGNAL_CLEANUP_TIMEOUT_MS = COMMAND_TIMEOUT_MS;
 const CLOSED_PORT_ERROR_CODES = new Set(["ECONNREFUSED", "ECONNRESET"]);
+// Docker Desktop cannot forward a host port from an internal network. The
+// port relay is the only verifier resource that uses Docker's built-in bridge.
+const DOCKER_DEFAULT_BRIDGE_NETWORK = "bridge";
 const NETWORK_OWNERSHIP_LABEL =
   "com.fourbrosmahjong.signal-verifier-network-run";
+const VOLUME_OWNERSHIP_LABEL = "com.fourbrosmahjong.signal-verifier-volume-run";
+const SOCKET_RELAY_DIRECTORY = "/run/signal-verifier";
+const SOCKET_RELAY_PATH = `${SOCKET_RELAY_DIRECTORY}/server.sock`;
+const MAX_CLEANUP_FAILURES = 8;
+const MAX_CLEANUP_DETAIL_BYTES = 768;
+const MAX_CLEANUP_RESOURCE_NAME_BYTES = 128;
+const ISOLATED_NETWORK_OPTIONS = Object.freeze({
+  "com.docker.network.bridge.enable_icc": "false",
+  "com.docker.network.bridge.enable_ip_masquerade": "false",
+  "com.docker.network.bridge.gateway_mode_ipv4": "isolated",
+  "com.docker.network.bridge.gateway_mode_ipv6": "isolated",
+});
 
 const activeChildProcesses = new Set();
 const activeContainers = new Map();
+const activeVolumes = new Map();
 const activeNetworks = new Map();
 let terminationPromise = null;
 let terminationSignal = null;
@@ -211,12 +227,107 @@ function sanitizeDiagnosticText(value) {
   return `${bytes.subarray(0, contentLength).toString("utf8")}${marker}`;
 }
 
+function boundedSanitizedText(
+  value,
+  maxBytes,
+  marker = "\n...[detail truncated]",
+) {
+  const text = sanitizeDiagnosticText(value);
+  const bytes = Buffer.from(text, "utf8");
+  if (bytes.byteLength <= maxBytes) return text;
+  const markerLength = Buffer.byteLength(marker, "utf8");
+  if (maxBytes <= markerLength) {
+    return Buffer.from(marker, "utf8").subarray(0, maxBytes).toString("utf8");
+  }
+  return `${bytes
+    .subarray(0, maxBytes - markerLength)
+    .toString("utf8")}${marker}`;
+}
+
 function safeCommandArguments(args) {
   return sanitizeDiagnosticText(args.join(" "));
 }
 
+function formatErrorMessage(error, seen, maxBytes) {
+  if (typeof error === "string") {
+    return boundedSanitizedText(error, maxBytes);
+  }
+  if (!(error instanceof Error)) return "unknown error";
+  if (seen.has(error)) return "[circular error cause]";
+  seen.add(error);
+  try {
+    const resourceType = error.cleanupResourceType;
+    const resourceName = error.cleanupResourceName;
+    let message =
+      typeof resourceType === "string" && typeof resourceName === "string"
+        ? `${resourceType} ${resourceName} cleanup failed`
+        : sanitizeDiagnosticText(error.message);
+
+    if (error instanceof AggregateError) {
+      const entries = Array.isArray(error.errors) ? error.errors : [];
+      const details = entries
+        .slice(0, MAX_CLEANUP_FAILURES)
+        .map(
+          (entry, index) =>
+            `${index + 1}. ${formatErrorMessage(
+              entry,
+              seen,
+              MAX_CLEANUP_DETAIL_BYTES,
+            )}`,
+        );
+      if (entries.length > MAX_CLEANUP_FAILURES) {
+        details.push(
+          `...${entries.length - MAX_CLEANUP_FAILURES} additional cleanup failure(s)`,
+        );
+      }
+      if (details.length > 0) message += `: ${details.join("; ")}`;
+    }
+
+    if (error.cause !== undefined) {
+      message += `; cause: ${formatErrorMessage(
+        error.cause,
+        seen,
+        MAX_CLEANUP_DETAIL_BYTES,
+      )}`;
+    }
+    return boundedSanitizedText(message, maxBytes);
+  } finally {
+    seen.delete(error);
+  }
+}
+
 function errorMessage(error) {
-  return error instanceof Error ? error.message : "unknown error";
+  return formatErrorMessage(error, new Set(), MAX_TIMEOUT_DIAGNOSTIC_BYTES);
+}
+
+function cleanupFailure(resourceType, record, error) {
+  const safeResourceType = boundedSanitizedText(
+    resourceType,
+    MAX_CLEANUP_RESOURCE_NAME_BYTES,
+  );
+  const safeResourceName = boundedSanitizedText(
+    record.name,
+    MAX_CLEANUP_RESOURCE_NAME_BYTES,
+  );
+  const failure = new Error(
+    `${safeResourceType} ${safeResourceName} cleanup failed`,
+    { cause: error },
+  );
+  Object.defineProperties(failure, {
+    cleanupResourceName: {
+      configurable: false,
+      enumerable: false,
+      value: safeResourceName,
+      writable: false,
+    },
+    cleanupResourceType: {
+      configurable: false,
+      enumerable: false,
+      value: safeResourceType,
+      writable: false,
+    },
+  });
+  return failure;
 }
 
 function terminateProcessGroup(child, signal) {
@@ -386,6 +497,12 @@ function isDockerNotFoundResult(result, resource) {
       /\bnetwork\b.*\bnot found\b/i.test(diagnostic)
     );
   }
+  if (resource === "volume") {
+    return (
+      /\bno such volume\b/i.test(diagnostic) ||
+      /\bvolume\b.*\bnot found\b/i.test(diagnostic)
+    );
+  }
   return false;
 }
 
@@ -477,6 +594,10 @@ const CONTAINER_STATE_FORMAT =
   "{{json .State.Running}}\t{{json .State.ExitCode}}\t{{json .State.OOMKilled}}\t{{json .State.Pid}}";
 const CONTAINER_IDENTITY_FORMAT = `{{with index .Config.Labels "${OWNERSHIP_LABEL}"}}{{json .}}{{else}}null{{end}}\t{{json .State.Running}}`;
 const NETWORK_IDENTITY_FORMAT = `{{with index .Labels "${NETWORK_OWNERSHIP_LABEL}"}}{{json .}}{{else}}null{{end}}`;
+const VOLUME_IDENTITY_FORMAT = `{{with index .Labels "${VOLUME_OWNERSHIP_LABEL}"}}{{json .}}{{else}}null{{end}}`;
+const NETWORK_CONFIGURATION_FORMAT = `{{json .Internal}}\t{{json .Driver}}\t{{json .Options}}\t{{json .EnableIPv4}}\t{{json .EnableIPv6}}\t{{json .Scope}}`;
+const CONTAINER_NETWORKS_FORMAT = "{{json .NetworkSettings.Networks}}";
+const CONTAINER_PORTS_FORMAT = "{{json .NetworkSettings.Ports}}";
 
 function registerContainer(name, runId) {
   const record = {
@@ -499,6 +620,18 @@ function registerNetwork(name, runId) {
     cleanupPromise: null,
   };
   activeNetworks.set(name, record);
+  return record;
+}
+
+function registerVolume(name, runId) {
+  const record = {
+    name,
+    runId,
+    owned: false,
+    createCommandSucceeded: false,
+    cleanupPromise: null,
+  };
+  activeVolumes.set(name, record);
   return record;
 }
 
@@ -1188,20 +1321,82 @@ async function inspectProcessTree(name) {
   });
 }
 
+function socketRelayScript() {
+  return [
+    'const net=require("node:net");',
+    'const fs=require("node:fs");',
+    `const socketPath=${JSON.stringify(SOCKET_RELAY_PATH)};`,
+    `const targetPort=${CONTAINER_PORT};`,
+    "try{fs.rmSync(socketPath,{force:true})}catch(error){process.exitCode=1;throw error}",
+    "const server=net.createServer((client)=>{",
+    'const upstream=net.createConnection({host:"127.0.0.1",port:targetPort});',
+    "const close=()=>{client.destroy();upstream.destroy()};",
+    'client.once("error",close);',
+    'upstream.once("error",close);',
+    'client.once("close",()=>upstream.destroy());',
+    'upstream.once("close",()=>client.destroy());',
+    "client.pipe(upstream);",
+    "upstream.pipe(client);",
+    "});",
+    'server.on("error",()=>{process.exitCode=1});',
+    "server.listen(socketPath,()=>{try{fs.chmodSync(socketPath,0o666)}catch(error){server.close(()=>{throw error})}});",
+  ].join("");
+}
+
+function portRelayScript() {
+  return [
+    'const net=require("node:net");',
+    `const socketPath=${JSON.stringify(SOCKET_RELAY_PATH)};`,
+    "const server=net.createServer((client)=>{",
+    "const upstream=net.createConnection({path:socketPath});",
+    "const close=()=>{client.destroy();upstream.destroy()};",
+    'client.once("error",close);',
+    'upstream.once("error",close);',
+    'client.once("close",()=>upstream.destroy());',
+    'upstream.once("close",()=>client.destroy());',
+    "client.pipe(upstream);",
+    "upstream.pipe(client);",
+    "});",
+    'server.on("error",()=>{process.exitCode=1});',
+    `server.listen(${CONTAINER_PORT},"0.0.0.0");`,
+  ].join("");
+}
+
+async function waitForSocketRelay(name, timeoutMs = START_TIMEOUT_MS) {
+  const checkSource = `const fs=require("node:fs");try{process.exit(fs.statSync(${JSON.stringify(
+    SOCKET_RELAY_PATH,
+  )}).isSocket()?0:1)}catch{process.exit(1)}`;
+  await waitUntil(
+    async (remainingMs) => {
+      const result = await docker(
+        ["exec", name, "node", "--eval", checkSource],
+        {
+          allowFailure: true,
+          timeoutMs: remainingMs,
+          outputMaxBytes: MAX_CONTAINER_METADATA_BYTES,
+        },
+      );
+      return result.code === 0 ? true : null;
+    },
+    timeoutMs,
+    `${name} Unix socket relay`,
+  );
+}
+
 async function runContainer(
   image,
   scenario,
   shutdownGraceMs,
   socketCloseGraceMs,
   network,
+  socketVolume,
 ) {
   const runId = randomUUID();
   const name = `fourbros-signal-${scenario}-${runId}`;
   const record = registerContainer(name, runId);
   try {
-    const runArgs = [
-      "run",
-      "--detach",
+    const createArgs = [
+      "create",
       "--read-only",
       "--tmpfs",
       RUNTIME_TMPFS,
@@ -1223,6 +1418,8 @@ async function runContainer(
       `max-file=${CONTAINER_LOG_MAX_FILE}`,
       "--network",
       network.name,
+      "--mount",
+      `type=volume,source=${socketVolume.name},target=${SOCKET_RELAY_DIRECTORY},volume-nocopy`,
       "--name",
       name,
       "--label",
@@ -1243,11 +1440,12 @@ async function runContainer(
       `ONLINE_SHUTDOWN_GRACE_MS=${shutdownGraceMs}`,
       "--env",
       `ONLINE_SOCKET_CLOSE_GRACE_MS=${socketCloseGraceMs}`,
-      "--publish",
-      `127.0.0.1::${CONTAINER_PORT}`,
       image,
     ];
-    await docker(runArgs);
+    await docker(createArgs, {
+      timeoutMs: COMMAND_TIMEOUT_MS,
+      outputMaxBytes: MAX_CONTAINER_METADATA_BYTES,
+    });
     record.createCommandSucceeded = true;
     const identity = await inspectContainerIdentity(name, COMMAND_TIMEOUT_MS);
     if (identity === null) {
@@ -1256,27 +1454,113 @@ async function runContainer(
       );
     }
     assertOwnedContainer(record, identity);
-    const port = await hostPort(name);
+    await assertContainerOnlyOnIsolatedNetwork(name, network.name);
+    await assertContainerHasNoPublishedPorts(name);
+    await docker(["start", name], {
+      timeoutMs: COMMAND_TIMEOUT_MS,
+      outputMaxBytes: MAX_CONTAINER_METADATA_BYTES,
+    });
+    await assertContainerOnlyOnIsolatedNetwork(name, network.name);
+
+    await docker(
+      [
+        "exec",
+        "--user",
+        "0",
+        name,
+        "node",
+        "--eval",
+        `require("node:fs").chmodSync(${JSON.stringify(
+          SOCKET_RELAY_DIRECTORY,
+        )},0o777)`,
+      ],
+      {
+        timeoutMs: COMMAND_TIMEOUT_MS,
+        outputMaxBytes: MAX_CONTAINER_METADATA_BYTES,
+      },
+    );
+    await docker(
+      ["exec", "--detach", name, "node", "--eval", socketRelayScript()],
+      {
+        timeoutMs: COMMAND_TIMEOUT_MS,
+        outputMaxBytes: MAX_CONTAINER_METADATA_BYTES,
+      },
+    );
+    await waitForSocketRelay(name);
+
+    const relayRunId = randomUUID();
+    const relayName = `fourbros-signal-relay-${scenario}-${relayRunId}`;
+    const portRelay = registerContainer(relayName, relayRunId);
+    record.portRelay = portRelay;
+    const relayRunArgs = [
+      "run",
+      "--detach",
+      "--read-only",
+      "--tmpfs",
+      "/tmp:rw,nosuid,nodev,size=1m",
+      "--cap-drop",
+      "ALL",
+      "--security-opt",
+      "no-new-privileges:true",
+      "--log-driver",
+      CONTAINER_LOG_DRIVER,
+      "--log-opt",
+      `max-size=${CONTAINER_LOG_MAX_SIZE}`,
+      "--log-opt",
+      `max-file=${CONTAINER_LOG_MAX_FILE}`,
+      "--network",
+      DOCKER_DEFAULT_BRIDGE_NETWORK,
+      "--mount",
+      `type=volume,source=${socketVolume.name},target=${SOCKET_RELAY_DIRECTORY},readonly,volume-nocopy`,
+      "--name",
+      relayName,
+      "--label",
+      `${OWNERSHIP_LABEL}=${relayRunId}`,
+      "--publish",
+      `127.0.0.1::${CONTAINER_PORT}`,
+      image,
+      "node",
+      "--eval",
+      portRelayScript(),
+    ];
+    await docker(relayRunArgs, {
+      timeoutMs: COMMAND_TIMEOUT_MS,
+      outputMaxBytes: MAX_CONTAINER_METADATA_BYTES,
+    });
+    portRelay.createCommandSucceeded = true;
+    const relayIdentity = await inspectContainerIdentity(
+      relayName,
+      COMMAND_TIMEOUT_MS,
+    );
+    if (relayIdentity === null) {
+      throw new Error(
+        `port relay disappeared before ownership verification: ${relayName}`,
+      );
+    }
+    assertOwnedContainer(portRelay, relayIdentity);
+    const publishedPort = await assertPortRelayContract(
+      relayName,
+      network.name,
+    );
+    const port = await hostPort(relayName);
+    invariant(
+      port === publishedPort,
+      "docker port disagrees with the published-port contract",
+    );
     await waitForHealth(port);
     const processTree = await inspectProcessTree(name);
     return Object.assign(record, { port, processTree });
   } catch (error) {
     let cleanupError = null;
     try {
-      await cleanupRegisteredContainer(record, {
-        allowNeverAppeared: record.createCommandSucceeded !== true,
-        waitForAppearance: true,
-        timeoutMs: SIGNAL_CLEANUP_TIMEOUT_MS,
-      });
+      await cleanupScenarioResources(record);
     } catch (cleanupFailure) {
       cleanupError = cleanupFailure;
     }
     if (cleanupError !== null) {
-      throw new Error(
-        `${errorMessage(error)}; container cleanup failed: ${sanitizeDiagnosticText(
-          errorMessage(cleanupError),
-        )}`,
-        { cause: error },
+      throw new AggregateError(
+        [error, cleanupError],
+        "scenario setup or cleanup failed",
       );
     }
     throw error;
@@ -1305,6 +1589,71 @@ async function inspectContainerIdentity(name, timeoutMs) {
     "container identity metadata is invalid",
   );
   return { label, running };
+}
+
+async function inspectContainerNetworkMap(name, timeoutMs) {
+  const args = ["inspect", name, "--format", CONTAINER_NETWORKS_FORMAT];
+  const result = await docker(args, {
+    timeoutMs,
+    outputMaxBytes: MAX_CONTAINER_METADATA_BYTES,
+  });
+  const [networks] = parseBoundedJsonFields(
+    result.stdout,
+    1,
+    "container network",
+  );
+  invariant(
+    networks !== null &&
+      typeof networks === "object" &&
+      !Array.isArray(networks),
+    "container network metadata is invalid",
+  );
+  return networks;
+}
+
+async function inspectContainerPorts(name, timeoutMs) {
+  const args = ["inspect", name, "--format", CONTAINER_PORTS_FORMAT];
+  const result = await docker(args, {
+    timeoutMs,
+    outputMaxBytes: MAX_CONTAINER_METADATA_BYTES,
+  });
+  const [ports] = parseBoundedJsonFields(result.stdout, 1, "container port");
+  invariant(
+    ports === null || (typeof ports === "object" && !Array.isArray(ports)),
+    "container port metadata is invalid",
+  );
+  return ports;
+}
+
+async function assertContainerOnlyOnIsolatedNetwork(
+  name,
+  networkName,
+  timeoutMs = COMMAND_TIMEOUT_MS,
+) {
+  const networks = await inspectContainerNetworkMap(name, timeoutMs);
+  const names = Object.keys(networks);
+  invariant(
+    names.length === 1 && names[0] === networkName,
+    `container is not isolated to ${networkName}: ${sanitizeDiagnosticText(
+      JSON.stringify(names),
+    )}`,
+  );
+}
+
+async function assertContainerHasNoPublishedPorts(
+  name,
+  timeoutMs = COMMAND_TIMEOUT_MS,
+) {
+  const ports = await inspectContainerPorts(name, timeoutMs);
+  if (ports === null) return;
+  for (const [containerPort, bindings] of Object.entries(ports)) {
+    invariant(
+      bindings === null,
+      `application container port is published: ${sanitizeDiagnosticText(
+        containerPort,
+      )}`,
+    );
+  }
 }
 
 function assertOwnedContainer(record, identity) {
@@ -1448,6 +1797,101 @@ async function inspectNetworkIdentity(name, timeoutMs) {
   return { label };
 }
 
+async function inspectNetworkConfiguration(name, timeoutMs) {
+  const args = [
+    "network",
+    "inspect",
+    name,
+    "--format",
+    NETWORK_CONFIGURATION_FORMAT,
+  ];
+  const result = await docker(args, {
+    timeoutMs,
+    outputMaxBytes: MAX_CONTAINER_METADATA_BYTES,
+  });
+  const [internal, driver, options, enableIPv4, enableIPv6, scope] =
+    parseBoundedJsonFields(result.stdout, 6, "network configuration");
+  invariant(
+    typeof internal === "boolean" &&
+      typeof driver === "string" &&
+      options !== null &&
+      typeof options === "object" &&
+      !Array.isArray(options) &&
+      typeof enableIPv4 === "boolean" &&
+      typeof enableIPv6 === "boolean" &&
+      typeof scope === "string",
+    "network configuration metadata is invalid",
+  );
+  return { internal, driver, options, enableIPv4, enableIPv6, scope };
+}
+
+function assertIsolatedNetworkContract(record, configuration) {
+  invariant(
+    configuration.internal === true,
+    `network must be internal: ${record.name}`,
+  );
+  invariant(
+    configuration.driver === "bridge",
+    `network driver must be bridge: ${record.name}`,
+  );
+  invariant(
+    configuration.enableIPv4 === true && configuration.enableIPv6 === false,
+    `network IP family contract failed: ${record.name}`,
+  );
+  invariant(
+    configuration.scope === "local",
+    `network scope must be local: ${record.name}`,
+  );
+  for (const [option, expected] of Object.entries(ISOLATED_NETWORK_OPTIONS)) {
+    invariant(
+      configuration.options[option] === expected,
+      `network option contract failed: ${option}=${expected}`,
+    );
+  }
+}
+
+async function assertPortRelayContract(
+  name,
+  networkName,
+  timeoutMs = COMMAND_TIMEOUT_MS,
+) {
+  const networks = await inspectContainerNetworkMap(name, timeoutMs);
+  const networkNames = Object.keys(networks);
+  invariant(
+    networkNames.length === 1 &&
+      networkNames[0] === DOCKER_DEFAULT_BRIDGE_NETWORK,
+    `port relay must use only the Docker Desktop transport network: ${sanitizeDiagnosticText(
+      JSON.stringify(networkNames),
+    )}`,
+  );
+  invariant(
+    networkNames[0] !== networkName,
+    "port relay must not join the isolated application network",
+  );
+
+  const ports = await inspectContainerPorts(name, timeoutMs);
+  const bindings = ports?.[`${CONTAINER_PORT}/tcp`];
+  invariant(
+    Array.isArray(bindings) && bindings.length === 1,
+    "port relay must have exactly one published application port",
+  );
+  const [binding] = bindings;
+  invariant(
+    binding !== null &&
+      typeof binding === "object" &&
+      binding.HostIp === "127.0.0.1" &&
+      typeof binding.HostPort === "string" &&
+      /^\d+$/.test(binding.HostPort),
+    "port relay must publish only on the host loopback address",
+  );
+  const port = Number(binding.HostPort);
+  invariant(
+    Number.isSafeInteger(port) && port > 0 && port <= 65_535,
+    "port relay published port is invalid",
+  );
+  return port;
+}
+
 function assertOwnedNetwork(record, identity) {
   invariant(
     identity.label === record.runId,
@@ -1550,6 +1994,200 @@ function cleanupRegisteredNetwork(record, options = {}) {
   return record.cleanupPromise;
 }
 
+async function inspectVolumeIdentity(name, timeoutMs) {
+  const args = ["volume", "inspect", name, "--format", VOLUME_IDENTITY_FORMAT];
+  const result = await docker(args, {
+    allowFailure: true,
+    timeoutMs,
+    outputMaxBytes: MAX_CONTAINER_METADATA_BYTES,
+  });
+  if (result.code !== 0) {
+    if (isDockerNotFoundResult(result, "volume")) return null;
+    throw dockerResultError("docker volume inspect", args, result);
+  }
+  const [label] = parseBoundedJsonFields(result.stdout, 1, "volume identity");
+  invariant(
+    label === null || typeof label === "string",
+    "volume identity metadata is invalid",
+  );
+  return { label };
+}
+
+function assertOwnedVolume(record, identity) {
+  invariant(
+    identity.label === record.runId,
+    `volume ownership mismatch: ${record.name}`,
+  );
+  record.owned = true;
+}
+
+async function waitForVolumeIdentity(record, deadline, options = {}) {
+  while (true) {
+    const remainingMs = deadline - Date.now();
+    if (remainingMs <= 0) {
+      if (options.allowNeverAppeared === true && record.owned !== true) {
+        return null;
+      }
+      throw new Error(
+        `volume cleanup deadline exceeded while locating ${record.name}`,
+      );
+    }
+    const identity = await inspectVolumeIdentity(record.name, remainingMs);
+    if (identity !== null) {
+      assertOwnedVolume(record, identity);
+      return identity;
+    }
+    if (record.owned === true) return null;
+    if (options.allowNeverAppeared !== true) {
+      throw new Error(`volume ownership could not be verified: ${record.name}`);
+    }
+    if (options.waitForAppearance !== true) return null;
+    await delay(Math.min(50, deadline - Date.now()));
+  }
+}
+
+async function waitForVolumeRemoval(record, deadline) {
+  while (true) {
+    const remainingMs = deadline - Date.now();
+    if (remainingMs <= 0) {
+      throw new Error(
+        `volume removal was not verified before the deadline: ${record.name}`,
+      );
+    }
+    const identity = await inspectVolumeIdentity(record.name, remainingMs);
+    if (identity === null) return;
+    assertOwnedVolume(record, identity);
+    await delay(Math.min(50, deadline - Date.now()));
+  }
+}
+
+function isDockerVolumeInUseResult(result) {
+  return /\bvolume\b.*\bin use\b/i.test(String(result.stderr ?? ""));
+}
+
+async function cleanupVolume(record, options = {}) {
+  const timeoutMs = options.timeoutMs ?? STOP_MARGIN_MS;
+  const deadline = Date.now() + boundedTimeoutMs(timeoutMs, "volume cleanup");
+  const identity = await waitForVolumeIdentity(record, deadline, options);
+  if (identity === null) {
+    if (record.owned === true || options.allowNeverAppeared === true) return;
+    throw new Error(`volume removal was not authorized: ${record.name}`);
+  }
+
+  const removeArgs = ["volume", "rm", record.name];
+  while (true) {
+    const remainingMs = deadline - Date.now();
+    if (remainingMs <= 0) {
+      throw new Error(`volume cleanup deadline exceeded for ${record.name}`);
+    }
+    const removeResult = await docker(removeArgs, {
+      allowFailure: true,
+      timeoutMs: remainingMs,
+      outputMaxBytes: MAX_CONTAINER_METADATA_BYTES,
+    });
+    if (
+      removeResult.code === 0 ||
+      isDockerNotFoundResult(removeResult, "volume")
+    ) {
+      await waitForVolumeRemoval(record, deadline);
+      return;
+    }
+    if (!isDockerVolumeInUseResult(removeResult)) {
+      throw dockerResultError("docker volume rm", removeArgs, removeResult);
+    }
+    await delay(Math.min(50, deadline - Date.now()));
+  }
+}
+
+function cleanupRegisteredVolume(record, options = {}) {
+  if (record.cleanupPromise !== null) return record.cleanupPromise;
+  record.cleanupPromise = cleanupVolume(record, options).then(
+    (result) => {
+      activeVolumes.delete(record.name);
+      return result;
+    },
+    (error) => {
+      record.cleanupPromise = null;
+      throw error;
+    },
+  );
+  return record.cleanupPromise;
+}
+
+async function cleanupScenarioResources(
+  container,
+  timeoutMs = SIGNAL_CLEANUP_TIMEOUT_MS,
+) {
+  const failures = [];
+  for (const record of [container.portRelay, container]) {
+    if (record === undefined) continue;
+    try {
+      await cleanupRegisteredContainer(record, {
+        timeoutMs,
+        allowNeverAppeared: record.createCommandSucceeded !== true,
+        waitForAppearance: true,
+      });
+    } catch (error) {
+      failures.push(cleanupFailure("container", record, error));
+    }
+  }
+  if (failures.length > 0) {
+    throw new AggregateError(failures, "scenario container cleanup failed");
+  }
+}
+
+async function createSocketVolume() {
+  const runId = randomUUID();
+  const name = `fourbros-signal-volume-${runId}`;
+  const record = registerVolume(name, runId);
+  const createArgs = [
+    "volume",
+    "create",
+    "--label",
+    `${VOLUME_OWNERSHIP_LABEL}=${runId}`,
+    name,
+  ];
+  try {
+    const createResult = await docker(createArgs, {
+      allowFailure: true,
+      timeoutMs: COMMAND_TIMEOUT_MS,
+      outputMaxBytes: MAX_CONTAINER_METADATA_BYTES,
+    });
+    requireDockerSuccess("docker volume create", createArgs, createResult);
+    record.createCommandSucceeded = true;
+    const identity = await inspectVolumeIdentity(name, COMMAND_TIMEOUT_MS);
+    if (identity === null) {
+      throw new Error(
+        `volume disappeared before ownership verification: ${name}`,
+      );
+    }
+    assertOwnedVolume(record, identity);
+    return record;
+  } catch (error) {
+    let cleanupError = null;
+    try {
+      await cleanupRegisteredVolume(record, {
+        allowNeverAppeared: record.createCommandSucceeded !== true,
+        waitForAppearance:
+          record.createCommandSucceeded !== true &&
+          /timed out after \d+ms/.test(errorMessage(error)),
+        timeoutMs: record.createCommandSucceeded
+          ? STOP_MARGIN_MS
+          : COMMAND_TIMEOUT_MS,
+      });
+    } catch (failure) {
+      cleanupError = failure;
+    }
+    if (cleanupError !== null) {
+      throw new AggregateError(
+        [error, cleanupError],
+        "volume setup or cleanup failed",
+      );
+    }
+    throw error;
+  }
+}
+
 async function createIsolatedNetwork() {
   const runId = randomUUID();
   const name = `fourbros-signal-network-${runId}`;
@@ -1559,14 +2197,13 @@ async function createIsolatedNetwork() {
     "create",
     "--driver",
     "bridge",
-    "--opt",
-    "com.docker.network.bridge.enable_icc=false",
-    "--opt",
-    "com.docker.network.bridge.enable_ip_masquerade=false",
-    "--label",
-    `${NETWORK_OWNERSHIP_LABEL}=${runId}`,
-    name,
+    "--internal",
+    "--ipv6=false",
   ];
+  for (const [option, value] of Object.entries(ISOLATED_NETWORK_OPTIONS)) {
+    createArgs.push("--opt", `${option}=${value}`);
+  }
+  createArgs.push("--label", `${NETWORK_OWNERSHIP_LABEL}=${runId}`, name);
   try {
     const createResult = await docker(createArgs, {
       allowFailure: true,
@@ -1582,6 +2219,11 @@ async function createIsolatedNetwork() {
       );
     }
     assertOwnedNetwork(record, identity);
+    const configuration = await inspectNetworkConfiguration(
+      name,
+      COMMAND_TIMEOUT_MS,
+    );
+    assertIsolatedNetworkContract(record, configuration);
     return record;
   } catch (error) {
     let cleanupError = null;
@@ -1599,11 +2241,9 @@ async function createIsolatedNetwork() {
       cleanupError = cleanupFailure;
     }
     if (cleanupError !== null) {
-      throw new Error(
-        `${errorMessage(error)}; network cleanup failed: ${sanitizeDiagnosticText(
-          errorMessage(cleanupError),
-        )}`,
-        { cause: error },
+      throw new AggregateError(
+        [error, cleanupError],
+        "network setup or cleanup failed",
       );
     }
     throw error;
@@ -1622,7 +2262,18 @@ async function cleanupRegisteredResources(
         waitForAppearance: true,
       });
     } catch (error) {
-      failures.push(error);
+      failures.push(cleanupFailure("container", record, error));
+    }
+  }
+  for (const record of [...activeVolumes.values()]) {
+    try {
+      await cleanupRegisteredVolume(record, {
+        timeoutMs,
+        allowNeverAppeared: record.createCommandSucceeded !== true,
+        waitForAppearance: true,
+      });
+    } catch (error) {
+      failures.push(cleanupFailure("volume", record, error));
     }
   }
   for (const record of [...activeNetworks.values()]) {
@@ -1633,7 +2284,7 @@ async function cleanupRegisteredResources(
         waitForAppearance: true,
       });
     } catch (error) {
-      failures.push(error);
+      failures.push(cleanupFailure("network", record, error));
     }
   }
   if (failures.length > 0) {
@@ -1884,6 +2535,16 @@ async function finishScenario(
     shutdownElapsedMs <= shutdownGraceMs + STOP_MARGIN_MS,
     `shutdown exceeded budget: ${shutdownElapsedMs}ms`,
   );
+  if (container.portRelay !== undefined) {
+    await cleanupRegisteredContainer(container.portRelay, {
+      timeoutMs: remainingUntil(
+        deadline,
+        `${container.name} port relay cleanup`,
+      ),
+      allowNeverAppeared: container.portRelay.createCommandSucceeded !== true,
+      waitForAppearance: true,
+    });
+  }
   await assertPortClosed(
     container.port,
     remainingUntil(deadline, `${container.name} port close`),
@@ -1904,7 +2565,7 @@ async function finishScenario(
   };
 }
 
-async function gracefulScenario(image, network) {
+async function gracefulScenario(image, network, socketVolume) {
   const shutdownGraceMs = 4_000;
   const socketCloseGraceMs = 1_000;
   const container = await runContainer(
@@ -1913,6 +2574,7 @@ async function gracefulScenario(image, network) {
     shutdownGraceMs,
     socketCloseGraceMs,
     network,
+    socketVolume,
   );
   let peer = null;
   try {
@@ -1958,11 +2620,11 @@ async function gracefulScenario(image, network) {
     });
   } finally {
     peer?.socket.terminate();
-    await cleanupRegisteredContainer(container);
+    await cleanupScenarioResources(container);
   }
 }
 
-async function socketCloseSubdeadlineScenario(image, network) {
+async function socketCloseSubdeadlineScenario(image, network, socketVolume) {
   const shutdownGraceMs = 4_000;
   const socketCloseGraceMs = 1_000;
   const container = await runContainer(
@@ -1971,6 +2633,7 @@ async function socketCloseSubdeadlineScenario(image, network) {
     shutdownGraceMs,
     socketCloseGraceMs,
     network,
+    socketVolume,
   );
   let peer = null;
   try {
@@ -2011,11 +2674,11 @@ async function socketCloseSubdeadlineScenario(image, network) {
     });
   } finally {
     peer?.socket.destroy();
-    await cleanupRegisteredContainer(container);
+    await cleanupScenarioResources(container);
   }
 }
 
-async function secondSignalScenario(image, network) {
+async function secondSignalScenario(image, network, socketVolume) {
   const shutdownGraceMs = 10_000;
   const socketCloseGraceMs = 5_000;
   const container = await runContainer(
@@ -2024,6 +2687,7 @@ async function secondSignalScenario(image, network) {
     shutdownGraceMs,
     socketCloseGraceMs,
     network,
+    socketVolume,
   );
   let peer = null;
   try {
@@ -2088,7 +2752,7 @@ async function secondSignalScenario(image, network) {
     });
   } finally {
     peer?.socket.destroy();
-    await cleanupRegisteredContainer(container);
+    await cleanupScenarioResources(container);
   }
 }
 
@@ -2108,10 +2772,7 @@ async function handleTerminationSignal(signal) {
   terminateActiveChildProcesses("SIGKILL");
   if (terminationPromise === null) {
     terminationPromise = cleanupRegisteredResources().catch((error) => {
-      throw new Error(
-        `signal cleanup failed: ${sanitizeDiagnosticText(errorMessage(error))}`,
-        { cause: error },
-      );
+      throw new Error("signal cleanup failed", { cause: error });
     });
   }
   try {
@@ -2162,10 +2823,13 @@ async function main() {
   );
   const network = await createIsolatedNetwork();
   try {
+    const socketVolume = await createSocketVolume();
     const results = [];
-    results.push(await gracefulScenario(imageId, network));
-    results.push(await socketCloseSubdeadlineScenario(imageId, network));
-    results.push(await secondSignalScenario(imageId, network));
+    results.push(await gracefulScenario(imageId, network, socketVolume));
+    results.push(
+      await socketCloseSubdeadlineScenario(imageId, network, socketVolume),
+    );
+    results.push(await secondSignalScenario(imageId, network, socketVolume));
     invariant(
       terminationSignal === null,
       `verification interrupted by ${terminationSignal}`,
@@ -2192,21 +2856,16 @@ void main().catch(async (error) => {
     try {
       await terminationPromise;
     } catch (cleanupError) {
-      error = new Error(
-        `${errorMessage(error)}; signal cleanup failed: ${sanitizeDiagnosticText(
-          errorMessage(cleanupError),
-        )}`,
-        { cause: error },
+      error = new AggregateError(
+        [error, cleanupError],
+        "verification and signal cleanup failed",
       );
     }
   }
   console.error(
     JSON.stringify({
       ok: false,
-      error:
-        error instanceof Error
-          ? sanitizeDiagnosticText(error.message)
-          : "unknown error",
+      error: errorMessage(error),
     }),
   );
   process.exitCode =
