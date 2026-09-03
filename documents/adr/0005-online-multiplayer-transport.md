@@ -15,7 +15,7 @@ Accepted
 ## Decision
 
 1. Vercel の `/online` がロビーと対局 UI を提供し、`NEXT_PUBLIC_ONLINE_WS_URL` で Railway の WebSocket エンドポイントへ接続する。
-2. Railway の `server/index.ts` が `ws` による `/ws` と `/healthz` を提供し、既存のゲームエンジンを権威的に実行する。
+2. Railway の `server/index.ts` が `ws` による接続 `/ws`、プロセス liveness `/healthz`、configuration/readiness healthcheck `/readyz` を提供し、既存のゲームエンジンを権威的に実行する。
 3. ルーム作成時に 4 席(`p0`〜`p3`)を確保し、未接続の席は AI として進行する。参加者には匿名の再接続トークンを発行し、ブラウザの `sessionStorage` に保存する。
 4. ルーム・座席・対局状態は当面プロセス内メモリに保持する。Railway の再起動時にルームを復元しない。認証、DB/Redis による永続化、水平スケールはこの MVP の範囲外とする。
 5. 操作にはルームのバージョンとプレイヤーIDを含め、サーバーは手番・座席所有権・入力牌を検証してから次のスナップショットを全参加者へ配信する。各参加者には自分の手牌を中心とした View を返し、他人の非公開情報と他人向け pending 操作は送信しない。

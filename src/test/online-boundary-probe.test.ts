@@ -7,11 +7,21 @@ import {
   main,
   parseProbeArguments,
   probeUpgrade,
+  readBoundedResponseBody,
   runBoundaryProbe,
 } from "../../scripts/probe-online-boundary.mjs";
 
 const ALLOWED_ORIGIN = "http://allowed.local";
 const DISALLOWED_ORIGIN = "http://disallowed.local";
+const HEALTH_SERVICE = "four-bros-mahjong-online";
+
+interface BoundaryFixtureOptions {
+  readonly allowMissingOrigin?: boolean;
+  readonly hangUpgrades?: boolean;
+  readonly healthBody?: string;
+  readonly readinessBody?: string;
+  readonly readinessStatus?: number;
+}
 
 interface BoundaryFixture {
   readonly baseUrl: string;
@@ -47,14 +57,22 @@ async function closeServer(
 async function startBoundaryFixture({
   allowMissingOrigin = false,
   hangUpgrades = false,
-} = {}): Promise<BoundaryFixture> {
+  healthBody = JSON.stringify({ ok: true, service: HEALTH_SERVICE }),
+  readinessBody,
+  readinessStatus = 200,
+}: BoundaryFixtureOptions = {}): Promise<BoundaryFixture> {
   const applicationBytes: Buffer[] = [];
   const origins: Array<string | undefined> = [];
   const sockets = new Set<Socket>();
   const server = createServer((request, response) => {
-    if (request.url === "/healthz") {
-      response.writeHead(200, { "content-type": "application/json" });
-      response.end('{"ok":true}');
+    if (request.url === "/healthz" || request.url === "/readyz") {
+      const status = request.url === "/readyz" ? readinessStatus : 200;
+      response.writeHead(status, { "content-type": "application/json" });
+      response.end(
+        request.url === "/healthz"
+          ? healthBody
+          : (readinessBody ?? JSON.stringify({ ok: status === 200 })),
+      );
       return;
     }
     response.writeHead(404);
@@ -123,6 +141,7 @@ describe("online boundary probe arguments", () => {
       allowedOrigin: "https://app.example.com",
       disallowedOrigin: "https://blocked.example",
       timeoutMs: 2500,
+      allowLocalTarget: false,
     });
   });
 
@@ -139,6 +158,7 @@ describe("online boundary probe arguments", () => {
       allowedOrigin: "https://env-app.example.com",
       disallowedOrigin: "https://env-blocked.example",
       timeoutMs: 2000,
+      allowLocalTarget: false,
     });
     expect(
       parseProbeArguments(
@@ -155,7 +175,7 @@ describe("online boundary probe arguments", () => {
   ])("fails closed when required environment %s is empty", (key, option) => {
     expect(() =>
       parseProbeArguments([], {
-        ONLINE_PROBE_BASE_URL: "http://online.local",
+        ONLINE_PROBE_BASE_URL: "https://online.example.com",
         ONLINE_PROBE_ALLOWED_ORIGIN: ALLOWED_ORIGIN,
         ONLINE_PROBE_DISALLOWED_ORIGIN: DISALLOWED_ORIGIN,
         [key]: "",
@@ -201,6 +221,28 @@ describe("online boundary probe arguments", () => {
     [
       [
         "--base-url",
+        "https://*.online.example.com",
+        "--allowed-origin",
+        "https://app.example.com",
+        "--disallowed-origin",
+        "https://blocked.example",
+      ],
+      "wildcard host",
+    ],
+    [
+      [
+        "--base-url",
+        "https://online.example.com",
+        "--allowed-origin",
+        "https://*.example.com",
+        "--disallowed-origin",
+        "https://blocked.example",
+      ],
+      "wildcard host",
+    ],
+    [
+      [
+        "--base-url",
         "https://online.example.com",
         "--allowed-origin",
         "https://app.example.com",
@@ -214,22 +256,237 @@ describe("online boundary probe arguments", () => {
   ])("fails closed for invalid arguments %#", (args, message) => {
     expect(() => parseProbeArguments(args, {})).toThrow(message);
   });
+
+  it.each([
+    ["127.0.0.1", "loopback"],
+    ["10.0.0.1", "private"],
+    ["172.16.0.1", "private"],
+    ["192.168.1.1", "private"],
+    ["169.254.169.254", "link-local metadata"],
+    ["[::1]", "loopback"],
+    ["[fe80::1]", "link-local"],
+    ["[fd00::1]", "private"],
+    ["metadata.google.internal", "metadata hostname"],
+  ])("rejects %s as a production probe target (%s)", (hostname) => {
+    expect(() =>
+      parseProbeArguments(
+        [
+          "--base-url",
+          `https://${hostname}`,
+          "--allowed-origin",
+          "https://app.example.com",
+          "--disallowed-origin",
+          "https://blocked.example",
+        ],
+        {},
+      ),
+    ).toThrow("public");
+  });
+
+  it("allows only loopback targets through an explicit local-test opt-in", () => {
+    expect(
+      parseProbeArguments(
+        [
+          "--base-url",
+          "http://127.0.0.1:4321",
+          "--allowed-origin",
+          "https://app.example.com",
+          "--disallowed-origin",
+          "https://blocked.example",
+          "--allow-local-target",
+        ],
+        {},
+      ),
+    ).toMatchObject({
+      baseUrl: "http://127.0.0.1:4321",
+      allowLocalTarget: true,
+    });
+    expect(() =>
+      parseProbeArguments(
+        [
+          "--base-url",
+          "http://10.0.0.1",
+          "--allowed-origin",
+          "https://app.example.com",
+          "--disallowed-origin",
+          "https://blocked.example",
+          "--allow-local-target",
+        ],
+        {},
+      ),
+    ).toThrow("only permits");
+  });
+
+  it("returns structured evidence when DNS resolution times out", async () => {
+    const startedAt = Date.now();
+    const evidence = await runBoundaryProbe({
+      baseUrl: "https://online.example.com",
+      allowedOrigin: "https://app.example.com",
+      disallowedOrigin: "https://blocked.example",
+      timeoutMs: 100,
+      lookupFunction: (() =>
+        new Promise(() => {})) as typeof import("node:dns/promises").lookup,
+    });
+
+    expect(Date.now() - startedAt).toBeLessThan(1_000);
+    expect(evidence).toMatchObject({
+      schemaVersion: 2,
+      ok: false,
+      target: { error: "dns_timeout" },
+      checks: {
+        health: { statusCode: null, error: "dns_timeout" },
+        readiness: { statusCode: null, error: "dns_timeout" },
+      },
+    });
+    expect(JSON.stringify(evidence)).not.toContain("stack");
+  });
+
+  it("returns structured evidence when DNS resolution fails", async () => {
+    const evidence = await runBoundaryProbe({
+      baseUrl: "https://online.example.com",
+      allowedOrigin: "https://app.example.com",
+      disallowedOrigin: "https://blocked.example",
+      timeoutMs: 100,
+      lookupFunction: (async () => {
+        throw new Error("resolver-internal-detail");
+      }) as typeof import("node:dns/promises").lookup,
+    });
+
+    expect(evidence).toMatchObject({
+      ok: false,
+      target: { error: "dns_lookup_failed" },
+      checks: {
+        health: { statusCode: null, error: "dns_lookup_failed" },
+      },
+    });
+    expect(JSON.stringify(evidence)).not.toContain("resolver-internal-detail");
+  });
+});
+
+describe("online boundary response body cleanup", () => {
+  it("cancels a body when Content-Length is invalid before reader acquisition", async () => {
+    const cancel = vi.fn().mockResolvedValue(undefined);
+    const getReader = vi.fn();
+    const response = {
+      headers: new Headers({ "content-length": "not-a-number" }),
+      body: { cancel, getReader },
+    };
+
+    await expect(readBoundedResponseBody(response)).rejects.toMatchObject({
+      code: "invalid_body_length",
+    });
+    expect(cancel).toHaveBeenCalledOnce();
+    expect(getReader).not.toHaveBeenCalled();
+  });
+
+  it("cancels the body when getReader fails", async () => {
+    const cancel = vi.fn().mockResolvedValue(undefined);
+    const response = {
+      headers: new Headers(),
+      body: {
+        cancel,
+        getReader: vi.fn(() => {
+          throw new Error("reader unavailable");
+        }),
+      },
+    };
+
+    await expect(readBoundedResponseBody(response)).rejects.toThrow(
+      "reader unavailable",
+    );
+    expect(cancel).toHaveBeenCalledOnce();
+  });
+
+  it("cancels and releases the reader when a read fails", async () => {
+    const reader = {
+      read: vi.fn().mockRejectedValue(new Error("stream failed")),
+      cancel: vi.fn().mockResolvedValue(undefined),
+      releaseLock: vi.fn(),
+    };
+    const response = {
+      headers: new Headers(),
+      body: { getReader: vi.fn(() => reader) },
+    };
+
+    await expect(readBoundedResponseBody(response)).rejects.toThrow(
+      "stream failed",
+    );
+    expect(reader.cancel).toHaveBeenCalledOnce();
+    expect(reader.releaseLock).toHaveBeenCalledOnce();
+  });
+
+  it("cancels and releases the reader for oversized bodies", async () => {
+    const reader = {
+      read: vi
+        .fn()
+        .mockResolvedValue({ done: false, value: new Uint8Array(4_097) }),
+      cancel: vi.fn().mockResolvedValue(undefined),
+      releaseLock: vi.fn(),
+    };
+    const response = {
+      headers: new Headers(),
+      body: { getReader: vi.fn(() => reader) },
+    };
+
+    await expect(readBoundedResponseBody(response)).rejects.toMatchObject({
+      code: "body_too_large",
+    });
+    expect(reader.cancel).toHaveBeenCalledOnce();
+    expect(reader.releaseLock).toHaveBeenCalledOnce();
+  });
+
+  it("cancels and releases the reader for truncated bodies", async () => {
+    const reader = {
+      read: vi.fn().mockResolvedValue({ done: true, value: undefined }),
+      cancel: vi.fn().mockResolvedValue(undefined),
+      releaseLock: vi.fn(),
+    };
+    const response = {
+      headers: new Headers({ "content-length": "2" }),
+      body: { getReader: vi.fn(() => reader) },
+    };
+
+    await expect(readBoundedResponseBody(response)).rejects.toMatchObject({
+      code: "truncated_body",
+    });
+    expect(reader.cancel).toHaveBeenCalledOnce();
+    expect(reader.releaseLock).toHaveBeenCalledOnce();
+  });
 });
 
 describe("online boundary probe", () => {
-  it("checks health and the exact 101/403/403 boundary without sending a frame", async () => {
+  it("checks liveness, readiness, and the exact 101/403/403 boundary without sending a frame", async () => {
     const fixture = await startBoundaryFixture();
     openFixtures.push(fixture);
 
     const evidence = await runBoundaryProbe({
+      allowLocalTarget: true,
       baseUrl: fixture.baseUrl,
       allowedOrigin: ALLOWED_ORIGIN,
       disallowedOrigin: DISALLOWED_ORIGIN,
       timeoutMs: 1_000,
     });
 
+    expect(evidence.schemaVersion).toBe(2);
     expect(evidence.ok).toBe(true);
-    expect(evidence.checks.health.statusCode).toBe(200);
+    expect(evidence.checks.health).toMatchObject({
+      statusCode: 200,
+      body: { ok: true },
+    });
+    expect(
+      "body" in evidence.checks.health
+        ? evidence.checks.health.body
+        : undefined,
+    ).toEqual({ ok: true });
+    expect(evidence.checks.readiness).toMatchObject({
+      statusCode: 200,
+      body: { ok: true },
+    });
+    expect(
+      "body" in evidence.checks.readiness
+        ? evidence.checks.readiness.body
+        : undefined,
+    ).toEqual({ ok: true });
     expect(evidence.checks.allowedOrigin.statusCode).toBe(101);
     expect(evidence.checks.disallowedOrigin.statusCode).toBe(403);
     expect(evidence.checks.missingOrigin.statusCode).toBe(403);
@@ -240,6 +497,291 @@ describe("online boundary probe", () => {
     ]);
     await new Promise((resolve) => setImmediate(resolve));
     expect(Buffer.concat(fixture.applicationBytes)).toHaveLength(0);
+  });
+
+  it("accepts valid exact liveness and readiness JSON bodies", async () => {
+    const fixture = await startBoundaryFixture({
+      healthBody: '{"ok":true,"service":"four-bros-mahjong-online"}',
+      readinessBody: '{"ok":true}',
+    });
+    openFixtures.push(fixture);
+
+    const evidence = await runBoundaryProbe({
+      allowLocalTarget: true,
+      baseUrl: fixture.baseUrl,
+      allowedOrigin: ALLOWED_ORIGIN,
+      disallowedOrigin: DISALLOWED_ORIGIN,
+      timeoutMs: 1_000,
+    });
+
+    expect(evidence.ok).toBe(true);
+    expect(evidence.checks.health).toMatchObject({
+      statusCode: 200,
+      body: { ok: true },
+    });
+    expect(evidence.checks.readiness).toMatchObject({
+      statusCode: 200,
+      body: { ok: true },
+    });
+  });
+
+  it("accepts all JSON whitespace characters around exact health fields", async () => {
+    const fixture = await startBoundaryFixture({
+      healthBody: `\r\n{\r\n\t"ok" \t:\t true,\r\n "service"\t:\t"${HEALTH_SERVICE}"\r\n}\r\n`,
+      readinessBody: ` \r\n{\n\t"ok"\t:\ttrue\r\n}\t`,
+    });
+    openFixtures.push(fixture);
+
+    const evidence = await runBoundaryProbe({
+      allowLocalTarget: true,
+      baseUrl: fixture.baseUrl,
+      allowedOrigin: ALLOWED_ORIGIN,
+      disallowedOrigin: DISALLOWED_ORIGIN,
+      timeoutMs: 1_000,
+    });
+
+    expect(evidence.ok).toBe(true);
+    expect(evidence.checks.health).toMatchObject({
+      statusCode: 200,
+      body: { ok: true },
+    });
+    expect(evidence.checks.readiness).toMatchObject({
+      statusCode: 200,
+      body: { ok: true },
+    });
+  });
+
+  it("rejects duplicate keys in liveness JSON bodies", async () => {
+    const fixture = await startBoundaryFixture({
+      healthBody: '{"ok":false,"ok":true,"service":"four-bros-mahjong-online"}',
+    });
+    openFixtures.push(fixture);
+
+    const evidence = await runBoundaryProbe({
+      allowLocalTarget: true,
+      baseUrl: fixture.baseUrl,
+      allowedOrigin: ALLOWED_ORIGIN,
+      disallowedOrigin: DISALLOWED_ORIGIN,
+      timeoutMs: 1_000,
+    });
+
+    expect(evidence.ok).toBe(false);
+    expect(evidence.checks.health).toMatchObject({
+      statusCode: 200,
+      error: "invalid_json",
+    });
+    expect(evidence.checks.health).not.toHaveProperty("body");
+  });
+
+  it("rejects duplicate keys in readiness JSON bodies", async () => {
+    const fixture = await startBoundaryFixture({
+      readinessBody: '{"ok":false,"ok":true}',
+    });
+    openFixtures.push(fixture);
+
+    const evidence = await runBoundaryProbe({
+      allowLocalTarget: true,
+      baseUrl: fixture.baseUrl,
+      allowedOrigin: ALLOWED_ORIGIN,
+      disallowedOrigin: DISALLOWED_ORIGIN,
+      timeoutMs: 1_000,
+    });
+
+    expect(evidence.ok).toBe(false);
+    expect(evidence.checks.readiness).toMatchObject({
+      statusCode: 200,
+      error: "invalid_json",
+    });
+    expect(evidence.checks.readiness).not.toHaveProperty("body");
+  });
+
+  it("reports readiness drift separately from liveness", async () => {
+    const fixture = await startBoundaryFixture({ readinessStatus: 503 });
+    openFixtures.push(fixture);
+
+    const evidence = await runBoundaryProbe({
+      allowLocalTarget: true,
+      baseUrl: fixture.baseUrl,
+      allowedOrigin: ALLOWED_ORIGIN,
+      disallowedOrigin: DISALLOWED_ORIGIN,
+      timeoutMs: 1_000,
+    });
+
+    expect(evidence.ok).toBe(false);
+    expect(evidence.checks.health.statusCode).toBe(200);
+    expect(evidence.checks.readiness).toMatchObject({
+      expectedStatus: 200,
+      statusCode: 503,
+      body: { ok: false },
+    });
+  });
+
+  it.each([
+    [
+      "liveness",
+      {
+        healthBody: JSON.stringify({ ok: false, service: HEALTH_SERVICE }),
+        readinessBody: undefined,
+      },
+    ],
+    [
+      "readiness",
+      { healthBody: undefined, readinessBody: JSON.stringify({ ok: false }) },
+    ],
+  ])("rejects a 200 %s response with ok:false", async (_name, options) => {
+    const fixture = await startBoundaryFixture(options);
+    openFixtures.push(fixture);
+
+    const evidence = await runBoundaryProbe({
+      allowLocalTarget: true,
+      baseUrl: fixture.baseUrl,
+      allowedOrigin: ALLOWED_ORIGIN,
+      disallowedOrigin: DISALLOWED_ORIGIN,
+      timeoutMs: 1_000,
+    });
+
+    expect(evidence.schemaVersion).toBe(2);
+    expect(evidence.ok).toBe(false);
+    expect(evidence.checks.health).toMatchObject({
+      body: options.healthBody === undefined ? { ok: true } : { ok: false },
+    });
+    expect(evidence.checks.readiness).toMatchObject({
+      body: options.readinessBody === undefined ? { ok: true } : { ok: false },
+    });
+  });
+
+  it.each([
+    ["missing service", JSON.stringify({ ok: true })],
+    ["wrong service", JSON.stringify({ ok: true, service: "another-service" })],
+    [
+      "unknown field",
+      JSON.stringify({ ok: true, service: HEALTH_SERVICE, extra: "redact-me" }),
+    ],
+    ["nonboolean ok", JSON.stringify({ ok: "true", service: HEALTH_SERVICE })],
+  ])("rejects invalid liveness payload: %s", async (_name, healthBody) => {
+    const fixture = await startBoundaryFixture({ healthBody });
+    openFixtures.push(fixture);
+
+    const evidence = await runBoundaryProbe({
+      allowLocalTarget: true,
+      baseUrl: fixture.baseUrl,
+      allowedOrigin: ALLOWED_ORIGIN,
+      disallowedOrigin: DISALLOWED_ORIGIN,
+      timeoutMs: 1_000,
+    });
+
+    expect(evidence.schemaVersion).toBe(2);
+    expect(evidence.ok).toBe(false);
+    expect(evidence.checks.health).toMatchObject({
+      statusCode: 200,
+      error: "invalid_schema",
+    });
+    expect(evidence.checks.health).not.toHaveProperty("body");
+    expect(JSON.stringify(evidence)).not.toContain("redact-me");
+  });
+
+  it("rejects malformed liveness and readiness JSON while retaining status evidence", async () => {
+    const fixture = await startBoundaryFixture({
+      healthBody: "{malformed",
+      readinessBody: "not-json",
+    });
+    openFixtures.push(fixture);
+
+    const evidence = await runBoundaryProbe({
+      allowLocalTarget: true,
+      baseUrl: fixture.baseUrl,
+      allowedOrigin: ALLOWED_ORIGIN,
+      disallowedOrigin: DISALLOWED_ORIGIN,
+      timeoutMs: 1_000,
+    });
+
+    expect(evidence.schemaVersion).toBe(2);
+    expect(evidence.ok).toBe(false);
+    expect(evidence.checks.health).toMatchObject({
+      statusCode: 200,
+      error: "invalid_json",
+    });
+    expect(evidence.checks.readiness).toMatchObject({
+      statusCode: 200,
+      error: "invalid_json",
+    });
+  });
+
+  it("rejects unknown health fields without emitting their values", async () => {
+    const secret = "health-secret-must-not-appear";
+    const fixture = await startBoundaryFixture({
+      healthBody: JSON.stringify({ ok: true, service: HEALTH_SERVICE, secret }),
+    });
+    openFixtures.push(fixture);
+
+    const evidence = await runBoundaryProbe({
+      allowLocalTarget: true,
+      baseUrl: fixture.baseUrl,
+      allowedOrigin: ALLOWED_ORIGIN,
+      disallowedOrigin: DISALLOWED_ORIGIN,
+      timeoutMs: 1_000,
+    });
+
+    expect(evidence.schemaVersion).toBe(2);
+    expect(evidence.ok).toBe(false);
+    expect(evidence.checks.health).toMatchObject({
+      statusCode: 200,
+      error: "invalid_schema",
+    });
+    expect(evidence.checks.health).not.toHaveProperty("body");
+    expect(JSON.stringify(evidence)).not.toContain(secret);
+  });
+
+  it("rejects a nonboolean ok field without emitting the response object", async () => {
+    const fixture = await startBoundaryFixture({
+      readinessBody: JSON.stringify({ ok: "true" }),
+    });
+    openFixtures.push(fixture);
+
+    const evidence = await runBoundaryProbe({
+      allowLocalTarget: true,
+      baseUrl: fixture.baseUrl,
+      allowedOrigin: ALLOWED_ORIGIN,
+      disallowedOrigin: DISALLOWED_ORIGIN,
+      timeoutMs: 1_000,
+    });
+
+    expect(evidence.schemaVersion).toBe(2);
+    expect(evidence.ok).toBe(false);
+    expect(evidence.checks.readiness).toMatchObject({
+      statusCode: 200,
+      error: "invalid_schema",
+    });
+    expect(evidence.checks.readiness).not.toHaveProperty("body");
+  });
+
+  it("rejects oversized health bodies before they can enter evidence", async () => {
+    const secret = "oversized-health-secret-must-not-appear";
+    const fixture = await startBoundaryFixture({
+      healthBody: JSON.stringify({
+        ok: true,
+        payload: "x".repeat(8_192),
+        secret,
+      }),
+    });
+    openFixtures.push(fixture);
+
+    const evidence = await runBoundaryProbe({
+      allowLocalTarget: true,
+      baseUrl: fixture.baseUrl,
+      allowedOrigin: ALLOWED_ORIGIN,
+      disallowedOrigin: DISALLOWED_ORIGIN,
+      timeoutMs: 1_000,
+    });
+
+    expect(evidence.schemaVersion).toBe(2);
+    expect(evidence.ok).toBe(false);
+    expect(evidence.checks.health).toMatchObject({
+      statusCode: 200,
+      error: "body_too_large",
+    });
+    expect(evidence.checks.health).not.toHaveProperty("body");
+    expect(JSON.stringify(evidence)).not.toContain(secret);
   });
 
   it("reports drift and returns a non-zero CLI result", async () => {
@@ -256,11 +798,14 @@ describe("online boundary probe", () => {
       DISALLOWED_ORIGIN,
       "--timeout-ms",
       "1000",
+      "--allow-local-target",
     ]);
 
     expect(exitCode).toBe(1);
     const evidence = JSON.parse(String(output.mock.calls.at(-1)?.[0]));
+    expect(evidence.schemaVersion).toBe(2);
     expect(evidence.ok).toBe(false);
+    expect(evidence.checks.readiness.statusCode).toBe(200);
     expect(evidence.checks.missingOrigin).toMatchObject({
       expectedStatus: 403,
       statusCode: 101,
@@ -272,6 +817,7 @@ describe("online boundary probe", () => {
     openFixtures.push(fixture);
 
     const evidence = await runBoundaryProbe({
+      allowLocalTarget: true,
       baseUrl: fixture.baseUrl,
       allowedOrigin: ALLOWED_ORIGIN,
       disallowedOrigin: DISALLOWED_ORIGIN,
@@ -295,17 +841,32 @@ describe("online boundary probe", () => {
 
   it("destroys a timed-out request transport before returning evidence", async () => {
     const transport = new EventEmitter() as ClientRequest;
+    let capturedOptions: Record<string, unknown> | undefined;
     transport.end = vi.fn();
     transport.destroy = vi.fn();
 
     const evidence = await probeUpgrade(
-      "http://online.local",
+      "https://online.example.com",
       ALLOWED_ORIGIN,
       100,
-      () => transport,
+      (_target, options) => {
+        capturedOptions = options;
+        return transport;
+      },
+      {
+        address: "198.51.100.10",
+        family: 4,
+        hostname: "online.example.com",
+      },
     );
 
     expect(evidence).toMatchObject({ statusCode: null, error: "timeout" });
+    expect(capturedOptions).toMatchObject({
+      hostname: "198.51.100.10",
+      servername: "online.example.com",
+      headers: { Host: "online.example.com", Origin: ALLOWED_ORIGIN },
+    });
+    expect(capturedOptions?.lookup).toEqual(expect.any(Function));
     expect(transport.end).toHaveBeenCalledOnce();
     expect(transport.destroy).toHaveBeenCalledOnce();
     expect(transport.destroy).toHaveBeenCalledWith(expect.any(Error));

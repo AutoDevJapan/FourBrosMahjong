@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import ts from "typescript";
 
 const RAILWAY_IAC_EVIDENCE_SCHEMA_VERSION = 1 as const;
@@ -6,11 +7,30 @@ const RAILWAY_IAC_EVIDENCE_MAX_FUTURE_SKEW_MS = 30 * 1_000;
 const RAILWAY_IAC_MINIMUM_CLI_VERSION = "5.42.1";
 const REVIEWED_RAILWAY_SDK_SCHEMA_REVISION =
   "c1b6ea8dd3e815e57257b1f17637e59d31db73b5";
+export const RAILWAY_LEGACY_FIXTURE_PATH =
+  "documents/fixtures/railway-pre-cutover.json";
+// SHA-256 of RAILWAY_LEGACY_FIXTURE_PATH. The fixture is the immutable
+// pre-cutover artifact; the current root railway.json is a separate target.
+export const RAILWAY_LEGACY_FIXTURE_SHA256 =
+  "2d772749d488b99e39f2428d80e9f8301214312835bc3d744250ec9d6742d84d";
+// This is the last known pre-cutover effective legacy baseline for #742. The
+// repository's desired runtime healthcheck is /readyz (#726), but changing the
+// checked-in file must not rewrite the external pre-cutover evidence expected
+// by the separate IaC ownership-cutover contract.
 const RAILWAY_LEGACY_KNOWN_CONFIG = Object.freeze({
   builder: "DOCKERFILE",
   dockerfilePath: "Dockerfile",
   startCommand: "node --import tsx server/start.ts",
   healthcheckPath: "/healthz",
+  healthcheckTimeoutSeconds: 60,
+  restartPolicyType: "ON_FAILURE",
+  restartPolicyMaxRetries: 10,
+});
+const RAILWAY_CURRENT_KNOWN_CONFIG = Object.freeze({
+  builder: "DOCKERFILE",
+  dockerfilePath: "Dockerfile",
+  startCommand: "node --import tsx server/start.ts",
+  healthcheckPath: "/readyz",
   healthcheckTimeoutSeconds: 60,
   restartPolicyType: "ON_FAILURE",
   restartPolicyMaxRetries: 10,
@@ -52,8 +72,12 @@ export interface RailwayIacFilesystemEvidence {
   generatedIacPath: string | null;
   generatedIacSha256: string | null;
   generatedIacSecretSafe: boolean | null;
-  legacyRepositoryFilePresent: boolean;
-  legacyRepositoryFileSha256: string | null;
+  currentRepositoryFilePresent: boolean;
+  currentRepositoryFileSha256: string | null;
+  currentRepositoryFileContent: string | null;
+  legacyFixturePresent: boolean;
+  legacyFixtureSha256: string | null;
+  legacyFixtureContent: string | null;
 }
 
 const ROOT_KEYS = [
@@ -314,6 +338,69 @@ function configEquals(
       ? sameStrings(leftValue, rightValue)
       : leftValue === rightValue;
   });
+}
+
+const RAILWAY_FILE_KEYS = ["$schema", "build", "deploy"] as const;
+const RAILWAY_BUILD_KEYS = ["builder", "dockerfilePath"] as const;
+const RAILWAY_DEPLOY_KEYS = [
+  "startCommand",
+  "healthcheckPath",
+  "healthcheckTimeout",
+  "restartPolicyType",
+  "restartPolicyMaxRetries",
+] as const;
+
+type RailwayKnownConfig = {
+  builder: string;
+  dockerfilePath: string;
+  startCommand: string;
+  healthcheckPath: string;
+  healthcheckTimeoutSeconds: number;
+  restartPolicyType: string;
+  restartPolicyMaxRetries: number;
+};
+
+function sha256(source: string): string {
+  return createHash("sha256").update(source, "utf8").digest("hex");
+}
+
+function railwayJsonContentIsKnown(
+  source: string | null,
+  expected: RailwayKnownConfig,
+): boolean {
+  if (source === null || Buffer.byteLength(source, "utf8") > 16 * 1_024)
+    return false;
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(source);
+  } catch {
+    return false;
+  }
+  if (!hasExactKeys(parsed, RAILWAY_FILE_KEYS)) return false;
+
+  const build = parsed.build;
+  const deploy = parsed.deploy;
+  return (
+    parsed.$schema === "https://railway.com/railway.schema.json" &&
+    hasExactKeys(build, RAILWAY_BUILD_KEYS) &&
+    build.builder === expected.builder &&
+    build.dockerfilePath === expected.dockerfilePath &&
+    hasExactKeys(deploy, RAILWAY_DEPLOY_KEYS) &&
+    deploy.startCommand === expected.startCommand &&
+    deploy.healthcheckPath === expected.healthcheckPath &&
+    deploy.healthcheckTimeout === expected.healthcheckTimeoutSeconds &&
+    deploy.restartPolicyType === expected.restartPolicyType &&
+    deploy.restartPolicyMaxRetries === expected.restartPolicyMaxRetries
+  );
+}
+
+function legacyFixtureContentIsKnown(source: string | null): boolean {
+  return railwayJsonContentIsKnown(source, RAILWAY_LEGACY_KNOWN_CONFIG);
+}
+
+function currentRepositoryFileContentIsKnown(source: string | null): boolean {
+  return railwayJsonContentIsKnown(source, RAILWAY_CURRENT_KNOWN_CONFIG);
 }
 
 function legacyKnownFieldsMatch(value: Record<string, unknown>): boolean {
@@ -579,22 +666,56 @@ export function generatedIacSourceIsSecretSafe(source: string): boolean {
   if (unsupportedBindingPattern) return false;
   const isResourceBinding = (name: string): boolean =>
     resourceBindings.has(name) && !nonResourceBindings.has(name);
+  const unwrapParenthesizedExpression = (
+    node: ts.Expression,
+  ): ts.Expression => {
+    let current = node;
+    while (ts.isParenthesizedExpression(current)) current = current.expression;
+    return current;
+  };
+  type MemberPath = {
+    root: ts.Expression;
+    names: string[];
+  };
+  const memberPath = (node: ts.Expression): MemberPath | null => {
+    const names: string[] = [];
+    let current: ts.Expression = node;
+    while (
+      ts.isPropertyAccessExpression(current) ||
+      ts.isElementAccessExpression(current)
+    ) {
+      if (ts.isPropertyAccessExpression(current)) {
+        names.unshift(current.name.text);
+      } else if (
+        current.argumentExpression !== undefined &&
+        ts.isStringLiteral(current.argumentExpression)
+      ) {
+        names.unshift(current.argumentExpression.text);
+      } else {
+        return null;
+      }
+      current = current.expression;
+    }
+    return names.length > 0 ? { root: current, names } : null;
+  };
+  const memberPathIsBounded = (path: MemberPath | null): path is MemberPath =>
+    path !== null &&
+    path.names.length > 0 &&
+    path.names.every((name) => isBoundedName(name));
   const resourceEnvOwner = (node: ts.Node): string | null => {
     if (
-      ts.isPropertyAccessExpression(node) &&
-      node.name.text === "env" &&
-      ts.isIdentifier(node.expression)
-    ) {
-      return node.expression.text;
-    }
+      !ts.isPropertyAccessExpression(node) &&
+      !ts.isElementAccessExpression(node)
+    )
+      return null;
+    const path = memberPath(node);
     if (
-      ts.isElementAccessExpression(node) &&
-      ts.isIdentifier(node.expression) &&
-      node.argumentExpression !== undefined &&
-      ts.isStringLiteral(node.argumentExpression) &&
-      node.argumentExpression.text === "env"
+      memberPathIsBounded(path) &&
+      path.names[0] === "env" &&
+      ts.isIdentifier(path.root) &&
+      isResourceBinding(path.root.text)
     ) {
-      return node.expression.text;
+      return path.root.text;
     }
     return null;
   };
@@ -640,58 +761,6 @@ export function generatedIacSourceIsSecretSafe(source: string): boolean {
     node.expression.text === "preserve" &&
     node.arguments.length === 0;
   const isAllowedVariableValue = (node: ts.Expression): boolean => {
-    if (ts.isCallExpression(node) && ts.isIdentifier(node.expression)) {
-      return (
-        isPreserveCall(node) ||
-        (node.expression.text === "ref" && refCallIsSafe(node))
-      );
-    }
-    if (ts.isPropertyAccessExpression(node)) {
-      const owner = node.expression;
-      if (!ts.isPropertyAccessExpression(owner)) return false;
-      if (
-        owner.name.text === "env" &&
-        ts.isIdentifier(owner.expression) &&
-        isResourceBinding(owner.expression.text)
-      ) {
-        return true;
-      }
-      return (
-        owner.name.text === "shared" &&
-        ts.isIdentifier(owner.expression) &&
-        isTrustedContextBinding(owner.expression.text)
-      );
-    }
-    return false;
-  };
-  const propertyNameText = (name: ts.PropertyName): string | null => {
-    if (ts.isIdentifier(name) || ts.isStringLiteral(name)) return name.text;
-    if (
-      ts.isComputedPropertyName(name) &&
-      ts.isStringLiteral(name.expression)
-    ) {
-      return name.expression.text;
-    }
-    return null;
-  };
-  const unwrapParenthesizedExpression = (
-    node: ts.Expression,
-  ): ts.Expression => {
-    let current = node;
-    while (ts.isParenthesizedExpression(current)) current = current.expression;
-    return current;
-  };
-  const containsStringLiteral = (node: ts.Node): boolean => {
-    if (ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node)) {
-      return true;
-    }
-    let found = false;
-    ts.forEachChild(node, (child) => {
-      if (!found && containsStringLiteral(child)) found = true;
-    });
-    return found;
-  };
-  const secretLikeValueIsStaticSafe = (node: ts.Expression): boolean => {
     const unwrapped = unwrapParenthesizedExpression(node);
     if (
       ts.isCallExpression(unwrapped) &&
@@ -702,7 +771,50 @@ export function generatedIacSourceIsSecretSafe(source: string): boolean {
         (unwrapped.expression.text === "ref" && refCallIsSafe(unwrapped))
       );
     }
-    return !containsStringLiteral(unwrapped);
+    const path = memberPath(unwrapped);
+    if (!memberPathIsBounded(path) || path.names.length < 2) return false;
+    if (
+      path.names[0] === "env" &&
+      ts.isIdentifier(path.root) &&
+      isResourceBinding(path.root.text)
+    ) {
+      return true;
+    }
+    return (
+      path.names[0] === "shared" &&
+      ts.isIdentifier(path.root) &&
+      isTrustedContextBinding(path.root.text)
+    );
+  };
+  const propertyNameText = (name: ts.PropertyName): string | null => {
+    if (ts.isIdentifier(name) || ts.isStringLiteral(name)) return name.text;
+    if (
+      ts.isComputedPropertyName(name) &&
+      ts.isStringLiteral(name.expression) &&
+      isBoundedName(name.expression.text)
+    ) {
+      return name.expression.text;
+    }
+    return null;
+  };
+  const isStaticPrimitiveWithoutString = (node: ts.Expression): boolean => {
+    const unwrapped = unwrapParenthesizedExpression(node);
+    return (
+      ts.isNumericLiteral(unwrapped) ||
+      unwrapped.kind === ts.SyntaxKind.TrueKeyword ||
+      unwrapped.kind === ts.SyntaxKind.FalseKeyword ||
+      unwrapped.kind === ts.SyntaxKind.NullKeyword
+    );
+  };
+  const secretLikeValueIsStaticSafe = (node: ts.Expression): boolean => {
+    const unwrapped = unwrapParenthesizedExpression(node);
+    // Sensitive fields may only receive values whose provenance is explicit.
+    // In particular, an Identifier is never safe here: resolving aliases from
+    // arbitrary declarations would make a string-only scan fail open.
+    return (
+      isAllowedVariableValue(unwrapped) ||
+      isStaticPrimitiveWithoutString(unwrapped)
+    );
   };
   const allowedVariableValueNodes = new Set<ts.Node>();
   const collectAllowedVariableValues = (node: ts.Node): void => {
@@ -730,6 +842,31 @@ export function generatedIacSourceIsSecretSafe(source: string): boolean {
       current = current.parent;
     }
     return false;
+  };
+  const memberExpressionRootedAt = (
+    node: ts.Identifier,
+  ): ts.Expression | null => {
+    let current: ts.Expression = node;
+    let parent = current.parent;
+    while (
+      (ts.isPropertyAccessExpression(parent) ||
+        ts.isElementAccessExpression(parent)) &&
+      parent.expression === current
+    ) {
+      current = parent;
+      parent = current.parent;
+    }
+    return current === node ? null : current;
+  };
+  const isResourceCollectionReference = (node: ts.Identifier): boolean => {
+    const array = node.parent;
+    if (!ts.isArrayLiteralExpression(array)) return false;
+    const property = array.parent;
+    return (
+      ts.isPropertyAssignment(property) &&
+      property.initializer === array &&
+      propertyNameText(property.name) === "resources"
+    );
   };
   const isResourceEnvironmentAccess = (node: ts.Node): boolean => {
     const owner = resourceEnvOwner(node);
@@ -770,6 +907,59 @@ export function generatedIacSourceIsSecretSafe(source: string): boolean {
     }
     return false;
   };
+  const callExpressionIsAllowed = (node: ts.CallExpression): boolean =>
+    ts.isIdentifier(node.expression) &&
+    allowedImportsAndCalls.has(node.expression.text) &&
+    isImportedBindingUsable(node.expression.text) &&
+    (node.expression.text !== "preserve" || node.arguments.length === 0) &&
+    (node.expression.text !== "ref" || refCallIsSafe(node));
+  const isIdentifierDeclarationName = (node: ts.Identifier): boolean => {
+    const parent = node.parent;
+    return (
+      (ts.isVariableDeclaration(parent) && parent.name === node) ||
+      (ts.isParameter(parent) && parent.name === node) ||
+      (ts.isFunctionExpression(parent) && parent.name === node) ||
+      (ts.isPropertyAccessExpression(parent) && parent.name === node) ||
+      (ts.isPropertyAssignment(parent) && parent.name === node) ||
+      ((ts.isMethodDeclaration(parent) ||
+        ts.isGetAccessorDeclaration(parent) ||
+        ts.isSetAccessorDeclaration(parent)) &&
+        parent.name === node) ||
+      (ts.isPropertySignature(parent) && parent.name === node) ||
+      (ts.isPropertyDeclaration(parent) && parent.name === node)
+    );
+  };
+  const isIdentifierReferenceAllowed = (node: ts.Identifier): boolean => {
+    if (isIdentifierDeclarationName(node)) return true;
+    const parent = node.parent;
+    if (
+      ts.isCallExpression(parent) &&
+      parent.expression === node &&
+      callExpressionIsAllowed(parent)
+    ) {
+      return true;
+    }
+    if (
+      ts.isCallExpression(parent) &&
+      parent.expression !== node &&
+      parent.arguments[0] === node &&
+      ts.isIdentifier(parent.expression) &&
+      parent.expression.text === "ref" &&
+      refCallIsSafe(parent) &&
+      isResourceBinding(node.text)
+    ) {
+      return true;
+    }
+    if (isResourceBinding(node.text) && isResourceCollectionReference(node)) {
+      return true;
+    }
+    const member = memberExpressionRootedAt(node);
+    return (
+      member !== null &&
+      isAllowedVariableValue(member) &&
+      isWithinAllowedVariableValue(member)
+    );
+  };
   let safe = true;
   const visit = (node: ts.Node): void => {
     if (!safe) return;
@@ -793,6 +983,8 @@ export function generatedIacSourceIsSecretSafe(source: string): boolean {
       ts.isFunctionDeclaration(node) ||
       ts.isClassDeclaration(node) ||
       ts.isClassExpression(node) ||
+      ts.isSpreadAssignment(node) ||
+      ts.isSpreadElement(node) ||
       ts.isAwaitExpression(node) ||
       ts.isYieldExpression(node) ||
       ts.isTaggedTemplateExpression(node)
@@ -800,7 +992,29 @@ export function generatedIacSourceIsSecretSafe(source: string): boolean {
       safe = false;
       return;
     }
+    if (ts.isArrowFunction(node) || ts.isFunctionExpression(node)) {
+      const parent = node.parent;
+      if (
+        !ts.isCallExpression(parent) ||
+        parent.arguments[0] !== node ||
+        !ts.isIdentifier(parent.expression) ||
+        parent.expression.text !== "defineRailway" ||
+        !isImportedBindingUsable("defineRailway") ||
+        node.parameters.length > 1
+      ) {
+        safe = false;
+        return;
+      }
+    }
     if (ts.isImportDeclaration(node)) {
+      return;
+    }
+    if (
+      ts.isMethodDeclaration(node) ||
+      ts.isGetAccessorDeclaration(node) ||
+      ts.isSetAccessorDeclaration(node)
+    ) {
+      safe = false;
       return;
     }
     if (ts.isExportDeclaration(node) && node.moduleSpecifier !== undefined) {
@@ -830,14 +1044,24 @@ export function generatedIacSourceIsSecretSafe(source: string): boolean {
       safe = false;
       return;
     }
+    if (
+      ts.isShorthandPropertyAssignment(node) &&
+      secretLikePropertyName.test(node.name.text)
+    ) {
+      safe = false;
+      return;
+    }
+    if (
+      (ts.isMethodDeclaration(node) ||
+        ts.isGetAccessorDeclaration(node) ||
+        ts.isSetAccessorDeclaration(node)) &&
+      secretLikePropertyName.test(propertyNameText(node.name) ?? "")
+    ) {
+      safe = false;
+      return;
+    }
     if (ts.isCallExpression(node)) {
-      if (
-        !ts.isIdentifier(node.expression) ||
-        !allowedImportsAndCalls.has(node.expression.text) ||
-        !isImportedBindingUsable(node.expression.text) ||
-        (node.expression.text === "preserve" && node.arguments.length !== 0) ||
-        (node.expression.text === "ref" && !refCallIsSafe(node))
-      ) {
+      if (!callExpressionIsAllowed(node)) {
         safe = false;
         return;
       }
@@ -850,6 +1074,16 @@ export function generatedIacSourceIsSecretSafe(source: string): boolean {
     ) {
       safe = false;
       return;
+    }
+    if (ts.isElementAccessExpression(node)) {
+      if (
+        node.argumentExpression === undefined ||
+        !ts.isStringLiteral(node.argumentExpression) ||
+        !isBoundedName(node.argumentExpression.text)
+      ) {
+        safe = false;
+        return;
+      }
     }
     if (
       (ts.isPropertyAccessExpression(node) ||
@@ -865,7 +1099,8 @@ export function generatedIacSourceIsSecretSafe(source: string): boolean {
     if (
       ts.isPropertyAssignment(node) &&
       ts.isComputedPropertyName(node.name) &&
-      !ts.isStringLiteral(node.name.expression)
+      (!ts.isStringLiteral(node.name.expression) ||
+        !isBoundedName(node.name.expression.text))
     ) {
       safe = false;
       return;
@@ -888,6 +1123,13 @@ export function generatedIacSourceIsSecretSafe(source: string): boolean {
     if (
       ts.isShorthandPropertyAssignment(node) &&
       ["env", "variables"].includes(node.name.text)
+    ) {
+      safe = false;
+      return;
+    }
+    if (
+      ts.isShorthandPropertyAssignment(node) ||
+      (ts.isIdentifier(node) && !isIdentifierReferenceAllowed(node))
     ) {
       safe = false;
       return;
@@ -1019,7 +1261,25 @@ export function validateRailwayIacMigrationEvidence(
   ) {
     reasons.push("secret-safety-unverified");
   }
-  if (!filesystem.legacyRepositoryFilePresent)
+
+  const currentRepositoryFileSource = filesystem.currentRepositoryFileContent;
+  const currentRepositoryFileSha256 = filesystem.currentRepositoryFileSha256;
+  const currentRepositoryFileValid =
+    filesystem.currentRepositoryFilePresent === true &&
+    typeof currentRepositoryFileSource === "string" &&
+    isSha256(currentRepositoryFileSha256) &&
+    sha256(currentRepositoryFileSource) === currentRepositoryFileSha256 &&
+    currentRepositoryFileContentIsKnown(currentRepositoryFileSource) &&
+    currentRepositoryFileSha256 !== RAILWAY_LEGACY_FIXTURE_SHA256;
+  const legacyFixtureHashValid =
+    filesystem.legacyFixturePresent === true &&
+    filesystem.legacyFixtureSha256 === RAILWAY_LEGACY_FIXTURE_SHA256 &&
+    typeof filesystem.legacyFixtureContent === "string" &&
+    sha256(filesystem.legacyFixtureContent) === filesystem.legacyFixtureSha256;
+  const legacyFixtureValid =
+    legacyFixtureHashValid &&
+    legacyFixtureContentIsKnown(filesystem.legacyFixtureContent);
+  if (!currentRepositoryFileValid || !legacyFixtureValid)
     reasons.push("legacy-config-missing");
 
   const cutover = input.ownershipCutover;
@@ -1029,7 +1289,11 @@ export function validateRailwayIacMigrationEvidence(
     !targetFieldsMatch(cutover, target) ||
     !isSha256(cutover.evidenceSha256) ||
     !isSha256(cutover.legacyFileSha256) ||
-    cutover.legacyFileSha256 !== filesystem.legacyRepositoryFileSha256 ||
+    !currentRepositoryFileValid ||
+    !legacyFixtureValid ||
+    cutover.legacyFileSha256 !== RAILWAY_LEGACY_FIXTURE_SHA256 ||
+    cutover.legacyFileSha256 !== filesystem.legacyFixtureSha256 ||
+    cutover.legacyFileSha256 === filesystem.currentRepositoryFileSha256 ||
     cutover.method !== "authorized-manual-clear" ||
     cutover.configFileSettingCleared !== true ||
     cutover.repositoryFileRetained !== true ||

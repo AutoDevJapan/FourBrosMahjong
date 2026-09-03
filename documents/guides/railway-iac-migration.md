@@ -13,7 +13,7 @@ Railway公式ではConfig as Codeは2026-12-01にhard cutoffとなる。IaCはbe
 
 ## 現在のHOLD
 
-このrepositoryには意図的に`.railway/railway.ts`を置かず、legacy `railway.json`を保持する。exact production project/environment/service identity、全project resource inventory、effective settingsをauthorized read-backしていないためである。したがって現時点の次のcommandは`hold`となる。
+このrepositoryには意図的に`.railway/railway.ts`を置かず、current targetとしてroot `railway.json`を保持する。ownership cutoverのlegacy根拠はcurrent targetから分離した、checked-in immutable fixture [`documents/fixtures/railway-pre-cutover.json`](../fixtures/railway-pre-cutover.json)（pre-cutoverの`/healthz`）だけである。exact production project/environment/service identity、全project resource inventory、effective settingsをauthorized read-backしていないため、現時点の次のcommandは`hold`となる。
 
 実施ownerはRailway Production Operatorだが現在未割当であり、未割当の間はHOLDする。移行目標日はhard cutoffよりreview/rollback余裕を確保した2026-10-31とし、完了証拠が揃うまでIssue #742はOPENを維持する。
 
@@ -30,7 +30,7 @@ placeholder IDやsecretを含むsnapshotをcommitしてvalidatorを通しては�
 1. authorized operatorが保存済みproduction targetをDashboardまたは認可済みread-only取得結果と照合する。CLIの`config --help`、`config pull --help`、`config plan --help`を保存し、CLI 5.42.1以上と必要subcommand/optionsを確認する。
 2. authorized `config pull`からfull-project `.railway/railway.ts`と全resource address inventoryを生成する。generated source、inventory、target membershipをreviewする。この時点ではConfig File settingを変更しない。raw variables取得につながる`--decrypt-variables`とpreserved variablesをomitするoptionは使用しない。
 3. generated sourceのSHA-256、review済みSDK revision、CLI version、全resource address集合、target serviceのnormalized source/configを保存する。variablesは`preserve()`または生成されたreferenceのままで、raw値をsource、plan、terminal capture、Issueへ出さない。Config as Codeのdeploy overrideはDashboard値を更新しないため、generated target configをcutover前後のeffective read-backとfieldごとexact比較する。
-4. 別途明示承認されたoperatorだけがlegacy Config File settingをmanual clearする。`migrate --apply`、`--delete-files`、非対話のdestructive flagはこの経路で使わない。root `railway.json`は必ず保持する。
+4. 別途明示承認されたoperatorだけがlegacy Config File settingをmanual clearする。`migrate --apply`、`--delete-files`、非対話のdestructive flagはこの経路で使わない。current targetのroot `railway.json`とimmutable pre-cutover fixtureは必ず保持する。
 5. 同じtargetについてfresh effective read-backと`railway config plan --json --detailed-exit-code --file .railway/railway.ts`を実行する。exact invocation、CLI version、redacted raw plan artifactのSHA-256、`--detailed-exit-code`使用を証拠化する。planはexit 0でadd/change/destroy/unrelated changeがすべて0でなければHOLDする。
 6. cutover前後のeffective source/configがexact parity、全証拠が5分以内、targetとgenerated hashが一致するsnapshotだけをoffline validatorへ渡す。
 
@@ -44,7 +44,8 @@ validatorの`pass`はauthorized cutover後のparity証拠が内部整合した�
 | inventory/resource addresses | 同じtargetへのfresh full-project `config pull`、authorized target mapping artifactのSHA-256 |
 | generated path/hash/SDK/CLI/source/config | checked-in generated file、local SHA-256、生成時CLI、review済みSDK source、生成されたtarget service block |
 | ownership cutover | authorized manual Config File clearの監査証跡。validator自身は変更しない |
-| retained legacy file | checked-in `railway.json`のSHA-256とcutover監査証跡のexact一致 |
+| current repository target | checked-in root `railway.json`（repository targetは`/readyz`）の存在・hash。legacy hashの根拠にはしない |
+| immutable pre-cutover legacy file | checked-in [`documents/fixtures/railway-pre-cutover.json`](../fixtures/railway-pre-cutover.json)のexact content（`/healthz`）・SHA-256とcutover監査証跡のexact一致 |
 | pre-cutover/effective source and config | 同じtargetのcutover直前・直後effective read-back。repository/branch/root/full deployment revisionを含む |
 | parity plan | setting clear後のfresh redacted plan、exact target/file hash、detailed exit code |
 | source secret safety | ASTによる保守的scanとhuman reviewの両方 |
@@ -61,7 +62,7 @@ ownership cutoverでは次を変更しない。
 | --- | --- |
 | builder/path | `DOCKERFILE` / `Dockerfile` |
 | start | current effective value（checked-in legacyは`node --import tsx server/start.ts`） |
-| health | current effective value（checked-in legacyは`/healthz`, 60秒） |
+| health | #742のpre-cutover parity baselineは`/healthz`, 60秒（liveness）。#726のrepository target `/readyz`は別のruntime変更であり、Railway productionのeffective valueとはread-backまで同一視しない |
 | restart | current effective value（checked-in legacyは`ON_FAILURE`, 10） |
 | replica/overlap/draining/watch/source | cutover直前とcutover直後でexact同値 |
 
@@ -71,8 +72,8 @@ IaCの`github(...)` sourceはrepository/branch/rootを表し、full deployment r
 
 ## contingencyとlegacy file removal
 
-初回cutover時点には独立known-good IaCが存在しない。2026-12-01より前にparityが崩れた場合だけ、保持したexact `railway.json`と保存済みpre-cutover effective configを根拠に、authorized operatorがlegacy Config File settingを再有効化するcontingencyを使える。このvalidatorはその操作を実行も承認もしない。hard cutoff後はこのcontingencyに依存できない。
+初回cutover時点には独立known-good IaCが存在しない。2026-12-01より前にparityが崩れた場合だけ、保存済みpre-cutover effective configと、checked-in [`documents/fixtures/railway-pre-cutover.json`](../fixtures/railway-pre-cutover.json)（旧healthcheck `/healthz`）のimmutableなcontent/file hashを根拠に、authorized operatorがlegacy Config File settingを再有効化するcontingencyを使える。現在の`railway.json`は#726のrepository target `/readyz`であり、旧`/healthz`設定の復旧根拠として使用してはならない。fixtureのcontentとfile hashを再照合してから操作し、このvalidatorはその操作を実行も承認もしない。hard cutoff後はこのcontingencyに依存できない。
 
 parity成功後、review済みgenerated file/hashを後続#726 runtime hardeningに対する独立known-good IaC baselineとして保存する。後続変更のrollbackはそのbaselineへのauthorized forward applyであり、room stateは復元しない。
 
-root `railway.json`の削除は、このPRやparity validatorのscope外である。後続runtime hardening、fresh production read-back、health、rollback evidenceが成功した後の別commitでのみ削除する。今回のvalidatorはlegacy fileがpresentであることを必須とする。
+root `railway.json`の削除は、このPRやparity validatorのscope外である。後続runtime hardening、fresh production read-back、health、rollback evidenceが成功した後の別commitでのみ削除する。今回のvalidatorはcurrent root targetとimmutable legacy fixtureの両方が正しいことを必須とする。

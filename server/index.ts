@@ -140,17 +140,42 @@ export function createOnlineServer(
   function allowedOrigins(): readonly string[] {
     return (environment.ALLOWED_ORIGINS ?? "")
       .split(",")
-      .map((origin) => origin.trim())
-      .filter(Boolean);
+      .map((origin) => origin.trim());
+  }
+
+  function canonicalAllowedOrigins(): ReadonlySet<string> | null {
+    const origins = allowedOrigins();
+    if (origins.length === 0) return null;
+
+    const canonicalOrigins = new Set<string>();
+    for (const origin of origins) {
+      try {
+        const parsed = new URL(origin);
+        if (
+          (parsed.protocol !== "http:" && parsed.protocol !== "https:") ||
+          parsed.hostname.includes("*") ||
+          parsed.origin !== origin
+        ) {
+          return null;
+        }
+        canonicalOrigins.add(parsed.origin);
+      } catch {
+        return null;
+      }
+    }
+    return canonicalOrigins;
+  }
+
+  function configuredOriginsAreValid(): boolean {
+    return canonicalAllowedOrigins() !== null;
   }
 
   function originAllowed(origin: string | undefined): boolean {
-    const allowed = allowedOrigins();
-    // An absent or empty allowlist must never widen the WebSocket boundary.
-    // Local and deployed environments must opt in with an explicit Origin.
-    return (
-      allowed.length > 0 && origin !== undefined && allowed.includes(origin)
-    );
+    const allowed = canonicalAllowedOrigins();
+    // An absent, empty, or invalid allowlist must never widen the WebSocket
+    // boundary. Local and deployed environments must opt in with an explicit
+    // Origin.
+    return allowed !== null && origin !== undefined && allowed.has(origin);
   }
 
   function send(client: Client, value: unknown): void {
@@ -766,8 +791,10 @@ export function createOnlineServer(
         !opsConfiguration.readinessBlocked &&
         // An empty allowlist rejects every WebSocket handshake. Do not report
         // a traffic-serving instance as ready while its online boundary is
-        // unusable due to this fail-closed configuration.
-        allowedOrigins().length > 0;
+        // unusable due to this fail-closed configuration. Invalid entries such
+        // as '*' or an origin with a path likewise cannot match a browser
+        // Origin header and must not make the instance appear ready.
+        configuredOriginsAreValid();
       writeJson(response, ready ? 200 : 503, { ok: ready });
       return;
     }
@@ -775,6 +802,10 @@ export function createOnlineServer(
       writeJson(response, 200, {
         service: "four-bros-mahjong-online",
         websocket: "/ws",
+        liveness: "/healthz",
+        readiness: "/readyz",
+        // Keep the original discovery key as a liveness alias for clients
+        // that still look up `health`.
         health: "/healthz",
       });
       return;

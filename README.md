@@ -58,7 +58,7 @@ pnpm docs           # TypeDoc → docs/api(gitignore対象)
 src/app/          Next.js App Router の各画面(`/`・`/online`・`/rules`・`/settings`・`/game`・`/game/result`・`/history`)と PWA 資産(`sw.js`・`manifest.ts`)
 src/components/   対局盤面・結果・共通 UI コンポーネント
 src/domain/       牌・山・和了判定・対局進行・点数精算などのゲームロジック
-server/           Railway で動かす WebSocket ルームサーバー(`/healthz`・`/ws`)
+server/           Railway で動かす WebSocket ルームサーバー(liveness `/healthz`・readiness/healthcheck `/readyz`・接続 `/ws`)
 e2e/              Playwright E2E テスト
 docs/             ゲームルール・ドキュメントの入口(人間向け)
 documents/spec/   実装スペック(SpecDD SSOT) — GoDD の docs_dir

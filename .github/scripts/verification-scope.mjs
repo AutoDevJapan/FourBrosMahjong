@@ -51,6 +51,8 @@ export const TEST_INPUT_PATHS = [
   "documents/guides/railway-online-deploy-runbook.md",
   // src/test/ui-refresh-assets.test.ts が manifest と原本 inventory を検証する。
   "documents/assets/ui-refresh/manifest.json",
+  // src/test/railway-iac-migration.test.ts が契約モジュール経由で不変fixtureを検証する。
+  "documents/fixtures/railway-pre-cutover.json",
 ];
 
 /** テストがディレクトリ単位で列挙する入力資産。追加・削除も同じ分類にする。 */
@@ -187,6 +189,15 @@ export const SCOPE_OUTPUT_KEYS = /** @type {const} */ ([
 /** API / ref 取得が job 全体の timeout まで居座らないための上限。 */
 export const EVIDENCE_IO_TIMEOUT_MS = 15_000;
 
+/** 同名 check run から Actions run を引く際の一意な API 呼び出し数上限。 */
+export const CHECK_RUN_EVIDENCE_MAX_LOOKUPS = 16;
+
+/** 同名 check run の Actions run 照合に使う累積時間上限。 */
+export const CHECK_RUN_EVIDENCE_TIMEOUT_MS = EVIDENCE_IO_TIMEOUT_MS;
+
+/** GitHub API response を JSON 化する前に保持できる最大サイズ。 */
+export const GITHUB_API_RESPONSE_MAX_BYTES = 1 * 1024 * 1024;
+
 // GitHub Compare API は 1 ページ最大 100 件で、変更ファイルは最大 300 件まで返す。
 // 上限に達した場合は一覧の完全性を証明できないため、変更パス判定を null に戻して
 // 呼び出し側の fail-open (全検証) を選ぶ。
@@ -196,6 +207,33 @@ const COMPARE_FILES_MAX_PAGES = 3;
 /** 成功 check をこのワークフローの PR run に束縛する。 */
 const TRUSTED_CHECK_APP = "github-actions";
 const TRUSTED_WORKFLOW_PATH = ".github/workflows/ci.yml";
+
+/**
+ * @template T
+ * @param {() => Promise<T>} operation
+ * @param {number} timeoutMs
+ * @returns {Promise<T>}
+ */
+function withTimeout(operation, timeoutMs) {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(
+      () => reject(new Error("evidence lookup timed out")),
+      timeoutMs,
+    );
+    Promise.resolve()
+      .then(operation)
+      .then(
+        (value) => {
+          clearTimeout(timer);
+          resolve(value);
+        },
+        (error) => {
+          clearTimeout(timer);
+          reject(error);
+        },
+      );
+  });
+}
 
 /**
  * この PR / push が持ち込んだ変更ファイルを取得する。
@@ -466,20 +504,43 @@ export async function resolvePostMergeEvidence({
   // details URL から Actions run を引き、その run がこの workflow の pull_request 実行で
   // 同じ head SHA を検証したことまで確認する。同じ SHA にはマージ後 push の同名 check も
   // 共存しうるため、それは候補から除外し、eligible な PR run が 1 本以上成功していることを
-  // 証拠とする。
+  // 証拠とする。check run の履歴は同じ Actions run を重複して含み得るため、run ID ごとに
+  // 応答を再利用する。API が遅延・大量候補・不正な応答で job を占有し続けても、証拠を
+  // 確認できない場合は従来どおり fail-closed (スキップしない) とする。
+  const lookupDeadline = Date.now() + CHECK_RUN_EVIDENCE_TIMEOUT_MS;
+  let workflowRunLookups = 0;
   let successfulEligibleRun = false;
+  /** @type {Map<string, any>} */
+  const workflowRunsById = new Map();
   for (const run of own) {
     if (run?.app?.slug !== TRUSTED_CHECK_APP) continue;
     const match = String(run?.details_url ?? "").match(
       /\/actions\/runs\/(\d+)(?:\/job\/\d+)?(?:[/?#]|$)/,
     );
     if (!match) return { skip: false, reason: "own-check-run-not-successful" };
+    const runId = match[1];
     /** @type {any} */
     let workflowRun;
-    try {
-      workflowRun = await api(`/repos/${repo}/actions/runs/${match[1]}`);
-    } catch {
-      return { skip: false, reason: "check-runs-api-failed" };
+    if (workflowRunsById.has(runId)) {
+      workflowRun = workflowRunsById.get(runId);
+    } else {
+      if (workflowRunLookups >= CHECK_RUN_EVIDENCE_MAX_LOOKUPS) {
+        return { skip: false, reason: "own-check-run-not-successful" };
+      }
+      const remainingMs = lookupDeadline - Date.now();
+      if (remainingMs <= 0) {
+        return { skip: false, reason: "check-runs-api-failed" };
+      }
+      workflowRunLookups += 1;
+      try {
+        workflowRun = await withTimeout(
+          () => api(`/repos/${repo}/actions/runs/${runId}`),
+          remainingMs,
+        );
+      } catch {
+        return { skip: false, reason: "check-runs-api-failed" };
+      }
+      workflowRunsById.set(runId, workflowRun);
     }
     const ineligible =
       workflowRun?.event !== "pull_request" ||
@@ -490,7 +551,10 @@ export async function resolvePostMergeEvidence({
       run?.conclusion === "success" &&
       workflowRun?.conclusion === "success"
     ) {
+      // A successful eligible run is decisive: later same-named checks cannot
+      // make the existing any-success evidence less trustworthy.
       successfulEligibleRun = true;
+      break;
     }
   }
   if (!successfulEligibleRun)
@@ -583,8 +647,60 @@ export async function githubApi(/** @type {string} */ path) {
     },
   });
   // 権限不足 (403) や存在しない (404) も「確認できなかった」として扱う。
-  if (!response.ok) throw new Error(`GitHub API ${path} -> ${response.status}`);
-  return response.json();
+  if (!response.ok) {
+    try {
+      await response.body?.cancel?.();
+    } catch {
+      // Keep the HTTP failure as the useful error for fail-open callers.
+    }
+    throw new Error(`GitHub API ${path} -> ${response.status}`);
+  }
+  // Compare API の files 配列には巨大な patch が含まれ得るため、response.json()
+  // の無制限バッファリングは使わない。上限超過・切断・不正JSONは呼び出し側の
+  // changedPathsFromApi / resolvePostMergeEvidence が fail-open (全検証) に戻す。
+  const contentLength = response.headers?.get?.("content-length");
+  if (contentLength !== null && contentLength !== undefined) {
+    const declaredLength = Number(contentLength);
+    if (
+      !Number.isSafeInteger(declaredLength) ||
+      declaredLength < 0 ||
+      declaredLength > GITHUB_API_RESPONSE_MAX_BYTES
+    ) {
+      await response.body?.cancel();
+      throw new Error(
+        `GitHub API ${path} response body is too large or invalid`,
+      );
+    }
+  }
+
+  if (!response.body)
+    throw new Error(`GitHub API ${path} response body is unavailable`);
+  const reader = response.body.getReader();
+  /** @type {Uint8Array[]} */
+  const chunks = [];
+  let totalBytes = 0;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      if (!(value instanceof Uint8Array))
+        throw new Error(`GitHub API ${path} response body is invalid`);
+      totalBytes += value.byteLength;
+      if (totalBytes > GITHUB_API_RESPONSE_MAX_BYTES) {
+        await reader.cancel();
+        throw new Error(`GitHub API ${path} response body is too large`);
+      }
+      chunks.push(value);
+    }
+  } catch (error) {
+    try {
+      await reader.cancel();
+    } catch {
+      // The original fetch/stream error is the useful failure for fail-open callers.
+    }
+    throw error;
+  }
+  return JSON.parse(Buffer.concat(chunks).toString("utf8"));
 }
 
 /**
