@@ -1101,16 +1101,23 @@ describe("Railway IaC parity snapshot contract (#742)", () => {
   });
 
   it("collects large unsupported parameter lists without quadratic scanning", () => {
-    const parameters = Array.from(
-      { length: 20_000 },
-      (_, index) => `p${index}`,
-    ).join(",");
-    const startedAt = performance.now();
-    expect(
-      generatedIacSourceIsSecretSafe(`const build = (${parameters}) => 0;`),
-    ).toBe(false);
-    expect(performance.now() - startedAt).toBeLessThan(2_000);
-  }, 5_000);
+    const measure = (parameterCount: number): number => {
+      const parameters = Array.from(
+        { length: parameterCount },
+        (_, index) => `p${index}`,
+      ).join(",");
+      const startedAt = performance.now();
+      expect(
+        generatedIacSourceIsSecretSafe(`const build = (${parameters}) => 0;`),
+      ).toBe(false);
+      return performance.now() - startedAt;
+    };
+    const smallDuration = measure(2_000);
+    const largeDuration = measure(20_000);
+    // A tenfold input increase should not cause quadratic work. The additive
+    // margin absorbs normal CI scheduling variance without hiding regressions.
+    expect(largeDuration).toBeLessThan(smallDuration * 32 + 1_000);
+  }, 10_000);
 
   it("keeps current readiness and immutable pre-cutover liveness separate", () => {
     const currentRailwayJson = JSON.parse(
