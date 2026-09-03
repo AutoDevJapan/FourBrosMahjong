@@ -679,6 +679,7 @@ describe("online deployment boundary probe (#653)", () => {
       try {
         const evidence = await runBoundaryProbe({
           baseUrl: server.url,
+          allowLocalTarget: true,
           allowedOrigin: TEST_ORIGIN,
           disallowedOrigin: UNAUTHORIZED_ORIGIN,
           timeoutMs: 1_000,

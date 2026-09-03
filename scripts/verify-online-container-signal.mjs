@@ -221,7 +221,11 @@ function errorMessage(error) {
 
 function terminateProcessGroup(child, signal) {
   const failures = [];
-  if (process.platform !== "win32" && Number.isInteger(child.pid) && child.pid > 0) {
+  if (
+    process.platform !== "win32" &&
+    Number.isInteger(child.pid) &&
+    child.pid > 0
+  ) {
     try {
       process.kill(-child.pid, signal);
     } catch (error) {
@@ -1237,7 +1241,9 @@ async function runContainer(
     record.createCommandSucceeded = true;
     const identity = await inspectContainerIdentity(name, COMMAND_TIMEOUT_MS);
     if (identity === null) {
-      throw new Error(`container disappeared before ownership verification: ${name}`);
+      throw new Error(
+        `container disappeared before ownership verification: ${name}`,
+      );
     }
     assertOwnedContainer(record, identity);
     const port = await hostPort(name);
@@ -1412,7 +1418,13 @@ function cleanupRegisteredContainer(record, options = {}) {
 }
 
 async function inspectNetworkIdentity(name, timeoutMs) {
-  const args = ["network", "inspect", name, "--format", NETWORK_IDENTITY_FORMAT];
+  const args = [
+    "network",
+    "inspect",
+    name,
+    "--format",
+    NETWORK_IDENTITY_FORMAT,
+  ];
   const result = await docker(args, {
     allowFailure: true,
     timeoutMs,
@@ -1456,7 +1468,9 @@ async function waitForNetworkIdentity(record, deadline, options = {}) {
     }
     if (record.owned === true) return null;
     if (options.allowNeverAppeared !== true) {
-      throw new Error(`network ownership could not be verified: ${record.name}`);
+      throw new Error(
+        `network ownership could not be verified: ${record.name}`,
+      );
     }
     if (options.waitForAppearance !== true) return null;
     await delay(Math.min(50, deadline - Date.now()));
@@ -1480,8 +1494,7 @@ async function waitForNetworkRemoval(record, deadline) {
 
 async function cleanupNetwork(record, options = {}) {
   const timeoutMs = options.timeoutMs ?? STOP_MARGIN_MS;
-  const deadline =
-    Date.now() + boundedTimeoutMs(timeoutMs, "network cleanup");
+  const deadline = Date.now() + boundedTimeoutMs(timeoutMs, "network cleanup");
   const identity = await waitForNetworkIdentity(record, deadline, options);
   if (identity === null) {
     if (record.owned === true || options.allowNeverAppeared === true) return;
@@ -1545,7 +1558,9 @@ async function createIsolatedNetwork() {
     record.createCommandSucceeded = true;
     const identity = await inspectNetworkIdentity(name, COMMAND_TIMEOUT_MS);
     if (identity === null) {
-      throw new Error(`network disappeared before ownership verification: ${name}`);
+      throw new Error(
+        `network disappeared before ownership verification: ${name}`,
+      );
     }
     assertOwnedNetwork(record, identity);
     return record;
@@ -1576,7 +1591,9 @@ async function createIsolatedNetwork() {
   }
 }
 
-async function cleanupRegisteredResources(timeoutMs = SIGNAL_CLEANUP_TIMEOUT_MS) {
+async function cleanupRegisteredResources(
+  timeoutMs = SIGNAL_CLEANUP_TIMEOUT_MS,
+) {
   const failures = [];
   for (const record of [...activeContainers.values()]) {
     try {
