@@ -74,6 +74,18 @@ jobs:
           # (`--name-only --no-renames` は blob を読まない)。この step は判定前に
           # 無条件で走る唯一のコストなので、blob の取得を省いて最小化する。
           filter: blob:none
+          # scope 判定中の worktree も必要最小限にする。変更パスは commit/tree
+          # object から読むため、ここでテスト入力や出荷コードを省略しても判定を
+          # fail-open にしたり、変更を隠したりしない。setup=true になった場合は
+          # 判定直後に sparse checkout を解除し、後続の全ジョブを完全なツリーで実行する。
+          sparse-checkout: |
+            /.github/scripts/verification-scope.mjs
+            /.npmrc
+            /.nvmrc
+            /package.json
+            /pnpm-lock.yaml
+            /pnpm-workspace.yaml
+          sparse-checkout-cone-mode: false
 
       - name: Resolve verification scope
         id: scope
@@ -91,6 +103,12 @@ jobs:
           SCOPE_CHECK_NAME: lint / typecheck / format / test / build
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: node .github/scripts/verification-scope.mjs
+
+      # scope=false の文書変更などでは sparse worktree のまま終了して blob を取得しない。
+      # 検証が必要な場合だけ、依存導入・テスト・buildの前に全ファイルを復元する。
+      - name: Materialize repository for verification
+        if: steps.scope.outputs.setup == 'true'
+        run: git sparse-checkout disable
 
       - name: Setup pnpm
         if: steps.scope.outputs.setup == 'true'
@@ -247,6 +265,17 @@ jobs:
           # (`--name-only --no-renames` は blob を読まない)。この step は判定前に
           # 無条件で走る唯一のコストなので、blob の取得を省いて最小化する。
           filter: blob:none
+          # scope 判定に必要なCLIとリポジトリのパッケージメタデータだけを最初に
+          # materializeする。検証が必要な場合はscope直後に完全なツリーへ戻すため、
+          # E2E specやfixtureをsparse checkoutが隠したまま実行することはない。
+          sparse-checkout: |
+            /.github/scripts/verification-scope.mjs
+            /.npmrc
+            /.nvmrc
+            /package.json
+            /pnpm-lock.yaml
+            /pnpm-workspace.yaml
+          sparse-checkout-cone-mode: false
 
       - name: Resolve verification scope
         id: scope
@@ -264,6 +293,10 @@ jobs:
           SCOPE_CHECK_NAME: E2E (Playwright)
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: node .github/scripts/verification-scope.mjs
+
+      - name: Materialize repository for verification
+        if: steps.scope.outputs.setup == 'true'
+        run: git sparse-checkout disable
 
       - name: Setup pnpm
         if: steps.scope.outputs.setup == 'true'

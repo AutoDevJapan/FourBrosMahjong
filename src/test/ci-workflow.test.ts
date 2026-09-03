@@ -17,6 +17,7 @@ import {
   classifyPath,
   DOCUMENTATION_EXCEPTIONS,
   EVIDENCE_IO_TIMEOUT_MS,
+  GITHUB_API_RESPONSE_MAX_BYTES,
   githubApi,
   protectedPushBranch,
   resolveChangedPaths,
@@ -1091,6 +1092,49 @@ describe("変更パスによる実行範囲の絞り込み (#491)", () => {
         checkout?.with?.["fetch-depth"],
         `${jobName}: fetch-depth: 0 が無いと merge-base を計算できず判定が常に無効化される`,
       ).toBe(0);
+    },
+  );
+
+  it.each(Object.keys(SCOPED_JOBS))(
+    "%s job はscope中だけsparseにし、検証前に完全なworktreeへ戻す",
+    (jobName) => {
+      const steps = readWorkflowFile("ci.yml").jobs?.[jobName]?.steps ?? [];
+      const checkout = steps.find((step) =>
+        step.uses?.startsWith("actions/checkout@"),
+      );
+      expect(checkout?.with?.filter, `${jobName}: blob filter が無い`).toBe(
+        "blob:none",
+      );
+      expect(checkout?.with?.["sparse-checkout-cone-mode"]).toBe(false);
+      const sparsePaths = String(checkout?.with?.["sparse-checkout"] ?? "")
+        .split("\n")
+        .map((path) => path.trim())
+        .filter(Boolean);
+      expect(sparsePaths).toEqual(
+        expect.arrayContaining([
+          "/.github/scripts/verification-scope.mjs",
+          "/.npmrc",
+          "/.nvmrc",
+          "/package.json",
+          "/pnpm-lock.yaml",
+          "/pnpm-workspace.yaml",
+        ]),
+      );
+
+      const materialize = steps.find(
+        (step) => step.run?.trim() === "git sparse-checkout disable",
+      );
+      expect(
+        materialize,
+        `${jobName}: 完全worktree復元stepが無い`,
+      ).toBeDefined();
+      expect(materialize?.if).toBe("steps.scope.outputs.setup == 'true'");
+      expect(steps.indexOf(materialize as Step)).toBeGreaterThan(
+        steps.findIndex((step) => step.id === SCOPE_STEP_ID),
+      );
+      expect(steps.indexOf(materialize as Step)).toBeLessThan(
+        steps.findIndex((step) => step.run?.includes("pnpm install")),
+      );
     },
   );
 
@@ -2656,7 +2700,7 @@ describe("マージ後証拠の外部 I/O timeout (#496)", () => {
   it("GitHub API fetch に短い AbortSignal timeout を渡す", async () => {
     const fetchMock = vi
       .fn()
-      .mockResolvedValue({ ok: true, json: async () => [] });
+      .mockResolvedValue(new Response("[]", { status: 200 }));
     const timeoutMock = vi.fn().mockReturnValue({ aborted: false });
     vi.stubEnv("GITHUB_TOKEN", "test-token");
     vi.stubGlobal("fetch", fetchMock);
@@ -2672,6 +2716,37 @@ describe("マージ後証拠の外部 I/O timeout (#496)", () => {
       vi.unstubAllEnvs();
     }
   });
+
+  it.each([
+    [
+      "上限超過",
+      `{"files":[{"filename":"src/app.ts","patch":"${"x".repeat(GITHUB_API_RESPONSE_MAX_BYTES)}"}]}`,
+    ],
+    ["不正JSON", '{"files":'],
+  ])(
+    "Compare API fallbackの%s本文は全検証側へfail-openする",
+    async (_label, body) => {
+      const fetchMock = vi
+        .fn()
+        .mockResolvedValue(new Response(body, { status: 200 }));
+      vi.stubEnv("GITHUB_TOKEN", "test-token");
+      vi.stubGlobal("fetch", fetchMock);
+      try {
+        await expect(
+          resolveChangedPaths({
+            repo: "AutoDevJapan/FourBrosMahjong",
+            baseSha: "a".repeat(40),
+            headSha: "b".repeat(40),
+            local: () => null,
+            api: githubApi,
+          }),
+        ).resolves.toEqual({ paths: null, source: "unresolved" });
+      } finally {
+        vi.unstubAllGlobals();
+        vi.unstubAllEnvs();
+      }
+    },
+  );
 });
 
 /**

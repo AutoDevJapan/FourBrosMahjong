@@ -189,6 +189,9 @@ export const SCOPE_OUTPUT_KEYS = /** @type {const} */ ([
 /** API / ref 取得が job 全体の timeout まで居座らないための上限。 */
 export const EVIDENCE_IO_TIMEOUT_MS = 15_000;
 
+/** GitHub API response を JSON 化する前に保持できる最大サイズ。 */
+export const GITHUB_API_RESPONSE_MAX_BYTES = 1 * 1024 * 1024;
+
 // GitHub Compare API は 1 ページ最大 100 件で、変更ファイルは最大 300 件まで返す。
 // 上限に達した場合は一覧の完全性を証明できないため、変更パス判定を null に戻して
 // 呼び出し側の fail-open (全検証) を選ぶ。
@@ -586,7 +589,52 @@ export async function githubApi(/** @type {string} */ path) {
   });
   // 権限不足 (403) や存在しない (404) も「確認できなかった」として扱う。
   if (!response.ok) throw new Error(`GitHub API ${path} -> ${response.status}`);
-  return response.json();
+  // Compare API の files 配列には巨大な patch が含まれ得るため、response.json()
+  // の無制限バッファリングは使わない。上限超過・切断・不正JSONは呼び出し側の
+  // changedPathsFromApi / resolvePostMergeEvidence が fail-open (全検証) に戻す。
+  const contentLength = response.headers?.get?.("content-length");
+  if (contentLength !== null && contentLength !== undefined) {
+    const declaredLength = Number(contentLength);
+    if (
+      !Number.isSafeInteger(declaredLength) ||
+      declaredLength < 0 ||
+      declaredLength > GITHUB_API_RESPONSE_MAX_BYTES
+    ) {
+      await response.body?.cancel();
+      throw new Error(
+        `GitHub API ${path} response body is too large or invalid`,
+      );
+    }
+  }
+
+  if (!response.body)
+    throw new Error(`GitHub API ${path} response body is unavailable`);
+  const reader = response.body.getReader();
+  /** @type {Uint8Array[]} */
+  const chunks = [];
+  let totalBytes = 0;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      if (!(value instanceof Uint8Array))
+        throw new Error(`GitHub API ${path} response body is invalid`);
+      totalBytes += value.byteLength;
+      if (totalBytes > GITHUB_API_RESPONSE_MAX_BYTES) {
+        await reader.cancel();
+        throw new Error(`GitHub API ${path} response body is too large`);
+      }
+      chunks.push(value);
+    }
+  } catch (error) {
+    try {
+      await reader.cancel();
+    } catch {
+      // The original fetch/stream error is the useful failure for fail-open callers.
+    }
+    throw error;
+  }
+  return JSON.parse(Buffer.concat(chunks).toString("utf8"));
 }
 
 /**
