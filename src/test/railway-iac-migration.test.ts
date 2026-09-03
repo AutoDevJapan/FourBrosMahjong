@@ -506,6 +506,31 @@ describe("Railway IaC parity snapshot contract (#742)", () => {
     ).toBe(true);
     expect(
       generatedIacSourceIsSecretSafe(
+        `import { service } from "railway/iac"; const options = externalOptions; service("fixture", options);`,
+      ),
+    ).toBe(false);
+    expect(
+      generatedIacSourceIsSecretSafe(
+        `import { service } from "railway/iac"; service("fixture", { options: externalOptions });`,
+      ),
+    ).toBe(false);
+    expect(
+      generatedIacSourceIsSecretSafe(
+        `import { preserve, service } from "railway/iac"; service("fixture", { env: { TOKEN: preserve() } });`,
+      ),
+    ).toBe(true);
+    expect(
+      generatedIacSourceIsSecretSafe(
+        `import { postgres, service } from "railway/iac"; const db = postgres("db"); service("fixture", { env: { DATABASE_URL: db["env"]["DATABASE_URL"] } });`,
+      ),
+    ).toBe(true);
+    expect(
+      generatedIacSourceIsSecretSafe(
+        `import { defineRailway, service } from "railway/iac"; export default defineRailway((ctx) => service("fixture", { env: { VALUE: ctx["shared"]["SECRET"] } }));`,
+      ),
+    ).toBe(true);
+    expect(
+      generatedIacSourceIsSecretSafe(
         `import { postgres, service } from "railway/iac"; const db = postgres("db"); { const db = Bun; service("fixture", { env: { VALUE: db.env.SECRET } }); }`,
       ),
     ).toBe(false);

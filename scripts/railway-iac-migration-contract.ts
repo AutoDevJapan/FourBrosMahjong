@@ -579,22 +579,57 @@ export function generatedIacSourceIsSecretSafe(source: string): boolean {
   if (unsupportedBindingPattern) return false;
   const isResourceBinding = (name: string): boolean =>
     resourceBindings.has(name) && !nonResourceBindings.has(name);
+  const unwrapParenthesizedExpression = (
+    node: ts.Expression,
+  ): ts.Expression => {
+    let current = node;
+    while (ts.isParenthesizedExpression(current)) current = current.expression;
+    return current;
+  };
+  type MemberPath = {
+    root: ts.Expression;
+    names: string[];
+  };
+  const memberPath = (node: ts.Expression): MemberPath | null => {
+    const names: string[] = [];
+    let current: ts.Expression = node;
+    while (
+      ts.isPropertyAccessExpression(current) ||
+      ts.isElementAccessExpression(current)
+    ) {
+      if (ts.isPropertyAccessExpression(current)) {
+        names.unshift(current.name.text);
+      } else if (
+        current.argumentExpression !== undefined &&
+        ts.isStringLiteral(current.argumentExpression)
+      ) {
+        names.unshift(current.argumentExpression.text);
+      } else {
+        return null;
+      }
+      current = current.expression;
+    }
+    return names.length > 0 ? { root: current, names } : null;
+  };
+  const memberPathIsBounded = (path: MemberPath | null): path is MemberPath =>
+    path !== null &&
+    path.names.length > 0 &&
+    path.names.every((name) => isBoundedName(name));
   const resourceEnvOwner = (node: ts.Node): string | null => {
     if (
-      ts.isPropertyAccessExpression(node) &&
-      node.name.text === "env" &&
-      ts.isIdentifier(node.expression)
+      !ts.isPropertyAccessExpression(node) &&
+      !ts.isElementAccessExpression(node)
     ) {
-      return node.expression.text;
+      return null;
     }
+    const path = memberPath(node);
     if (
-      ts.isElementAccessExpression(node) &&
-      ts.isIdentifier(node.expression) &&
-      node.argumentExpression !== undefined &&
-      ts.isStringLiteral(node.argumentExpression) &&
-      node.argumentExpression.text === "env"
+      memberPathIsBounded(path) &&
+      path.names[0] === "env" &&
+      ts.isIdentifier(path.root) &&
+      isResourceBinding(path.root.text)
     ) {
-      return node.expression.text;
+      return path.root.text;
     }
     return null;
   };
@@ -640,46 +675,41 @@ export function generatedIacSourceIsSecretSafe(source: string): boolean {
     node.expression.text === "preserve" &&
     node.arguments.length === 0;
   const isAllowedVariableValue = (node: ts.Expression): boolean => {
-    if (ts.isCallExpression(node) && ts.isIdentifier(node.expression)) {
+    const unwrapped = unwrapParenthesizedExpression(node);
+    if (
+      ts.isCallExpression(unwrapped) &&
+      ts.isIdentifier(unwrapped.expression)
+    ) {
       return (
-        isPreserveCall(node) ||
-        (node.expression.text === "ref" && refCallIsSafe(node))
+        isPreserveCall(unwrapped) ||
+        (unwrapped.expression.text === "ref" && refCallIsSafe(unwrapped))
       );
     }
-    if (ts.isPropertyAccessExpression(node)) {
-      const owner = node.expression;
-      if (!ts.isPropertyAccessExpression(owner)) return false;
-      if (
-        owner.name.text === "env" &&
-        ts.isIdentifier(owner.expression) &&
-        isResourceBinding(owner.expression.text)
-      ) {
-        return true;
-      }
-      return (
-        owner.name.text === "shared" &&
-        ts.isIdentifier(owner.expression) &&
-        isTrustedContextBinding(owner.expression.text)
-      );
+    const path = memberPath(unwrapped);
+    if (!memberPathIsBounded(path) || path.names.length < 2) return false;
+    if (
+      path.names[0] === "env" &&
+      ts.isIdentifier(path.root) &&
+      isResourceBinding(path.root.text)
+    ) {
+      return true;
     }
-    return false;
+    return (
+      path.names[0] === "shared" &&
+      ts.isIdentifier(path.root) &&
+      isTrustedContextBinding(path.root.text)
+    );
   };
   const propertyNameText = (name: ts.PropertyName): string | null => {
     if (ts.isIdentifier(name) || ts.isStringLiteral(name)) return name.text;
     if (
       ts.isComputedPropertyName(name) &&
-      ts.isStringLiteral(name.expression)
+      ts.isStringLiteral(name.expression) &&
+      isBoundedName(name.expression.text)
     ) {
       return name.expression.text;
     }
     return null;
-  };
-  const unwrapParenthesizedExpression = (
-    node: ts.Expression,
-  ): ts.Expression => {
-    let current = node;
-    while (ts.isParenthesizedExpression(current)) current = current.expression;
-    return current;
   };
   const isStaticPrimitiveWithoutString = (node: ts.Expression): boolean => {
     const unwrapped = unwrapParenthesizedExpression(node);
@@ -736,6 +766,31 @@ export function generatedIacSourceIsSecretSafe(source: string): boolean {
     }
     return false;
   };
+  const memberExpressionRootedAt = (
+    node: ts.Identifier,
+  ): ts.Expression | null => {
+    let current: ts.Expression = node;
+    let parent = current.parent;
+    while (
+      (ts.isPropertyAccessExpression(parent) ||
+        ts.isElementAccessExpression(parent)) &&
+      parent.expression === current
+    ) {
+      current = parent;
+      parent = current.parent;
+    }
+    return current === node ? null : current;
+  };
+  const isResourceCollectionReference = (node: ts.Identifier): boolean => {
+    const array = node.parent;
+    if (!ts.isArrayLiteralExpression(array)) return false;
+    const property = array.parent;
+    return (
+      ts.isPropertyAssignment(property) &&
+      property.initializer === array &&
+      propertyNameText(property.name) === "resources"
+    );
+  };
   const isResourceEnvironmentAccess = (node: ts.Node): boolean => {
     const owner = resourceEnvOwner(node);
     if (owner !== null) {
@@ -775,6 +830,59 @@ export function generatedIacSourceIsSecretSafe(source: string): boolean {
     }
     return false;
   };
+  const callExpressionIsAllowed = (node: ts.CallExpression): boolean =>
+    ts.isIdentifier(node.expression) &&
+    allowedImportsAndCalls.has(node.expression.text) &&
+    isImportedBindingUsable(node.expression.text) &&
+    (node.expression.text !== "preserve" || node.arguments.length === 0) &&
+    (node.expression.text !== "ref" || refCallIsSafe(node));
+  const isIdentifierDeclarationName = (node: ts.Identifier): boolean => {
+    const parent = node.parent;
+    return (
+      (ts.isVariableDeclaration(parent) && parent.name === node) ||
+      (ts.isParameter(parent) && parent.name === node) ||
+      (ts.isFunctionExpression(parent) && parent.name === node) ||
+      (ts.isPropertyAccessExpression(parent) && parent.name === node) ||
+      (ts.isPropertyAssignment(parent) && parent.name === node) ||
+      ((ts.isMethodDeclaration(parent) ||
+        ts.isGetAccessorDeclaration(parent) ||
+        ts.isSetAccessorDeclaration(parent)) &&
+        parent.name === node) ||
+      (ts.isPropertySignature(parent) && parent.name === node) ||
+      (ts.isPropertyDeclaration(parent) && parent.name === node)
+    );
+  };
+  const isIdentifierReferenceAllowed = (node: ts.Identifier): boolean => {
+    if (isIdentifierDeclarationName(node)) return true;
+    const parent = node.parent;
+    if (
+      ts.isCallExpression(parent) &&
+      parent.expression === node &&
+      callExpressionIsAllowed(parent)
+    ) {
+      return true;
+    }
+    if (
+      ts.isCallExpression(parent) &&
+      parent.expression !== node &&
+      parent.arguments[0] === node &&
+      ts.isIdentifier(parent.expression) &&
+      parent.expression.text === "ref" &&
+      refCallIsSafe(parent) &&
+      isResourceBinding(node.text)
+    ) {
+      return true;
+    }
+    if (isResourceBinding(node.text) && isResourceCollectionReference(node)) {
+      return true;
+    }
+    const member = memberExpressionRootedAt(node);
+    return (
+      member !== null &&
+      isAllowedVariableValue(member) &&
+      isWithinAllowedVariableValue(member)
+    );
+  };
   let safe = true;
   const visit = (node: ts.Node): void => {
     if (!safe) return;
@@ -809,6 +917,20 @@ export function generatedIacSourceIsSecretSafe(source: string): boolean {
     ) {
       safe = false;
       return;
+    }
+    if (ts.isArrowFunction(node) || ts.isFunctionExpression(node)) {
+      const parent = node.parent;
+      if (
+        !ts.isCallExpression(parent) ||
+        parent.arguments[0] !== node ||
+        !ts.isIdentifier(parent.expression) ||
+        parent.expression.text !== "defineRailway" ||
+        !isImportedBindingUsable("defineRailway") ||
+        node.parameters.length > 1
+      ) {
+        safe = false;
+        return;
+      }
     }
     if (ts.isImportDeclaration(node)) {
       return;
@@ -851,13 +973,7 @@ export function generatedIacSourceIsSecretSafe(source: string): boolean {
       return;
     }
     if (ts.isCallExpression(node)) {
-      if (
-        !ts.isIdentifier(node.expression) ||
-        !allowedImportsAndCalls.has(node.expression.text) ||
-        !isImportedBindingUsable(node.expression.text) ||
-        (node.expression.text === "preserve" && node.arguments.length !== 0) ||
-        (node.expression.text === "ref" && !refCallIsSafe(node))
-      ) {
+      if (!callExpressionIsAllowed(node)) {
         safe = false;
         return;
       }
@@ -885,7 +1001,8 @@ export function generatedIacSourceIsSecretSafe(source: string): boolean {
     if (
       ts.isPropertyAssignment(node) &&
       ts.isComputedPropertyName(node.name) &&
-      !ts.isStringLiteral(node.name.expression)
+      (!ts.isStringLiteral(node.name.expression) ||
+        !isBoundedName(node.name.expression.text))
     ) {
       safe = false;
       return;
@@ -924,6 +1041,22 @@ export function generatedIacSourceIsSecretSafe(source: string): boolean {
     if (
       ts.isShorthandPropertyAssignment(node) &&
       ["env", "variables"].includes(node.name.text)
+    ) {
+      safe = false;
+      return;
+    }
+    if (
+      ts.isElementAccessExpression(node) &&
+      (node.argumentExpression === undefined ||
+        !ts.isStringLiteral(node.argumentExpression) ||
+        !isBoundedName(node.argumentExpression.text))
+    ) {
+      safe = false;
+      return;
+    }
+    if (
+      ts.isShorthandPropertyAssignment(node) ||
+      (ts.isIdentifier(node) && !isIdentifierReferenceAllowed(node))
     ) {
       safe = false;
       return;
