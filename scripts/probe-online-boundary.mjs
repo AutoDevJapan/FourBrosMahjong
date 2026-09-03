@@ -9,6 +9,7 @@ const MIN_TIMEOUT_MS = 100;
 const MAX_TIMEOUT_MS = 30_000;
 const MAX_HEALTH_BODY_BYTES = 4_096;
 const PROBE_EVIDENCE_SCHEMA_VERSION = 2;
+const EXPECTED_HEALTH_SERVICE = "four-bros-mahjong-online";
 const ENVIRONMENT_KEYS = Object.freeze({
   baseUrl: "ONLINE_PROBE_BASE_URL",
   allowedOrigin: "ONLINE_PROBE_ALLOWED_ORIGIN",
@@ -300,12 +301,13 @@ function parseHealthBody(bytes, path) {
   }
   const keys = Object.keys(value);
   const allowedKeys = path === "/healthz" ? ["ok", "service"] : ["ok"];
+  const hasService = Object.prototype.hasOwnProperty.call(value, "service");
   if (
     !Object.prototype.hasOwnProperty.call(value, "ok") ||
     keys.some((key) => !allowedKeys.includes(key)) ||
     typeof value.ok !== "boolean" ||
-    (Object.prototype.hasOwnProperty.call(value, "service") &&
-      value.service !== "four-bros-mahjong-online")
+    (path === "/healthz" &&
+      (!hasService || value.service !== EXPECTED_HEALTH_SERVICE))
   ) {
     return { error: "invalid_schema" };
   }

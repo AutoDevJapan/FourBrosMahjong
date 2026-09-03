@@ -12,6 +12,7 @@ import {
 
 const ALLOWED_ORIGIN = "http://allowed.local";
 const DISALLOWED_ORIGIN = "http://disallowed.local";
+const HEALTH_SERVICE = "four-bros-mahjong-online";
 
 interface BoundaryFixtureOptions {
   readonly allowMissingOrigin?: boolean;
@@ -55,7 +56,7 @@ async function closeServer(
 async function startBoundaryFixture({
   allowMissingOrigin = false,
   hangUpgrades = false,
-  healthBody = JSON.stringify({ ok: true }),
+  healthBody = JSON.stringify({ ok: true, service: HEALTH_SERVICE }),
   readinessBody,
   readinessStatus = 200,
 }: BoundaryFixtureOptions = {}): Promise<BoundaryFixture> {
@@ -272,10 +273,20 @@ describe("online boundary probe", () => {
       statusCode: 200,
       body: { ok: true },
     });
+    expect(
+      "body" in evidence.checks.health
+        ? evidence.checks.health.body
+        : undefined,
+    ).toEqual({ ok: true });
     expect(evidence.checks.readiness).toMatchObject({
       statusCode: 200,
       body: { ok: true },
     });
+    expect(
+      "body" in evidence.checks.readiness
+        ? evidence.checks.readiness.body
+        : undefined,
+    ).toEqual({ ok: true });
     expect(evidence.checks.allowedOrigin.statusCode).toBe(101);
     expect(evidence.checks.disallowedOrigin.statusCode).toBe(403);
     expect(evidence.checks.missingOrigin.statusCode).toBe(403);
@@ -311,7 +322,10 @@ describe("online boundary probe", () => {
   it.each([
     [
       "liveness",
-      { healthBody: JSON.stringify({ ok: false }), readinessBody: undefined },
+      {
+        healthBody: JSON.stringify({ ok: false, service: HEALTH_SERVICE }),
+        readinessBody: undefined,
+      },
     ],
     [
       "readiness",
@@ -336,6 +350,35 @@ describe("online boundary probe", () => {
     expect(evidence.checks.readiness).toMatchObject({
       body: options.readinessBody === undefined ? { ok: true } : { ok: false },
     });
+  });
+
+  it.each([
+    ["missing service", JSON.stringify({ ok: true })],
+    ["wrong service", JSON.stringify({ ok: true, service: "another-service" })],
+    [
+      "unknown field",
+      JSON.stringify({ ok: true, service: HEALTH_SERVICE, extra: "redact-me" }),
+    ],
+    ["nonboolean ok", JSON.stringify({ ok: "true", service: HEALTH_SERVICE })],
+  ])("rejects invalid liveness payload: %s", async (_name, healthBody) => {
+    const fixture = await startBoundaryFixture({ healthBody });
+    openFixtures.push(fixture);
+
+    const evidence = await runBoundaryProbe({
+      baseUrl: fixture.baseUrl,
+      allowedOrigin: ALLOWED_ORIGIN,
+      disallowedOrigin: DISALLOWED_ORIGIN,
+      timeoutMs: 1_000,
+    });
+
+    expect(evidence.schemaVersion).toBe(2);
+    expect(evidence.ok).toBe(false);
+    expect(evidence.checks.health).toMatchObject({
+      statusCode: 200,
+      error: "invalid_schema",
+    });
+    expect(evidence.checks.health).not.toHaveProperty("body");
+    expect(JSON.stringify(evidence)).not.toContain("redact-me");
   });
 
   it("rejects malformed liveness and readiness JSON while retaining status evidence", async () => {
@@ -367,7 +410,7 @@ describe("online boundary probe", () => {
   it("rejects unknown health fields without emitting their values", async () => {
     const secret = "health-secret-must-not-appear";
     const fixture = await startBoundaryFixture({
-      healthBody: JSON.stringify({ ok: true, secret }),
+      healthBody: JSON.stringify({ ok: true, service: HEALTH_SERVICE, secret }),
     });
     openFixtures.push(fixture);
 

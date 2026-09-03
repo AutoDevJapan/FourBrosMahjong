@@ -195,7 +195,7 @@ ONLINE_PROBE_TIMEOUT_MS=10000 \
 node scripts/probe-online-boundary.mjs
 ```
 
-helper は `schemaVersion: 2` の timestamp、各 status、liveness/readiness の解析済み JSON body を標準出力へ返す。期待値は liveness `200` かつ body `{"ok":true}`、readiness `200` かつ body `{"ok":true}`、allowed Origin `101`、disallowed Origin `403`、missing Origin `403` である。`--allowed-origin` と Railway の `ALLOWED_ORIGINS` は同じ canonical な完全一致 HTTP(S) Origin とし、wildcard、path/query、invalid entry の混在を使わない。不正な実効設定なら readiness `503` と upgrade `403` を失敗証拠として扱う。200 response の body が malformed、`ok` が boolean でない、または `ok: false` の場合も exit code `1` になる。non-200 response の `{"ok":false}` body は drift の有用な証拠として JSON に残る。すべて一致すれば exit code `0`、境界 drift や network error / timeout があれば `1`、引数不正なら `2` を返す。deploy 前の既知 drift がある場合も JSON を保存し、成功と読み替えない。
+helper は `schemaVersion: 2` の timestamp、各 status、liveness/readiness の解析済み JSON body を標準出力へ返す。期待値は `/healthz` が `200` かつ response body `{"ok":true,"service":"four-bros-mahjong-online"}`、`/readyz` が `200` かつ body `{"ok":true}`、allowed Origin `101`、disallowed Origin `403`、missing Origin `403` である。probe evidenceへ保存するbodyは常に sanitized な `{"ok":true}` / `{"ok":false}` だけであり、healthのservice値や任意のunknown fieldを反射しない。`--allowed-origin` と Railway の `ALLOWED_ORIGINS` は同じ canonical な完全一致 HTTP(S) Origin とし、wildcard、path/query、invalid entry の混在を使わない。不正な実効設定なら readiness `503` と upgrade `403` を失敗証拠として扱う。200 response の body が malformed、`ok` が boolean でない、healthの`service`が欠落または不一致、または `ok: false` の場合も exit code `1` になる。non-200 response の `{"ok":false}` body は drift の有用な証拠として JSON に残る。すべて一致すれば exit code `0`、境界 drift や network error / timeout があれば `1`、引数不正なら `2` を返す。deploy 前の既知 drift がある場合も JSON を保存し、成功と読み替えない。
 
 ## 2. メンテナンスを開始する
 
@@ -292,7 +292,7 @@ test "$OPS_RELEASE_CODE" = 200
 5. new activeをprospective rollbackとしてfresh `pre-drain` evidenceを再構成し、offline validatorが`pass`であることを確認する。失敗は成功扱いにせずrollback判断へ進む。
 6. `ALLOWED_ORIGINS` が変更前の承認済み canonical 完全一致 HTTP(S) Origin と一致することを確認する。wildcard、path/query、invalid entry の混在がなく、無関係な secret を出力しない。
 7. boundary probe helper を同じ引数で一度実行する。
-8. probe evidence が `schemaVersion: 2` であり、liveness `200` + body `{"ok":true}`、readiness `200` + body `{"ok":true}`、allowed `101`、disallowed `403`、missing `403` の全一致を確認する。malformed body や boolean でない / false の `ok` は成功扱いにしない。
+8. probe evidence が `schemaVersion: 2` であり、liveness `200` + response body `{"ok":true,"service":"four-bros-mahjong-online"}`（evidence上のsanitized bodyは`{"ok":true}`）、readiness `200` + body `{"ok":true}`、allowed `101`、disallowed `403`、missing `403` の全一致を確認する。malformed body、healthのservice欠落・不一致、または boolean でない / false の `ok` は成功扱いにしない。unknown fieldを含むresponseは失敗として扱い、evidenceへその値を保存しない。
 9. Railway の deploy/runtime logs に crash、継続的な5xx、予期しないrestartがないことを確認する。
 10. abuse control の接続・message・action・room試行上限は local または隔離した staging で検証する。production へ負荷・game messageを送って完了証拠を作らない。
 11. Issue コメントには full source SHA、deployment ID / image digest、allowlist確認方法、probe JSON、時刻、local/staging test結果だけを記録し、secretを含めない。
@@ -309,7 +309,7 @@ test "$OPS_RELEASE_CODE" = 200
 
 Railway Dashboard から、事前に記録した rollback 可能な known-good deployment を選ぶ。Railway の rollback は以前の image と custom variables を復元するが、plan ごとの image retention を過ぎた deployment は選べない。その場合は事前に確認した正確な以前の source/config を redeploy する。曖昧な「latest」や別 resource を代替 target にしない。
 
-rollback 後も新しい deployment IDを記録し、`schemaVersion: 2` の probe evidenceで liveness/readiness の status と body（200 は `{"ok":true}`）および3つの Origin probeを再実行する。サービスが復旧しても、ルームは復元されない。rollback target が missing-Origin を受け入れる既知の旧版なら #653 は未完了のまま `HOLD` とし、security drift を解消済みとは報告しない。
+rollback 後も新しい deployment IDを記録し、`schemaVersion: 2` の probe evidenceで liveness/readiness の status と body（healthの200 responseは`{"ok":true,"service":"four-bros-mahjong-online"}`、evidence上はsanitizedな`{"ok":true}`、readinessの200は`{"ok":true}`）および3つの Origin probeを再実行する。サービスが復旧しても、ルームは復元されない。rollback target が missing-Origin を受け入れる既知の旧版なら #653 は未完了のまま `HOLD` とし、security drift を解消済みとは報告しない。
 
 ## 公式 Railway 仕様
 
