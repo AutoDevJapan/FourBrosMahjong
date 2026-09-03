@@ -522,7 +522,6 @@ export function generatedIacSourceIsSecretSafe(source: string): boolean {
     "template",
     "volume",
   ]);
-  const importedBindings = new Set<string>();
   for (const statement of sourceFile.statements) {
     if (!ts.isImportDeclaration(statement)) continue;
     const clause = statement.importClause;
@@ -530,20 +529,19 @@ export function generatedIacSourceIsSecretSafe(source: string): boolean {
       !ts.isStringLiteral(statement.moduleSpecifier) ||
       statement.moduleSpecifier.text !== "railway/iac" ||
       clause === undefined ||
+      clause.isTypeOnly ||
       clause.name !== undefined ||
       clause.namedBindings === undefined ||
       !ts.isNamedImports(clause.namedBindings) ||
       clause.namedBindings.elements.length === 0 ||
       clause.namedBindings.elements.some(
         (element) =>
+          element.isTypeOnly ||
           element.propertyName !== undefined ||
           !allowedImportsAndCalls.has(element.name.text),
       )
     ) {
       return false;
-    }
-    for (const element of clause.namedBindings.elements) {
-      importedBindings.add(element.name.text);
     }
   }
   const resourceFactoryNames = new Set([
@@ -559,7 +557,6 @@ export function generatedIacSourceIsSecretSafe(source: string): boolean {
   ]);
   type BindingKind = "import" | "non-resource" | "resource" | "trusted-context";
   type Binding = {
-    name: string;
     kind: BindingKind;
     declaration: ts.Node;
   };
@@ -588,6 +585,10 @@ export function generatedIacSourceIsSecretSafe(source: string): boolean {
   const parameterBindings = new Map<ts.ParameterDeclaration, Binding>();
   const functionLikeNodes: Array<ts.ArrowFunction | ts.FunctionExpression> = [];
   let unsupportedBindingPattern = false;
+  const isVarDeclaration = (node: ts.Node): node is ts.VariableDeclaration =>
+    ts.isVariableDeclaration(node) &&
+    ts.isVariableDeclarationList(node.parent) &&
+    node.parent.flags === ts.NodeFlags.None;
   const declareBinding = (
     scope: Scope,
     name: string,
@@ -596,10 +597,16 @@ export function generatedIacSourceIsSecretSafe(source: string): boolean {
   ): Binding => {
     const existing = scope.bindings.get(name);
     if (existing !== undefined) {
+      const harmlessVarRedeclaration =
+        isVarDeclaration(declaration) &&
+        declaration.initializer === undefined &&
+        (isVarDeclaration(existing.declaration) ||
+          ts.isParameter(existing.declaration));
+      if (harmlessVarRedeclaration) return existing;
       unsupportedBindingPattern = true;
       return existing;
     }
-    const binding: Binding = { name, kind, declaration };
+    const binding: Binding = { kind, declaration };
     scope.bindings.set(name, binding);
     return binding;
   };
@@ -638,18 +645,28 @@ export function generatedIacSourceIsSecretSafe(source: string): boolean {
   ): void {
     scopeAtNode.set(node, parentScope);
     functionLikeNodes.push(node);
-    const functionScope = createScope(parentScope, true);
+    const functionNameScope =
+      ts.isFunctionExpression(node) && node.name !== undefined
+        ? createScope(parentScope)
+        : parentScope;
+    const functionScope = createScope(functionNameScope, true);
     if (ts.isFunctionExpression(node) && node.name !== undefined) {
-      scopeAtNode.set(node.name, functionScope);
-      declareBinding(functionScope, node.name.text, "non-resource", node.name);
+      scopeAtNode.set(node.name, functionNameScope);
+      declareBinding(
+        functionNameScope,
+        node.name.text,
+        "non-resource",
+        node.name,
+      );
     }
     for (const parameter of node.parameters) {
       collectParameter(parameter, functionScope);
     }
+    const parameterNodes = new Set<ts.Node>(node.parameters);
     ts.forEachChild(node, (child) => {
       if (
         (ts.isFunctionExpression(node) && child === node.name) ||
-        node.parameters.some((parameter) => parameter === child)
+        parameterNodes.has(child)
       ) {
         return;
       }
@@ -674,7 +691,7 @@ export function generatedIacSourceIsSecretSafe(source: string): boolean {
       const declarationList = node.parent;
       const isVarDeclaration =
         ts.isVariableDeclarationList(declarationList) &&
-        (declarationList.flags & (ts.NodeFlags.Const | ts.NodeFlags.Let)) === 0;
+        declarationList.flags === ts.NodeFlags.None;
       const declarationScope = isVarDeclaration
         ? parentScope.functionScope
         : parentScope;
@@ -1083,6 +1100,14 @@ export function generatedIacSourceIsSecretSafe(source: string): boolean {
   let safe = true;
   const visit = (node: ts.Node): void => {
     if (!safe) return;
+    if (
+      node.kind === ts.SyntaxKind.ThisKeyword ||
+      node.kind === ts.SyntaxKind.SuperKeyword ||
+      ts.isMetaProperty(node)
+    ) {
+      safe = false;
+      return;
+    }
     if (
       (ts.isBinaryExpression(node) &&
         node.operatorToken.kind >= ts.SyntaxKind.FirstAssignment &&

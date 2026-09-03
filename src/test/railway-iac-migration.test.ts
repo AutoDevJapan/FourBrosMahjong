@@ -612,6 +612,16 @@ describe("Railway IaC parity snapshot contract (#742)", () => {
     expect(generatedIacSourceIsSecretSafe("const config = {}")).toBe(true);
     expect(
       generatedIacSourceIsSecretSafe(
+        `import type { service } from "railway/iac"; service("fixture", {});`,
+      ),
+    ).toBe(false);
+    expect(
+      generatedIacSourceIsSecretSafe(
+        `import { type service } from "railway/iac"; service("fixture", {});`,
+      ),
+    ).toBe(false);
+    expect(
+      generatedIacSourceIsSecretSafe(
         `import { service } from "railway/iac"; const token = "SECRET_SENTINEL"; service("fixture", { env: { ONLINE_OPS_TOKEN: token } });`,
       ),
     ).toBe(false);
@@ -733,6 +743,11 @@ describe("Railway IaC parity snapshot contract (#742)", () => {
     expect(
       generatedIacSourceIsSecretSafe(
         `import { service } from "railway/iac"; service("fixture", { source: ctx.shared.SECRET });`,
+      ),
+    ).toBe(false);
+    expect(
+      generatedIacSourceIsSecretSafe(
+        `import { service } from "railway/iac"; service("fixture", { source: this.shared.SECRET });`,
       ),
     ).toBe(false);
     expect(
@@ -1015,6 +1030,21 @@ describe("Railway IaC parity snapshot contract (#742)", () => {
     ).toBe(false);
     expect(
       generatedIacSourceIsSecretSafe(
+        `import { postgres, service } from "railway/iac"; { using db = postgres("db"); } service("fixture", { env: { VALUE: db.env.SECRET } });`,
+      ),
+    ).toBe(false);
+    expect(
+      generatedIacSourceIsSecretSafe(
+        `import { postgres, service } from "railway/iac"; var db = postgres("db"); { var db; service("fixture", { env: { VALUE: db.env.SECRET } }); }`,
+      ),
+    ).toBe(true);
+    expect(
+      generatedIacSourceIsSecretSafe(
+        `import { defineRailway, service } from "railway/iac"; export default defineRailway(function ctx(ctx) { var ctx; return service("fixture", { env: { VALUE: ctx.shared.SECRET } }); });`,
+      ),
+    ).toBe(true);
+    expect(
+      generatedIacSourceIsSecretSafe(
         `import { postgres, ref, service } from "railway/iac"; { const db = postgres("db"); } service("fixture", { env: { VALUE: ref(db, "output") } });`,
       ),
     ).toBe(false);
@@ -1035,6 +1065,16 @@ describe("Railway IaC parity snapshot contract (#742)", () => {
     ).toBe(true);
     expect(
       generatedIacSourceIsSecretSafe(
+        `import { defineRailway, project, service } from "railway/iac"; export default defineRailway(function ctx(ctx) { return project("fixture", { resources: [] }); });`,
+      ),
+    ).toBe(true);
+    expect(
+      generatedIacSourceIsSecretSafe(
+        `import { postgres, service } from "railway/iac"; var db = postgres("db"); { var db = Bun; service("fixture", { env: { VALUE: db.env.SECRET } }); }`,
+      ),
+    ).toBe(false);
+    expect(
+      generatedIacSourceIsSecretSafe(
         `import { defineRailway, postgres, service } from "railway/iac"; const db = postgres("db"); export default defineRailway(function db() { return service("fixture", { env: { VALUE: db.env.SECRET } }); });`,
       ),
     ).toBe(false);
@@ -1052,6 +1092,16 @@ describe("Railway IaC parity snapshot contract (#742)", () => {
       generatedIacSourceIsSecretSafe(
         `import { defineRailway, project } from "railway/iac"; export default defineRailway(({ shared }) => project("fixture", { resources: [] }));`,
       ),
+    ).toBe(false);
+  });
+
+  it("collects large unsupported parameter lists without quadratic scanning", () => {
+    const parameters = Array.from(
+      { length: 2_048 },
+      (_, index) => `p${index}`,
+    ).join(",");
+    expect(
+      generatedIacSourceIsSecretSafe(`const build = (${parameters}) => 0;`),
     ).toBe(false);
   });
 
