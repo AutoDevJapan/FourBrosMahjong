@@ -1,7 +1,17 @@
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
+import {
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  symlinkSync,
+  unlinkSync,
+  writeFileSync,
+} from "node:fs";
+import { tmpdir } from "node:os";
+import { dirname, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import {
   generatedIacSourceIsSecretSafe,
@@ -11,6 +21,14 @@ import {
   type RailwayIacFilesystemEvidence,
   validateRailwayIacMigrationEvidence,
 } from "../../scripts/railway-iac-migration-contract";
+import {
+  isDirectEntrypoint,
+  localFilesystemEvidence,
+  MAX_GENERATED_IAC_BYTES,
+  MAX_LEGACY_CONFIG_BYTES,
+  readBoundedFile,
+  readBoundedTextFile,
+} from "../../scripts/verify-railway-iac-migration";
 
 const NOW = Date.parse("2026-08-28T06:00:00.000Z");
 const GENERATED_SOURCE = `
@@ -201,6 +219,20 @@ function reasonsFor(
     .reasons;
 }
 
+function withTemporaryRepository<T>(callback: (rootDirectory: string) => T): T {
+  const rootDirectory = mkdtempSync(join(tmpdir(), "railway-iac-read-"));
+  try {
+    mkdirSync(join(rootDirectory, ".railway"));
+    writeFileSync(
+      join(rootDirectory, "railway.json"),
+      readFileSync(resolve(process.cwd(), "railway.json")),
+    );
+    return callback(rootDirectory);
+  } finally {
+    rmSync(rootDirectory, { force: true, recursive: true });
+  }
+}
+
 describe("Railway IaC parity snapshot contract (#742)", () => {
   it("passes only post-cutover parity evidence without authorizing an operation", () => {
     expect(
@@ -235,6 +267,214 @@ describe("Railway IaC parity snapshot contract (#742)", () => {
         NOW,
       ).reasons,
     ).toEqual(["generated-iac-missing", "secret-safety-unverified"]);
+  });
+
+  it.each([
+    ["missing", () => undefined],
+    [
+      "oversized",
+      (generatedPath: string) => {
+        writeFileSync(
+          generatedPath,
+          Buffer.alloc(MAX_GENERATED_IAC_BYTES + 1, "x"),
+        );
+      },
+    ],
+    [
+      "read failure",
+      (generatedPath: string) => {
+        symlinkSync("missing-target", generatedPath);
+      },
+    ],
+  ])("keeps %s generated IaC fail-closed", (_caseName, prepare) => {
+    const filesystem = withTemporaryRepository((rootDirectory) => {
+      prepare(join(rootDirectory, ".railway", "railway.ts"));
+      return localFilesystemEvidence(rootDirectory);
+    });
+
+    const evidence = validEvidence();
+    evidence.ownershipCutover.legacyFileSha256 =
+      filesystem.legacyRepositoryFileSha256;
+    expect(filesystem).toMatchObject({
+      generatedIacPath: null,
+      generatedIacSha256: null,
+      generatedIacSecretSafe: null,
+      legacyRepositoryFilePresent: true,
+    });
+    expect(
+      validateRailwayIacMigrationEvidence(evidence, filesystem, NOW).reasons,
+    ).toEqual(["generated-iac-missing", "secret-safety-unverified"]);
+  });
+
+  it("rejects a generated IaC file beneath a symlinked parent directory", () => {
+    const filesystem = withTemporaryRepository((rootDirectory) => {
+      const realDirectory = join(rootDirectory, "real-railway");
+      mkdirSync(realDirectory);
+      writeFileSync(join(realDirectory, "railway.ts"), GENERATED_SOURCE);
+      rmSync(join(rootDirectory, ".railway"), {
+        force: true,
+        recursive: true,
+      });
+      symlinkSync(realDirectory, join(rootDirectory, ".railway"));
+      return localFilesystemEvidence(rootDirectory);
+    });
+
+    expect(filesystem).toMatchObject({
+      generatedIacPath: null,
+      generatedIacSha256: null,
+      generatedIacSecretSafe: null,
+    });
+  });
+
+  it("rejects link/.. traversal that escapes the normalized root", () => {
+    const fixtureDirectory = mkdtempSync(
+      join(tmpdir(), "railway-iac-traversal-"),
+    );
+    try {
+      const rootDirectory = join(fixtureDirectory, "root");
+      const outsideDirectory = join(fixtureDirectory, "outside");
+      const insideSentinel = Buffer.from("inside sentinel\n");
+      const outsideSentinel = Buffer.from("outside sentinel\n");
+      mkdirSync(rootDirectory);
+      mkdirSync(outsideDirectory);
+      writeFileSync(join(rootDirectory, "target"), insideSentinel);
+      writeFileSync(join(fixtureDirectory, "target"), outsideSentinel);
+      symlinkSync(outsideDirectory, join(rootDirectory, "link"));
+
+      // Keep `link/..` in the path passed to the filesystem. `join()` and
+      // `resolve()` would normalize it to the inside sentinel instead.
+      const traversalPath = `${rootDirectory}/link/../target`;
+      expect(readFileSync(join(rootDirectory, "target"))).toEqual(
+        insideSentinel,
+      );
+      // This is what the vulnerable raw read would observe.
+      expect(readFileSync(traversalPath)).toEqual(outsideSentinel);
+      // The hardened helper rejects the escape and reads only the normalized
+      // path within the root.
+      expect(readBoundedFile(traversalPath, 64, rootDirectory)).toEqual(
+        insideSentinel,
+      );
+      expect(readBoundedTextFile(traversalPath, 64, rootDirectory)).toBe(
+        insideSentinel.toString("utf8"),
+      );
+    } finally {
+      rmSync(fixtureDirectory, { force: true, recursive: true });
+    }
+  });
+
+  it.each([
+    [
+      "missing",
+      (legacyPath: string) => {
+        unlinkSync(legacyPath);
+      },
+    ],
+    [
+      "oversized",
+      (legacyPath: string) => {
+        writeFileSync(
+          legacyPath,
+          Buffer.alloc(MAX_LEGACY_CONFIG_BYTES + 1, "x"),
+        );
+      },
+    ],
+    [
+      "directory",
+      (legacyPath: string) => {
+        rmSync(legacyPath, { force: true, recursive: true });
+        mkdirSync(legacyPath);
+      },
+    ],
+    [
+      "symlink",
+      (legacyPath: string, rootDirectory: string) => {
+        const targetPath = join(rootDirectory, "legacy-target.json");
+        writeFileSync(targetPath, "{}\n");
+        rmSync(legacyPath, { force: true, recursive: true });
+        symlinkSync(targetPath, legacyPath);
+      },
+    ],
+    [
+      "read failure",
+      (legacyPath: string, rootDirectory: string) => {
+        rmSync(legacyPath, { force: true, recursive: true });
+        symlinkSync(join(rootDirectory, "missing-target.json"), legacyPath);
+      },
+    ],
+  ])("keeps %s legacy config fail-closed", (_caseName, prepare) => {
+    const filesystem = withTemporaryRepository((rootDirectory) => {
+      const legacyPath = join(rootDirectory, "railway.json");
+      prepare(legacyPath, rootDirectory);
+      return localFilesystemEvidence(rootDirectory);
+    });
+
+    expect(filesystem).toMatchObject({
+      legacyRepositoryFilePresent: false,
+      legacyRepositoryFileSha256: null,
+    });
+  });
+
+  it("reads a regular legacy config and records its bounded raw hash", () => {
+    const expected = readFileSync(resolve(process.cwd(), "railway.json"));
+    const filesystem = withTemporaryRepository((rootDirectory) =>
+      localFilesystemEvidence(rootDirectory),
+    );
+
+    expect(filesystem).toMatchObject({
+      legacyRepositoryFilePresent: true,
+      legacyRepositoryFileSha256: createHash("sha256")
+        .update(expected)
+        .digest("hex"),
+    });
+  });
+
+  it("reads an ordinary file consistently across the bounded read passes", () => {
+    withTemporaryRepository((rootDirectory) => {
+      const filePath = join(rootDirectory, "ordinary.txt");
+      const expected = Buffer.from("ordinary content\n");
+      writeFileSync(filePath, expected);
+
+      expect(readBoundedFile(filePath, expected.length, rootDirectory)).toEqual(
+        expected,
+      );
+      expect(
+        readBoundedTextFile(filePath, expected.length, rootDirectory),
+      ).toBe(expected.toString("utf8"));
+    });
+  });
+
+  it("resolves a symlinked verifier entrypoint before invoking main", () => {
+    const moduleUrl = new URL(
+      "../../scripts/verify-railway-iac-migration.ts",
+      import.meta.url,
+    ).href;
+    const symlinkPath = join(
+      mkdtempSync(join(tmpdir(), "railway-entrypoint-")),
+      "verify.ts",
+    );
+    try {
+      symlinkSync(fileURLToPath(moduleUrl), symlinkPath);
+      expect(isDirectEntrypoint(symlinkPath, moduleUrl)).toBe(true);
+    } finally {
+      rmSync(dirname(symlinkPath), { force: true, recursive: true });
+    }
+  });
+
+  it("accepts a regular legacy config at the byte limit", () => {
+    const filesystem = withTemporaryRepository((rootDirectory) => {
+      writeFileSync(
+        join(rootDirectory, "railway.json"),
+        Buffer.alloc(MAX_LEGACY_CONFIG_BYTES, "x"),
+      );
+      return localFilesystemEvidence(rootDirectory);
+    });
+
+    expect(filesystem.legacyRepositoryFilePresent).toBe(true);
+    expect(filesystem.legacyRepositoryFileSha256).toBe(
+      createHash("sha256")
+        .update(Buffer.alloc(MAX_LEGACY_CONFIG_BYTES, "x"))
+        .digest("hex"),
+    );
   });
 
   it.each([
