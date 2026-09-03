@@ -24,6 +24,8 @@ import {
   localFilesystemEvidence,
   MAX_GENERATED_IAC_BYTES,
   MAX_LEGACY_CONFIG_BYTES,
+  readBoundedFile,
+  readBoundedTextFile,
 } from "../../scripts/verify-railway-iac-migration";
 
 const NOW = Date.parse("2026-08-28T06:00:00.000Z");
@@ -289,6 +291,26 @@ describe("Railway IaC parity snapshot contract (#742)", () => {
     });
   });
 
+  it("rejects link/.. traversal that escapes the normalized root", () => {
+    const fixtureDirectory = mkdtempSync(
+      join(tmpdir(), "railway-iac-traversal-"),
+    );
+    try {
+      const rootDirectory = join(fixtureDirectory, "root");
+      const outsideDirectory = join(fixtureDirectory, "outside");
+      mkdirSync(rootDirectory);
+      mkdirSync(outsideDirectory);
+      writeFileSync(join(fixtureDirectory, "target"), "outside\n");
+      symlinkSync(outsideDirectory, join(rootDirectory, "link"));
+
+      const traversalPath = join(rootDirectory, "link", "..", "target");
+      expect(readBoundedFile(traversalPath, 64, rootDirectory)).toBeNull();
+      expect(readBoundedTextFile(traversalPath, 64, rootDirectory)).toBeNull();
+    } finally {
+      rmSync(fixtureDirectory, { force: true, recursive: true });
+    }
+  });
+
   it.each([
     [
       "missing",
@@ -352,6 +374,21 @@ describe("Railway IaC parity snapshot contract (#742)", () => {
       legacyRepositoryFileSha256: createHash("sha256")
         .update(expected)
         .digest("hex"),
+    });
+  });
+
+  it("reads an ordinary file consistently across the bounded read passes", () => {
+    withTemporaryRepository((rootDirectory) => {
+      const filePath = join(rootDirectory, "ordinary.txt");
+      const expected = Buffer.from("ordinary content\n");
+      writeFileSync(filePath, expected);
+
+      expect(readBoundedFile(filePath, expected.length, rootDirectory)).toEqual(
+        expected,
+      );
+      expect(
+        readBoundedTextFile(filePath, expected.length, rootDirectory),
+      ).toBe(expected.toString("utf8"));
     });
   });
 

@@ -55,11 +55,11 @@ function hasStableFileSnapshot(
 }
 
 function pathHasNoSymlinkedParents(
-  filePath: string,
-  rootDirectory = dirname(filePath),
+  normalizedFilePath: string,
+  normalizedRootDirectory = dirname(normalizedFilePath),
 ): boolean {
-  let currentPath = resolve(filePath);
-  const boundaryPath = resolve(rootDirectory);
+  let currentPath = normalizedFilePath;
+  const boundaryPath = normalizedRootDirectory;
   while (true) {
     const stats = lstatSync(currentPath);
     if (stats.isSymbolicLink()) return false;
@@ -71,12 +71,14 @@ function pathHasNoSymlinkedParents(
 }
 
 function pathStillOwnsFile(
-  filePath: string,
+  normalizedFilePath: string,
   fileStats: ReturnType<typeof fstatSync>,
-  rootDirectory?: string,
+  normalizedRootDirectory: string,
 ): boolean {
-  if (!pathHasNoSymlinkedParents(filePath, rootDirectory)) return false;
-  const pathStats = lstatSync(filePath);
+  if (!pathHasNoSymlinkedParents(normalizedFilePath, normalizedRootDirectory)) {
+    return false;
+  }
+  const pathStats = lstatSync(normalizedFilePath);
   return (
     pathStats.isFile() &&
     !pathStats.isSymbolicLink() &&
@@ -95,6 +97,12 @@ export function readBoundedFile(
   let content: Buffer | null = null;
 
   try {
+    // Resolve before any filesystem operation. Opening the raw path could
+    // resolve `..` after a symlink, while the boundary check must inspect this
+    // exact normalized path.
+    const normalizedFilePath = resolve(filePath);
+    const normalizedRootDirectory = resolve(rootDirectory);
+
     // Open once and inspect that descriptor so a path replacement cannot make
     // the size check and the read refer to different files. O_NOFOLLOW rejects
     // the final symlink atomically where the platform provides it, while the
@@ -102,13 +110,17 @@ export function readBoundedFile(
     // O_NONBLOCK also prevents a raced special file such as a FIFO from
     // blocking the verifier.
     fileDescriptor = openSync(
-      filePath,
+      normalizedFilePath,
       constants.O_RDONLY | constants.O_NONBLOCK | (constants.O_NOFOLLOW ?? 0),
     );
     const initialStats = fstatSync(fileDescriptor);
     if (
       !isBoundedRegularFile(initialStats, maxBytes) ||
-      !pathStillOwnsFile(filePath, initialStats, rootDirectory)
+      !pathStillOwnsFile(
+        normalizedFilePath,
+        initialStats,
+        normalizedRootDirectory,
+      )
     ) {
       return null;
     }
@@ -154,7 +166,11 @@ export function readBoundedFile(
     if (
       !isBoundedRegularFile(finalStats, maxBytes) ||
       !hasStableFileSnapshot(initialStats, finalStats) ||
-      !pathStillOwnsFile(filePath, finalStats, rootDirectory)
+      !pathStillOwnsFile(
+        normalizedFilePath,
+        finalStats,
+        normalizedRootDirectory,
+      )
     ) {
       return null;
     }
