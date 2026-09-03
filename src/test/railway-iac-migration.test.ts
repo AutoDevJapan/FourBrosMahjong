@@ -6,6 +6,7 @@ import {
   readFileSync,
   rmSync,
   symlinkSync,
+  unlinkSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -20,6 +21,7 @@ import {
 import {
   localFilesystemEvidence,
   MAX_GENERATED_IAC_BYTES,
+  MAX_LEGACY_CONFIG_BYTES,
 } from "../../scripts/verify-railway-iac-migration";
 
 const NOW = Date.parse("2026-08-28T06:00:00.000Z");
@@ -263,6 +265,89 @@ describe("Railway IaC parity snapshot contract (#742)", () => {
     expect(
       validateRailwayIacMigrationEvidence(evidence, filesystem, NOW).reasons,
     ).toEqual(["generated-iac-missing", "secret-safety-unverified"]);
+  });
+
+  it.each([
+    [
+      "missing",
+      (legacyPath: string) => {
+        unlinkSync(legacyPath);
+      },
+    ],
+    [
+      "oversized",
+      (legacyPath: string) => {
+        writeFileSync(
+          legacyPath,
+          Buffer.alloc(MAX_LEGACY_CONFIG_BYTES + 1, "x"),
+        );
+      },
+    ],
+    [
+      "directory",
+      (legacyPath: string) => {
+        rmSync(legacyPath, { force: true, recursive: true });
+        mkdirSync(legacyPath);
+      },
+    ],
+    [
+      "symlink",
+      (legacyPath: string, rootDirectory: string) => {
+        const targetPath = join(rootDirectory, "legacy-target.json");
+        writeFileSync(targetPath, "{}\n");
+        rmSync(legacyPath, { force: true, recursive: true });
+        symlinkSync(targetPath, legacyPath);
+      },
+    ],
+    [
+      "read failure",
+      (legacyPath: string, rootDirectory: string) => {
+        rmSync(legacyPath, { force: true, recursive: true });
+        symlinkSync(join(rootDirectory, "missing-target.json"), legacyPath);
+      },
+    ],
+  ])("keeps %s legacy config fail-closed", (_caseName, prepare) => {
+    const filesystem = withTemporaryRepository((rootDirectory) => {
+      const legacyPath = join(rootDirectory, "railway.json");
+      prepare(legacyPath, rootDirectory);
+      return localFilesystemEvidence(rootDirectory);
+    });
+
+    expect(filesystem).toMatchObject({
+      legacyRepositoryFilePresent: false,
+      legacyRepositoryFileSha256: null,
+    });
+  });
+
+  it("reads a regular legacy config and records its bounded raw hash", () => {
+    const expected = readFileSync(resolve(process.cwd(), "railway.json"));
+    const filesystem = withTemporaryRepository((rootDirectory) =>
+      localFilesystemEvidence(rootDirectory),
+    );
+
+    expect(filesystem).toMatchObject({
+      legacyRepositoryFilePresent: true,
+      legacyRepositoryFileSha256: createHash("sha256")
+        .update(expected)
+        .digest("hex"),
+    });
+  });
+
+  it("accepts a regular legacy config at the byte limit", () => {
+    const filesystem = withTemporaryRepository((rootDirectory) => {
+      writeFileSync(
+        join(rootDirectory, "railway.json"),
+        Buffer.alloc(MAX_LEGACY_CONFIG_BYTES, "x"),
+      );
+      return localFilesystemEvidence(rootDirectory);
+    });
+
+    expect(filesystem.legacyRepositoryFilePresent).toBe(true);
+    expect(filesystem.legacyRepositoryFileSha256).toBe(
+      createHash("sha256")
+        .update(Buffer.alloc(MAX_LEGACY_CONFIG_BYTES, "x"))
+        .digest("hex"),
+    );
   });
 
   it.each([

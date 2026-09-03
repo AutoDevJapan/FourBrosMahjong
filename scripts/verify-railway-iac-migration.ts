@@ -2,10 +2,9 @@ import { createHash } from "node:crypto";
 import {
   closeSync,
   constants,
-  existsSync,
   fstatSync,
+  lstatSync,
   openSync,
-  readFileSync,
   readSync,
 } from "node:fs";
 import { resolve } from "node:path";
@@ -18,25 +17,71 @@ import {
 
 const MAX_INPUT_BYTES = 64 * 1_024;
 export const MAX_GENERATED_IAC_BYTES = 64 * 1_024;
+export const MAX_LEGACY_CONFIG_BYTES = 64 * 1_024;
 const repositoryRoot = process.cwd();
 
-export function readBoundedTextFile(filePath: string): string | null {
+function isBoundedRegularFile(
+  fileStats: ReturnType<typeof fstatSync>,
+  maxBytes: number,
+): boolean {
+  return (
+    fileStats.isFile() &&
+    Number.isSafeInteger(fileStats.size) &&
+    fileStats.size >= 0 &&
+    fileStats.size <= maxBytes
+  );
+}
+
+function hasSameFileIdentity(
+  firstStats: ReturnType<typeof fstatSync>,
+  secondStats: ReturnType<typeof fstatSync>,
+): boolean {
+  return (
+    firstStats.dev === secondStats.dev && firstStats.ino === secondStats.ino
+  );
+}
+
+function pathStillOwnsFile(
+  filePath: string,
+  fileStats: ReturnType<typeof fstatSync>,
+): boolean {
+  const pathStats = lstatSync(filePath);
+  return (
+    pathStats.isFile() &&
+    !pathStats.isSymbolicLink() &&
+    hasSameFileIdentity(pathStats, fileStats)
+  );
+}
+
+export function readBoundedFile(
+  filePath: string,
+  maxBytes: number,
+): Buffer | null {
+  if (!Number.isSafeInteger(maxBytes) || maxBytes < 0) return null;
+
   let fileDescriptor: number | undefined;
+  let content: Buffer | null = null;
 
   try {
     // Open once and inspect that descriptor so a path replacement cannot make
-    // the size check and the read refer to different files. O_NONBLOCK also
-    // prevents a raced special file such as a FIFO from blocking the verifier.
+    // the size check and the read refer to different files. O_NOFOLLOW rejects
+    // the final symlink atomically where the platform provides it, while the
+    // lstat identity checks below keep the same fail-closed behavior elsewhere.
+    // O_NONBLOCK also prevents a raced special file such as a FIFO from
+    // blocking the verifier.
     fileDescriptor = openSync(
       filePath,
-      constants.O_RDONLY | constants.O_NONBLOCK,
+      constants.O_RDONLY | constants.O_NONBLOCK | (constants.O_NOFOLLOW ?? 0),
     );
-    const fileStats = fstatSync(fileDescriptor);
-    if (!fileStats.isFile() || fileStats.size > MAX_GENERATED_IAC_BYTES) {
+    const initialStats = fstatSync(fileDescriptor);
+    if (
+      !isBoundedRegularFile(initialStats, maxBytes) ||
+      !pathStillOwnsFile(filePath, initialStats)
+    ) {
       return null;
     }
 
-    const content = Buffer.alloc(fileStats.size);
+    content = Buffer.alloc(initialStats.size);
     let bytesRead = 0;
     while (bytesRead < content.length) {
       const chunkSize = readSync(
@@ -59,11 +104,14 @@ export function readBoundedTextFile(filePath: string): string | null {
       return null;
     }
     const finalStats = fstatSync(fileDescriptor);
-    if (!finalStats.isFile() || finalStats.size !== fileStats.size) {
+    if (
+      !isBoundedRegularFile(finalStats, maxBytes) ||
+      !hasSameFileIdentity(initialStats, finalStats) ||
+      finalStats.size !== initialStats.size ||
+      !pathStillOwnsFile(filePath, finalStats)
+    ) {
       return null;
     }
-
-    return content.toString("utf8");
   } catch {
     return null;
   } finally {
@@ -71,11 +119,22 @@ export function readBoundedTextFile(filePath: string): string | null {
       try {
         closeSync(fileDescriptor);
       } catch {
-        // The read result is already fail-closed if closing the descriptor
-        // itself fails.
+        // A successful read is not evidence if the descriptor cannot be
+        // closed; discard it so close failures remain fail-closed.
+        content = null;
       }
     }
   }
+
+  return content;
+}
+
+export function readBoundedTextFile(
+  filePath: string,
+  maxBytes = MAX_GENERATED_IAC_BYTES,
+): string | null {
+  const content = readBoundedFile(filePath, maxBytes);
+  return content === null ? null : content.toString("utf8");
 }
 
 export function localFilesystemEvidence(
@@ -83,8 +142,8 @@ export function localFilesystemEvidence(
 ): RailwayIacFilesystemEvidence {
   const generatedPath = resolve(rootDirectory, ".railway/railway.ts");
   const legacyPath = resolve(rootDirectory, "railway.json");
-  const legacyExists = existsSync(legacyPath);
   const generatedSource = readBoundedTextFile(generatedPath);
+  const legacySource = readBoundedFile(legacyPath, MAX_LEGACY_CONFIG_BYTES);
   return {
     generatedIacPath: generatedSource === null ? null : ".railway/railway.ts",
     generatedIacSha256:
@@ -95,10 +154,11 @@ export function localFilesystemEvidence(
       generatedSource === null
         ? null
         : generatedIacSourceIsSecretSafe(generatedSource),
-    legacyRepositoryFilePresent: legacyExists,
-    legacyRepositoryFileSha256: legacyExists
-      ? createHash("sha256").update(readFileSync(legacyPath)).digest("hex")
-      : null,
+    legacyRepositoryFilePresent: legacySource !== null,
+    legacyRepositoryFileSha256:
+      legacySource === null
+        ? null
+        : createHash("sha256").update(legacySource).digest("hex"),
   };
 }
 
