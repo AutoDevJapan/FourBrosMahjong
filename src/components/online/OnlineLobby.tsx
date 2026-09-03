@@ -135,8 +135,8 @@ function normalizeRetryAfterMs(value: unknown): number | undefined {
   return Math.min(MAX_SERVER_RETRY_AFTER_MS, Math.ceil(value));
 }
 
-function nameRequirementMessage(name: string): string {
-  return name.trim().length > 0
+function nameRequirementMessage(normalizedName: string | null): string {
+  return normalizedName !== null
     ? `表示名は入力されています(${MAX_PLAYER_NAME_LENGTH}文字以内)。`
     : `参加には表示名が必要です。表示名を入力してください(${MAX_PLAYER_NAME_LENGTH}文字以内)。`;
 }
@@ -165,12 +165,12 @@ function roomCodeRequirementMessage(roomCode: string): string {
 }
 
 function joinRequirementMessage(
-  name: string,
+  normalizedName: string | null,
   roomCode: string,
   status: ConnectionStatus,
 ): string {
   const requirements: string[] = [];
-  if (name.trim().length === 0) {
+  if (normalizedName === null) {
     requirements.push("表示名を入力してください。");
   }
 
@@ -1379,9 +1379,13 @@ export default function OnlineLobby() {
     status !== "reconnecting";
   const normalizedRoomCode = normalizeRoomCode(roomCode);
   const joinDisabled = !canSubmit || normalizedRoomCode === null;
-  const nameRequirement = nameRequirementMessage(name);
+  const nameRequirement = nameRequirementMessage(normalizedName);
   const roomCodeRequirement = roomCodeRequirementMessage(roomCode);
-  const joinRequirement = joinRequirementMessage(name, roomCode, status);
+  const joinRequirement = joinRequirementMessage(
+    normalizedName,
+    roomCode,
+    status,
+  );
   const createRoom = () => {
     if (!canSubmit) return;
     start({ type: "create", name: normalizedName ?? "" });
@@ -1478,7 +1482,7 @@ export default function OnlineLobby() {
               }}
               placeholder="例: たろう"
               required
-              aria-invalid={name.trim().length === 0}
+              aria-invalid={normalizedName === null}
               aria-describedby={`${NAME_REQUIREMENT_ID}${maintenance ? ` ${MAINTENANCE_NOTICE_ID}` : ""}`}
               className="min-h-11 rounded-lg border border-control-border bg-transparent px-3 py-2 font-normal"
             />
