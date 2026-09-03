@@ -1374,6 +1374,11 @@ describe("verification-scope の分類契約 (#491)", () => {
     // [説明, パス, 期待する分類]
     ["仕様書", "documents/spec/game-flow.md", "documentation"],
     ["ルートの md", "CLAUDE.md", "documentation"],
+    [
+      "immutable pre-cutover fixture",
+      "documents/fixtures/railway-pre-cutover.json",
+      "unit-test",
+    ],
     ["単体テスト", "src/domain/game/engine.test.ts", "unit-test"],
     ["コンポーネントテスト", "src/components/game/Board.test.tsx", "unit-test"],
     [
@@ -1486,7 +1491,9 @@ describe("verification-scope の分類契約 (#491)", () => {
 describe("テスト入力資産をdocs-onlyで黙殺しない (#745)", () => {
   /**
    * テストコードがどう解決しているかに関係なく、文字列リテラルとして現れる
-   * リポジトリ相対の docs/documents/README/CHANGELOG 入力を集める。
+   * リポジトリ相対の docs/documents/README/CHANGELOG 入力を集める。テストが
+   * importする検証契約モジュールに入力パス定数がある場合は、そのモジュールも
+   * 明示的に走査する。
    *
    * `resolve(process.cwd(), "…")`、`readFileSync("…")`、`new URL("…", import.meta.url)`、
    * JSON import、ディレクトリコピーのどれかへ限定すると、新しい参照形式を追加した
@@ -1508,6 +1515,19 @@ describe("テスト入力資産をdocs-onlyで黙殺しない (#745)", () => {
         ? relativePath.replace(/\/$/, "")
         : null;
     };
+    const collect = (file: string) => {
+      const source = readFileSync(file, "utf8");
+      for (const match of source.matchAll(/(["'])([^"'\\\n]+)\1/g)) {
+        const literal = match[2];
+        if (
+          !/(^|\/)(?:docs|documents)\//.test(literal) &&
+          !/^(?:README|CHANGELOG)\.md$/.test(literal)
+        )
+          continue;
+        const path = sourcePath(file, literal);
+        if (path) found.add(path);
+      }
+    };
     const walk = (dir: string) => {
       for (const entry of readdirSync(dir, { withFileTypes: true })) {
         const file = resolve(dir, entry.name);
@@ -1520,22 +1540,16 @@ describe("テスト入力資産をdocs-onlyで黙殺しない (#745)", () => {
         // このファイル自身は分類テストの入力データとしてパスを並べるため除外する。
         // 判定対象はあくまで「他のテストが参照している入力資産」。
         if (entry.name === "ci-workflow.test.ts") continue;
-        const source = readFileSync(file, "utf8");
-        for (const match of source.matchAll(/(["'])([^"'\\\n]+)\1/g)) {
-          const literal = match[2];
-          if (
-            !/(^|\/)(?:docs|documents)\//.test(literal) &&
-            !/^(?:README|CHANGELOG)\.md$/.test(literal)
-          )
-            continue;
-          const path = sourcePath(file, literal);
-          if (path) found.add(path);
-        }
+        collect(file);
       }
     };
     // server/ のrunbook、src/ のJSON import、e2e/ のfixtureを同じ検査対象にする。
     for (const root of ["server", "src", "e2e"])
       walk(resolve(repositoryRoot, root));
+    // railway-iac-migration.test.ts が import する契約モジュールのfixture定数も検査する。
+    collect(
+      resolve(repositoryRoot, "scripts/railway-iac-migration-contract.ts"),
+    );
     return [...found];
   }
 
@@ -1552,6 +1566,7 @@ describe("テスト入力資産をdocs-onlyで黙殺しない (#745)", () => {
         "documents/guides/railway-online-deploy-runbook.md",
         "documents/assets/ui-refresh/manifest.json",
         "documents/assets/ui-refresh",
+        "documents/fixtures/railway-pre-cutover.json",
       ]),
     );
 
@@ -1586,6 +1601,7 @@ describe("テスト入力資産をdocs-onlyで黙殺しない (#745)", () => {
     "documents/assets/ui-refresh/manifest.json",
     "documents/assets/ui-refresh/originals/lobby.png",
     "documents/assets/ui-refresh/originals/new-reference.png",
+    "documents/fixtures/railway-pre-cutover.json",
     "README.md",
     "CHANGELOG.md",
     "docs/四兄弟麻雀ルール.md",
