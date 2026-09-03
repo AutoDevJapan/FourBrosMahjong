@@ -371,8 +371,7 @@ function parseBoundedJsonFields(output, expectedCount, label) {
 
 const CONTAINER_STATE_FORMAT =
   "{{json .State.Running}}\t{{json .State.ExitCode}}\t{{json .State.OOMKilled}}\t{{json .State.Pid}}";
-const CONTAINER_IDENTITY_FORMAT =
-  `{{with index .Config.Labels "${OWNERSHIP_LABEL}"}}{{json .}}{{else}}null{{end}}\t{{json .State.Running}}`;
+const CONTAINER_IDENTITY_FORMAT = `{{with index .Config.Labels "${OWNERSHIP_LABEL}"}}{{json .}}{{else}}null{{end}}\t{{json .State.Running}}`;
 
 async function containerState(name, timeoutMs = COMMAND_TIMEOUT_MS) {
   const result = await docker(
@@ -394,7 +393,12 @@ async function containerState(name, timeoutMs = COMMAND_TIMEOUT_MS) {
       Number.isSafeInteger(pid),
     "container state metadata is invalid",
   );
-  return { Running: running, ExitCode: exitCode, OOMKilled: oomKilled, Pid: pid };
+  return {
+    Running: running,
+    ExitCode: exitCode,
+    OOMKilled: oomKilled,
+    Pid: pid,
+  };
 }
 
 async function waitForStopped(name, timeoutMs) {
@@ -706,12 +710,17 @@ function probePortClosed(port, timeoutMs = PORT_PROBE_TIMEOUT_MS) {
       callback(value);
     };
 
-    socket.setTimeout(Math.max(1, Math.min(PORT_PROBE_TIMEOUT_MS, timeoutMs)), () => {
-      finish(
-        reject,
-        new Error(`port ${port} close probe timed out; closure is unverified`),
-      );
-    });
+    socket.setTimeout(
+      Math.max(1, Math.min(PORT_PROBE_TIMEOUT_MS, timeoutMs)),
+      () => {
+        finish(
+          reject,
+          new Error(
+            `port ${port} close probe timed out; closure is unverified`,
+          ),
+        );
+      },
+    );
     socket.once("connect", () => {
       connected = true;
       finish(resolve, false);
@@ -1132,16 +1141,20 @@ async function inspectContainerIdentity(name, timeoutMs) {
 
 async function cleanupContainer(name, runId, options = {}) {
   const timeoutMs = options.timeoutMs ?? STOP_MARGIN_MS;
-  const deadline = Date.now() + boundedTimeoutMs(timeoutMs, "container cleanup");
+  const deadline =
+    Date.now() + boundedTimeoutMs(timeoutMs, "container cleanup");
   let identity = null;
   while (identity === null) {
     const remainingMs = deadline - Date.now();
     if (remainingMs <= 0) {
       if (options.waitForAppearance !== true) return;
-      throw new Error(`container cleanup deadline exceeded while locating ${name}`);
+      throw new Error(
+        `container cleanup deadline exceeded while locating ${name}`,
+      );
     }
     identity = await inspectContainerIdentity(name, remainingMs);
-    if (identity !== null || options.waitForAppearance !== true) return;
+    if (identity !== null) break;
+    if (options.waitForAppearance !== true) return;
     await delay(Math.min(50, deadline - Date.now()));
   }
   if (identity.label !== runId) return;
@@ -1159,7 +1172,9 @@ async function cleanupContainer(name, runId, options = {}) {
   }
   remainingMs = deadline - Date.now();
   if (remainingMs <= 0) {
-    throw new Error(`container cleanup deadline exceeded before removing ${name}`);
+    throw new Error(
+      `container cleanup deadline exceeded before removing ${name}`,
+    );
   }
   await docker(["rm", "--force", name], {
     allowFailure: true,
@@ -1168,7 +1183,9 @@ async function cleanupContainer(name, runId, options = {}) {
   });
   remainingMs = deadline - Date.now();
   if (remainingMs <= 0) {
-    throw new Error(`container cleanup deadline exceeded while verifying ${name}`);
+    throw new Error(
+      `container cleanup deadline exceeded while verifying ${name}`,
+    );
   }
   await waitUntil(
     async (probeRemainingMs) => {
@@ -1569,7 +1586,10 @@ async function secondSignalScenario(image) {
     const shutdownStartedAt = Date.now();
     const deadline = shutdownStartedAt + shutdownGraceMs + STOP_MARGIN_MS;
     await docker(["kill", "--signal=TERM", container.name], {
-      timeoutMs: remainingUntil(deadline, "second-signal first shutdown signal"),
+      timeoutMs: remainingUntil(
+        deadline,
+        "second-signal first shutdown signal",
+      ),
     });
     await waitForLogEvent(
       container.name,
@@ -1628,15 +1648,18 @@ async function secondSignalScenario(image) {
 
 async function main() {
   const { image } = parseArguments(process.argv.slice(2));
-  const inspected = await docker([
-    "image",
-    "inspect",
-    image,
-    "--format",
-    "{{json .Id}}\t{{json .Config.Cmd}}\t{{json .Config.User}}",
-  ], {
-    outputMaxBytes: MAX_IMAGE_METADATA_BYTES,
-  });
+  const inspected = await docker(
+    [
+      "image",
+      "inspect",
+      image,
+      "--format",
+      "{{json .Id}}\t{{json .Config.Cmd}}\t{{json .Config.User}}",
+    ],
+    {
+      outputMaxBytes: MAX_IMAGE_METADATA_BYTES,
+    },
+  );
   const [imageId, command, imageUserValue] = parseBoundedJsonFields(
     inspected.stdout,
     3,
