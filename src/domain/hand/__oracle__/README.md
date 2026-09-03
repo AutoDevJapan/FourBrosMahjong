@@ -154,7 +154,8 @@
 - 呼び出し側は `cross-validation.test.ts` の**乱択ジェネレータを呼ぶ全ループ**で
   `expect(...).toHaveLength()` を通します。決め打ち fixture の `count34ToTiles` 経路は
   オラクル側の枚数アサートが担保します。
-- `randomHand` 由来のループも同様です。枚数が欠けても `shanten()` とオラクルはどちらも
+- `randomHand` 由来のループ（`src/domain/game/ai.test.ts` の副露数別検証を含む）も同様です。
+  枚数が欠けても `shanten()` とオラクルはどちらも
   短い手を受け付けて一致してしまい、**完全に無症状**で素通りするためです。
 - `randomMeldedHand` 由来のブロックは `definition-oracle.ts` の `assertFormArity` が
   `RangeError` を投げるので二重に守られますが、他ブロックと形を揃えて明示もしています。
@@ -162,9 +163,6 @@
   `waitingIndicesByDefinition34` / `menzenWaitingIndicesByDefinition34` /
   `shantenByDefinition34` はいずれも枚数が噛み合わなければ `RangeError` を投げ、
   「和了形でない」と「呼び出し側の契約違反」を空集合で同一視しません。
-
-⚠️ **未対応**: `src/domain/game/ai.test.ts` の `randomHand` ループだけはまだガードが
-無く、契約違反が静かに素通りします(#456 で追随)。本ディレクトリ外なので分離しました。
 
 ## 参照ライブラリとのアンカー(再現手順)
 
