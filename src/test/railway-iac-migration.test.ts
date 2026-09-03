@@ -356,6 +356,11 @@ describe("Railway IaC parity snapshot contract (#742)", () => {
     ).toBe(false);
     expect(
       generatedIacSourceIsSecretSafe(
+        `import { service } from "railway/iac"; service("fixture", { options: { TOKEN: -1 } });`,
+      ),
+    ).toBe(true);
+    expect(
+      generatedIacSourceIsSecretSafe(
         `service("fixture", { env: { PUBLIC_VALUE: "not-secret-but-not-preserved" } });`,
       ),
     ).toBe(false);
@@ -611,6 +616,34 @@ describe("Railway IaC parity snapshot contract (#742)", () => {
         evidence.generatedIac.manualSecretReviewCompleted = false;
       }),
     ).toContain("secret-safety-unverified");
+  });
+
+  it("rejects dynamic methods/accessors and spread forms that evade auditing", () => {
+    expect(
+      generatedIacSourceIsSecretSafe(
+        `import { service } from "railway/iac"; const key = "ONLINE_OPS_TOKEN"; service("fixture", { options: { [key]() { return -1; } } });`,
+      ),
+    ).toBe(false);
+    expect(
+      generatedIacSourceIsSecretSafe(
+        `import { service } from "railway/iac"; const key = "ONLINE_OPS_TOKEN"; service("fixture", { options: { get [key]() { return -1; } } });`,
+      ),
+    ).toBe(false);
+    expect(
+      generatedIacSourceIsSecretSafe(
+        `import { service } from "railway/iac"; const key = "ONLINE_OPS_TOKEN"; service("fixture", { options: { set [key](value) {} } });`,
+      ),
+    ).toBe(false);
+    expect(
+      generatedIacSourceIsSecretSafe(
+        `import { service } from "railway/iac"; const options = unknownOptions; service("fixture", { options: { ...options } });`,
+      ),
+    ).toBe(false);
+    expect(
+      generatedIacSourceIsSecretSafe(
+        `import { project } from "railway/iac"; const resources = []; project("fixture", { resources: [...resources] });`,
+      ),
+    ).toBe(false);
   });
 
   it("keeps the checked-in legacy mapping at parity", () => {

@@ -683,11 +683,20 @@ export function generatedIacSourceIsSecretSafe(source: string): boolean {
   };
   const isStaticPrimitiveWithoutString = (node: ts.Expression): boolean => {
     const unwrapped = unwrapParenthesizedExpression(node);
-    return (
+    if (
       ts.isNumericLiteral(unwrapped) ||
       unwrapped.kind === ts.SyntaxKind.TrueKeyword ||
       unwrapped.kind === ts.SyntaxKind.FalseKeyword ||
       unwrapped.kind === ts.SyntaxKind.NullKeyword
+    ) {
+      return true;
+    }
+    return (
+      ts.isPrefixUnaryExpression(unwrapped) &&
+      [ts.SyntaxKind.PlusToken, ts.SyntaxKind.MinusToken].includes(
+        unwrapped.operator,
+      ) &&
+      ts.isNumericLiteral(unwrapParenthesizedExpression(unwrapped.operand))
     );
   };
   const secretLikeValueIsStaticSafe = (node: ts.Expression): boolean => {
@@ -791,7 +800,12 @@ export function generatedIacSourceIsSecretSafe(source: string): boolean {
       ts.isClassExpression(node) ||
       ts.isAwaitExpression(node) ||
       ts.isYieldExpression(node) ||
-      ts.isTaggedTemplateExpression(node)
+      ts.isTaggedTemplateExpression(node) ||
+      // A spread can introduce properties or values from an unanalyzed
+      // binding, so reject every spread form rather than allowing it to skip
+      // the property provenance checks below.
+      ts.isSpreadAssignment(node) ||
+      ts.isSpreadElement(node)
     ) {
       safe = false;
       return;
@@ -804,6 +818,16 @@ export function generatedIacSourceIsSecretSafe(source: string): boolean {
       return;
     }
     if (ts.isImportEqualsDeclaration(node) || ts.isNewExpression(node)) {
+      safe = false;
+      return;
+    }
+    if (
+      ts.isMethodDeclaration(node) ||
+      ts.isGetAccessorDeclaration(node) ||
+      ts.isSetAccessorDeclaration(node)
+    ) {
+      // Method/accessor names can be computed dynamically, and their values
+      // are not among the explicitly approved primitive/reference forms.
       safe = false;
       return;
     }
