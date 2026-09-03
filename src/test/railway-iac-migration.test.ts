@@ -331,6 +331,31 @@ describe("Railway IaC parity snapshot contract (#742)", () => {
     expect(generatedIacSourceIsSecretSafe("const config = {}")).toBe(true);
     expect(
       generatedIacSourceIsSecretSafe(
+        `import { service } from "railway/iac"; const token = "SECRET_SENTINEL"; service("fixture", { env: { ONLINE_OPS_TOKEN: token } });`,
+      ),
+    ).toBe(false);
+    expect(
+      generatedIacSourceIsSecretSafe(
+        `import { service } from "railway/iac"; const token = "SECRET_SENTINEL"; service("fixture", { options: { ONLINE_OPS_TOKEN: token } });`,
+      ),
+    ).toBe(false);
+    expect(
+      generatedIacSourceIsSecretSafe(
+        `import { service } from "railway/iac"; const token = "SECRET_SENTINEL"; service("fixture", { options: { ONLINE_OPS_TOKEN: { value: token } } });`,
+      ),
+    ).toBe(false);
+    expect(
+      generatedIacSourceIsSecretSafe(
+        `import { service } from "railway/iac"; const token = "SECRET_SENTINEL"; service("fixture", { options: { ONLINE_OPS_TOKEN: \`${"${token}"}\` } });`,
+      ),
+    ).toBe(false);
+    expect(
+      generatedIacSourceIsSecretSafe(
+        `import { service } from "railway/iac"; const ONLINE_OPS_TOKEN = "SECRET_SENTINEL"; service("fixture", { options: { ONLINE_OPS_TOKEN } });`,
+      ),
+    ).toBe(false);
+    expect(
+      generatedIacSourceIsSecretSafe(
         `service("fixture", { env: { PUBLIC_VALUE: "not-secret-but-not-preserved" } });`,
       ),
     ).toBe(false);
