@@ -79,11 +79,11 @@ describe("ThemeToggle", () => {
   it("既存の保存値が残る保存失敗時も現在タブの選択を維持する", async () => {
     const user = userEvent.setup();
     localStorage.setItem("theme", "light");
-    const setItem = vi.spyOn(Storage.prototype, "setItem").mockImplementation(
-      () => {
+    const setItem = vi
+      .spyOn(Storage.prototype, "setItem")
+      .mockImplementation(() => {
         throw new DOMException("QuotaExceededError");
-      },
-    );
+      });
     render(<ThemeToggle />);
 
     await user.click(screen.getByRole("radio", { name: "ダーク" }));
