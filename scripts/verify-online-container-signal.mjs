@@ -375,10 +375,16 @@ function isDockerNotFoundResult(result, resource) {
   if (result.code === 0) return false;
   const diagnostic = String(result.stderr ?? "");
   if (resource === "container") {
-    return /\bno such (?:container|object)\b/i.test(diagnostic);
+    return (
+      /\bno such (?:container|object)\b/i.test(diagnostic) ||
+      /\bcontainer\b.*\bnot found\b/i.test(diagnostic)
+    );
   }
   if (resource === "network") {
-    return /\bno such network\b/i.test(diagnostic);
+    return (
+      /\bno such network\b/i.test(diagnostic) ||
+      /\bnetwork\b.*\bnot found\b/i.test(diagnostic)
+    );
   }
   return false;
 }
@@ -397,6 +403,10 @@ function requireDockerSuccess(operation, args, result) {
 
 function isDockerNotRunningResult(result) {
   return /\b(?:is|was) not running\b/i.test(String(result.stderr ?? ""));
+}
+
+function isDockerActiveEndpointResult(result) {
+  return /\bhas active endpoints\b/i.test(String(result.stderr ?? ""));
 }
 
 function invariant(condition, message) {
@@ -1255,12 +1265,8 @@ async function runContainer(
     try {
       await cleanupRegisteredContainer(record, {
         allowNeverAppeared: record.createCommandSucceeded !== true,
-        waitForAppearance:
-          record.createCommandSucceeded !== true &&
-          /timed out after \d+ms/.test(errorMessage(error)),
-        timeoutMs: record.createCommandSucceeded
-          ? STOP_MARGIN_MS
-          : COMMAND_TIMEOUT_MS,
+        waitForAppearance: true,
+        timeoutMs: SIGNAL_CLEANUP_TIMEOUT_MS,
       });
     } catch (cleanupFailure) {
       cleanupError = cleanupFailure;
@@ -1500,23 +1506,33 @@ async function cleanupNetwork(record, options = {}) {
     if (record.owned === true || options.allowNeverAppeared === true) return;
     throw new Error(`network removal was not authorized: ${record.name}`);
   }
-  const remainingMs = deadline - Date.now();
+  let remainingMs = deadline - Date.now();
   if (remainingMs <= 0) {
     throw new Error(`network cleanup deadline exceeded for ${record.name}`);
   }
   const removeArgs = ["network", "rm", record.name];
-  const removeResult = await docker(removeArgs, {
-    allowFailure: true,
-    timeoutMs: remainingMs,
-    outputMaxBytes: MAX_CONTAINER_METADATA_BYTES,
-  });
-  if (
-    removeResult.code !== 0 &&
-    !isDockerNotFoundResult(removeResult, "network")
-  ) {
-    throw dockerResultError("docker network rm", removeArgs, removeResult);
+  while (true) {
+    remainingMs = deadline - Date.now();
+    if (remainingMs <= 0) {
+      throw new Error(`network cleanup deadline exceeded for ${record.name}`);
+    }
+    const removeResult = await docker(removeArgs, {
+      allowFailure: true,
+      timeoutMs: remainingMs,
+      outputMaxBytes: MAX_CONTAINER_METADATA_BYTES,
+    });
+    if (
+      removeResult.code === 0 ||
+      isDockerNotFoundResult(removeResult, "network")
+    ) {
+      await waitForNetworkRemoval(record, deadline);
+      return;
+    }
+    if (!isDockerActiveEndpointResult(removeResult)) {
+      throw dockerResultError("docker network rm", removeArgs, removeResult);
+    }
+    await delay(Math.min(50, deadline - Date.now()));
   }
-  await waitForNetworkRemoval(record, deadline);
 }
 
 function cleanupRegisteredNetwork(record, options = {}) {
@@ -1543,7 +1559,10 @@ async function createIsolatedNetwork() {
     "create",
     "--driver",
     "bridge",
-    "--internal",
+    "--opt",
+    "com.docker.network.bridge.enable_icc=false",
+    "--opt",
+    "com.docker.network.bridge.enable_ip_masquerade=false",
     "--label",
     `${NETWORK_OWNERSHIP_LABEL}=${runId}`,
     name,
@@ -2162,7 +2181,7 @@ async function main() {
       }),
     );
   } finally {
-    await cleanupRegisteredNetwork(network);
+    await cleanupRegisteredResources();
   }
 }
 
