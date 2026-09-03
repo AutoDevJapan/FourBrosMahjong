@@ -51,6 +51,7 @@ export const RAILWAY_IAC_MIGRATION_REASONS = [
   "parity-plan-not-clean",
   "parity-plan-target-mismatch",
   "parity-readback-mismatch",
+  "pinned-plan-unverified",
   "resource-inventory-mismatch",
   "secret-safety-unverified",
   "target-identity-invalid",
@@ -98,6 +99,7 @@ const CLI_KEYS = [
   "pullSupported",
   "planSupported",
   "planJsonSupported",
+  "planOutSupported",
   "detailedExitCodeSupported",
 ] as const;
 const TARGET_KEYS = [
@@ -153,6 +155,8 @@ const PLAN_KEYS = [
   "capturedAt",
   "sourceSha256",
   "planOutputSha256",
+  "pinnedPlanArtifactSha256",
+  "pinnedPlanStoredOutsideRepository",
   "cliVersion",
   "invocation",
   "exitCode",
@@ -1346,6 +1350,7 @@ export function validateRailwayIacMigrationEvidence(
     cli.pullSupported !== true ||
     cli.planSupported !== true ||
     cli.planJsonSupported !== true ||
+    cli.planOutSupported !== true ||
     cli.detailedExitCodeSupported !== true
   ) {
     reasons.push("cli-capability-unverified");
@@ -1543,9 +1548,16 @@ export function validateRailwayIacMigrationEvidence(
     plan.cliVersion !== cliVersion ||
     plan.cliVersion !== generated.cliVersion ||
     plan.invocation !==
-      "railway config plan --json --detailed-exit-code --file .railway/railway.ts"
+      "railway config plan --json --detailed-exit-code --file .railway/railway.ts --out <outside-repository>/railway-plan.json"
   ) {
     reasons.push("parity-plan-target-mismatch");
+  }
+  if (
+    !planShapeValid ||
+    !isSha256(plan.pinnedPlanArtifactSha256) ||
+    plan.pinnedPlanStoredOutsideRepository !== true
+  ) {
+    reasons.push("pinned-plan-unverified");
   }
   if (
     !planShapeValid ||
