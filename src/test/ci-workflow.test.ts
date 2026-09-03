@@ -2717,6 +2717,32 @@ describe("マージ後証拠の外部 I/O timeout (#496)", () => {
     }
   });
 
+  it("GitHub API の非2xx本文をcancelし、変更パス判定はfail-openする", async () => {
+    const cancel = vi.fn().mockRejectedValue(new Error("cancel failed"));
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 403,
+      body: { cancel },
+    });
+    vi.stubEnv("GITHUB_TOKEN", "test-token");
+    vi.stubGlobal("fetch", fetchMock);
+    try {
+      await expect(
+        resolveChangedPaths({
+          repo: "AutoDevJapan/FourBrosMahjong",
+          baseSha: "a".repeat(40),
+          headSha: "b".repeat(40),
+          local: () => null,
+          api: githubApi,
+        }),
+      ).resolves.toEqual({ paths: null, source: "unresolved" });
+      expect(cancel).toHaveBeenCalledOnce();
+    } finally {
+      vi.unstubAllGlobals();
+      vi.unstubAllEnvs();
+    }
+  });
+
   it.each([
     [
       "上限超過",

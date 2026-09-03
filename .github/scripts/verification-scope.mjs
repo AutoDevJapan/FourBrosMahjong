@@ -588,7 +588,14 @@ export async function githubApi(/** @type {string} */ path) {
     },
   });
   // 権限不足 (403) や存在しない (404) も「確認できなかった」として扱う。
-  if (!response.ok) throw new Error(`GitHub API ${path} -> ${response.status}`);
+  if (!response.ok) {
+    try {
+      await response.body?.cancel?.();
+    } catch {
+      // Keep the HTTP failure as the useful error for fail-open callers.
+    }
+    throw new Error(`GitHub API ${path} -> ${response.status}`);
+  }
   // Compare API の files 配列には巨大な patch が含まれ得るため、response.json()
   // の無制限バッファリングは使わない。上限超過・切断・不正JSONは呼び出し側の
   // changedPathsFromApi / resolvePostMergeEvidence が fail-open (全検証) に戻す。
