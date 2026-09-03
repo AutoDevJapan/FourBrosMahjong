@@ -61,8 +61,12 @@ let cachedSnapshot: ThemeSnapshot | null = null;
 // 一致させる。永続化に成功した時点、または別タブの storage 通知で破棄する。
 let volatilePreference: ThemePreference | null = null;
 
-/** 永続値を読み、保存不可時だけ現在タブの揮発設定へフォールバックする。 */
+/** 現在タブの揮発設定を優先し、なければ永続値を読む。 */
 function readStoredPreference(): ThemePreference {
+  // 保存に失敗して古い永続値が残っていても、現在タブの選択を維持する。
+  if (volatilePreference !== null) {
+    return volatilePreference;
+  }
   try {
     const stored = localStorage.getItem(STORAGE_KEY);
     if (stored === "light" || stored === "dark") {

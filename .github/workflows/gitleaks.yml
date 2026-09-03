@@ -48,8 +48,11 @@ jobs:
           archive="gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
           checksum_file="gitleaks_${GITLEAKS_VERSION}_checksums.txt"
           base_url="https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}"
-          curl --fail --location --silent --show-error --output "${archive}" "${base_url}/${archive}"
-          curl --fail --location --silent --show-error --output "${checksum_file}" "${base_url}/${checksum_file}"
+          # The release is authenticated below, but an upstream/network fault
+          # must not make a secret-scan runner download forever or fill its disk.
+          # Keep the checksum manifest much smaller than the binary archive.
+          curl --fail --location --silent --show-error --connect-timeout 10 --max-time 60 --max-filesize 1048576 --output "${checksum_file}" "${base_url}/${checksum_file}"
+          curl --fail --location --silent --show-error --connect-timeout 10 --max-time 60 --max-filesize 134217728 --output "${archive}" "${base_url}/${archive}"
 
           # Do not let a checksum manifest silently omit the archive we are about to
           # install. A missing-file-tolerant checksum check would return success in

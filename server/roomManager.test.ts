@@ -2,7 +2,10 @@ import { randomBytes } from "node:crypto";
 import { describe, expect, it, vi } from "vitest";
 import { walkToGameEnd } from "../src/components/game/finishedGameFixture";
 import { createGame, discard, seatOfPlayer } from "../src/domain/game/engine";
-import { MAX_PLAYER_NAME_LENGTH } from "../src/lib/playerName";
+import {
+  MAX_PLAYER_NAME_CODE_UNITS,
+  MAX_PLAYER_NAME_LENGTH,
+} from "../src/lib/playerName";
 import {
   normalizePlayerName,
   parseGameAction,
@@ -69,6 +72,22 @@ describe("online room manager", () => {
     expect(normalizePlayerName("עברית")).toBe("עברית");
   });
 
+  it("falls back when bounded sanitization would otherwise produce an empty name", () => {
+    const visibleAfterBoundedPrefix =
+      "\u0301".repeat(MAX_PLAYER_NAME_CODE_UNITS) + "A";
+    const invisibleAfterGraphemeLimit =
+      "\u0301 ".repeat(MAX_PLAYER_NAME_LENGTH - 1) + "A";
+
+    expect(normalizePlayerName(visibleAfterBoundedPrefix)).toBe("ゲスト");
+    expect(normalizePlayerName(visibleAfterBoundedPrefix, "ホスト")).toBe(
+      "ホスト",
+    );
+    expect(normalizePlayerName(invisibleAfterGraphemeLimit)).toBe("ゲスト");
+    expect(normalizePlayerName(invisibleAfterGraphemeLimit, "ホスト")).toBe(
+      "ホスト",
+    );
+  });
+
   it("create/joinの直接入力でも不可視名をroom stateへ保存しない", () => {
     const manager = new RoomManager();
     const host = manager.create("\u200B");
@@ -79,6 +98,14 @@ describe("online room manager", () => {
     if (!guest) throw new Error("guest should join");
     expect(guest.player.name).toBe("א");
     expect(guest.room.state.players[1]?.name).toBe("א");
+
+    const boundedInvisible = "\u0301 ".repeat(MAX_PLAYER_NAME_LENGTH - 1) + "A";
+    const boundedHost = manager.create(boundedInvisible);
+    expect(boundedHost.player.name).toBe("ホスト");
+    const boundedGuest = manager.join(boundedHost.room.code, boundedInvisible);
+    if (!boundedGuest) throw new Error("bounded invisible guest should join");
+    expect(boundedGuest.player.name).toBe("ゲスト");
+    expect(boundedGuest.room.state.players[1]?.name).toBe("ゲスト");
   });
 
   it("creates a room, assigns the next human seat, and rejects stale actions", () => {

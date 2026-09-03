@@ -76,6 +76,52 @@ describe("ThemeToggle", () => {
     expect(darkRadio).toBeChecked();
   });
 
+  it("既存の保存値が残る保存失敗時も現在タブの選択を維持する", async () => {
+    const user = userEvent.setup();
+    localStorage.setItem("theme", "light");
+    const setItem = vi
+      .spyOn(Storage.prototype, "setItem")
+      .mockImplementation(() => {
+        throw new DOMException("QuotaExceededError");
+      });
+    render(<ThemeToggle />);
+
+    await user.click(screen.getByRole("radio", { name: "ダーク" }));
+
+    expect(screen.getByRole("radio", { name: "ダーク" })).toBeChecked();
+    expect(screen.getByText(/現在の表示:/)).toHaveTextContent(
+      "ダーク(手動で固定中)",
+    );
+
+    setItem.mockRestore();
+    await user.click(screen.getByRole("radio", { name: "システム設定に従う" }));
+  });
+
+  it("既存の保存値を削除できない場合もシステム設定を選択状態にする", async () => {
+    const user = userEvent.setup();
+    localStorage.setItem("theme", "dark");
+    const removeItem = vi
+      .spyOn(Storage.prototype, "removeItem")
+      .mockImplementation(() => {
+        throw new DOMException("SecurityError");
+      });
+    render(<ThemeToggle />);
+
+    await user.click(screen.getByRole("radio", { name: "システム設定に従う" }));
+
+    expect(
+      screen.getByRole("radio", { name: "システム設定に従う" }),
+    ).toBeChecked();
+    expect(screen.getByText(/現在の表示:/)).toHaveTextContent(
+      "ライト(システム設定に追従中)",
+    );
+    expect(document.documentElement).not.toHaveAttribute("data-theme");
+
+    removeItem.mockRestore();
+    await user.click(screen.getByRole("radio", { name: "ダーク" }));
+    await user.click(screen.getByRole("radio", { name: "システム設定に従う" }));
+  });
+
   it("システム追従時は OS のダーク設定を実効テーマとして表示する", async () => {
     stubMatchMedia(true);
     render(<ThemeToggle />);
