@@ -5,6 +5,7 @@ import { parse } from "yaml";
 import {
   CI_PAGE_SIZE,
   CODEQL_CHECK_NAMES,
+  GITHUB_API_ANCESTRY_RESPONSE_MAX_BYTES,
   GITHUB_API_RESPONSE_MAX_BYTES,
   githubApi,
   hasTrustedCiRun,
@@ -258,8 +259,47 @@ describe("release ancestry guard (#507)", () => {
     ).resolves.toBeUndefined();
     expect(api.mock.calls).toEqual([
       ["/repos/owner/repo/git/ref/heads/main"],
-      [`/repos/owner/repo/compare/${SHA}...${mainRef.object.sha}`],
+      [
+        `/repos/owner/repo/compare/${SHA}...${mainRef.object.sha}?page=2&per_page=1`,
+        { responseType: "ancestry" },
+      ],
     ]);
+  });
+
+  it("accepts a large compare body when ancestry fields are valid", async () => {
+    const largeCompareBody = JSON.stringify({
+      ...comparison,
+      files: [
+        {
+          filename: "large.patch",
+          patch: "x".repeat(GITHUB_API_RESPONSE_MAX_BYTES),
+        },
+      ],
+    });
+    expect(Buffer.byteLength(largeCompareBody)).toBeGreaterThan(
+      GITHUB_API_RESPONSE_MAX_BYTES,
+    );
+    expect(Buffer.byteLength(largeCompareBody)).toBeLessThan(
+      GITHUB_API_ANCESTRY_RESPONSE_MAX_BYTES,
+    );
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify(ref), { status: 200 }))
+      .mockResolvedValueOnce(new Response(largeCompareBody, { status: 200 }));
+    vi.stubEnv("GITHUB_TOKEN", "test-token");
+    vi.stubGlobal("fetch", fetchMock);
+    try {
+      await expect(
+        verifyTagOnMain({ repo: "owner/repo", sha: SHA, api: githubApi }),
+      ).resolves.toBeUndefined();
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+      expect(fetchMock.mock.calls[1]?.[0]).toContain(
+        `/compare/${SHA}...${MAIN_SHA}?page=2&per_page=1`,
+      );
+    } finally {
+      vi.unstubAllGlobals();
+      vi.unstubAllEnvs();
+    }
   });
 
   it.each([
