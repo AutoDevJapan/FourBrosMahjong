@@ -95,6 +95,18 @@
         "west": "p2",
         "bench": "p3"
       },
+      "beforePoints": {
+        "p0": 39000,
+        "p1": 36000,
+        "p2": 33000,
+        "p3": 32000
+      },
+      "afterPoints": {
+        "p0": 39000,
+        "p1": 36000,
+        "p2": 33000,
+        "p3": 32000
+      },
       "pointsRemainWithPlayer": true
     },
     {
@@ -121,6 +133,18 @@
         "south": "p1",
         "west": "p2",
         "bench": "p3"
+      },
+      "beforePoints": {
+        "p0": 39000,
+        "p1": 36000,
+        "p2": 33000,
+        "p3": 32000
+      },
+      "afterPoints": {
+        "p0": 39000,
+        "p1": 36000,
+        "p2": 33000,
+        "p3": 32000
       },
       "pointsRemainWithPlayer": true
     }
@@ -172,7 +196,32 @@
         "seatedCount": 3,
         "benchCount": 1,
         "benchHasNoSeatWind": true,
-        "pointsRemainWithPlayer": true
+        "pointsRemainWithPlayer": true,
+        "slotShape": {
+          "self": {
+            "kind": "seated",
+            "playerId": "p0",
+            "points": 35000,
+            "seatWind": "east"
+          },
+          "left": {
+            "kind": "bench",
+            "playerId": "p3",
+            "points": 35000
+          },
+          "across": {
+            "kind": "seated",
+            "playerId": "p2",
+            "points": 35000,
+            "seatWind": "west"
+          },
+          "right": {
+            "kind": "seated",
+            "playerId": "p1",
+            "points": 35000,
+            "seatWind": "south"
+          }
+        }
       }
     }
   ],

@@ -1,9 +1,25 @@
+import { selectView } from "@/components/game/gameView";
+import { createGame } from "@/domain/game/engine";
+import type { SlotContent } from "@/domain/game/viewTypes";
 import contract from "../../documents/fixtures/unity-display-contract.json";
 
 const SEAT_KEYS = ["east", "south", "west", "bench"] as const;
 const PLAYER_IDS = ["p0", "p1", "p2", "p3"] as const;
+const VIEW_SLOT_KEYS = ["self", "left", "across", "right"] as const;
 type SeatKey = (typeof SEAT_KEYS)[number];
-type SeatMap = Record<SeatKey, string>;
+type FixturePlayerId = (typeof PLAYER_IDS)[number];
+type SeatMap = Record<SeatKey, FixturePlayerId>;
+type PointsByPlayer = Record<FixturePlayerId, number>;
+type ViewSlotKey = (typeof VIEW_SLOT_KEYS)[number];
+
+interface DisplaySlotFixture {
+  readonly kind: "seated" | "bench";
+  readonly playerId: FixturePlayerId;
+  readonly points: number;
+  readonly seatWind?: "east" | "south" | "west";
+}
+
+type DisplaySlotShape = Record<ViewSlotKey, DisplaySlotFixture>;
 
 interface RotationCase {
   readonly name: string;
@@ -18,6 +34,8 @@ interface ProgressionCase {
   readonly afterRound: RoundPosition;
   readonly beforeSeats: SeatMap;
   readonly afterSeats: SeatMap;
+  readonly beforePoints: PointsByPlayer;
+  readonly afterPoints: PointsByPlayer;
   readonly pointsRemainWithPlayer: boolean;
 }
 
@@ -41,7 +59,9 @@ interface ContractFixture {
   readonly visualCases: readonly {
     readonly id: string;
     readonly sourceComponent: string;
-    readonly assertions: Record<string, unknown>;
+    readonly assertions: Record<string, unknown> & {
+      readonly slotShape?: DisplaySlotShape;
+    };
   }[];
   readonly negativeCases: readonly string[];
 }
@@ -60,6 +80,78 @@ function expectedRotation(before: SeatMap): SeatMap {
 function expectSeatMap(map: SeatMap) {
   expect(Object.keys(map).sort()).toEqual([...SEAT_KEYS].sort());
   expect(Object.values(map).sort()).toEqual([...PLAYER_IDS].sort());
+}
+
+function expectPointMap(points: PointsByPlayer) {
+  expect(Object.keys(points).sort()).toEqual([...PLAYER_IDS].sort());
+  for (const playerId of PLAYER_IDS) {
+    expect(typeof points[playerId]).toBe("number");
+    expect(Number.isFinite(points[playerId])).toBe(true);
+  }
+}
+
+function expectPointsRemainWithPlayer(
+  before: PointsByPlayer,
+  after: PointsByPlayer,
+) {
+  expectPointMap(before);
+  expectPointMap(after);
+  for (const playerId of PLAYER_IDS) {
+    expect(after[playerId]).toBe(before[playerId]);
+  }
+}
+
+function expectDisplaySlotShape(shape: DisplaySlotShape) {
+  expect(Object.keys(shape).sort()).toEqual([...VIEW_SLOT_KEYS].sort());
+
+  const slots = VIEW_SLOT_KEYS.map((position) => shape[position]);
+  expect(slots).toHaveLength(4);
+  expect(slots.filter((slot) => slot.kind === "seated")).toHaveLength(3);
+  expect(slots.filter((slot) => slot.kind === "bench")).toHaveLength(1);
+  expect(slots.map((slot) => slot.playerId).sort()).toEqual(
+    [...PLAYER_IDS].sort(),
+  );
+
+  const seated = slots.filter((slot) => slot.kind === "seated");
+  expect(seated.map((slot) => slot.seatWind).sort()).toEqual([
+    "east",
+    "south",
+    "west",
+  ]);
+  for (const slot of slots) {
+    expect(typeof slot.points).toBe("number");
+    expect(Number.isFinite(slot.points)).toBe(true);
+    if (slot.kind === "bench") {
+      expect(slot).not.toHaveProperty("seatWind");
+    }
+  }
+}
+
+function displaySlotFixtureOf(slot: SlotContent): DisplaySlotFixture {
+  if (slot.kind === "seated") {
+    return {
+      kind: "seated",
+      playerId: slot.player.playerId,
+      points: slot.player.points,
+      seatWind: slot.player.seatWind,
+    };
+  }
+  return {
+    kind: "bench",
+    playerId: slot.player.playerId,
+    points: slot.player.points,
+  };
+}
+
+function displaySlotShapeOf(
+  view: ReturnType<typeof selectView>,
+): DisplaySlotShape {
+  return {
+    self: displaySlotFixtureOf(view.slots.self),
+    left: displaySlotFixtureOf(view.slots.left),
+    across: displaySlotFixtureOf(view.slots.across),
+    right: displaySlotFixtureOf(view.slots.right),
+  };
 }
 
 describe("Unity display contract fixture", () => {
@@ -101,6 +193,9 @@ describe("Unity display contract fixture", () => {
 
     const renchan = fixture.progressionCases[0];
     if (renchan === undefined) throw new Error("renchan fixture is missing");
+    expectSeatMap(renchan.beforeSeats);
+    expectSeatMap(renchan.afterSeats);
+    expectPointsRemainWithPlayer(renchan.beforePoints, renchan.afterPoints);
     expect(renchan).toMatchObject({
       name: "renchan-keeps-seats",
       outcome: "dealerContinues",
@@ -113,6 +208,12 @@ describe("Unity display contract fixture", () => {
     const windChange = fixture.progressionCases[1];
     if (windChange === undefined)
       throw new Error("wind-change fixture is missing");
+    expectSeatMap(windChange.beforeSeats);
+    expectSeatMap(windChange.afterSeats);
+    expectPointsRemainWithPlayer(
+      windChange.beforePoints,
+      windChange.afterPoints,
+    );
     expect(windChange).toMatchObject({
       name: "east-4-to-south-1",
       outcome: "dealerPasses",
@@ -135,6 +236,7 @@ describe("Unity display contract fixture", () => {
 
     const river = fixture.visualCases[0];
     if (river === undefined) throw new Error("river fixture is missing");
+    expect(river.sourceComponent).toBe("Discards");
     expect(river.assertions).toMatchObject({
       directionalSlot: "self-left-across-right",
       gridWrap: true,
@@ -144,6 +246,7 @@ describe("Unity display contract fixture", () => {
 
     const hand = fixture.visualCases[1];
     if (hand === undefined) throw new Error("hand fixture is missing");
+    expect(hand.sourceComponent).toBe("HandTileAnimation");
     expect(hand.assertions.transitionKinds).toEqual([
       "deal",
       "draw",
@@ -158,6 +261,7 @@ describe("Unity display contract fixture", () => {
 
     const effects = fixture.visualCases[2];
     if (effects === undefined) throw new Error("effects fixture is missing");
+    expect(effects.sourceComponent).toBe("gameEffect");
     expect(effects.assertions.kinds).toEqual([
       "discard",
       "riichi",
@@ -175,6 +279,7 @@ describe("Unity display contract fixture", () => {
 
     const bench = fixture.visualCases[3];
     if (bench === undefined) throw new Error("bench fixture is missing");
+    expect(bench.sourceComponent).toBe("PlayerSlot");
     expect(bench.assertions).toMatchObject({
       slotCount: 4,
       seatedCount: 3,
@@ -182,6 +287,9 @@ describe("Unity display contract fixture", () => {
       benchHasNoSeatWind: true,
       pointsRemainWithPlayer: true,
     });
+    if (bench.assertions.slotShape === undefined)
+      throw new Error("bench slot shape is missing");
+    expectDisplaySlotShape(bench.assertions.slotShape);
 
     expect(fixture.negativeCases).toEqual(
       expect.arrayContaining([
@@ -191,5 +299,28 @@ describe("Unity display contract fixture", () => {
         expect.stringContaining("credentials"),
       ]),
     );
+  });
+
+  it("anchors the fixture to selectView's three-seated/one-bench slot shape", () => {
+    const bench = fixture.visualCases.find(
+      (item) => item.id === "bench-warmers",
+    );
+    if (bench === undefined) throw new Error("bench fixture is missing");
+    if (bench.assertions.slotShape === undefined)
+      throw new Error("bench slot shape is missing");
+
+    const view = selectView(createGame({ seed: 827 }));
+    const slots = Object.values(view.slots);
+    expect(slots).toHaveLength(4);
+    expect(slots.filter((slot) => slot.kind === "seated")).toHaveLength(3);
+    expect(slots.filter((slot) => slot.kind === "bench")).toHaveLength(1);
+
+    const benchSlot = slots.find((slot) => slot.kind === "bench");
+    if (benchSlot === undefined) throw new Error("view bench slot is missing");
+    expect(benchSlot.player).not.toHaveProperty("seatWind");
+
+    const actualShape = displaySlotShapeOf(view);
+    expectDisplaySlotShape(actualShape);
+    expect(actualShape).toEqual(bench.assertions.slotShape);
   });
 });
