@@ -1457,6 +1457,11 @@ describe("verification-scope の分類契約 (#491)", () => {
       "documents/fixtures/railway-pre-cutover.json",
       "unit-test",
     ],
+    [
+      "Unity display contract fixture",
+      "documents/fixtures/unity-display-contract.json",
+      "unit-test",
+    ],
     ["単体テスト", "src/domain/game/engine.test.ts", "unit-test"],
     ["コンポーネントテスト", "src/components/game/Board.test.tsx", "unit-test"],
     [
