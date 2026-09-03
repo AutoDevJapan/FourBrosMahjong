@@ -5,12 +5,6 @@ import { pathToFileURL } from "node:url";
 export const GITHUB_API_TIMEOUT_MS = 15_000;
 /** Maximum GitHub API response bytes retained before JSON parsing. */
 export const GITHUB_API_RESPONSE_MAX_BYTES = 1 * 1024 * 1024;
-/**
- * Compare responses can contain file patches. Ancestry requests use a
- * non-first paginated response to omit those files, while this separate cap
- * remains a fail-closed bound if the endpoint returns extra data anyway.
- */
-export const GITHUB_API_ANCESTRY_RESPONSE_MAX_BYTES = 8 * 1024 * 1024;
 export const CI_PAGE_SIZE = 100;
 export const MAX_CI_PAGES = 10;
 export const MAX_CODEQL_CANDIDATES = 10;
@@ -490,10 +484,9 @@ async function cancelResponseBody(response) {
  * can contain attacker-controlled fields such as patch text.
  * @param {Response} response
  * @param {string} path
- * @param {number} maxBytes
  * @returns {Promise<unknown>}
  */
-async function readBoundedApiResponse(response, path, maxBytes) {
+async function readBoundedApiResponse(response, path) {
   let contentLength;
   try {
     contentLength = response.headers?.get?.("content-length");
@@ -506,7 +499,7 @@ async function readBoundedApiResponse(response, path, maxBytes) {
     if (
       !Number.isSafeInteger(declaredLength) ||
       declaredLength < 0 ||
-      declaredLength > maxBytes
+      declaredLength > GITHUB_API_RESPONSE_MAX_BYTES
     ) {
       await cancelResponseBody(response);
       throw new Error(
@@ -522,6 +515,7 @@ async function readBoundedApiResponse(response, path, maxBytes) {
   try {
     reader = response.body.getReader();
   } catch {
+    await cancelResponseBody(response);
     throw new Error(`GitHub API ${path} response body is unavailable`);
   }
   /** @type {Uint8Array[]} */
@@ -534,7 +528,7 @@ async function readBoundedApiResponse(response, path, maxBytes) {
       if (done) break;
       if (!(value instanceof Uint8Array)) throw new Error();
       totalBytes += value.byteLength;
-      if (totalBytes > maxBytes) {
+      if (totalBytes > GITHUB_API_RESPONSE_MAX_BYTES) {
         bodyError = "is too large";
         throw new Error();
       }
@@ -562,11 +556,8 @@ async function readBoundedApiResponse(response, path, maxBytes) {
   }
 }
 
-/**
- * @param {string} path
- * @param {{responseType?: "default" | "ancestry"}} [options]
- */
-export async function githubApi(path, options = {}) {
+/** @param {string} path */
+export async function githubApi(path) {
   const token = process.env.GITHUB_TOKEN;
   if (!token) throw new Error("GITHUB_TOKEN is not available");
   const base = process.env.GITHUB_API_URL || "https://api.github.com";
@@ -582,18 +573,14 @@ export async function githubApi(path, options = {}) {
     await cancelResponseBody(response);
     throw new Error(`GitHub API ${path} -> ${response.status}`);
   }
-  const maxBytes =
-    options.responseType === "ancestry"
-      ? GITHUB_API_ANCESTRY_RESPONSE_MAX_BYTES
-      : GITHUB_API_RESPONSE_MAX_BYTES;
-  return readBoundedApiResponse(response, path, maxBytes);
+  return readBoundedApiResponse(response, path);
 }
 
 /**
  * Capture the current main commit through the read-only GitHub API, then prove
  * the tagged SHA is its exact merge base. This keeps checkout credentials out
  * of git config without trusting a remote-tracking ref after checkout.
- * @param {{repo: string, sha: string, api: (path: string, options?: {responseType?: "default" | "ancestry"}) => Promise<unknown>}} input
+ * @param {{repo: string, sha: string, api: (path: string) => Promise<unknown>}} input
  */
 export async function verifyTagOnMain({ repo, sha, api }) {
   try {
@@ -624,7 +611,6 @@ export async function verifyTagOnMain({ repo, sha, api }) {
     const comparison = /** @type {any} */ (
       await api(
         `/repos/${repoPath}/compare/${sha}...${mainSha}?page=2&per_page=1`,
-        { responseType: "ancestry" },
       )
     );
     const statusMatches =
