@@ -32,6 +32,7 @@ on:
 # 手動再実行の多重起動を防ぐ (schedule は基本1本しか走らないが workflow_dispatch は多重起動しうる)。
 concurrency:
   group: gitleaks-version-check
+  cancel-in-progress: true
 
 permissions:
   contents: read
