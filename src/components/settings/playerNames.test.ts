@@ -100,7 +100,7 @@ describe("sanitizePlayerName", () => {
   });
 
   it("可視文字が12書記素上限の外側にある生入力はnullへフォールバックする", () => {
-    const raw = ("\u0301 ").repeat(MAX_PLAYER_NAME_LENGTH - 1) + "A";
+    const raw = "\u0301 ".repeat(MAX_PLAYER_NAME_LENGTH - 1) + "A";
 
     expect(sanitizePlayerName(raw)).toBeNull();
   });
