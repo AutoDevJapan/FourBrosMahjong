@@ -9,6 +9,7 @@ import { fileURLToPath } from "node:url";
 const DEFAULT_TIMEOUT_MS = 10_000;
 const MIN_TIMEOUT_MS = 100;
 const MAX_TIMEOUT_MS = 30_000;
+const DNS_LOOKUP_TIMEOUT_MS = 5_000;
 const MAX_HEALTH_BODY_BYTES = 4_096;
 const PROBE_EVIDENCE_SCHEMA_VERSION = 2;
 const EXPECTED_HEALTH_SERVICE = "four-bros-mahjong-online";
@@ -273,22 +274,86 @@ function validateTargetHostname(url, option, allowLocalTarget) {
   }
 }
 
-async function validateProductionTarget(baseUrl) {
+function isLoopbackAddress(address) {
+  const family = isIP(address);
+  if (family === 4) return LOOPBACK_IPV4.check(address, "ipv4");
+  return family === 6 && LOOPBACK_IPV6.check(address, "ipv6");
+}
+
+class ProbeTargetError extends Error {
+  constructor(code) {
+    super(code);
+    this.name = "ProbeTargetError";
+    this.code = code;
+  }
+}
+
+function targetErrorCode(error) {
+  return error instanceof ProbeTargetError ? error.code : undefined;
+}
+
+async function lookupWithTimeout(hostname, timeoutMs, lookupFunction) {
+  const boundedTimeoutMs = Math.min(timeoutMs, DNS_LOOKUP_TIMEOUT_MS);
+  let timer;
+  const lookupPromise = Promise.resolve().then(() =>
+    lookupFunction(hostname, { all: true, verbatim: true }),
+  );
+  const timeoutPromise = new Promise((_, reject) => {
+    timer = setTimeout(
+      () => reject(new ProbeTargetError("dns_timeout")),
+      boundedTimeoutMs,
+    );
+  });
+  try {
+    return await Promise.race([lookupPromise, timeoutPromise]);
+  } catch (error) {
+    if (targetErrorCode(error) !== undefined) throw error;
+    throw new ProbeTargetError("dns_lookup_failed");
+  } finally {
+    if (timer !== undefined) clearTimeout(timer);
+  }
+}
+
+async function resolveProbeTarget(
+  baseUrl,
+  timeoutMs,
+  allowLocalTarget = false,
+  lookupFunction = lookup,
+) {
   const url = new URL(baseUrl);
   const hostname = normalizedHostname(url);
-  if (isIP(hostname) !== 0) return;
-  let addresses;
-  try {
-    addresses = await lookup(hostname, { all: true, verbatim: true });
-  } catch {
-    throw new Error("--base-url hostname could not be resolved safely");
+  if (isIP(hostname) !== 0) {
+    return Object.freeze({
+      address: hostname,
+      family: isIP(hostname),
+      hostname,
+    });
   }
+  const addresses = await lookupWithTimeout(
+    hostname,
+    timeoutMs,
+    lookupFunction,
+  );
   if (
+    !Array.isArray(addresses) ||
     addresses.length === 0 ||
-    addresses.some(({ address }) => isUnsafeIp(address))
+    addresses.some(
+      ({ address, family }) =>
+        typeof address !== "string" ||
+        ![4, 6].includes(family) ||
+        (allowLocalTarget ? !isLoopbackAddress(address) : isUnsafeIp(address)),
+    )
   ) {
-    throw new Error("--base-url must resolve only to public, non-private IPs");
+    throw new ProbeTargetError(
+      allowLocalTarget ? "local_target_not_loopback" : "target_not_public",
+    );
   }
+  const [selected] = addresses;
+  return Object.freeze({
+    address: selected.address,
+    family: selected.family,
+    hostname,
+  });
 }
 
 function parseTimeout(value) {
@@ -321,9 +386,9 @@ function bodyErrorCode(error) {
   return error instanceof ProbeBodyError ? error.code : undefined;
 }
 
-function declaredContentLength(response) {
-  const value = response.headers.get("content-length");
-  if (value === null) return undefined;
+function parseDeclaredContentLength(value) {
+  if (value === null || value === undefined) return undefined;
+  if (Array.isArray(value)) throw new ProbeBodyError("invalid_body_length");
   if (!/^\d+$/.test(value)) {
     throw new ProbeBodyError("invalid_body_length");
   }
@@ -334,6 +399,10 @@ function declaredContentLength(response) {
   return length;
 }
 
+function declaredContentLength(response) {
+  return parseDeclaredContentLength(response.headers.get("content-length"));
+}
+
 async function cancelResponseBody(response) {
   if (response.body === null) return;
   try {
@@ -342,6 +411,77 @@ async function cancelResponseBody(response) {
     // The body is already being rejected; cancellation failures are not useful
     // evidence and must not replace the bounded-body result.
   }
+}
+
+function destroyIncomingResponse(response) {
+  try {
+    response.destroy();
+  } catch {
+    // The response is already being rejected; destruction is best effort.
+  }
+}
+
+function readBoundedIncomingResponseBody(response) {
+  let expectedLength;
+  try {
+    expectedLength = parseDeclaredContentLength(
+      response.headers["content-length"],
+    );
+  } catch (error) {
+    destroyIncomingResponse(response);
+    return Promise.reject(error);
+  }
+  if (expectedLength !== undefined && expectedLength > MAX_HEALTH_BODY_BYTES) {
+    destroyIncomingResponse(response);
+    return Promise.reject(new ProbeBodyError("body_too_large"));
+  }
+
+  return new Promise((resolveBody, rejectBody) => {
+    const chunks = [];
+    let receivedBytes = 0;
+    let settled = false;
+    const fail = (error) => {
+      if (settled) return;
+      settled = true;
+      destroyIncomingResponse(response);
+      rejectBody(error);
+    };
+    response.on("data", (chunk) => {
+      if (settled) return;
+      try {
+        const bytes = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+        receivedBytes += bytes.byteLength;
+        if (receivedBytes > MAX_HEALTH_BODY_BYTES) {
+          fail(new ProbeBodyError("body_too_large"));
+          return;
+        }
+        chunks.push(bytes);
+      } catch (error) {
+        fail(error);
+      }
+    });
+    response.once("end", () => {
+      if (settled) return;
+      if (expectedLength !== undefined && receivedBytes !== expectedLength) {
+        fail(
+          new ProbeBodyError(
+            receivedBytes < expectedLength
+              ? "truncated_body"
+              : "invalid_body_length",
+          ),
+        );
+        return;
+      }
+      settled = true;
+      resolveBody(Uint8Array.from(Buffer.concat(chunks)));
+    });
+    response.once("aborted", () => {
+      fail(new ProbeBodyError("truncated_body"));
+    });
+    response.once("error", (error) => {
+      fail(error);
+    });
+  });
 }
 
 export async function readBoundedResponseBody(response) {
@@ -572,43 +712,112 @@ function parseJsonWithUniqueKeys(text) {
   return JSON.parse(text);
 }
 
-async function probeHttp(path, baseUrl, timeoutMs) {
-  const startedAt = new Date().toISOString();
-  try {
-    const response = await fetch(new URL(path, baseUrl), {
-      method: "GET",
-      redirect: "manual",
-      signal: AbortSignal.timeout(timeoutMs),
-      headers: { accept: "application/json" },
-    });
-    try {
-      const parsed = parseHealthBody(
-        await readBoundedResponseBody(response),
-        path,
-      );
-      return { startedAt, statusCode: response.status, ...parsed };
-    } catch (error) {
-      const message = errorMessage(error);
-      return {
-        startedAt,
-        statusCode: response.status,
-        error:
-          message === "timeout"
-            ? "timeout"
-            : (bodyErrorCode(error) ?? "invalid_json"),
-      };
+function pinnedLookup(probeTarget) {
+  return (_hostname, _options, callback) => {
+    callback(null, probeTarget.address, probeTarget.family);
+  };
+}
+
+function requestOptions(target, probeTarget, headers, method = "GET") {
+  const hostname = probeTarget?.address ?? target.hostname;
+  const options = {
+    protocol: target.protocol,
+    hostname,
+    port: target.port,
+    path: `${target.pathname}${target.search}`,
+    method,
+    headers: {
+      ...headers,
+      Host: target.host,
+    },
+    agent: false,
+  };
+  if (probeTarget !== undefined) {
+    options.lookup = pinnedLookup(probeTarget);
+    if (
+      target.protocol === "https:" &&
+      isIP(normalizedHostname(target)) === 0
+    ) {
+      options.servername = normalizedHostname(target);
     }
-  } catch (error) {
-    return { startedAt, statusCode: null, error: errorMessage(error) };
   }
+  return options;
 }
 
-async function probeHealth(baseUrl, timeoutMs) {
-  return probeHttp("/healthz", baseUrl, timeoutMs);
+function requestErrorCode(error) {
+  if (errorMessage(error) === "timeout") return "timeout";
+  if (
+    error &&
+    typeof error.code === "string" &&
+    /^[A-Z][A-Z0-9_]+$/.test(error.code)
+  ) {
+    return error.code;
+  }
+  return "request_failed";
 }
 
-async function probeReadiness(baseUrl, timeoutMs) {
-  return probeHttp("/readyz", baseUrl, timeoutMs);
+async function probeHttp(path, baseUrl, timeoutMs, probeTarget) {
+  const startedAt = new Date().toISOString();
+  const target = new URL(path, baseUrl);
+  const request = target.protocol === "https:" ? httpsRequest : httpRequest;
+  return new Promise((resolveProbe) => {
+    let settled = false;
+    let timer;
+    let requestHandle;
+    const settle = (result) => {
+      if (settled) return;
+      settled = true;
+      if (timer !== undefined) clearTimeout(timer);
+      resolveProbe({ startedAt, ...result });
+    };
+    try {
+      requestHandle = request(
+        requestOptions(target, probeTarget, {
+          accept: "application/json",
+          "accept-encoding": "identity",
+        }),
+      );
+      timer = setTimeout(() => {
+        settle({ statusCode: null, error: "timeout" });
+        requestHandle.destroy(new Error("probe timeout"));
+      }, timeoutMs);
+      requestHandle.once("response", (response) => {
+        void (async () => {
+          const statusCode = response.statusCode ?? null;
+          try {
+            const parsed = parseHealthBody(
+              await readBoundedIncomingResponseBody(response),
+              path,
+            );
+            settle({ statusCode, ...parsed });
+          } catch (error) {
+            const message = errorMessage(error);
+            settle({
+              statusCode,
+              error:
+                message === "timeout"
+                  ? "timeout"
+                  : (bodyErrorCode(error) ?? "invalid_json"),
+            });
+          }
+        })();
+      });
+      requestHandle.once("error", (error) => {
+        settle({ statusCode: null, error: requestErrorCode(error) });
+      });
+      requestHandle.end();
+    } catch (error) {
+      settle({ statusCode: null, error: requestErrorCode(error) });
+    }
+  });
+}
+
+async function probeHealth(baseUrl, timeoutMs, probeTarget) {
+  return probeHttp("/healthz", baseUrl, timeoutMs, probeTarget);
+}
+
+async function probeReadiness(baseUrl, timeoutMs, probeTarget) {
+  return probeHttp("/readyz", baseUrl, timeoutMs, probeTarget);
 }
 
 /**
@@ -626,6 +835,7 @@ export async function probeUpgrade(
   origin,
   timeoutMs,
   requestFactory = createUpgradeRequest,
+  probeTarget,
 ) {
   const target = new URL("/ws", baseUrl);
   const startedAt = new Date().toISOString();
@@ -646,15 +856,10 @@ export async function probeUpgrade(
       "Sec-WebSocket-Version": "13",
       ...(origin === undefined ? {} : { Origin: origin }),
     };
-    const upgradeRequest = requestFactory(target, {
-      protocol: target.protocol,
-      hostname: target.hostname,
-      port: target.port,
-      path: target.pathname,
-      method: "GET",
-      headers,
-      agent: false,
-    });
+    const upgradeRequest = requestFactory(
+      target,
+      requestOptions(target, probeTarget, headers),
+    );
     timer = setTimeout(() => {
       settle({ statusCode: null, error: "timeout" });
       upgradeRequest.destroy(new Error("probe timeout"));
@@ -684,29 +889,85 @@ function matches(result, expectedStatus) {
   );
 }
 
+const PROBE_CHECK_NAMES = Object.freeze([
+  "health",
+  "readiness",
+  "allowedOrigin",
+  "disallowedOrigin",
+  "missingOrigin",
+]);
+
+function targetFailureEvidence(baseUrl, startedAt, error) {
+  const errorCode = targetErrorCode(error) ?? "target_unavailable";
+  const checks = Object.fromEntries(
+    PROBE_CHECK_NAMES.map((name) => [
+      name,
+      {
+        expectedStatus: EXPECTED[name],
+        statusCode: null,
+        error: errorCode,
+      },
+    ]),
+  );
+  return {
+    schemaVersion: PROBE_EVIDENCE_SCHEMA_VERSION,
+    ok: false,
+    startedAt,
+    finishedAt: new Date().toISOString(),
+    baseUrl,
+    target: { error: errorCode },
+    checks,
+  };
+}
+
 export async function runBoundaryProbe({
   baseUrl,
   allowedOrigin,
   disallowedOrigin,
   timeoutMs = DEFAULT_TIMEOUT_MS,
   allowLocalTarget = false,
+  lookupFunction = lookup,
 }) {
   const normalizedBaseUrl = parseBaseUrl(baseUrl, allowLocalTarget);
-  if (!allowLocalTarget) await validateProductionTarget(normalizedBaseUrl);
   const startedAt = new Date().toISOString();
-  const health = await probeHealth(normalizedBaseUrl, timeoutMs);
-  const readiness = await probeReadiness(normalizedBaseUrl, timeoutMs);
+  let probeTarget;
+  try {
+    probeTarget = await resolveProbeTarget(
+      normalizedBaseUrl,
+      timeoutMs,
+      allowLocalTarget,
+      lookupFunction ?? lookup,
+    );
+  } catch (error) {
+    return targetFailureEvidence(normalizedBaseUrl, startedAt, error);
+  }
+  const health = await probeHealth(normalizedBaseUrl, timeoutMs, probeTarget);
+  const readiness = await probeReadiness(
+    normalizedBaseUrl,
+    timeoutMs,
+    probeTarget,
+  );
   const allowed = await probeUpgrade(
     normalizedBaseUrl,
     allowedOrigin,
     timeoutMs,
+    createUpgradeRequest,
+    probeTarget,
   );
   const disallowed = await probeUpgrade(
     normalizedBaseUrl,
     disallowedOrigin,
     timeoutMs,
+    createUpgradeRequest,
+    probeTarget,
   );
-  const missing = await probeUpgrade(normalizedBaseUrl, undefined, timeoutMs);
+  const missing = await probeUpgrade(
+    normalizedBaseUrl,
+    undefined,
+    timeoutMs,
+    createUpgradeRequest,
+    probeTarget,
+  );
   const checks = {
     health: { expectedStatus: EXPECTED.health, ...health },
     readiness: { expectedStatus: EXPECTED.readiness, ...readiness },

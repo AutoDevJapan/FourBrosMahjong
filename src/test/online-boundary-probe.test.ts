@@ -316,6 +316,51 @@ describe("online boundary probe arguments", () => {
       ),
     ).toThrow("only permits");
   });
+
+  it("returns structured evidence when DNS resolution times out", async () => {
+    const startedAt = Date.now();
+    const evidence = await runBoundaryProbe({
+      baseUrl: "https://online.example.com",
+      allowedOrigin: "https://app.example.com",
+      disallowedOrigin: "https://blocked.example",
+      timeoutMs: 100,
+      lookupFunction: (() =>
+        new Promise(() => {})) as typeof import("node:dns/promises").lookup,
+    });
+
+    expect(Date.now() - startedAt).toBeLessThan(1_000);
+    expect(evidence).toMatchObject({
+      schemaVersion: 2,
+      ok: false,
+      target: { error: "dns_timeout" },
+      checks: {
+        health: { statusCode: null, error: "dns_timeout" },
+        readiness: { statusCode: null, error: "dns_timeout" },
+      },
+    });
+    expect(JSON.stringify(evidence)).not.toContain("stack");
+  });
+
+  it("returns structured evidence when DNS resolution fails", async () => {
+    const evidence = await runBoundaryProbe({
+      baseUrl: "https://online.example.com",
+      allowedOrigin: "https://app.example.com",
+      disallowedOrigin: "https://blocked.example",
+      timeoutMs: 100,
+      lookupFunction: (async () => {
+        throw new Error("resolver-internal-detail");
+      }) as typeof import("node:dns/promises").lookup,
+    });
+
+    expect(evidence).toMatchObject({
+      ok: false,
+      target: { error: "dns_lookup_failed" },
+      checks: {
+        health: { statusCode: null, error: "dns_lookup_failed" },
+      },
+    });
+    expect(JSON.stringify(evidence)).not.toContain("resolver-internal-detail");
+  });
 });
 
 describe("online boundary response body cleanup", () => {
@@ -796,17 +841,32 @@ describe("online boundary probe", () => {
 
   it("destroys a timed-out request transport before returning evidence", async () => {
     const transport = new EventEmitter() as ClientRequest;
+    let capturedOptions: Record<string, unknown> | undefined;
     transport.end = vi.fn();
     transport.destroy = vi.fn();
 
     const evidence = await probeUpgrade(
-      "http://online.local",
+      "https://online.example.com",
       ALLOWED_ORIGIN,
       100,
-      () => transport,
+      (_target, options) => {
+        capturedOptions = options;
+        return transport;
+      },
+      {
+        address: "198.51.100.10",
+        family: 4,
+        hostname: "online.example.com",
+      },
     );
 
     expect(evidence).toMatchObject({ statusCode: null, error: "timeout" });
+    expect(capturedOptions).toMatchObject({
+      hostname: "198.51.100.10",
+      servername: "online.example.com",
+      headers: { Host: "online.example.com", Origin: ALLOWED_ORIGIN },
+    });
+    expect(capturedOptions?.lookup).toEqual(expect.any(Function));
     expect(transport.end).toHaveBeenCalledOnce();
     expect(transport.destroy).toHaveBeenCalledOnce();
     expect(transport.destroy).toHaveBeenCalledWith(expect.any(Error));
