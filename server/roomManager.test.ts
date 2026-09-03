@@ -2,7 +2,10 @@ import { randomBytes } from "node:crypto";
 import { describe, expect, it, vi } from "vitest";
 import { walkToGameEnd } from "../src/components/game/finishedGameFixture";
 import { createGame, discard, seatOfPlayer } from "../src/domain/game/engine";
-import { MAX_PLAYER_NAME_LENGTH } from "../src/lib/playerName";
+import {
+  MAX_PLAYER_NAME_CODE_UNITS,
+  MAX_PLAYER_NAME_LENGTH,
+} from "../src/lib/playerName";
 import {
   normalizePlayerName,
   parseGameAction,
@@ -67,6 +70,16 @@ describe("online room manager", () => {
     expect(normalizePlayerName("\u200B\u2060\uFEFF")).toBe("ゲスト");
     expect(normalizePlayerName("A\u202EB")).toBe("AB");
     expect(normalizePlayerName("עברית")).toBe("עברית");
+  });
+
+  it("falls back when bounded sanitization would otherwise produce an empty name", () => {
+    const visibleAfterBoundedPrefix =
+      "\u0301".repeat(MAX_PLAYER_NAME_CODE_UNITS) + "A";
+
+    expect(normalizePlayerName(visibleAfterBoundedPrefix)).toBe("ゲスト");
+    expect(normalizePlayerName(visibleAfterBoundedPrefix, "ホスト")).toBe(
+      "ホスト",
+    );
   });
 
   it("create/joinの直接入力でも不可視名をroom stateへ保存しない", () => {

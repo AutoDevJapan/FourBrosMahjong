@@ -223,7 +223,12 @@ export function normalizePlayerName(
   fallback = "ゲスト",
 ): string {
   if (typeof value !== "string") return fallback;
-  return sanitizePlayerName(value) ?? fallback;
+  const sanitized = sanitizePlayerName(value);
+  // `sanitizePlayerName` can return an empty string when a visible character
+  // appears just beyond its bounded code-unit prefix. Never let that malformed
+  // result cross the online snapshot boundary: clients correctly reject an
+  // empty player name and would then lose room synchronization.
+  return sanitized === null || sanitized === "" ? fallback : sanitized;
 }
 
 function namesOf(room: Room): PlayerNames {
