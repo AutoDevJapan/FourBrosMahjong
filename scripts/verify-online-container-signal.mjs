@@ -15,6 +15,7 @@ const OWNERSHIP_LABEL = "com.fourbrosmahjong.signal-verifier-run";
 const CONTAINER_MEMORY_LIMIT = "512m";
 const CONTAINER_CPU_LIMIT = "1";
 const CONTAINER_PIDS_LIMIT = "128";
+const RUNTIME_TMPFS = "/tmp:rw,nosuid,nodev,size=64m";
 const REQUIRED_RUNTIME_PACKAGES = ["tsx", "ws"];
 const FORBIDDEN_RUNTIME_PACKAGES = [
   "vitest",
@@ -51,8 +52,11 @@ const ABSENT_RUNTIME_PATHS = [
 ];
 const RUNTIME_SOURCE_SCAN_ROOTS = ["/app/server", "/app/src"];
 const MAX_RUNTIME_SOURCE_ENTRIES = 10_000;
+const MAX_RUNTIME_FILESYSTEM_ENTRIES = MAX_RUNTIME_SOURCE_ENTRIES;
 const MAX_RUNTIME_SOURCE_DEPTH = 32;
 const MAX_HEALTH_BODY_BYTES = 4_096;
+const MAX_IMAGE_METADATA_BYTES = 16 * 1024;
+const MAX_CONTAINER_METADATA_BYTES = 4 * 1024;
 const MAX_PROCESS_OUTPUT_BYTES = 64 * 1024;
 const MAX_DOCKER_LOG_BYTES = 64 * 1024;
 const MAX_TIMEOUT_DIAGNOSTIC_BYTES = 4 * 1024;
@@ -61,12 +65,22 @@ const PROCESS_OUTPUT_TRUNCATION_MARKER = Buffer.from(
   "utf8",
 );
 const MAX_UPGRADE_RESPONSE_BYTES = 16 * 1024;
+const MAX_WEBSOCKET_MESSAGE_BYTES = 16 * 1024;
 const CLOSED_PORT_ERROR_CODES = new Set(["ECONNREFUSED", "ECONNRESET"]);
 
-const SENSITIVE_DIAGNOSTIC_PATTERN =
-  /(["']?(?:token|secret|password|passwd|authorization|cookie|api[_-]?key)[^"'=\s]*["']?\s*[:=]\s*["']?)[^"',\s}\]]+/gi;
-const SENSITIVE_ARGUMENT_PATTERN =
-  /(?:token|secret|password|passwd|authorization|cookie|api[_-]?key)[^=\s]*=/i;
+const SENSITIVE_KEY_PATTERN =
+  "(?:[A-Za-z0-9]+[_-])*" +
+  "(?:token|secret|password|passwd|authorization|cookie|api[_-]?key|private[_-]?key)" +
+  "(?:[_-][A-Za-z0-9]+)*";
+const SENSITIVE_DIAGNOSTIC_PATTERN = new RegExp(
+  `(["']?${SENSITIVE_KEY_PATTERN}["']?\\s*[:=]\\s*)("(?:\\\\.|[^"\\\\])*"|'(?:\\\\.|[^'\\\\])*'|[^\\r\\n]*)`,
+  "gi",
+);
+const BEARER_SECRET_PATTERN = /\b(Bearer|Basic)\s+[A-Za-z0-9._~+/=-]+/gi;
+const PRIVATE_KEY_PATTERN =
+  /-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z0-9 ]*PRIVATE KEY-----/g;
+const TOKEN_PREFIX_PATTERN =
+  /\b(?:gh[pousr]_|github_pat_|xox[baprs]-|sk-[A-Za-z0-9_-]+|AIza[0-9A-Za-z_-])[A-Za-z0-9._~+/=-]*/gi;
 
 function usage() {
   throw new Error(
@@ -165,8 +179,11 @@ function createBoundedOutputCollector(
 }
 
 function sanitizeDiagnosticText(value) {
-  const withoutControlSequences = value
+  const withoutControlSequences = String(value)
     .replace(/\u001b\[[0-?]*[ -/]*[@-~]/g, "")
+    .replace(PRIVATE_KEY_PATTERN, "[redacted-private-key]")
+    .replace(BEARER_SECRET_PATTERN, "$1 [redacted]")
+    .replace(TOKEN_PREFIX_PATTERN, "[redacted-token]")
     .replace(SENSITIVE_DIAGNOSTIC_PATTERN, "$1[redacted]")
     .replace(/[^\t\n\r\x20-\x7e]/g, "?");
   const bytes = Buffer.from(withoutControlSequences, "utf8");
@@ -182,17 +199,28 @@ function sanitizeDiagnosticText(value) {
 }
 
 function safeCommandArguments(args) {
-  return args
-    .map((argument) => {
-      const match = argument.match(SENSITIVE_ARGUMENT_PATTERN);
-      if (match === null || match.index === undefined) return argument;
-      return `${argument.slice(0, match.index + match[0].length)}[redacted]`;
-    })
-    .join(" ");
+  return sanitizeDiagnosticText(args.join(" "));
+}
+
+function diagnosticSuffix(label, value) {
+  const text = sanitizeDiagnosticText(value);
+  return text.length > 0 ? `\n${label}:\n${text}` : "";
+}
+
+function boundedTimeoutMs(timeoutMs, label) {
+  const value = Math.floor(Number(timeoutMs));
+  invariant(
+    Number.isFinite(value) && value > 0,
+    `${label} deadline has expired`,
+  );
+  return value;
 }
 
 function run(command, args, options = {}) {
-  const timeoutMs = options.timeoutMs ?? COMMAND_TIMEOUT_MS;
+  const timeoutMs = boundedTimeoutMs(
+    options.timeoutMs ?? COMMAND_TIMEOUT_MS,
+    `${command} command`,
+  );
   return new Promise((resolve, reject) => {
     const child = spawn(command, args, {
       cwd: process.cwd(),
@@ -201,36 +229,49 @@ function run(command, args, options = {}) {
     });
     const outputMaxBytes = options.outputMaxBytes ?? MAX_PROCESS_OUTPUT_BYTES;
     const outputRetention = options.outputRetention ?? "head";
-    const stdout = createBoundedOutputCollector(
-      outputMaxBytes,
-      outputRetention,
-    );
-    const stderr = createBoundedOutputCollector(
-      outputMaxBytes,
-      outputRetention,
-    );
+    const captureIndividualOutput = options.captureIndividualOutput !== false;
+    const stdout = captureIndividualOutput
+      ? createBoundedOutputCollector(outputMaxBytes, outputRetention)
+      : null;
+    const stderr = captureIndividualOutput
+      ? createBoundedOutputCollector(outputMaxBytes, outputRetention)
+      : null;
+    const combinedOutput =
+      options.combinedOutputMaxBytes === undefined
+        ? null
+        : createBoundedOutputCollector(
+            options.combinedOutputMaxBytes,
+            options.outputRetention ?? "tail",
+          );
     let settled = false;
     let timedOut = false;
-    const timeoutDiagnosticOutput = () => {
-      const stderrText = sanitizeDiagnosticText(stderr.text());
-      return stderrText.length > 0 ? `\nstderr:\n${stderrText}` : "";
-    };
     const timeoutError = () =>
       new Error(
-        `${command} timed out after ${timeoutMs}ms: ${safeCommandArguments(args)}${timeoutDiagnosticOutput()}`,
+        `${command} timed out after ${timeoutMs}ms: ${safeCommandArguments(args)}` +
+          diagnosticSuffix("stderr", stderr?.text() ?? ""),
       );
     const timer = setTimeout(() => {
       if (settled) return;
       timedOut = true;
       child.kill("SIGKILL");
     }, timeoutMs);
-    child.stdout.on("data", (chunk) => stdout.append(chunk));
-    child.stderr.on("data", (chunk) => stderr.append(chunk));
+    child.stdout.on("data", (chunk) => {
+      stdout?.append(chunk);
+      combinedOutput?.append(chunk);
+    });
+    child.stderr.on("data", (chunk) => {
+      stderr?.append(chunk);
+      combinedOutput?.append(chunk);
+    });
     child.once("error", (error) => {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
-      reject(timedOut ? timeoutError() : error);
+      reject(
+        timedOut
+          ? timeoutError()
+          : new Error(`${command} failed to start: ${error.code ?? "unknown"}`),
+      );
     });
     child.once("close", (code, signal) => {
       if (settled) return;
@@ -239,8 +280,9 @@ function run(command, args, options = {}) {
       const result = Object.freeze({
         code,
         signal,
-        stdout: stdout.text(),
-        stderr: stderr.text(),
+        stdout: stdout?.text() ?? "",
+        stderr: stderr?.text() ?? "",
+        combined: combinedOutput?.text(),
       });
       if (timedOut) {
         reject(timeoutError());
@@ -250,7 +292,8 @@ function run(command, args, options = {}) {
       else {
         reject(
           new Error(
-            `${command} ${args.join(" ")} failed (${code ?? signal})\n${result.stderr}`,
+            `${command} ${safeCommandArguments(args)} failed (${code ?? signal})` +
+              diagnosticSuffix("stderr", result.stderr),
           ),
         );
       }
@@ -271,44 +314,93 @@ function delay(milliseconds) {
 }
 
 function withTimeout(promise, timeoutMs, label) {
+  const boundedMs = boundedTimeoutMs(timeoutMs, label);
   let timer;
   const timeout = new Promise((_, reject) => {
     timer = setTimeout(
-      () => reject(new Error(`${label} timed out after ${timeoutMs}ms`)),
-      timeoutMs,
+      () => reject(new Error(`${label} timed out after ${boundedMs}ms`)),
+      boundedMs,
     );
   });
   return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
 }
 
 async function waitUntil(probe, timeoutMs, label) {
-  const deadline = Date.now() + timeoutMs;
+  const boundedMs = boundedTimeoutMs(timeoutMs, label);
+  const deadline = Date.now() + boundedMs;
   let lastError = null;
   while (Date.now() < deadline) {
+    const remainingMs = deadline - Date.now();
     try {
-      const value = await probe();
+      const value = await withTimeout(
+        Promise.resolve().then(() => probe(remainingMs)),
+        remainingMs,
+        `${label} probe`,
+      );
       if (value !== null && value !== false) return value;
     } catch (error) {
       lastError = error;
     }
-    await delay(50);
+    const delayMs = Math.min(50, deadline - Date.now());
+    if (delayMs > 0) await delay(delayMs);
   }
   throw new Error(
-    `${label} timed out after ${timeoutMs}ms${
-      lastError instanceof Error ? `: ${lastError.message}` : ""
+    `${label} timed out after ${boundedMs}ms${
+      lastError instanceof Error
+        ? `: ${sanitizeDiagnosticText(lastError.message)}`
+        : ""
     }`,
   );
 }
 
-async function containerState(name) {
-  const result = await docker(["inspect", name, "--format", "{{json .State}}"]);
-  return JSON.parse(result.stdout.trim());
+function remainingUntil(deadline, label) {
+  return boundedTimeoutMs(deadline - Date.now(), label);
+}
+
+function parseBoundedJsonFields(output, expectedCount, label) {
+  const fields = output.trim().split("\t");
+  if (fields.length !== expectedCount) {
+    throw new Error(`${label} metadata is invalid`);
+  }
+  try {
+    return fields.map((field) => JSON.parse(field));
+  } catch {
+    throw new Error(`${label} metadata is invalid`);
+  }
+}
+
+const CONTAINER_STATE_FORMAT =
+  "{{json .State.Running}}\t{{json .State.ExitCode}}\t{{json .State.OOMKilled}}\t{{json .State.Pid}}";
+const CONTAINER_IDENTITY_FORMAT =
+  `{{with index .Config.Labels "${OWNERSHIP_LABEL}"}}{{json .}}{{else}}null{{end}}\t{{json .State.Running}}`;
+
+async function containerState(name, timeoutMs = COMMAND_TIMEOUT_MS) {
+  const result = await docker(
+    ["inspect", name, "--format", CONTAINER_STATE_FORMAT],
+    {
+      timeoutMs,
+      outputMaxBytes: MAX_CONTAINER_METADATA_BYTES,
+    },
+  );
+  const [running, exitCode, oomKilled, pid] = parseBoundedJsonFields(
+    result.stdout,
+    4,
+    "container state",
+  );
+  invariant(
+    typeof running === "boolean" &&
+      Number.isSafeInteger(exitCode) &&
+      typeof oomKilled === "boolean" &&
+      Number.isSafeInteger(pid),
+    "container state metadata is invalid",
+  );
+  return { Running: running, ExitCode: exitCode, OOMKilled: oomKilled, Pid: pid };
 }
 
 async function waitForStopped(name, timeoutMs) {
   return waitUntil(
-    async () => {
-      const state = await containerState(name);
+    async (remainingMs) => {
+      const state = await containerState(name, remainingMs);
       return state.Running === false ? state : null;
     },
     timeoutMs,
@@ -316,11 +408,13 @@ async function waitForStopped(name, timeoutMs) {
   );
 }
 
-async function hostPort(name) {
-  const result = await docker(["port", name, `${CONTAINER_PORT}/tcp`]);
+async function hostPort(name, timeoutMs = COMMAND_TIMEOUT_MS) {
+  const result = await docker(["port", name, `${CONTAINER_PORT}/tcp`], {
+    timeoutMs,
+    outputMaxBytes: MAX_CONTAINER_METADATA_BYTES,
+  });
   const match = result.stdout.trim().match(/127\.0\.0\.1:(\d+)$/);
-  if (match === null)
-    throw new Error(`unexpected docker port: ${result.stdout}`);
+  if (match === null) throw new Error("unexpected docker port response");
   return Number(match[1]);
 }
 
@@ -563,10 +657,10 @@ function isExactHealthBody(bytes, path) {
 
 async function waitForEndpoint(port, path, label) {
   return waitUntil(
-    async () => {
+    async (remainingMs) => {
       const response = await fetch(`http://127.0.0.1:${port}${path}`, {
         redirect: "manual",
-        signal: AbortSignal.timeout(500),
+        signal: AbortSignal.timeout(Math.max(1, Math.min(500, remainingMs))),
       });
       if (response.status !== 200) {
         await cancelResponseBody(response);
@@ -600,7 +694,7 @@ function errorCode(error) {
   return undefined;
 }
 
-function probePortClosed(port) {
+function probePortClosed(port, timeoutMs = PORT_PROBE_TIMEOUT_MS) {
   return new Promise((resolve, reject) => {
     const socket = createConnection({ host: "127.0.0.1", port });
     let settled = false;
@@ -612,7 +706,7 @@ function probePortClosed(port) {
       callback(value);
     };
 
-    socket.setTimeout(PORT_PROBE_TIMEOUT_MS, () => {
+    socket.setTimeout(Math.max(1, Math.min(PORT_PROBE_TIMEOUT_MS, timeoutMs)), () => {
       finish(
         reject,
         new Error(`port ${port} close probe timed out; closure is unverified`),
@@ -640,13 +734,13 @@ function probePortClosed(port) {
   });
 }
 
-async function assertPortClosed(port) {
+async function assertPortClosed(port, timeoutMs = STOP_MARGIN_MS) {
   await waitUntil(
-    async () => {
-      const closed = await probePortClosed(port);
+    async (remainingMs) => {
+      const closed = await probePortClosed(port, remainingMs);
       return closed ? true : null;
     },
-    STOP_MARGIN_MS,
+    timeoutMs,
     "published port close",
   );
 }
@@ -677,7 +771,7 @@ const forbiddenPackages = ${JSON.stringify(FORBIDDEN_RUNTIME_PACKAGES)};
 const readOnlyPaths = ${JSON.stringify(READ_ONLY_RUNTIME_PATHS)};
 const absentPaths = ${JSON.stringify(ABSENT_RUNTIME_PATHS)};
 const sourceScanRoots = ${JSON.stringify(RUNTIME_SOURCE_SCAN_ROOTS)};
-const maxSourceEntries = ${MAX_RUNTIME_SOURCE_ENTRIES};
+const maxRuntimeFilesystemEntries = ${MAX_RUNTIME_FILESYSTEM_ENTRIES};
 const maxSourceDepth = ${MAX_RUNTIME_SOURCE_DEPTH};
 
 async function forEachDirectoryEntry(path, onEntry) {
@@ -691,6 +785,14 @@ async function forEachDirectoryEntry(path, onEntry) {
     }
   } finally {
     await directory.close();
+  }
+}
+
+let runtimeFilesystemEntries = 0;
+function accountRuntimeEntry() {
+  runtimeFilesystemEntries += 1;
+  if (runtimeFilesystemEntries > maxRuntimeFilesystemEntries) {
+    throw new Error("runtime filesystem scan exceeded entry limit");
   }
 }
 
@@ -708,17 +810,28 @@ function directPackageExists(packageName) {
   return pathExists(join("/app/node_modules", packageName, "package.json"));
 }
 
-async function pnpmStoreContains(packageName) {
-  const prefix = packageName.startsWith("@")
-    ? packageName.replace("/", "+") + "@"
-    : packageName + "@";
-  let found = false;
+async function scanPnpmStore(packageNames) {
+  const prefixes = Object.fromEntries(
+    packageNames.map((packageName) => [
+      packageName,
+      packageName.startsWith("@")
+        ? packageName.replace("/", "+") + "@"
+        : packageName + "@",
+    ]),
+  );
+  const found = Object.fromEntries(
+    packageNames.map((packageName) => [packageName, false]),
+  );
+  let foundCount = 0;
   await forEachDirectoryEntry("/app/node_modules/.pnpm", async (entry) => {
-    if (entry.name.startsWith(prefix)) {
-      found = true;
-      return false;
+    accountRuntimeEntry();
+    for (const packageName of packageNames) {
+      if (!found[packageName] && entry.name.startsWith(prefixes[packageName])) {
+        found[packageName] = true;
+        foundCount += 1;
+      }
     }
-    return true;
+    return foundCount < packageNames.length;
   });
   return found;
 }
@@ -738,14 +851,10 @@ function isTestOnlySource(path, entry) {
 async function findUnexpectedSourceEntries(roots) {
   const pending = roots.map((path) => ({ depth: 0, path }));
   const unexpected = [];
-  let visited = 0;
   while (pending.length > 0) {
     const current = pending.pop();
     await forEachDirectoryEntry(current.path, async (entry) => {
-      visited += 1;
-      if (visited > maxSourceEntries) {
-        throw new Error("runtime source scan exceeded entry limit");
-      }
+      accountRuntimeEntry();
       const path = join(current.path, entry.name);
       if (isTestOnlySource(path, entry)) {
         unexpected.push(path);
@@ -782,13 +891,14 @@ const required = Object.fromEntries(
     ]),
   ),
 );
+const forbiddenPnpmStore = await scanPnpmStore(forbiddenPackages);
 const forbidden = Object.fromEntries(
   await Promise.all(
     forbiddenPackages.map(async (name) => [
       name,
       {
         direct: await directPackageExists(name),
-        pnpmStore: await pnpmStoreContains(name),
+        pnpmStore: forbiddenPnpmStore[name] === true,
       },
     ]),
   ),
@@ -848,7 +958,9 @@ async function inspectRuntimeSecurity(name) {
       details.pid1Uids.every(
         (value) => Number.isSafeInteger(value) && value > 0,
       ),
-    `all PID 1 UIDs must be non-root: ${JSON.stringify(details.pid1Uids)}`,
+    `all PID 1 UIDs must be non-root: ${sanitizeDiagnosticText(
+      JSON.stringify(details.pid1Uids),
+    )}`,
   );
   invariant(
     Array.isArray(details.pid1Gids) &&
@@ -856,7 +968,9 @@ async function inspectRuntimeSecurity(name) {
       details.pid1Gids.every(
         (value) => Number.isSafeInteger(value) && value > 0,
       ),
-    `all PID 1 GIDs must be non-root: ${JSON.stringify(details.pid1Gids)}`,
+    `all PID 1 GIDs must be non-root: ${sanitizeDiagnosticText(
+      JSON.stringify(details.pid1Gids),
+    )}`,
   );
   for (const packageName of REQUIRED_RUNTIME_PACKAGES) {
     invariant(
@@ -891,8 +1005,8 @@ async function inspectRuntimeSecurity(name) {
   invariant(
     Array.isArray(details.unexpectedRuntimeSourceEntries) &&
       details.unexpectedRuntimeSourceEntries.length === 0,
-    `test-only runtime source is present: ${JSON.stringify(
-      details.unexpectedRuntimeSourceEntries,
+    `test-only runtime source is present: ${sanitizeDiagnosticText(
+      JSON.stringify(details.unexpectedRuntimeSourceEntries),
     )}`,
   );
   return Object.freeze(details);
@@ -909,8 +1023,14 @@ async function inspectProcessTree(name) {
   const cmdline = cmdlineResult.stdout.trim();
   const executable = executableResult.stdout.trim();
   const top = topResult.stdout.trim();
-  invariant(cmdline === EXPECTED_CMDLINE, `unexpected PID 1: ${cmdline}`);
-  invariant(executable.endsWith("/node"), `PID 1 is not Node: ${executable}`);
+  invariant(
+    cmdline === EXPECTED_CMDLINE,
+    `unexpected PID 1: ${sanitizeDiagnosticText(cmdline)}`,
+  );
+  invariant(
+    executable.endsWith("/node"),
+    `PID 1 is not Node: ${sanitizeDiagnosticText(executable)}`,
+  );
   invariant(
     top.includes(EXPECTED_CMDLINE),
     "docker top does not contain Node entrypoint",
@@ -926,7 +1046,7 @@ async function inspectProcessTree(name) {
     executable,
     esbuildChildObserved: top.includes("/esbuild "),
     runtimeSecurity,
-    top,
+    top: sanitizeDiagnosticText(top),
   });
 }
 
@@ -942,6 +1062,9 @@ async function runContainer(
     await docker([
       "run",
       "--detach",
+      "--read-only",
+      "--tmpfs",
+      RUNTIME_TMPFS,
       "--memory",
       CONTAINER_MEMORY_LIMIT,
       "--cpus",
@@ -984,23 +1107,81 @@ async function runContainer(
   }
 }
 
+async function inspectContainerIdentity(name, timeoutMs) {
+  const result = await docker(
+    ["inspect", name, "--format", CONTAINER_IDENTITY_FORMAT],
+    {
+      allowFailure: true,
+      timeoutMs,
+      outputMaxBytes: MAX_CONTAINER_METADATA_BYTES,
+    },
+  );
+  if (result.code !== 0) return null;
+  const [label, running] = parseBoundedJsonFields(
+    result.stdout,
+    2,
+    "container identity",
+  );
+  invariant(
+    (label === null || typeof label === "string") &&
+      typeof running === "boolean",
+    "container identity metadata is invalid",
+  );
+  return { label, running };
+}
+
 async function cleanupContainer(name, runId, options = {}) {
-  const deadline =
-    Date.now() + (options.waitForAppearance === true ? STOP_MARGIN_MS : 0);
-  let inspected;
-  do {
-    inspected = await docker(["inspect", name], { allowFailure: true });
-    if (inspected.code === 0) break;
-    if (Date.now() >= deadline) return;
-    await delay(50);
-  } while (true);
-  const details = JSON.parse(inspected.stdout)[0];
-  if (details?.Config?.Labels?.[OWNERSHIP_LABEL] !== runId) return;
-  const state = await containerState(name);
-  if (state.Running === true) {
-    await docker(["kill", "--signal=KILL", name], { allowFailure: true });
+  const timeoutMs = options.timeoutMs ?? STOP_MARGIN_MS;
+  const deadline = Date.now() + boundedTimeoutMs(timeoutMs, "container cleanup");
+  let identity = null;
+  while (identity === null) {
+    const remainingMs = deadline - Date.now();
+    if (remainingMs <= 0) {
+      if (options.waitForAppearance !== true) return;
+      throw new Error(`container cleanup deadline exceeded while locating ${name}`);
+    }
+    identity = await inspectContainerIdentity(name, remainingMs);
+    if (identity !== null || options.waitForAppearance !== true) return;
+    await delay(Math.min(50, deadline - Date.now()));
   }
-  await docker(["rm", name], { allowFailure: true });
+  if (identity.label !== runId) return;
+
+  let remainingMs = deadline - Date.now();
+  if (remainingMs <= 0) {
+    throw new Error(`container cleanup deadline exceeded for ${name}`);
+  }
+  if (identity.running === true) {
+    await docker(["kill", "--signal=KILL", name], {
+      allowFailure: true,
+      timeoutMs: remainingMs,
+      outputMaxBytes: MAX_CONTAINER_METADATA_BYTES,
+    });
+  }
+  remainingMs = deadline - Date.now();
+  if (remainingMs <= 0) {
+    throw new Error(`container cleanup deadline exceeded before removing ${name}`);
+  }
+  await docker(["rm", "--force", name], {
+    allowFailure: true,
+    timeoutMs: remainingMs,
+    outputMaxBytes: MAX_CONTAINER_METADATA_BYTES,
+  });
+  remainingMs = deadline - Date.now();
+  if (remainingMs <= 0) {
+    throw new Error(`container cleanup deadline exceeded while verifying ${name}`);
+  }
+  await waitUntil(
+    async (probeRemainingMs) => {
+      const current = await inspectContainerIdentity(name, probeRemainingMs);
+      if (current === null) return true;
+      if (current.label !== runId) {
+        throw new Error(`container ownership changed during cleanup: ${name}`);
+      }
+      return null;
+    },
+    remainingMs,
+    `${name} removal`,
+  );
 }
 
 function eventRecords(logs) {
@@ -1051,19 +1232,21 @@ function assertCommonEvents(records, expectedSignalCount = 1) {
   invariant(firstSignal?.ordinal === 1, "first signal ordinal must be one");
 }
 
-async function logsFor(name) {
+async function logsFor(name, timeoutMs = COMMAND_TIMEOUT_MS) {
   const result = await docker(["logs", name], {
     allowFailure: true,
-    outputMaxBytes: MAX_DOCKER_LOG_BYTES,
+    captureIndividualOutput: false,
+    combinedOutputMaxBytes: MAX_DOCKER_LOG_BYTES,
+    timeoutMs,
     outputRetention: "tail",
   });
-  return `${result.stdout}${result.stderr}`;
+  return result.combined ?? "";
 }
 
 async function waitForLogEvent(name, event, timeoutMs = START_TIMEOUT_MS) {
   return waitUntil(
-    async () => {
-      const records = eventRecords(await logsFor(name));
+    async (remainingMs) => {
+      const records = eventRecords(await logsFor(name, remainingMs));
       return records.some((record) => record.event === event) ? records : null;
     },
     timeoutMs,
@@ -1071,9 +1254,46 @@ async function waitForLogEvent(name, event, timeoutMs = START_TIMEOUT_MS) {
   );
 }
 
+function websocketMessageText(data) {
+  let bytes;
+  let toText;
+  if (Buffer.isBuffer(data)) {
+    bytes = data.byteLength;
+    toText = () => data.toString("utf8");
+  } else if (data instanceof ArrayBuffer) {
+    bytes = data.byteLength;
+    toText = () => Buffer.from(data).toString("utf8");
+  } else if (Array.isArray(data)) {
+    bytes = 0;
+    for (const chunk of data) {
+      if (!Buffer.isBuffer(chunk)) {
+        throw new Error("WebSocket message data is invalid");
+      }
+      bytes += chunk.byteLength;
+      if (bytes > MAX_WEBSOCKET_MESSAGE_BYTES) {
+        throw new Error(
+          `WebSocket message exceeded ${MAX_WEBSOCKET_MESSAGE_BYTES} bytes`,
+        );
+      }
+    }
+    toText = () => Buffer.concat(data, bytes).toString("utf8");
+  } else {
+    const text = String(data);
+    bytes = Buffer.byteLength(text, "utf8");
+    toText = () => text;
+  }
+  if (bytes > MAX_WEBSOCKET_MESSAGE_BYTES) {
+    throw new Error(
+      `WebSocket message exceeded ${MAX_WEBSOCKET_MESSAGE_BYTES} bytes`,
+    );
+  }
+  return toText();
+}
+
 function openWebSocket(port) {
   const socket = new WebSocket(`ws://127.0.0.1:${port}/ws`, {
     origin: TEST_ORIGIN,
+    maxPayload: MAX_WEBSOCKET_MESSAGE_BYTES,
   });
   const opened = new Promise((resolve, reject) => {
     socket.once("open", resolve);
@@ -1082,12 +1302,13 @@ function openWebSocket(port) {
   const maintenance = new Promise((resolve, reject) => {
     socket.on("message", (data) => {
       try {
-        const message = JSON.parse(data.toString());
+        const message = JSON.parse(websocketMessageText(data));
         if (message.type === "maintenance" && message.phase === "terminating") {
           resolve(message);
         }
       } catch (error) {
         reject(error);
+        socket.terminate();
       }
     });
   });
@@ -1146,7 +1367,11 @@ function openUncooperativeWebSocket(port) {
         ) {
           const header = responseText();
           if (!header.startsWith("HTTP/1.1 101 ")) {
-            fail(new Error(`WebSocket upgrade failed: ${header}`));
+            fail(
+              new Error(
+                `WebSocket upgrade failed: ${sanitizeDiagnosticText(header)}`,
+              ),
+            );
             return;
           }
           // Deliberately never parse or acknowledge the server close frame.
@@ -1180,23 +1405,46 @@ function openUncooperativeWebSocket(port) {
   return { socket, opened, closed };
 }
 
-async function finishScenario(container, startedAt, shutdownGraceMs) {
+async function finishScenario(
+  container,
+  startedAt,
+  shutdownGraceMs,
+  options = {},
+) {
+  const shutdownStartedAt = options.shutdownStartedAt ?? startedAt;
+  const deadline =
+    options.deadline ?? shutdownStartedAt + shutdownGraceMs + STOP_MARGIN_MS;
   const state = await waitForStopped(
     container.name,
-    shutdownGraceMs + STOP_MARGIN_MS,
+    remainingUntil(deadline, `${container.name} stop`),
   );
   const elapsedMs = Date.now() - startedAt;
+  const shutdownElapsedMs = Date.now() - shutdownStartedAt;
   invariant(state.ExitCode === 0, `container exit was ${state.ExitCode}`);
   invariant(state.OOMKilled === false, "container was OOM-killed");
   invariant(state.Pid === 0, `container retained PID ${state.Pid}`);
   invariant(
-    elapsedMs <= shutdownGraceMs + STOP_MARGIN_MS,
-    `shutdown exceeded budget: ${elapsedMs}ms`,
+    shutdownElapsedMs <= shutdownGraceMs + STOP_MARGIN_MS,
+    `shutdown exceeded budget: ${shutdownElapsedMs}ms`,
   );
-  await assertPortClosed(container.port);
-  const top = await docker(["top", container.name], { allowFailure: true });
+  await assertPortClosed(
+    container.port,
+    remainingUntil(deadline, `${container.name} port close`),
+  );
+  const top = await docker(["top", container.name], {
+    allowFailure: true,
+    outputMaxBytes: MAX_CONTAINER_METADATA_BYTES,
+    timeoutMs: remainingUntil(deadline, `${container.name} process check`),
+  });
   invariant(top.code !== 0, "stopped container still exposes a process tree");
-  return { state, elapsedMs, logs: await logsFor(container.name) };
+  return {
+    state,
+    elapsedMs,
+    logs: await logsFor(
+      container.name,
+      remainingUntil(deadline, `${container.name} log collection`),
+    ),
+  };
 }
 
 async function gracefulScenario(image) {
@@ -1212,10 +1460,14 @@ async function gracefulScenario(image) {
   try {
     await withTimeout(peer.opened, START_TIMEOUT_MS, "WebSocket open");
     const startedAt = Date.now();
-    await docker(["kill", "--signal=TERM", container.name]);
+    const deadline = startedAt + shutdownGraceMs + STOP_MARGIN_MS;
+    await docker(["kill", "--signal=TERM", container.name], {
+      timeoutMs: remainingUntil(deadline, "graceful shutdown signal"),
+    });
+    const peerTimeoutMs = remainingUntil(deadline, "graceful shutdown peer");
     const [notice, close] = await Promise.all([
-      withTimeout(peer.maintenance, shutdownGraceMs, "maintenance notice"),
-      withTimeout(peer.closed, shutdownGraceMs, "WebSocket close"),
+      withTimeout(peer.maintenance, peerTimeoutMs, "maintenance notice"),
+      withTimeout(peer.closed, peerTimeoutMs, "WebSocket close"),
     ]);
     invariant(
       typeof notice.deadline === "string",
@@ -1226,7 +1478,9 @@ async function gracefulScenario(image) {
       close.reason === "service restart",
       `unexpected close reason ${close.reason}`,
     );
-    const result = await finishScenario(container, startedAt, shutdownGraceMs);
+    const result = await finishScenario(container, startedAt, shutdownGraceMs, {
+      deadline,
+    });
     const records = eventRecords(result.logs);
     assertCommonEvents(records);
     invariant(
@@ -1262,10 +1516,19 @@ async function socketCloseSubdeadlineScenario(image) {
   try {
     await withTimeout(peer.opened, START_TIMEOUT_MS, "raw WebSocket open");
     const startedAt = Date.now();
-    await docker(["kill", "--signal=TERM", container.name]);
-    const result = await finishScenario(container, startedAt, shutdownGraceMs);
+    const deadline = startedAt + shutdownGraceMs + STOP_MARGIN_MS;
+    await docker(["kill", "--signal=TERM", container.name], {
+      timeoutMs: remainingUntil(deadline, "subdeadline shutdown signal"),
+    });
+    const result = await finishScenario(container, startedAt, shutdownGraceMs, {
+      deadline,
+    });
     peer.socket.resume();
-    await withTimeout(peer.closed, STOP_MARGIN_MS, "raw WebSocket close");
+    await withTimeout(
+      peer.closed,
+      remainingUntil(deadline, "raw WebSocket close"),
+      "raw WebSocket close",
+    );
     const records = eventRecords(result.logs);
     assertCommonEvents(records);
     invariant(
@@ -1303,17 +1566,32 @@ async function secondSignalScenario(image) {
   const peer = openUncooperativeWebSocket(container.port);
   try {
     await withTimeout(peer.opened, START_TIMEOUT_MS, "raw WebSocket open");
-    await docker(["kill", "--signal=TERM", container.name]);
-    await waitForLogEvent(container.name, "shutdown-close-started");
+    const shutdownStartedAt = Date.now();
+    const deadline = shutdownStartedAt + shutdownGraceMs + STOP_MARGIN_MS;
+    await docker(["kill", "--signal=TERM", container.name], {
+      timeoutMs: remainingUntil(deadline, "second-signal first shutdown signal"),
+    });
+    await waitForLogEvent(
+      container.name,
+      "shutdown-close-started",
+      remainingUntil(deadline, "second-signal shutdown progress"),
+    );
     const secondSignalAt = Date.now();
-    await docker(["kill", "--signal=INT", container.name]);
+    await docker(["kill", "--signal=INT", container.name], {
+      timeoutMs: remainingUntil(deadline, "second-signal interrupt"),
+    });
     const result = await finishScenario(
       container,
       secondSignalAt,
       shutdownGraceMs,
+      { shutdownStartedAt, deadline },
     );
     peer.socket.resume();
-    await withTimeout(peer.closed, STOP_MARGIN_MS, "raw WebSocket close");
+    await withTimeout(
+      peer.closed,
+      remainingUntil(deadline, "raw WebSocket close"),
+      "raw WebSocket close",
+    );
     const records = eventRecords(result.logs);
     assertCommonEvents(records, 2);
     invariant(
@@ -1355,12 +1633,16 @@ async function main() {
     "inspect",
     image,
     "--format",
-    "{{json .}}",
-  ]);
-  const imageDetails = JSON.parse(inspected.stdout.trim());
-  const imageId = imageDetails.Id;
-  const command = imageDetails.Config?.Cmd;
-  const imageUser = assertExplicitNonRootImageUser(imageDetails.Config?.User);
+    "{{json .Id}}\t{{json .Config.Cmd}}\t{{json .Config.User}}",
+  ], {
+    outputMaxBytes: MAX_IMAGE_METADATA_BYTES,
+  });
+  const [imageId, command, imageUserValue] = parseBoundedJsonFields(
+    inspected.stdout,
+    3,
+    "image",
+  );
+  const imageUser = assertExplicitNonRootImageUser(imageUserValue);
   invariant(
     typeof imageId === "string" && /^sha256:[0-9a-f]{64}$/.test(imageId),
     `image does not have an immutable ID: ${String(imageId)}`,
@@ -1390,7 +1672,10 @@ void main().catch((error) => {
   console.error(
     JSON.stringify({
       ok: false,
-      error: error instanceof Error ? error.message : "unknown error",
+      error:
+        error instanceof Error
+          ? sanitizeDiagnosticText(error.message)
+          : "unknown error",
     }),
   );
   process.exitCode = 1;
