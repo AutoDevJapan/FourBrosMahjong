@@ -296,7 +296,10 @@ jobs:
 
       - name: Materialize repository for verification
         if: steps.scope.outputs.setup == 'true'
-        run: git sparse-checkout disable
+        # actions/checkout の set-safe-directory は action 内の一時 HOME にだけ書き込まれる。
+        # container job の run step は別 HOME (/github/home) なので、その設定を引き継がない。
+        # このコマンドだけ、GitHub が提供する当該 workspace を明示的に許可する。
+        run: git -c safe.directory="$GITHUB_WORKSPACE" sparse-checkout disable
 
       - name: Setup pnpm
         if: steps.scope.outputs.setup == 'true'

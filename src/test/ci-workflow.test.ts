@@ -1121,8 +1121,12 @@ describe("変更パスによる実行範囲の絞り込み (#491)", () => {
         ]),
       );
 
+      const expectedMaterializeCommand =
+        jobName === "e2e"
+          ? 'git -c safe.directory="$GITHUB_WORKSPACE" sparse-checkout disable'
+          : "git sparse-checkout disable";
       const materialize = steps.find(
-        (step) => step.run?.trim() === "git sparse-checkout disable",
+        (step) => step.run?.trim() === expectedMaterializeCommand,
       );
       expect(
         materialize,
