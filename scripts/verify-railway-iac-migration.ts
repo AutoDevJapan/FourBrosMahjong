@@ -6,8 +6,9 @@ import {
   lstatSync,
   openSync,
   readSync,
+  realpathSync,
 } from "node:fs";
-import { resolve } from "node:path";
+import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   generatedIacSourceIsSecretSafe,
@@ -41,10 +42,40 @@ function hasSameFileIdentity(
   );
 }
 
+function hasStableFileSnapshot(
+  firstStats: ReturnType<typeof fstatSync>,
+  secondStats: ReturnType<typeof fstatSync>,
+): boolean {
+  return (
+    hasSameFileIdentity(firstStats, secondStats) &&
+    firstStats.size === secondStats.size &&
+    firstStats.mtimeMs === secondStats.mtimeMs &&
+    firstStats.ctimeMs === secondStats.ctimeMs
+  );
+}
+
+function pathHasNoSymlinkedParents(
+  filePath: string,
+  rootDirectory = dirname(filePath),
+): boolean {
+  let currentPath = resolve(filePath);
+  const boundaryPath = resolve(rootDirectory);
+  while (true) {
+    const stats = lstatSync(currentPath);
+    if (stats.isSymbolicLink()) return false;
+    if (currentPath === boundaryPath) return true;
+    const parentPath = dirname(currentPath);
+    if (parentPath === currentPath) return false;
+    currentPath = parentPath;
+  }
+}
+
 function pathStillOwnsFile(
   filePath: string,
   fileStats: ReturnType<typeof fstatSync>,
+  rootDirectory?: string,
 ): boolean {
+  if (!pathHasNoSymlinkedParents(filePath, rootDirectory)) return false;
   const pathStats = lstatSync(filePath);
   return (
     pathStats.isFile() &&
@@ -56,6 +87,7 @@ function pathStillOwnsFile(
 export function readBoundedFile(
   filePath: string,
   maxBytes: number,
+  rootDirectory = dirname(filePath),
 ): Buffer | null {
   if (!Number.isSafeInteger(maxBytes) || maxBytes < 0) return null;
 
@@ -76,7 +108,7 @@ export function readBoundedFile(
     const initialStats = fstatSync(fileDescriptor);
     if (
       !isBoundedRegularFile(initialStats, maxBytes) ||
-      !pathStillOwnsFile(filePath, initialStats)
+      !pathStillOwnsFile(filePath, initialStats, rootDirectory)
     ) {
       return null;
     }
@@ -103,12 +135,26 @@ export function readBoundedFile(
     if (readSync(fileDescriptor, extraByte, 0, 1, null) !== 0) {
       return null;
     }
+    const verificationContent = Buffer.alloc(content.length);
+    let verificationBytesRead = 0;
+    while (verificationBytesRead < verificationContent.length) {
+      const chunkSize = readSync(
+        fileDescriptor,
+        verificationContent,
+        verificationBytesRead,
+        verificationContent.length - verificationBytesRead,
+        0 + verificationBytesRead,
+      );
+      if (chunkSize === 0) return null;
+      verificationBytesRead += chunkSize;
+    }
+    if (!content.equals(verificationContent)) return null;
+
     const finalStats = fstatSync(fileDescriptor);
     if (
       !isBoundedRegularFile(finalStats, maxBytes) ||
-      !hasSameFileIdentity(initialStats, finalStats) ||
-      finalStats.size !== initialStats.size ||
-      !pathStillOwnsFile(filePath, finalStats)
+      !hasStableFileSnapshot(initialStats, finalStats) ||
+      !pathStillOwnsFile(filePath, finalStats, rootDirectory)
     ) {
       return null;
     }
@@ -129,11 +175,27 @@ export function readBoundedFile(
   return content;
 }
 
+export function isDirectEntrypoint(
+  argumentPath = process.argv[1],
+  moduleUrl = import.meta.url,
+): boolean {
+  if (argumentPath === undefined) return false;
+  try {
+    return (
+      realpathSync(resolve(argumentPath)) ===
+      realpathSync(fileURLToPath(moduleUrl))
+    );
+  } catch {
+    return false;
+  }
+}
+
 export function readBoundedTextFile(
   filePath: string,
   maxBytes = MAX_GENERATED_IAC_BYTES,
+  rootDirectory = dirname(filePath),
 ): string | null {
-  const content = readBoundedFile(filePath, maxBytes);
+  const content = readBoundedFile(filePath, maxBytes, rootDirectory);
   return content === null ? null : content.toString("utf8");
 }
 
@@ -142,8 +204,16 @@ export function localFilesystemEvidence(
 ): RailwayIacFilesystemEvidence {
   const generatedPath = resolve(rootDirectory, ".railway/railway.ts");
   const legacyPath = resolve(rootDirectory, "railway.json");
-  const generatedSource = readBoundedTextFile(generatedPath);
-  const legacySource = readBoundedFile(legacyPath, MAX_LEGACY_CONFIG_BYTES);
+  const generatedSource = readBoundedTextFile(
+    generatedPath,
+    MAX_GENERATED_IAC_BYTES,
+    rootDirectory,
+  );
+  const legacySource = readBoundedFile(
+    legacyPath,
+    MAX_LEGACY_CONFIG_BYTES,
+    rootDirectory,
+  );
   return {
     generatedIacPath: generatedSource === null ? null : ".railway/railway.ts",
     generatedIacSha256:
@@ -194,9 +264,6 @@ async function main(): Promise<void> {
   process.exitCode = result.migrationEvidence === "pass" ? 0 : 1;
 }
 
-if (
-  process.argv[1] !== undefined &&
-  resolve(process.argv[1]) === fileURLToPath(import.meta.url)
-) {
+if (isDirectEntrypoint()) {
   void main();
 }

@@ -10,7 +10,8 @@ import {
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import {
   generatedIacSourceIsSecretSafe,
@@ -19,6 +20,7 @@ import {
   validateRailwayIacMigrationEvidence,
 } from "../../scripts/railway-iac-migration-contract";
 import {
+  isDirectEntrypoint,
   localFilesystemEvidence,
   MAX_GENERATED_IAC_BYTES,
   MAX_LEGACY_CONFIG_BYTES,
@@ -267,6 +269,26 @@ describe("Railway IaC parity snapshot contract (#742)", () => {
     ).toEqual(["generated-iac-missing", "secret-safety-unverified"]);
   });
 
+  it("rejects a generated IaC file beneath a symlinked parent directory", () => {
+    const filesystem = withTemporaryRepository((rootDirectory) => {
+      const realDirectory = join(rootDirectory, "real-railway");
+      mkdirSync(realDirectory);
+      writeFileSync(join(realDirectory, "railway.ts"), GENERATED_SOURCE);
+      rmSync(join(rootDirectory, ".railway"), {
+        force: true,
+        recursive: true,
+      });
+      symlinkSync(realDirectory, join(rootDirectory, ".railway"));
+      return localFilesystemEvidence(rootDirectory);
+    });
+
+    expect(filesystem).toMatchObject({
+      generatedIacPath: null,
+      generatedIacSha256: null,
+      generatedIacSecretSafe: null,
+    });
+  });
+
   it.each([
     [
       "missing",
@@ -331,6 +353,23 @@ describe("Railway IaC parity snapshot contract (#742)", () => {
         .update(expected)
         .digest("hex"),
     });
+  });
+
+  it("resolves a symlinked verifier entrypoint before invoking main", () => {
+    const moduleUrl = new URL(
+      "../../scripts/verify-railway-iac-migration.ts",
+      import.meta.url,
+    ).href;
+    const symlinkPath = join(
+      mkdtempSync(join(tmpdir(), "railway-entrypoint-")),
+      "verify.ts",
+    );
+    try {
+      symlinkSync(fileURLToPath(moduleUrl), symlinkPath);
+      expect(isDirectEntrypoint(symlinkPath, moduleUrl)).toBe(true);
+    } finally {
+      rmSync(dirname(symlinkPath), { force: true, recursive: true });
+    }
   });
 
   it("accepts a regular legacy config at the byte limit", () => {
