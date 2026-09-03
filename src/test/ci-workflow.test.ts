@@ -1081,6 +1081,30 @@ describe("変更パスによる実行範囲の絞り込み (#491)", () => {
     },
   );
 
+  it("E2E scopeは最初のGit操作前にworkspace限定のsafe.directoryを設定する", () => {
+    const steps = readWorkflowFile("ci.yml").jobs?.e2e?.steps ?? [];
+    const scope = steps.find((step) => step.id === SCOPE_STEP_ID);
+    const safeDirectoryCommand =
+      'git config --global --add safe.directory "$GITHUB_WORKSPACE"';
+    const resolverCommand = "node .github/scripts/verification-scope.mjs";
+
+    expect(scope, "e2e: scope stepが無い").toBeDefined();
+    expect(scope?.run?.trim()).toBe(
+      `${safeDirectoryCommand}\n${resolverCommand}`,
+    );
+
+    const safeDirectoryCommands = steps
+      .map((step) => step.run?.trim() ?? "")
+      .filter((run) => run.includes("safe.directory"));
+    expect(safeDirectoryCommands).toEqual([
+      `${safeDirectoryCommand}\n${resolverCommand}`,
+      'git -c safe.directory="$GITHUB_WORKSPACE" sparse-checkout disable',
+    ]);
+    expect(safeDirectoryCommands.join("\n")).not.toMatch(
+      /safe\.directory\s*=\s*\*/,
+    );
+  });
+
   it.each(Object.keys(SCOPED_JOBS))(
     "%s job の checkout は判定に必要な履歴を取得している",
     (jobName) => {

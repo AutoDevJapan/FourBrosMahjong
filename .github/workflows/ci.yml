@@ -292,7 +292,13 @@ jobs:
           SCOPE_FORCED: ${{ github.event.forced }}
           SCOPE_CHECK_NAME: E2E (Playwright)
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: node .github/scripts/verification-scope.mjs
+        # The resolver itself runs local Git before the materialization step. The
+        # container's run-step HOME does not inherit checkout's Git config, so
+        # allow only this workspace before the resolver's first repository read.
+        # Keep this exact path scoped; never broaden it to a global wildcard.
+        run: |
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          node .github/scripts/verification-scope.mjs
 
       - name: Materialize repository for verification
         if: steps.scope.outputs.setup == 'true'
