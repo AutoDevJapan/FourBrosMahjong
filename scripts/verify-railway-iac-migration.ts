@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, statSync } from "node:fs";
 import { resolve } from "node:path";
 import {
   generatedIacSourceIsSecretSafe,
@@ -8,22 +8,31 @@ import {
 } from "./railway-iac-migration-contract";
 
 const MAX_INPUT_BYTES = 64 * 1_024;
+const MAX_GENERATED_IAC_BYTES = 64 * 1_024;
 const repositoryRoot = process.cwd();
+
+function readBoundedTextFile(filePath: string): string | null {
+  try {
+    const fileStats = statSync(filePath);
+    if (!fileStats.isFile() || fileStats.size > MAX_GENERATED_IAC_BYTES) {
+      return null;
+    }
+    return readFileSync(filePath, "utf8");
+  } catch {
+    return null;
+  }
+}
 
 function localFilesystemEvidence(): RailwayIacFilesystemEvidence {
   const generatedPath = resolve(repositoryRoot, ".railway/railway.ts");
   const legacyPath = resolve(repositoryRoot, "railway.json");
-  const generatedExists = existsSync(generatedPath);
   const legacyExists = existsSync(legacyPath);
-  const generatedSource = generatedExists
-    ? readFileSync(generatedPath, "utf8")
-    : null;
+  const generatedSource = readBoundedTextFile(generatedPath);
   return {
-    generatedIacPath: generatedExists ? ".railway/railway.ts" : null,
-    generatedIacSha256: generatedExists
-      ? createHash("sha256")
-          .update(generatedSource ?? "")
-          .digest("hex")
+    generatedIacPath:
+      generatedSource === null ? null : ".railway/railway.ts",
+    generatedIacSha256: generatedSource !== null
+      ? createHash("sha256").update(generatedSource).digest("hex")
       : null,
     generatedIacSecretSafe:
       generatedSource === null
