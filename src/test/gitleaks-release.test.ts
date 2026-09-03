@@ -1,7 +1,12 @@
+import { spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
+  GITLEAKS_ARCHIVE_MAX_BYTES,
+  GITLEAKS_CHECKSUM_MANIFEST_MAX_BYTES,
+  GITLEAKS_RELEASE_FETCH_TIMEOUT_MS,
+  GITLEAKS_RELEASE_METADATA_MAX_BYTES,
   gitleaksArchiveName,
   gitleaksChecksumAssetName,
   gitleaksReleaseDownloadBaseUrl,
@@ -17,6 +22,10 @@ import {
 const GITLEAKS_WORKFLOW = resolve(
   process.cwd(),
   ".github/workflows/gitleaks.yml",
+);
+const GITLEAKS_RELEASE_SCRIPT = resolve(
+  process.cwd(),
+  ".github/scripts/gitleaks-release.mjs",
 );
 const ARCHIVE = gitleaksArchiveName("8.30.1");
 const CANDIDATE_CHECKSUM_ASSET = gitleaksChecksumAssetName("8.31.0");
@@ -108,11 +117,11 @@ describe("gitleaks release metadata and updater verification", () => {
     const release = releaseFixture();
     const archiveBytes = Buffer.from("reviewed candidate archive");
     const digest = sha256Hex(archiveBytes);
-    const calls: string[] = [];
+    const calls: Array<{ url: string; signal: unknown }> = [];
     const resolved = await resolveGitleaksRelease(release, {
-      fetchImpl: async (input) => {
+      fetchImpl: async (input, init) => {
         const url = String(input);
-        calls.push(url);
+        calls.push({ url, signal: init?.signal });
         if (url.endsWith(CANDIDATE_CHECKSUM_ASSET)) {
           return new Response(`${digest}  ${gitleaksArchiveName("8.31.0")}\n`);
         }
@@ -122,8 +131,101 @@ describe("gitleaks release metadata and updater verification", () => {
 
     expect(resolved.archiveSha256).toBe(digest);
     expect(calls).toHaveLength(2);
-    expect(calls).toContain(resolved.archiveUrl);
-    expect(calls).toContain(resolved.checksumUrl);
+    expect(calls.map(({ url }) => url)).toContain(resolved.archiveUrl);
+    expect(calls.map(({ url }) => url)).toContain(resolved.checksumUrl);
+    expect(calls[1]?.signal).toBe(calls[0]?.signal);
+    expect(calls[0]?.signal).toBeInstanceOf(AbortSignal);
+    expect(GITLEAKS_RELEASE_FETCH_TIMEOUT_MS).toBe(60_000);
+  });
+
+  it.each([
+    ["declared archive response", "archive", GITLEAKS_ARCHIVE_MAX_BYTES + 1],
+    [
+      "declared checksum response",
+      "checksum",
+      GITLEAKS_CHECKSUM_MANIFEST_MAX_BYTES + 1,
+    ],
+  ])(
+    "rejects a %s before buffering it",
+    async (_label, target, declaredLength) => {
+      const release = releaseFixture();
+      const cancel = vi.fn().mockResolvedValue(undefined);
+      const oversized = {
+        ok: true,
+        status: 200,
+        headers: new Headers({ "content-length": String(declaredLength) }),
+        body: { cancel },
+      } as unknown as Response;
+
+      await expect(
+        resolveGitleaksRelease(release, {
+          fetchImpl: async (input) => {
+            const url = String(input);
+            if (
+              (target === "archive" &&
+                url.endsWith(CANDIDATE_CHECKSUM_ASSET)) ||
+              (target === "checksum" && !url.endsWith(CANDIDATE_CHECKSUM_ASSET))
+            ) {
+              return new Response("small response");
+            }
+            return oversized;
+          },
+        }),
+      ).rejects.toThrow(/too large/);
+      expect(cancel).toHaveBeenCalledOnce();
+    },
+  );
+
+  it("cancels a chunked checksum response when it crosses the byte bound", async () => {
+    const release = releaseFixture();
+    const cancel = vi.fn().mockResolvedValue(undefined);
+    let reads = 0;
+    const reader = {
+      read: vi.fn(async () => {
+        reads += 1;
+        if (reads === 1) {
+          return {
+            done: false,
+            value: new Uint8Array(GITLEAKS_CHECKSUM_MANIFEST_MAX_BYTES),
+          };
+        }
+        if (reads === 2) return { done: false, value: new Uint8Array(1) };
+        return { done: true, value: undefined };
+      }),
+      cancel,
+      releaseLock: vi.fn(),
+    };
+    const oversized = {
+      ok: true,
+      status: 200,
+      headers: new Headers(),
+      body: { getReader: () => reader },
+    } as unknown as Response;
+
+    await expect(
+      resolveGitleaksRelease(release, {
+        fetchImpl: async (input) =>
+          String(input).endsWith(CANDIDATE_CHECKSUM_ASSET)
+            ? oversized
+            : new Response(Buffer.from("small archive")),
+      }),
+    ).rejects.toThrow(/too large/);
+    expect(cancel).toHaveBeenCalledOnce();
+    expect(reader.releaseLock).toHaveBeenCalledOnce();
+  });
+
+  it("rejects oversized release metadata before parsing it", () => {
+    const result = spawnSync(
+      process.execPath,
+      [GITLEAKS_RELEASE_SCRIPT, "--resolve-release"],
+      {
+        input: "x".repeat(GITLEAKS_RELEASE_METADATA_MAX_BYTES + 1),
+        encoding: "utf8",
+      },
+    );
+
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain("release metadata input is too large");
   });
 
   it("does not create an update candidate when download verification fails", async () => {

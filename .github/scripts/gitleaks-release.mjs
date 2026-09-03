@@ -10,6 +10,15 @@ const GITLEAKS_RELEASE_PAGE_ROOT =
   "https://github.com/gitleaks/gitleaks/releases/tag";
 const SHA256_PATTERN = /^[0-9a-f]{64}$/i;
 
+/** Abort a stalled upstream request before the updater consumes the whole job. */
+export const GITLEAKS_RELEASE_FETCH_TIMEOUT_MS = 60_000;
+/** Bound the release JSON piped from `gh api` before parsing it. */
+export const GITLEAKS_RELEASE_METADATA_MAX_BYTES = 1 * 1024 * 1024;
+/** Checksum manifests are text metadata and should stay small. */
+export const GITLEAKS_CHECKSUM_MANIFEST_MAX_BYTES = 1 * 1024 * 1024;
+/** Allow room for a future binary while bounding untrusted archive input. */
+export const GITLEAKS_ARCHIVE_MAX_BYTES = 128 * 1024 * 1024;
+
 /** @typedef {{name?: unknown, browser_download_url?: unknown}} GitleaksAsset */
 /** @typedef {{tag_name?: unknown, draft?: unknown, prerelease?: unknown, assets?: unknown}} GitleaksRelease */
 
@@ -219,12 +228,101 @@ export function verifyPinnedGitleaksArchive(input) {
   return { actualSha256, pinnedSha256, upstreamSha256 };
 }
 
+/** @param {Response | undefined} response */
+async function cancelResponseBody(response) {
+  try {
+    await response?.body?.cancel?.();
+  } catch {
+    // Preserve the original response or stream failure.
+  }
+}
+
 /** @param {Response} response @param {string} url */
 async function requireResponse(response, url) {
-  if (!response.ok) {
-    throw new Error(`download failed for ${url}: HTTP ${response.status}`);
+  if (!response?.ok) {
+    await cancelResponseBody(response);
+    throw new Error(`download failed for ${url}: HTTP ${response?.status}`);
   }
   return response;
+}
+
+/**
+ * Read a release response with a fixed byte budget. `Response.text()` and
+ * `Response.arrayBuffer()` buffer the complete upstream body before the
+ * checksum is checked, so a malformed release could otherwise exhaust the
+ * updater runner before verification runs.
+ *
+ * @param {Response} response
+ * @param {string} url
+ * @param {number} maxBytes
+ * @returns {Promise<Buffer>}
+ */
+async function readBoundedResponse(response, url, maxBytes) {
+  await requireResponse(response, url);
+
+  let contentLength;
+  try {
+    contentLength = response.headers?.get?.("content-length");
+  } catch {
+    await cancelResponseBody(response);
+    throw new Error(`download response headers are invalid for ${url}`);
+  }
+  if (contentLength !== null && contentLength !== undefined) {
+    const declaredLength = Number(contentLength);
+    if (
+      !Number.isSafeInteger(declaredLength) ||
+      declaredLength < 0 ||
+      declaredLength > maxBytes
+    ) {
+      await cancelResponseBody(response);
+      throw new Error(`download response is too large or invalid for ${url}`);
+    }
+  }
+
+  if (!response.body) {
+    throw new Error(`download response body is unavailable for ${url}`);
+  }
+
+  let reader;
+  try {
+    reader = response.body.getReader();
+  } catch {
+    await cancelResponseBody(response);
+    throw new Error(`download response body is unavailable for ${url}`);
+  }
+
+  /** @type {Uint8Array[]} */
+  const chunks = [];
+  let totalBytes = 0;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      if (!(value instanceof Uint8Array)) {
+        throw new Error(`download response body is invalid for ${url}`);
+      }
+      totalBytes += value.byteLength;
+      if (!Number.isSafeInteger(totalBytes) || totalBytes > maxBytes) {
+        throw new Error(`download response is too large for ${url}`);
+      }
+      chunks.push(value);
+    }
+  } catch (error) {
+    try {
+      await reader.cancel();
+    } catch {
+      // Preserve the original response or stream failure.
+    }
+    throw error;
+  } finally {
+    try {
+      reader.releaseLock();
+    } catch {
+      // Preserve the original response or stream failure.
+    }
+  }
+
+  return Buffer.concat(chunks, totalBytes);
 }
 
 /**
@@ -242,18 +340,24 @@ export async function resolveGitleaksRelease(release, options = {}) {
     throw new Error("fetch is unavailable for gitleaks release verification");
   }
 
+  const signal = AbortSignal.timeout(GITLEAKS_RELEASE_FETCH_TIMEOUT_MS);
   const [checksumResponse, archiveResponse] = await Promise.all([
-    fetchImpl(metadata.checksumUrl),
-    fetchImpl(metadata.archiveUrl),
+    fetchImpl(metadata.checksumUrl, { signal }),
+    fetchImpl(metadata.archiveUrl, { signal }),
   ]);
-  const checksumText = await requireResponse(
-    checksumResponse,
-    metadata.checksumUrl,
-  ).then((response) => response.text());
-  const archiveBytes = await requireResponse(
-    archiveResponse,
-    metadata.archiveUrl,
-  ).then((response) => response.arrayBuffer());
+  const [checksumBytes, archiveBytes] = await Promise.all([
+    readBoundedResponse(
+      checksumResponse,
+      metadata.checksumUrl,
+      GITLEAKS_CHECKSUM_MANIFEST_MAX_BYTES,
+    ),
+    readBoundedResponse(
+      archiveResponse,
+      metadata.archiveUrl,
+      GITLEAKS_ARCHIVE_MAX_BYTES,
+    ),
+  ]);
+  const checksumText = checksumBytes.toString("utf8");
   const manifestSha256 = parseGitleaksChecksumManifest(
     checksumText,
     metadata.archive,
@@ -357,15 +461,41 @@ function outputLines(input) {
 
 /** @param {string} input */
 async function readStdin(input = "") {
-  if (input !== "") return input;
+  if (input !== "") {
+    if (
+      Buffer.byteLength(input, "utf8") > GITLEAKS_RELEASE_METADATA_MAX_BYTES
+    ) {
+      throw new Error("release metadata input is too large");
+    }
+    return input;
+  }
   return new Promise((resolve, reject) => {
     let source = "";
+    let totalBytes = 0;
+    let settled = false;
+    /** @param {unknown} error */
+    const fail = (error) => {
+      if (settled) return;
+      settled = true;
+      process.stdin.destroy();
+      reject(error);
+    };
     process.stdin.setEncoding("utf8");
     process.stdin.on("data", (chunk) => {
+      if (settled) return;
+      totalBytes += Buffer.byteLength(chunk, "utf8");
+      if (totalBytes > GITLEAKS_RELEASE_METADATA_MAX_BYTES) {
+        fail(new Error("release metadata input is too large"));
+        return;
+      }
       source += chunk;
     });
-    process.stdin.on("end", () => resolve(source));
-    process.stdin.on("error", reject);
+    process.stdin.on("end", () => {
+      if (settled) return;
+      settled = true;
+      resolve(source);
+    });
+    process.stdin.on("error", fail);
   });
 }
 

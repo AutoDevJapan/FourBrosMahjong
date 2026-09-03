@@ -1,6 +1,10 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
+import {
+  GITLEAKS_ARCHIVE_MAX_BYTES,
+  GITLEAKS_CHECKSUM_MANIFEST_MAX_BYTES,
+} from "../../.github/scripts/gitleaks-release.mjs";
 import { versionFromGitleaksReleaseTag } from "../../.github/scripts/gitleaks-version.mjs";
 
 const GITLEAKS_WORKFLOW = resolve(
@@ -42,6 +46,18 @@ describe("gitleaks binary integrity gate", () => {
     expect(workflow).toContain("sha256sum --check --strict -");
     expect(workflow).toContain(
       "checksum manifest must contain exactly one entry",
+    );
+
+    const downloads = workflow
+      .split("\n")
+      .map((line) => line.trim())
+      .filter((line) => line.startsWith("curl "));
+    expect(downloads).toHaveLength(2);
+    expect(downloads[0]).toContain(
+      `--connect-timeout 10 --max-time 60 --max-filesize ${GITLEAKS_CHECKSUM_MANIFEST_MAX_BYTES}`,
+    );
+    expect(downloads[1]).toContain(
+      `--connect-timeout 10 --max-time 60 --max-filesize ${GITLEAKS_ARCHIVE_MAX_BYTES}`,
     );
   });
 });
