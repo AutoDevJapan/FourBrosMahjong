@@ -227,6 +227,12 @@ function withTemporaryRepository<T>(callback: (rootDirectory: string) => T): T {
       join(rootDirectory, "railway.json"),
       readFileSync(resolve(process.cwd(), "railway.json")),
     );
+    const legacyFixturePath = join(rootDirectory, RAILWAY_LEGACY_FIXTURE_PATH);
+    mkdirSync(dirname(legacyFixturePath), { recursive: true });
+    writeFileSync(
+      legacyFixturePath,
+      readFileSync(resolve(process.cwd(), RAILWAY_LEGACY_FIXTURE_PATH)),
+    );
     return callback(rootDirectory);
   } finally {
     rmSync(rootDirectory, { force: true, recursive: true });
@@ -293,13 +299,12 @@ describe("Railway IaC parity snapshot contract (#742)", () => {
     });
 
     const evidence = validEvidence();
-    evidence.ownershipCutover.legacyFileSha256 =
-      filesystem.legacyRepositoryFileSha256;
+    evidence.ownershipCutover.legacyFileSha256 = filesystem.legacyFixtureSha256;
     expect(filesystem).toMatchObject({
       generatedIacPath: null,
       generatedIacSha256: null,
       generatedIacSecretSafe: null,
-      legacyRepositoryFilePresent: true,
+      legacyFixturePresent: true,
     });
     expect(
       validateRailwayIacMigrationEvidence(evidence, filesystem, NOW).reasons,
@@ -409,8 +414,8 @@ describe("Railway IaC parity snapshot contract (#742)", () => {
     });
 
     expect(filesystem).toMatchObject({
-      legacyRepositoryFilePresent: false,
-      legacyRepositoryFileSha256: null,
+      currentRepositoryFilePresent: false,
+      currentRepositoryFileSha256: null,
     });
   });
 
@@ -421,8 +426,8 @@ describe("Railway IaC parity snapshot contract (#742)", () => {
     );
 
     expect(filesystem).toMatchObject({
-      legacyRepositoryFilePresent: true,
-      legacyRepositoryFileSha256: createHash("sha256")
+      currentRepositoryFilePresent: true,
+      currentRepositoryFileSha256: createHash("sha256")
         .update(expected)
         .digest("hex"),
     });
@@ -469,8 +474,8 @@ describe("Railway IaC parity snapshot contract (#742)", () => {
       return localFilesystemEvidence(rootDirectory);
     });
 
-    expect(filesystem.legacyRepositoryFilePresent).toBe(true);
-    expect(filesystem.legacyRepositoryFileSha256).toBe(
+    expect(filesystem.currentRepositoryFilePresent).toBe(true);
+    expect(filesystem.currentRepositoryFileSha256).toBe(
       createHash("sha256")
         .update(Buffer.alloc(MAX_LEGACY_CONFIG_BYTES, "x"))
         .digest("hex"),
