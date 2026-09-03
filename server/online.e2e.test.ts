@@ -935,6 +935,12 @@ describe("online multiplayer local E2E (#629)", () => {
       allowedOrigins: `${TEST_ORIGIN},${TEST_ORIGIN}/path`,
       handshakeOrigin: TEST_ORIGIN,
     },
+    { allowedOrigins: `${TEST_ORIGIN},`, handshakeOrigin: TEST_ORIGIN },
+    { allowedOrigins: `,${TEST_ORIGIN}`, handshakeOrigin: TEST_ORIGIN },
+    {
+      allowedOrigins: `${TEST_ORIGIN},,${TEST_ORIGIN}`,
+      handshakeOrigin: TEST_ORIGIN,
+    },
   ])(
     "rejects a WebSocket handshake for invalid Origin allowlist $allowedOrigins",
     async ({ allowedOrigins, handshakeOrigin }) => {

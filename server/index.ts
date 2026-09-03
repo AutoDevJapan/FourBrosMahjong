@@ -140,8 +140,7 @@ export function createOnlineServer(
   function allowedOrigins(): readonly string[] {
     return (environment.ALLOWED_ORIGINS ?? "")
       .split(",")
-      .map((origin) => origin.trim())
-      .filter(Boolean);
+      .map((origin) => origin.trim());
   }
 
   function canonicalAllowedOrigins(): ReadonlySet<string> | null {

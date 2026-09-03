@@ -170,6 +170,9 @@ describe("createOnlineServer lifecycle", () => {
       configuredOrigins: `${ORIGIN},${ORIGIN}/path`,
       handshakeOrigin: ORIGIN,
     },
+    { configuredOrigins: `${ORIGIN},`, handshakeOrigin: ORIGIN },
+    { configuredOrigins: `,${ORIGIN}`, handshakeOrigin: ORIGIN },
+    { configuredOrigins: `${ORIGIN},,${ORIGIN}`, handshakeOrigin: ORIGIN },
   ])(
     "reports not ready and rejects a non-canonical Origin allowlist: $configuredOrigins",
     async ({ configuredOrigins, handshakeOrigin }) => {
