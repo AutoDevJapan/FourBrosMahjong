@@ -5,6 +5,8 @@ import { parse } from "yaml";
 import {
   CI_PAGE_SIZE,
   CODEQL_CHECK_NAMES,
+  GITHUB_API_RESPONSE_MAX_BYTES,
+  githubApi,
   hasTrustedCiRun,
   hasTrustedReleaseEvidence,
   MAX_CI_PAGES,
@@ -429,6 +431,105 @@ describe("trusted CI evidence guard (#507)", () => {
     ).rejects.toThrow(/pagination safety limit/);
     expect(api).toHaveBeenCalledTimes(MAX_CI_PAGES);
   });
+});
+
+describe("GitHub API response body guard (#810)", () => {
+  it("parses a bounded response body without calling Response.json", async () => {
+    const response = new Response('{"ok":true}', { status: 200 });
+    const json = vi.spyOn(response, "json");
+    const fetchMock = vi.fn().mockResolvedValue(response);
+    vi.stubEnv("GITHUB_TOKEN", "test-token");
+    vi.stubGlobal("fetch", fetchMock);
+    try {
+      await expect(githubApi("/test")).resolves.toEqual({ ok: true });
+      expect(json).not.toHaveBeenCalled();
+    } finally {
+      vi.unstubAllGlobals();
+      vi.unstubAllEnvs();
+    }
+  });
+
+  it("cancels a response rejected by its declared byte length", async () => {
+    const cancel = vi.fn().mockResolvedValue(undefined);
+    const body = new ReadableStream({ cancel });
+    const response = {
+      ok: true,
+      status: 200,
+      headers: new Headers({
+        "content-length": String(GITHUB_API_RESPONSE_MAX_BYTES + 1),
+      }),
+      body,
+    };
+    const fetchMock = vi.fn().mockResolvedValue(response);
+    vi.stubEnv("GITHUB_TOKEN", "test-token");
+    vi.stubGlobal("fetch", fetchMock);
+    try {
+      await expect(githubApi("/test")).rejects.toThrow(/too large/);
+      expect(cancel).toHaveBeenCalledOnce();
+    } finally {
+      vi.unstubAllGlobals();
+      vi.unstubAllEnvs();
+    }
+  });
+
+  it("cancels non-success responses without reflecting body details", async () => {
+    const secret = "token=release-body-secret";
+    const cancel = vi.fn().mockRejectedValue(new Error(secret));
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 403,
+      body: { cancel },
+    });
+    vi.stubEnv("GITHUB_TOKEN", "test-token");
+    vi.stubGlobal("fetch", fetchMock);
+    try {
+      const rejection = await githubApi("/test").catch((error: unknown) =>
+        String(error),
+      );
+      expect(rejection).toBe("Error: GitHub API /test -> 403");
+      expect(rejection).not.toContain(secret);
+      expect(cancel).toHaveBeenCalledOnce();
+    } finally {
+      vi.unstubAllGlobals();
+      vi.unstubAllEnvs();
+    }
+  });
+
+  it.each([
+    [
+      "oversized",
+      `{"secret":"release-body-secret${"x".repeat(GITHUB_API_RESPONSE_MAX_BYTES)}"}`,
+    ],
+    ["malformed", '{"secret":"release-body-secret'],
+  ])(
+    "keeps %s response bodies fail-closed and out of diagnostics",
+    async (_label, body) => {
+      const fetchMock = vi
+        .fn()
+        .mockResolvedValueOnce(new Response(body, { status: 200 }))
+        .mockResolvedValueOnce(new Response(body, { status: 200 }));
+      vi.stubEnv("GITHUB_TOKEN", "test-token");
+      vi.stubGlobal("fetch", fetchMock);
+      try {
+        const directRejection = await githubApi("/test").catch(
+          (error: unknown) => String(error),
+        );
+        expect(directRejection).toMatch(/response body/);
+        expect(directRejection).not.toContain("release-body-secret");
+
+        const rejection = await hasTrustedReleaseEvidence({
+          repo: "owner/repo",
+          sha: SHA,
+          api: githubApi,
+        }).catch((error: unknown) => String(error));
+        expect(rejection).toBe("Error: trusted CI evidence is unavailable");
+        expect(rejection).not.toContain("release-body-secret");
+      } finally {
+        vi.unstubAllGlobals();
+        vi.unstubAllEnvs();
+      }
+    },
+  );
 });
 
 describe("trusted release security evidence guard (#748)", () => {

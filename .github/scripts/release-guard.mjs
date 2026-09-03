@@ -3,6 +3,8 @@ import { readFileSync } from "node:fs";
 import { pathToFileURL } from "node:url";
 
 export const GITHUB_API_TIMEOUT_MS = 15_000;
+/** Maximum GitHub API response bytes retained before JSON parsing. */
+export const GITHUB_API_RESPONSE_MAX_BYTES = 1 * 1024 * 1024;
 export const CI_PAGE_SIZE = 100;
 export const MAX_CI_PAGES = 10;
 export const MAX_CODEQL_CANDIDATES = 10;
@@ -467,6 +469,92 @@ export async function hasTrustedReleaseEvidence({ repo, sha, api }) {
   }
 }
 
+/** @param {Response} response */
+async function cancelResponseBody(response) {
+  try {
+    await response.body?.cancel?.();
+  } catch {
+    // Keep the original API failure as the useful fail-closed diagnostic.
+  }
+}
+
+/**
+ * Read a GitHub API JSON response with a fixed byte budget. Response.json()
+ * buffers an unbounded body before parsing, which is unsafe for endpoints that
+ * can contain attacker-controlled fields such as patch text.
+ * @param {Response} response
+ * @param {string} path
+ * @returns {Promise<unknown>}
+ */
+async function readBoundedApiResponse(response, path) {
+  let contentLength;
+  try {
+    contentLength = response.headers?.get?.("content-length");
+  } catch {
+    await cancelResponseBody(response);
+    throw new Error(`GitHub API ${path} response body is invalid`);
+  }
+  if (contentLength !== null && contentLength !== undefined) {
+    const declaredLength = Number(contentLength);
+    if (
+      !Number.isSafeInteger(declaredLength) ||
+      declaredLength < 0 ||
+      declaredLength > GITHUB_API_RESPONSE_MAX_BYTES
+    ) {
+      await cancelResponseBody(response);
+      throw new Error(
+        `GitHub API ${path} response body is too large or invalid`,
+      );
+    }
+  }
+
+  if (!response.body)
+    throw new Error(`GitHub API ${path} response body is unavailable`);
+
+  let reader;
+  try {
+    reader = response.body.getReader();
+  } catch {
+    throw new Error(`GitHub API ${path} response body is unavailable`);
+  }
+  /** @type {Uint8Array[]} */
+  const chunks = [];
+  let totalBytes = 0;
+  let bodyError = "is invalid";
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      if (!(value instanceof Uint8Array)) throw new Error();
+      totalBytes += value.byteLength;
+      if (totalBytes > GITHUB_API_RESPONSE_MAX_BYTES) {
+        bodyError = "is too large";
+        throw new Error();
+      }
+      chunks.push(value);
+    }
+  } catch {
+    try {
+      await reader.cancel();
+    } catch {
+      // Preserve the fixed body diagnostic if stream cancellation fails.
+    }
+    throw new Error(`GitHub API ${path} response body ${bodyError}`);
+  } finally {
+    try {
+      reader.releaseLock();
+    } catch {
+      // Preserve the body diagnostic if the stream is already released.
+    }
+  }
+
+  try {
+    return JSON.parse(Buffer.concat(chunks).toString("utf8"));
+  } catch {
+    throw new Error(`GitHub API ${path} response body is invalid`);
+  }
+}
+
 /** @param {string} path */
 export async function githubApi(path) {
   const token = process.env.GITHUB_TOKEN;
@@ -480,8 +568,11 @@ export async function githubApi(path) {
       "x-github-api-version": "2022-11-28",
     },
   });
-  if (!response.ok) throw new Error(`GitHub API ${path} -> ${response.status}`);
-  return response.json();
+  if (!response.ok) {
+    await cancelResponseBody(response);
+    throw new Error(`GitHub API ${path} -> ${response.status}`);
+  }
+  return readBoundedApiResponse(response, path);
 }
 
 /**
