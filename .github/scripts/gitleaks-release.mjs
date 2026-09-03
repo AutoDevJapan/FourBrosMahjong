@@ -373,13 +373,22 @@ export async function resolveGitleaksRelease(release, options = {}) {
     controller.signal,
     AbortSignal.timeout(GITLEAKS_RELEASE_FETCH_TIMEOUT_MS),
   ]);
-  const fetches = [
-    fetchImpl(metadata.checksumUrl, { signal }),
-    fetchImpl(metadata.archiveUrl, { signal }),
-  ];
+  /** @type {Promise<Response>[]} */
+  let fetches = [];
   /** @type {Promise<Buffer>[]} */
   let reads = [];
   try {
+    /** @param {string} url @returns {Promise<Response>} */
+    const fetchResponse = (url) =>
+      Promise.resolve()
+        .then(() => fetchImpl(url, { signal }))
+        // Reject non-2xx responses as soon as either fetch resolves, rather
+        // than waiting for the sibling network operation to finish.
+        .then((response) => requireResponse(response, url));
+    fetches = [
+      fetchResponse(metadata.checksumUrl),
+      fetchResponse(metadata.archiveUrl),
+    ];
     const [checksumResponse, archiveResponse] = await Promise.all(fetches);
     reads = [
       readBoundedResponse(

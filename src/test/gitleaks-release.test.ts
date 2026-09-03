@@ -256,6 +256,41 @@ describe("gitleaks release metadata and updater verification", () => {
     expect(cancel).toHaveBeenCalledOnce();
   });
 
+  it("aborts a pending sibling when the other download returns HTTP error", async () => {
+    const release = releaseFixture();
+    const signals: Array<AbortSignal | null | undefined> = [];
+    const cancel = vi.fn().mockResolvedValue(undefined);
+    const unavailable = {
+      ok: false,
+      status: 503,
+      body: { cancel },
+    } as unknown as Response;
+
+    await expect(
+      resolveGitleaksRelease(release, {
+        fetchImpl: (input, init) => {
+          const signal = init?.signal;
+          signals.push(signal);
+          if (String(input).endsWith(CANDIDATE_CHECKSUM_ASSET)) {
+            return Promise.resolve(unavailable);
+          }
+          return new Promise((_, reject) => {
+            signal?.addEventListener(
+              "abort",
+              () => reject(new Error("sibling fetch aborted")),
+              { once: true },
+            );
+          });
+        },
+      }),
+    ).rejects.toThrow("HTTP 503");
+
+    expect(signals).toHaveLength(2);
+    expect(signals[0]).toBe(signals[1]);
+    expect(signals[0]).toHaveProperty("aborted", true);
+    expect(cancel).toHaveBeenCalledOnce();
+  });
+
   it("rejects oversized release metadata before parsing it", () => {
     const result = spawnSync(
       process.execPath,
