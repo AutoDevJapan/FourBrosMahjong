@@ -22,7 +22,7 @@ import type {
   OnlineHostTransitionReason,
 } from "../src/domain/online/types";
 import { createTile, type Suit } from "../src/domain/tiles/tile";
-import { sanitizePlayerName } from "../src/lib/playerName";
+import { isValidPlayerName, sanitizePlayerName } from "../src/lib/playerName";
 import {
   normalizeRoomCode,
   ROOM_CODE_ALPHABET,
@@ -228,7 +228,9 @@ export function normalizePlayerName(
   // appears just beyond its bounded code-unit prefix. Never let that malformed
   // result cross the online snapshot boundary: clients correctly reject an
   // empty player name and would then lose room synchronization.
-  return sanitized === null || sanitized === "" ? fallback : sanitized;
+  return sanitized === null || !isValidPlayerName(sanitized)
+    ? fallback
+    : sanitized;
 }
 
 function namesOf(room: Room): PlayerNames {
