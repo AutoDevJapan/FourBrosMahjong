@@ -768,28 +768,24 @@ export function generatedIacSourceIsSecretSafe(source: string): boolean {
     while (ts.isParenthesizedExpression(current)) current = current.expression;
     return current;
   };
-  const containsStringLiteral = (node: ts.Node): boolean => {
-    if (ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node)) {
-      return true;
-    }
-    let found = false;
-    ts.forEachChild(node, (child) => {
-      if (!found && containsStringLiteral(child)) found = true;
-    });
-    return found;
+  const isStaticPrimitiveWithoutString = (node: ts.Expression): boolean => {
+    const unwrapped = unwrapParenthesizedExpression(node);
+    return (
+      ts.isNumericLiteral(unwrapped) ||
+      unwrapped.kind === ts.SyntaxKind.TrueKeyword ||
+      unwrapped.kind === ts.SyntaxKind.FalseKeyword ||
+      unwrapped.kind === ts.SyntaxKind.NullKeyword
+    );
   };
   const secretLikeValueIsStaticSafe = (node: ts.Expression): boolean => {
     const unwrapped = unwrapParenthesizedExpression(node);
-    if (
-      ts.isCallExpression(unwrapped) &&
-      ts.isIdentifier(unwrapped.expression)
-    ) {
-      return (
-        isPreserveCall(unwrapped) ||
-        (unwrapped.expression.text === "ref" && refCallIsSafe(unwrapped))
-      );
-    }
-    return !containsStringLiteral(unwrapped);
+    // Sensitive fields may only receive values whose provenance is explicit.
+    // In particular, an Identifier is never safe here: resolving aliases from
+    // arbitrary declarations would make a string-only scan fail open.
+    return (
+      isAllowedVariableValue(unwrapped) ||
+      isStaticPrimitiveWithoutString(unwrapped)
+    );
   };
   const allowedVariableValueNodes = new Set<ts.Node>();
   const collectAllowedVariableValues = (node: ts.Node): void => {
@@ -913,6 +909,22 @@ export function generatedIacSourceIsSecretSafe(source: string): boolean {
       ts.isPropertyAssignment(node) &&
       secretLikePropertyName.test(propertyNameText(node.name) ?? "") &&
       !secretLikeValueIsStaticSafe(node.initializer)
+    ) {
+      safe = false;
+      return;
+    }
+    if (
+      ts.isShorthandPropertyAssignment(node) &&
+      secretLikePropertyName.test(node.name.text)
+    ) {
+      safe = false;
+      return;
+    }
+    if (
+      (ts.isMethodDeclaration(node) ||
+        ts.isGetAccessorDeclaration(node) ||
+        ts.isSetAccessorDeclaration(node)) &&
+      secretLikePropertyName.test(propertyNameText(node.name) ?? "")
     ) {
       safe = false;
       return;
