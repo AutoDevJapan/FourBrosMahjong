@@ -189,6 +189,12 @@ export const SCOPE_OUTPUT_KEYS = /** @type {const} */ ([
 /** API / ref 取得が job 全体の timeout まで居座らないための上限。 */
 export const EVIDENCE_IO_TIMEOUT_MS = 15_000;
 
+/** 同名 check run から Actions run を引く際の一意な API 呼び出し数上限。 */
+export const CHECK_RUN_EVIDENCE_MAX_LOOKUPS = 16;
+
+/** 同名 check run の Actions run 照合に使う累積時間上限。 */
+export const CHECK_RUN_EVIDENCE_TIMEOUT_MS = EVIDENCE_IO_TIMEOUT_MS;
+
 /** GitHub API response を JSON 化する前に保持できる最大サイズ。 */
 export const GITHUB_API_RESPONSE_MAX_BYTES = 1 * 1024 * 1024;
 
@@ -201,6 +207,33 @@ const COMPARE_FILES_MAX_PAGES = 3;
 /** 成功 check をこのワークフローの PR run に束縛する。 */
 const TRUSTED_CHECK_APP = "github-actions";
 const TRUSTED_WORKFLOW_PATH = ".github/workflows/ci.yml";
+
+/**
+ * @template T
+ * @param {() => Promise<T>} operation
+ * @param {number} timeoutMs
+ * @returns {Promise<T>}
+ */
+function withTimeout(operation, timeoutMs) {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(
+      () => reject(new Error("evidence lookup timed out")),
+      timeoutMs,
+    );
+    Promise.resolve()
+      .then(operation)
+      .then(
+        (value) => {
+          clearTimeout(timer);
+          resolve(value);
+        },
+        (error) => {
+          clearTimeout(timer);
+          reject(error);
+        },
+      );
+  });
+}
 
 /**
  * この PR / push が持ち込んだ変更ファイルを取得する。
@@ -471,20 +504,43 @@ export async function resolvePostMergeEvidence({
   // details URL から Actions run を引き、その run がこの workflow の pull_request 実行で
   // 同じ head SHA を検証したことまで確認する。同じ SHA にはマージ後 push の同名 check も
   // 共存しうるため、それは候補から除外し、eligible な PR run が 1 本以上成功していることを
-  // 証拠とする。
+  // 証拠とする。check run の履歴は同じ Actions run を重複して含み得るため、run ID ごとに
+  // 応答を再利用する。API が遅延・大量候補・不正な応答で job を占有し続けても、証拠を
+  // 確認できない場合は従来どおり fail-closed (スキップしない) とする。
+  const lookupDeadline = Date.now() + CHECK_RUN_EVIDENCE_TIMEOUT_MS;
+  let workflowRunLookups = 0;
   let successfulEligibleRun = false;
+  /** @type {Map<string, any>} */
+  const workflowRunsById = new Map();
   for (const run of own) {
     if (run?.app?.slug !== TRUSTED_CHECK_APP) continue;
     const match = String(run?.details_url ?? "").match(
       /\/actions\/runs\/(\d+)(?:\/job\/\d+)?(?:[/?#]|$)/,
     );
     if (!match) return { skip: false, reason: "own-check-run-not-successful" };
+    const runId = match[1];
     /** @type {any} */
     let workflowRun;
-    try {
-      workflowRun = await api(`/repos/${repo}/actions/runs/${match[1]}`);
-    } catch {
-      return { skip: false, reason: "check-runs-api-failed" };
+    if (workflowRunsById.has(runId)) {
+      workflowRun = workflowRunsById.get(runId);
+    } else {
+      if (workflowRunLookups >= CHECK_RUN_EVIDENCE_MAX_LOOKUPS) {
+        return { skip: false, reason: "own-check-run-not-successful" };
+      }
+      const remainingMs = lookupDeadline - Date.now();
+      if (remainingMs <= 0) {
+        return { skip: false, reason: "check-runs-api-failed" };
+      }
+      workflowRunLookups += 1;
+      try {
+        workflowRun = await withTimeout(
+          () => api(`/repos/${repo}/actions/runs/${runId}`),
+          remainingMs,
+        );
+      } catch {
+        return { skip: false, reason: "check-runs-api-failed" };
+      }
+      workflowRunsById.set(runId, workflowRun);
     }
     const ineligible =
       workflowRun?.event !== "pull_request" ||
@@ -495,7 +551,10 @@ export async function resolvePostMergeEvidence({
       run?.conclusion === "success" &&
       workflowRun?.conclusion === "success"
     ) {
+      // A successful eligible run is decisive: later same-named checks cannot
+      // make the existing any-success evidence less trustworthy.
       successfulEligibleRun = true;
+      break;
     }
   }
   if (!successfulEligibleRun)

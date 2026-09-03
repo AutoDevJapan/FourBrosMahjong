@@ -12,6 +12,8 @@ import { dirname, join, relative, resolve, sep } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { parse } from "yaml";
 import {
+  CHECK_RUN_EVIDENCE_MAX_LOOKUPS,
+  CHECK_RUN_EVIDENCE_TIMEOUT_MS,
   changedPaths,
   changedPathsFromApi,
   classifyPath,
@@ -2358,6 +2360,157 @@ describe("マージ後 push のスキップ前提を実行時に検証する (#4
       skip: true,
       reason: "verified-by-merged-pull-request",
     });
+  });
+
+  it("成功したPR checkを見つけたら後続の同名runを照会しない", async () => {
+    const paths: string[] = [];
+    const dependencies = happyPath({
+      apiError: "/actions/runs/456",
+      checkRuns: {
+        check_runs: [
+          {
+            name: CHECK,
+            conclusion: "success",
+            app: { slug: "github-actions" },
+            details_url: "https://github.com/o/r/actions/runs/123/job/1",
+          },
+          {
+            name: CHECK,
+            conclusion: "success",
+            app: { slug: "github-actions" },
+            details_url: "https://github.com/o/r/actions/runs/456/job/2",
+          },
+        ],
+      },
+    });
+    const result = await resolvePostMergeEvidence({
+      repo: REPO,
+      sha: SHA,
+      before: BEFORE,
+      forced: false,
+      branch: "main",
+      checkName: CHECK,
+      api: async (path) => {
+        paths.push(path);
+        return dependencies.api(path);
+      },
+    });
+
+    expect(result).toEqual({
+      skip: true,
+      reason: "verified-by-merged-pull-request",
+    });
+    expect(paths).not.toContain(`/repos/${REPO}/actions/runs/456`);
+  });
+
+  it("同じActions run IDは一度だけ照会し、重複checkの成功判定は保持する", async () => {
+    const paths: string[] = [];
+    const dependencies = happyPath({
+      checkRuns: {
+        check_runs: [
+          {
+            name: CHECK,
+            conclusion: "failure",
+            app: { slug: "github-actions" },
+            details_url: "https://github.com/o/r/actions/runs/123/job/1",
+          },
+          {
+            name: CHECK,
+            conclusion: "success",
+            app: { slug: "github-actions" },
+            details_url: "https://github.com/o/r/actions/runs/123/job/2",
+          },
+        ],
+      },
+    });
+    const result = await resolvePostMergeEvidence({
+      repo: REPO,
+      sha: SHA,
+      before: BEFORE,
+      forced: false,
+      branch: "main",
+      checkName: CHECK,
+      api: async (path) => {
+        paths.push(path);
+        return dependencies.api(path);
+      },
+    });
+
+    expect(result.skip).toBe(true);
+    expect(
+      paths.filter((path) => path === `/repos/${REPO}/actions/runs/123`),
+    ).toHaveLength(1);
+  });
+
+  it("Actions run照会の件数上限を超えた未確認証拠はスキップに使わない", async () => {
+    const paths: string[] = [];
+    const dependencies = happyPath({
+      checkRuns: {
+        check_runs: Array.from(
+          { length: CHECK_RUN_EVIDENCE_MAX_LOOKUPS + 1 },
+          (_, index) => ({
+            name: CHECK,
+            conclusion: "failure",
+            app: { slug: "github-actions" },
+            details_url: `https://github.com/o/r/actions/runs/${1000 + index}/job/1`,
+          }),
+        ),
+      },
+      workflowRun: {
+        event: "push",
+        path: ".github/workflows/ci.yml",
+        head_sha: HEAD,
+        conclusion: "failure",
+      },
+    });
+    const result = await resolvePostMergeEvidence({
+      repo: REPO,
+      sha: SHA,
+      before: BEFORE,
+      forced: false,
+      branch: "main",
+      checkName: CHECK,
+      api: async (path) => {
+        paths.push(path);
+        return dependencies.api(path);
+      },
+    });
+
+    expect(result).toEqual({
+      skip: false,
+      reason: "own-check-run-not-successful",
+    });
+    expect(
+      paths.filter((path) => /\/actions\/runs\/\d+$/.test(path)),
+    ).toHaveLength(CHECK_RUN_EVIDENCE_MAX_LOOKUPS);
+  });
+
+  it("Actions run照会の累積timeoutで応答しないAPIをfail-closedする", async () => {
+    vi.useFakeTimers();
+    try {
+      const dependencies = happyPath();
+      const resultPromise = resolvePostMergeEvidence({
+        repo: REPO,
+        sha: SHA,
+        before: BEFORE,
+        forced: false,
+        branch: "main",
+        checkName: CHECK,
+        api: async (path) => {
+          if (path === `/repos/${REPO}/actions/runs/123`)
+            return new Promise(() => {});
+          return dependencies.api(path);
+        },
+      });
+
+      await vi.advanceTimersByTimeAsync(CHECK_RUN_EVIDENCE_TIMEOUT_MS);
+      await expect(resultPromise).resolves.toEqual({
+        skip: false,
+        reason: "check-runs-api-failed",
+      });
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it.each([
