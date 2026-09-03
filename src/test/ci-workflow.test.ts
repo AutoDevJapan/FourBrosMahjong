@@ -588,6 +588,10 @@ describe("GITHUB_TOKEN 生成PRのrequired checks", () => {
     const check = readWorkflowFile("gitleaks-version-check.yml");
     expect(check.on).toHaveProperty("workflow_dispatch");
     expect(check.on).toHaveProperty("schedule");
+    expect(check.concurrency).toEqual({
+      group: "${{ github.workflow }}-${{ github.ref }}",
+      "cancel-in-progress": true,
+    });
     expect(check.permissions).toEqual({ contents: "read" });
     expect(check.jobs?.["open-bump-pr"]).toBeUndefined();
 
