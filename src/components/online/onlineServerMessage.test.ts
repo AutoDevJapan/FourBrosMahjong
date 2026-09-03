@@ -70,6 +70,26 @@ function firstRoundEnd(seed: number): EngineState {
   });
 }
 
+function mutableSlotSnapshot(snapshot: OnlineSnapshot): {
+  currentTurn: unknown;
+  view: {
+    slots: Record<
+      string,
+      { kind: string; player: Record<string, unknown> }
+    >;
+  };
+} {
+  return structuredClone(snapshot) as unknown as {
+    currentTurn: unknown;
+    view: {
+      slots: Record<
+        string,
+        { kind: string; player: Record<string, unknown> }
+      >;
+    };
+  };
+}
+
 describe("parseOnlineServerMessage", () => {
   it("parses current session, snapshot, error, and pong messages", () => {
     const snapshot = snapshotFixture();
@@ -427,6 +447,71 @@ describe("parseOnlineServerMessage", () => {
     if (parsed?.type !== "session") throw new Error("legacy session expected");
     expect(parsed.snapshot).not.toHaveProperty("explicitKita");
     expect(parsed.snapshot.pending).not.toHaveProperty("canKita");
+  });
+
+  it("enforces the three-seated/one-bench slot and current-turn boundary", () => {
+    const snapshot = snapshotFixture();
+    expect(
+      parseOnlineServerMessage({ type: "snapshot", snapshot }),
+    ).toEqual({ type: "snapshot", snapshot });
+    expect(
+      parseOnlineServerMessage({
+        type: "snapshot",
+        snapshot: LEGACY_1C8CC9_PLAYING_SNAPSHOT,
+      }),
+    ).not.toBeNull();
+
+    const allSeated = mutableSlotSnapshot(snapshot);
+    const benchSlot = allSeated.view.slots.left;
+    benchSlot.kind = "seated";
+    benchSlot.player = {
+      ...benchSlot.player,
+      seatWind: "west",
+      handCount: 13,
+      kitaCount: 0,
+      discards: [],
+    };
+    expect(
+      parseOnlineServerMessage({ type: "snapshot", snapshot: allSeated }),
+    ).toBeNull();
+
+    const allBench = mutableSlotSnapshot(snapshot);
+    for (const slot of Object.values(allBench.view.slots)) {
+      if (slot.kind !== "seated") continue;
+      slot.kind = "bench";
+      slot.player = {
+        playerId: slot.player.playerId,
+        name: slot.player.name,
+        points: slot.player.points,
+      };
+    }
+    expect(
+      parseOnlineServerMessage({ type: "snapshot", snapshot: allBench }),
+    ).toBeNull();
+
+    const benchPlayerSlot = Object.values(snapshot.view.slots).find(
+      (slot) => slot.kind === "bench",
+    );
+    if (!benchPlayerSlot) throw new Error("bench slot expected");
+    expect(
+      parseOnlineServerMessage({
+        type: "snapshot",
+        snapshot: { ...snapshot, currentTurn: benchPlayerSlot.player.playerId },
+      }),
+    ).toBeNull();
+
+    const outsideSlot = mutableSlotSnapshot(snapshot);
+    outsideSlot.currentTurn = "p3";
+    outsideSlot.view.slots.left.player.playerId = "p0";
+    expect(
+      parseOnlineServerMessage({ type: "snapshot", snapshot: outsideSlot }),
+    ).toBeNull();
+    expect(
+      parseOnlineServerMessage({
+        type: "snapshot",
+        snapshot: { ...snapshot, currentTurn: "p9" },
+      }),
+    ).toBeNull();
   });
 
   it("validates real playing, win/draw roundEnd, and gameEnd snapshots", () => {

@@ -333,6 +333,19 @@ function isGameView(value: unknown, you: OnlineSnapshot["you"]): boolean {
   if (!SLOT_POSITIONS.every((position) => isSlot(slots[position]))) {
     return false;
   }
+  const slotValues = SLOT_POSITIONS.map(
+    (position) => slots[position] as Record<string, unknown>,
+  );
+  const playerIds = slotValues.map(
+    (slot) => (slot.player as Record<string, unknown>).playerId,
+  );
+  if (
+    slotValues.filter((slot) => slot.kind === "seated").length !== 3 ||
+    new Set(playerIds).size !== playerIds.length ||
+    !CHARACTER_PLAYER_IDS.every((playerId) => playerIds.includes(playerId))
+  ) {
+    return false;
+  }
   const selfSlot = slots.self as Record<string, unknown>;
   const selfPlayer = selfSlot.player as Record<string, unknown>;
   if (selfPlayer.playerId !== you) return false;
@@ -380,6 +393,19 @@ function isGameView(value: unknown, you: OnlineSnapshot["you"]): boolean {
     (dora.uraIndicators === undefined ||
       isTileArray(dora.uraIndicators, MAX_DORA_INDICATOR_COUNT)) &&
     (value.result === null || isGameResult(value.result))
+  );
+}
+
+function isSeatedPlayerId(
+  view: OnlineSnapshot["view"],
+  playerId: unknown,
+): boolean {
+  return (
+    isPlayerId(playerId) &&
+    SLOT_POSITIONS.some((position) => {
+      const slot = view.slots[position];
+      return slot.kind === "seated" && slot.player.playerId === playerId;
+    })
   );
 }
 
@@ -554,7 +580,8 @@ function isOnlineSnapshot(value: OnlineSnapshot): boolean {
     isGameView(value.view, value.you) &&
     isPending(value.pending, value.you) &&
     isRoundSummary(value.roundSummary) &&
-    (value.currentTurn === null || isPlayerId(value.currentTurn)) &&
+    (value.currentTurn === null ||
+      isSeatedPlayerId(value.view, value.currentTurn)) &&
     isHostNotice(value.hostNotice) &&
     isDepartureNotice(value.departureNotice)
   );
