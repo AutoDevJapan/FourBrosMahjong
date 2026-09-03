@@ -596,6 +596,38 @@ describe("OnlineLobby の参加条件", () => {
     );
   });
 
+  it("IME合成中に書記素境界外へ可視文字がある表示名も無効にする", () => {
+    render(<OnlineLobby />);
+
+    const nameInput = screen.getByRole("textbox", { name: "表示名" });
+    const roomCodeInput = screen.getByRole("textbox", { name: "ルームコード" });
+    const createButton = screen.getByRole("button", {
+      name: "新しいルームを作る",
+    });
+    const joinButton = screen.getByRole("button", { name: "参加する" });
+
+    fireEvent.change(roomCodeInput, { target: { value: "ABC234" } });
+    const visibleCharacterOutsideLimit = "\u0301 ".repeat(11) + "A";
+    fireEvent.compositionStart(nameInput);
+    fireEvent.change(nameInput, {
+      target: { value: visibleCharacterOutsideLimit },
+    });
+
+    expect(nameInput).toHaveValue(visibleCharacterOutsideLimit);
+    expect(nameInput).toHaveAttribute("aria-invalid", "true");
+    expect(nameInput).toHaveAccessibleDescription(
+      /参加には表示名が必要です。表示名を入力してください/,
+    );
+    expect(createButton).toBeDisabled();
+    expect(joinButton).toBeDisabled();
+    expect(joinButton).toHaveAccessibleDescription(
+      /表示名を入力してください。/,
+    );
+    expect(screen.getByRole("status")).toHaveTextContent(
+      "表示名を入力してください。",
+    );
+  });
+
   it("I/O/0/1を含むコードを参加前に具体的に拒否する", async () => {
     const user = userEvent.setup();
     render(<OnlineLobby />);
