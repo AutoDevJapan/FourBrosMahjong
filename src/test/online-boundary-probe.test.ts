@@ -299,6 +299,73 @@ describe("online boundary probe", () => {
     expect(Buffer.concat(fixture.applicationBytes)).toHaveLength(0);
   });
 
+  it("accepts valid exact liveness and readiness JSON bodies", async () => {
+    const fixture = await startBoundaryFixture({
+      healthBody: '{"ok":true,"service":"four-bros-mahjong-online"}',
+      readinessBody: '{"ok":true}',
+    });
+    openFixtures.push(fixture);
+
+    const evidence = await runBoundaryProbe({
+      baseUrl: fixture.baseUrl,
+      allowedOrigin: ALLOWED_ORIGIN,
+      disallowedOrigin: DISALLOWED_ORIGIN,
+      timeoutMs: 1_000,
+    });
+
+    expect(evidence.ok).toBe(true);
+    expect(evidence.checks.health).toMatchObject({
+      statusCode: 200,
+      body: { ok: true },
+    });
+    expect(evidence.checks.readiness).toMatchObject({
+      statusCode: 200,
+      body: { ok: true },
+    });
+  });
+
+  it("rejects duplicate keys in liveness JSON bodies", async () => {
+    const fixture = await startBoundaryFixture({
+      healthBody: '{"ok":false,"ok":true,"service":"four-bros-mahjong-online"}',
+    });
+    openFixtures.push(fixture);
+
+    const evidence = await runBoundaryProbe({
+      baseUrl: fixture.baseUrl,
+      allowedOrigin: ALLOWED_ORIGIN,
+      disallowedOrigin: DISALLOWED_ORIGIN,
+      timeoutMs: 1_000,
+    });
+
+    expect(evidence.ok).toBe(false);
+    expect(evidence.checks.health).toMatchObject({
+      statusCode: 200,
+      error: "invalid_json",
+    });
+    expect(evidence.checks.health).not.toHaveProperty("body");
+  });
+
+  it("rejects duplicate keys in readiness JSON bodies", async () => {
+    const fixture = await startBoundaryFixture({
+      readinessBody: '{"ok":false,"ok":true}',
+    });
+    openFixtures.push(fixture);
+
+    const evidence = await runBoundaryProbe({
+      baseUrl: fixture.baseUrl,
+      allowedOrigin: ALLOWED_ORIGIN,
+      disallowedOrigin: DISALLOWED_ORIGIN,
+      timeoutMs: 1_000,
+    });
+
+    expect(evidence.ok).toBe(false);
+    expect(evidence.checks.readiness).toMatchObject({
+      statusCode: 200,
+      error: "invalid_json",
+    });
+    expect(evidence.checks.readiness).not.toHaveProperty("body");
+  });
+
   it("reports readiness drift separately from liveness", async () => {
     const fixture = await startBoundaryFixture({ readinessStatus: 503 });
     openFixtures.push(fixture);

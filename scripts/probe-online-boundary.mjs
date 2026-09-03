@@ -291,7 +291,7 @@ function parseHealthBody(bytes, path) {
 
   let value;
   try {
-    value = JSON.parse(text);
+    value = parseJsonWithUniqueKeys(text);
   } catch {
     return { error: "invalid_json" };
   }
@@ -313,6 +313,115 @@ function parseHealthBody(bytes, path) {
   }
 
   return { body: { ok: value.ok } };
+}
+
+function parseJsonWithUniqueKeys(text) {
+  const cursor = { index: 0 };
+
+  function skipWhitespace() {
+    while (/[^\S\r\n]/.test(text[cursor.index] ?? "")) {
+      cursor.index += 1;
+    }
+  }
+
+  function scanString() {
+    const start = cursor.index;
+    if (text[cursor.index] !== '"') {
+      throw new Error("JSON string expected");
+    }
+    cursor.index += 1;
+    while (cursor.index < text.length) {
+      const code = text.charCodeAt(cursor.index);
+      if (code === 0x22) {
+        cursor.index += 1;
+        return JSON.parse(text.slice(start, cursor.index));
+      }
+      if (code === 0x5c) {
+        cursor.index += 1;
+        if (cursor.index >= text.length) throw new Error("invalid JSON escape");
+        if (text[cursor.index] === "u") cursor.index += 5;
+        else cursor.index += 1;
+        continue;
+      }
+      if (code < 0x20) throw new Error("invalid JSON string");
+      cursor.index += 1;
+    }
+    throw new Error("unterminated JSON string");
+  }
+
+  function scanPrimitive() {
+    const start = cursor.index;
+    while (
+      cursor.index < text.length &&
+      !/[\t\n\r ,\]}]/.test(text[cursor.index])
+    ) {
+      cursor.index += 1;
+    }
+    if (cursor.index === start) throw new Error("JSON value expected");
+  }
+
+  function scanValue() {
+    skipWhitespace();
+    const character = text[cursor.index];
+    if (character === "{") return scanObject();
+    if (character === "[") return scanArray();
+    if (character === '"') {
+      scanString();
+      return;
+    }
+    scanPrimitive();
+  }
+
+  function scanObject() {
+    cursor.index += 1;
+    skipWhitespace();
+    const keys = new Set();
+    if (text[cursor.index] === "}") {
+      cursor.index += 1;
+      return;
+    }
+    while (true) {
+      skipWhitespace();
+      const key = scanString();
+      if (keys.has(key)) throw new Error(`duplicate JSON object key: ${key}`);
+      keys.add(key);
+      skipWhitespace();
+      if (text[cursor.index] !== ":") throw new Error("JSON colon expected");
+      cursor.index += 1;
+      scanValue();
+      skipWhitespace();
+      if (text[cursor.index] === "}") {
+        cursor.index += 1;
+        return;
+      }
+      if (text[cursor.index] !== ",") throw new Error("JSON comma expected");
+      cursor.index += 1;
+    }
+  }
+
+  function scanArray() {
+    cursor.index += 1;
+    skipWhitespace();
+    if (text[cursor.index] === "]") {
+      cursor.index += 1;
+      return;
+    }
+    while (true) {
+      scanValue();
+      skipWhitespace();
+      if (text[cursor.index] === "]") {
+        cursor.index += 1;
+        return;
+      }
+      if (text[cursor.index] !== ",") throw new Error("JSON comma expected");
+      cursor.index += 1;
+    }
+  }
+
+  scanValue();
+  skipWhitespace();
+  if (cursor.index !== text.length) throw new Error("trailing JSON data");
+  return JSON.parse(text);
 }
 
 async function probeHttp(path, baseUrl, timeoutMs) {
