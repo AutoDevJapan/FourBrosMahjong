@@ -1100,7 +1100,7 @@ describe("Railway IaC parity snapshot contract (#742)", () => {
     ).toBe(false);
   });
 
-  it("collects large unsupported parameter lists without quadratic scanning", () => {
+  it("uses set membership while collecting large parameter lists", () => {
     const parameters = Array.from(
       { length: 20_000 },
       (_, index) => `p${index}`,
@@ -1112,13 +1112,22 @@ describe("Railway IaC parity snapshot contract (#742)", () => {
       resolve(process.cwd(), "scripts/railway-iac-migration-contract.ts"),
       "utf8",
     );
-    const functionLikeSource = contractSource.slice(
-      contractSource.indexOf("function collectFunctionLike"),
-      contractSource.indexOf("function collectScopesAndBindings"),
+    const functionLikeStart = contractSource.indexOf(
+      "function collectFunctionLike",
     );
-    expect(contractSource).toContain(
+    const nextFunctionStart = contractSource.indexOf(
+      "function collectScopesAndBindings",
+    );
+    expect(functionLikeStart).toBeGreaterThanOrEqual(0);
+    expect(nextFunctionStart).toBeGreaterThan(functionLikeStart);
+    const functionLikeSource = contractSource.slice(
+      functionLikeStart,
+      nextFunctionStart,
+    );
+    expect(functionLikeSource).toContain(
       "const parameterNodes = new Set<ts.Node>(node.parameters);",
     );
+    expect(functionLikeSource).toContain("parameterNodes.has(child)");
     expect(functionLikeSource).not.toContain("node.parameters.some(");
   });
 
