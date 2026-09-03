@@ -532,6 +532,61 @@ describe("Railway IaC parity snapshot contract (#742)", () => {
     ).toBe(false);
     expect(
       generatedIacSourceIsSecretSafe(
+        `import { service } from "railway/iac"; service("fixture", { options: { ...externalOptions } });`,
+      ),
+    ).toBe(false);
+    expect(
+      generatedIacSourceIsSecretSafe(
+        `import { service } from "railway/iac"; const options = externalOptions; service("fixture", options);`,
+      ),
+    ).toBe(false);
+    expect(
+      generatedIacSourceIsSecretSafe(
+        `import { preserve, service } from "railway/iac"; const options = { env: { TOKEN: preserve() } }; service("fixture", options);`,
+      ),
+    ).toBe(false);
+    expect(
+      generatedIacSourceIsSecretSafe(
+        `import { preserve, service } from "railway/iac"; const safeValue = preserve(); service("fixture", { env: { TOKEN: safeValue } });`,
+      ),
+    ).toBe(false);
+    expect(
+      generatedIacSourceIsSecretSafe(
+        `import { service } from "railway/iac"; const key = "TOKEN"; service("fixture", { options: { [key]: "SECRET_SENTINEL" } });`,
+      ),
+    ).toBe(false);
+    expect(
+      generatedIacSourceIsSecretSafe(
+        `import { service } from "railway/iac"; service("fixture", { options: { ["TOKEN"]() { return "SECRET_SENTINEL"; } } });`,
+      ),
+    ).toBe(false);
+    expect(
+      generatedIacSourceIsSecretSafe(
+        `import { service } from "railway/iac"; service("fixture", { options: { get ["TOKEN"]() { return "SECRET_SENTINEL"; } } });`,
+      ),
+    ).toBe(false);
+    expect(
+      generatedIacSourceIsSecretSafe(
+        `import { service } from "railway/iac"; service("fixture", { options: { set ["TOKEN"](value) {} } });`,
+      ),
+    ).toBe(false);
+    expect(
+      generatedIacSourceIsSecretSafe(
+        `import { preserve, service } from "railway/iac"; service("fixture", { ["env"]: { ["ONLINE_OPS_TOKEN"]: preserve() } });`,
+      ),
+    ).toBe(true);
+    expect(
+      generatedIacSourceIsSecretSafe(
+        `import { postgres, service } from "railway/iac"; const db = postgres("db"); service("fixture", { env: { DATABASE_URL: db["env"]["DATABASE_URL"] } });`,
+      ),
+    ).toBe(true);
+    expect(
+      generatedIacSourceIsSecretSafe(
+        `import { defineRailway, service } from "railway/iac"; export default defineRailway((ctx) => service("fixture", { env: { VALUE: ctx["shared"]["SECRET"] } }));`,
+      ),
+    ).toBe(true);
+    expect(
+      generatedIacSourceIsSecretSafe(
         `import { ref, service } from "railway/iac"; const resource = service("other", {}); service("fixture", { options: { TOKEN: (ref(resource, "output")) } });`,
       ),
     ).toBe(true);
