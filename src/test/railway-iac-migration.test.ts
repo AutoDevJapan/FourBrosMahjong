@@ -1,7 +1,15 @@
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
+import {
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
+import { tmpdir } from "node:os";
+import { join, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
   generatedIacSourceIsSecretSafe,
@@ -9,6 +17,10 @@ import {
   type RailwayIacFilesystemEvidence,
   validateRailwayIacMigrationEvidence,
 } from "../../scripts/railway-iac-migration-contract";
+import {
+  localFilesystemEvidence,
+  MAX_GENERATED_IAC_BYTES,
+} from "../../scripts/verify-railway-iac-migration";
 
 const NOW = Date.parse("2026-08-28T06:00:00.000Z");
 const GENERATED_SOURCE = `
@@ -170,6 +182,20 @@ function reasonsFor(
     .reasons;
 }
 
+function withTemporaryRepository<T>(callback: (rootDirectory: string) => T): T {
+  const rootDirectory = mkdtempSync(join(tmpdir(), "railway-iac-read-"));
+  try {
+    mkdirSync(join(rootDirectory, ".railway"));
+    writeFileSync(
+      join(rootDirectory, "railway.json"),
+      readFileSync(resolve(process.cwd(), "railway.json")),
+    );
+    return callback(rootDirectory);
+  } finally {
+    rmSync(rootDirectory, { force: true, recursive: true });
+  }
+}
+
 describe("Railway IaC parity snapshot contract (#742)", () => {
   it("passes only post-cutover parity evidence without authorizing an operation", () => {
     expect(
@@ -199,6 +225,43 @@ describe("Railway IaC parity snapshot contract (#742)", () => {
         currentFilesystem,
         NOW,
       ).reasons,
+    ).toEqual(["generated-iac-missing", "secret-safety-unverified"]);
+  });
+
+  it.each([
+    ["missing", () => undefined],
+    [
+      "oversized",
+      (generatedPath: string) => {
+        writeFileSync(
+          generatedPath,
+          Buffer.alloc(MAX_GENERATED_IAC_BYTES + 1, "x"),
+        );
+      },
+    ],
+    [
+      "read failure",
+      (generatedPath: string) => {
+        symlinkSync("missing-target", generatedPath);
+      },
+    ],
+  ])("keeps %s generated IaC fail-closed", (_caseName, prepare) => {
+    const filesystem = withTemporaryRepository((rootDirectory) => {
+      prepare(join(rootDirectory, ".railway", "railway.ts"));
+      return localFilesystemEvidence(rootDirectory);
+    });
+
+    const evidence = validEvidence();
+    evidence.ownershipCutover.legacyFileSha256 =
+      filesystem.legacyRepositoryFileSha256;
+    expect(filesystem).toMatchObject({
+      generatedIacPath: null,
+      generatedIacSha256: null,
+      generatedIacSecretSafe: null,
+      legacyRepositoryFilePresent: true,
+    });
+    expect(
+      validateRailwayIacMigrationEvidence(evidence, filesystem, NOW).reasons,
     ).toEqual(["generated-iac-missing", "secret-safety-unverified"]);
   });
 
