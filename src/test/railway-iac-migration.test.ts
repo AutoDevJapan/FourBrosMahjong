@@ -298,14 +298,30 @@ describe("Railway IaC parity snapshot contract (#742)", () => {
     try {
       const rootDirectory = join(fixtureDirectory, "root");
       const outsideDirectory = join(fixtureDirectory, "outside");
+      const insideSentinel = Buffer.from("inside sentinel\n");
+      const outsideSentinel = Buffer.from("outside sentinel\n");
       mkdirSync(rootDirectory);
       mkdirSync(outsideDirectory);
-      writeFileSync(join(fixtureDirectory, "target"), "outside\n");
+      writeFileSync(join(rootDirectory, "target"), insideSentinel);
+      writeFileSync(join(fixtureDirectory, "target"), outsideSentinel);
       symlinkSync(outsideDirectory, join(rootDirectory, "link"));
 
-      const traversalPath = join(rootDirectory, "link", "..", "target");
-      expect(readBoundedFile(traversalPath, 64, rootDirectory)).toBeNull();
-      expect(readBoundedTextFile(traversalPath, 64, rootDirectory)).toBeNull();
+      // Keep `link/..` in the path passed to the filesystem. `join()` and
+      // `resolve()` would normalize it to the inside sentinel instead.
+      const traversalPath = `${rootDirectory}/link/../target`;
+      expect(readFileSync(join(rootDirectory, "target"))).toEqual(
+        insideSentinel,
+      );
+      // This is what the vulnerable raw read would observe.
+      expect(readFileSync(traversalPath)).toEqual(outsideSentinel);
+      // The hardened helper rejects the escape and reads only the normalized
+      // path within the root.
+      expect(readBoundedFile(traversalPath, 64, rootDirectory)).toEqual(
+        insideSentinel,
+      );
+      expect(readBoundedTextFile(traversalPath, 64, rootDirectory)).toBe(
+        insideSentinel.toString("utf8"),
+      );
     } finally {
       rmSync(fixtureDirectory, { force: true, recursive: true });
     }
