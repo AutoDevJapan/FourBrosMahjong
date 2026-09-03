@@ -213,10 +213,7 @@ async function cancelResponseBody(response) {
 
 async function readBoundedResponseBody(response) {
   const expectedLength = declaredContentLength(response);
-  if (
-    expectedLength !== undefined &&
-    expectedLength > MAX_HEALTH_BODY_BYTES
-  ) {
+  if (expectedLength !== undefined && expectedLength > MAX_HEALTH_BODY_BYTES) {
     await cancelResponseBody(response);
     throw new Error("response body too large");
   }
