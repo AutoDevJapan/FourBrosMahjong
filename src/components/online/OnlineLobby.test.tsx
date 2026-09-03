@@ -551,6 +551,83 @@ describe("OnlineLobby の参加条件", () => {
     );
   });
 
+  it("不可視の表示名は入力条件・参加条件・送信状態を一貫して無効にする", () => {
+    render(<OnlineLobby />);
+
+    const nameInput = screen.getByRole("textbox", { name: "表示名" });
+    const roomCodeInput = screen.getByRole("textbox", { name: "ルームコード" });
+    const createButton = screen.getByRole("button", {
+      name: "新しいルームを作る",
+    });
+    const joinButton = screen.getByRole("button", { name: "参加する" });
+
+    fireEvent.change(roomCodeInput, { target: { value: "ABC234" } });
+    // 入力時の書記素上限で可視の末尾だけが落ちると、結合文字だけがstateに残る。
+    const invisibleOnlyAfterLimit = `${"\u0301 ".repeat(11)}A`;
+    fireEvent.change(nameInput, {
+      target: { value: invisibleOnlyAfterLimit },
+    });
+
+    expect(nameInput).toHaveAttribute("aria-invalid", "true");
+    expect(nameInput).toHaveAccessibleDescription(
+      /参加には表示名が必要です。表示名を入力してください/,
+    );
+    expect(createButton).toBeDisabled();
+    expect(joinButton).toBeDisabled();
+    expect(joinButton).toHaveAccessibleDescription(
+      /表示名を入力してください。/,
+    );
+    expect(screen.getByRole("status")).toHaveTextContent(
+      "表示名を入力してください。",
+    );
+
+    fireEvent.change(nameInput, { target: { value: "麻雀😀" } });
+
+    expect(nameInput).toHaveValue("麻雀😀");
+    expect(nameInput).toHaveAttribute("aria-invalid", "false");
+    expect(nameInput).toHaveAccessibleDescription(/表示名は入力されています/);
+    expect(createButton).toBeEnabled();
+    expect(joinButton).toBeEnabled();
+    expect(joinButton).toHaveAccessibleDescription(
+      /参加条件を満たしています。参加できます。/,
+    );
+    expect(screen.getByRole("status")).toHaveTextContent(
+      "参加条件を満たしています。参加できます。",
+    );
+  });
+
+  it("IME合成中に書記素境界外へ可視文字がある表示名も無効にする", () => {
+    render(<OnlineLobby />);
+
+    const nameInput = screen.getByRole("textbox", { name: "表示名" });
+    const roomCodeInput = screen.getByRole("textbox", { name: "ルームコード" });
+    const createButton = screen.getByRole("button", {
+      name: "新しいルームを作る",
+    });
+    const joinButton = screen.getByRole("button", { name: "参加する" });
+
+    fireEvent.change(roomCodeInput, { target: { value: "ABC234" } });
+    const visibleCharacterOutsideLimit = "\u0301 ".repeat(11) + "A";
+    fireEvent.compositionStart(nameInput);
+    fireEvent.change(nameInput, {
+      target: { value: visibleCharacterOutsideLimit },
+    });
+
+    expect(nameInput).toHaveValue(visibleCharacterOutsideLimit);
+    expect(nameInput).toHaveAttribute("aria-invalid", "true");
+    expect(nameInput).toHaveAccessibleDescription(
+      /参加には表示名が必要です。表示名を入力してください/,
+    );
+    expect(createButton).toBeDisabled();
+    expect(joinButton).toBeDisabled();
+    expect(joinButton).toHaveAccessibleDescription(
+      /表示名を入力してください。/,
+    );
+    expect(screen.getByRole("status")).toHaveTextContent(
+      "表示名を入力してください。",
+    );
+  });
+
   it("I/O/0/1を含むコードを参加前に具体的に拒否する", async () => {
     const user = userEvent.setup();
     render(<OnlineLobby />);

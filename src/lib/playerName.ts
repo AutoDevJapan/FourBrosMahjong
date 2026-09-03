@@ -163,5 +163,6 @@ export function sanitizePlayerName(raw: string): string | null {
     .replace(/\s+/gu, " ")
     .trim();
   if (normalized === "" || !hasVisiblePlayerNameBase(normalized)) return null;
-  return limitPlayerName(normalized);
+  const limited = limitPlayerName(normalized);
+  return hasVisiblePlayerNameBase(limited) ? limited : null;
 }
