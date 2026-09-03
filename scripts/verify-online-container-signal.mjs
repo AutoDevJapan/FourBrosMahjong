@@ -48,6 +48,7 @@ const ABSENT_RUNTIME_PATHS = [
 const RUNTIME_SOURCE_SCAN_ROOTS = ["/app/server", "/app/src"];
 const MAX_RUNTIME_SOURCE_ENTRIES = 10_000;
 const MAX_RUNTIME_SOURCE_DEPTH = 32;
+const MAX_HEALTH_BODY_BYTES = 4_096;
 
 function usage() {
   throw new Error(
@@ -190,6 +191,117 @@ async function hostPort(name) {
   return Number(match[1]);
 }
 
+function declaredContentLength(response) {
+  const value = response.headers.get("content-length");
+  if (value === null) return undefined;
+  if (!/^\d+$/.test(value)) throw new Error("invalid response body length");
+  const length = Number(value);
+  if (!Number.isSafeInteger(length)) {
+    throw new Error("invalid response body length");
+  }
+  return length;
+}
+
+async function cancelResponseBody(response) {
+  if (response.body === null) return;
+  try {
+    await response.body.cancel();
+  } catch {
+    // The bounded-body result is more useful than a cancellation error.
+  }
+}
+
+async function readBoundedResponseBody(response) {
+  const expectedLength = declaredContentLength(response);
+  if (
+    expectedLength !== undefined &&
+    expectedLength > MAX_HEALTH_BODY_BYTES
+  ) {
+    await cancelResponseBody(response);
+    throw new Error("response body too large");
+  }
+
+  if (response.body === null) {
+    if (expectedLength !== undefined && expectedLength !== 0) {
+      throw new Error("truncated response body");
+    }
+    return new Uint8Array();
+  }
+
+  const reader = response.body.getReader();
+  const chunks = [];
+  let receivedBytes = 0;
+  try {
+    while (true) {
+      const result = await reader.read();
+      if (result.done) break;
+      if (!(result.value instanceof Uint8Array)) {
+        throw new Error("invalid response body");
+      }
+      receivedBytes += result.value.byteLength;
+      if (receivedBytes > MAX_HEALTH_BODY_BYTES) {
+        try {
+          await reader.cancel();
+        } catch {
+          // The bounded-body result is more useful than a cancellation error.
+        }
+        throw new Error("response body too large");
+      }
+      chunks.push(result.value);
+    }
+  } finally {
+    reader.releaseLock();
+  }
+
+  if (expectedLength !== undefined && receivedBytes !== expectedLength) {
+    throw new Error(
+      receivedBytes < expectedLength
+        ? "truncated response body"
+        : "invalid response body length",
+    );
+  }
+
+  const bytes = new Uint8Array(receivedBytes);
+  let offset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return bytes;
+}
+
+function isExactHealthBody(bytes, path) {
+  let value;
+  try {
+    const text = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+    value = JSON.parse(text);
+  } catch {
+    return false;
+  }
+
+  if (value === null || typeof value !== "object" || Array.isArray(value)) {
+    return false;
+  }
+
+  if (path === "/healthz") {
+    const keys = Object.keys(value);
+    return (
+      keys.length === 2 &&
+      keys.includes("ok") &&
+      keys.includes("service") &&
+      value.ok === true &&
+      value.service === "four-bros-mahjong-online"
+    );
+  }
+
+  if (path === "/readyz") {
+    const keys = Object.keys(value);
+    return keys.length === 1 && keys[0] === "ok" && value.ok === true;
+  }
+
+  return false;
+}
+
 async function waitForEndpoint(port, path, label) {
   return waitUntil(
     async () => {
@@ -197,8 +309,8 @@ async function waitForEndpoint(port, path, label) {
         signal: AbortSignal.timeout(500),
       });
       if (!response.ok) return null;
-      const body = await response.json();
-      return body?.ok === true ? true : null;
+      const body = await readBoundedResponseBody(response);
+      return isExactHealthBody(body, path) ? true : null;
     },
     START_TIMEOUT_MS,
     label,
