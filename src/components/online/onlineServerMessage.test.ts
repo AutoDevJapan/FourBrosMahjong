@@ -73,19 +73,13 @@ function firstRoundEnd(seed: number): EngineState {
 function mutableSlotSnapshot(snapshot: OnlineSnapshot): {
   currentTurn: unknown;
   view: {
-    slots: Record<
-      string,
-      { kind: string; player: Record<string, unknown> }
-    >;
+    slots: Record<string, { kind: string; player: Record<string, unknown> }>;
   };
 } {
   return structuredClone(snapshot) as unknown as {
     currentTurn: unknown;
     view: {
-      slots: Record<
-        string,
-        { kind: string; player: Record<string, unknown> }
-      >;
+      slots: Record<string, { kind: string; player: Record<string, unknown> }>;
     };
   };
 }
@@ -451,9 +445,10 @@ describe("parseOnlineServerMessage", () => {
 
   it("enforces the three-seated/one-bench slot and current-turn boundary", () => {
     const snapshot = snapshotFixture();
-    expect(
-      parseOnlineServerMessage({ type: "snapshot", snapshot }),
-    ).toEqual({ type: "snapshot", snapshot });
+    expect(parseOnlineServerMessage({ type: "snapshot", snapshot })).toEqual({
+      type: "snapshot",
+      snapshot,
+    });
     expect(
       parseOnlineServerMessage({
         type: "snapshot",

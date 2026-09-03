@@ -90,7 +90,8 @@ describe("Unity display contract fixture", () => {
 
       const next =
         fixture.rotationCases[(index + 1) % fixture.rotationCases.length];
-      if (next === undefined) throw new Error("next rotation fixture is missing");
+      if (next === undefined)
+        throw new Error("next rotation fixture is missing");
       expect(next.before).toEqual(rotation.after);
     }
   });
