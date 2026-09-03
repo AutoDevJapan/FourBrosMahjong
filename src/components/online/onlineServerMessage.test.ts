@@ -70,6 +70,20 @@ function firstRoundEnd(seed: number): EngineState {
   });
 }
 
+function mutableSlotSnapshot(snapshot: OnlineSnapshot): {
+  currentTurn: unknown;
+  view: {
+    slots: Record<string, { kind: string; player: Record<string, unknown> }>;
+  };
+} {
+  return structuredClone(snapshot) as unknown as {
+    currentTurn: unknown;
+    view: {
+      slots: Record<string, { kind: string; player: Record<string, unknown> }>;
+    };
+  };
+}
+
 describe("parseOnlineServerMessage", () => {
   it("parses current session, snapshot, error, and pong messages", () => {
     const snapshot = snapshotFixture();
@@ -427,6 +441,105 @@ describe("parseOnlineServerMessage", () => {
     if (parsed?.type !== "session") throw new Error("legacy session expected");
     expect(parsed.snapshot).not.toHaveProperty("explicitKita");
     expect(parsed.snapshot.pending).not.toHaveProperty("canKita");
+  });
+
+  it("enforces the three-seated/one-bench slot and current-turn boundary", () => {
+    const snapshot = snapshotFixture();
+    expect(parseOnlineServerMessage({ type: "snapshot", snapshot })).toEqual({
+      type: "snapshot",
+      snapshot,
+    });
+    expect(
+      parseOnlineServerMessage({
+        type: "snapshot",
+        snapshot: LEGACY_1C8CC9_PLAYING_SNAPSHOT,
+      }),
+    ).not.toBeNull();
+
+    const allSeated = mutableSlotSnapshot(snapshot);
+    const benchSlot = allSeated.view.slots.left;
+    benchSlot.kind = "seated";
+    benchSlot.player = {
+      ...benchSlot.player,
+      seatWind: "west",
+      handCount: 13,
+      kitaCount: 0,
+      discards: [],
+    };
+    expect(
+      parseOnlineServerMessage({ type: "snapshot", snapshot: allSeated }),
+    ).toBeNull();
+
+    const allBench = mutableSlotSnapshot(snapshot);
+    for (const slot of Object.values(allBench.view.slots)) {
+      if (slot.kind !== "seated") continue;
+      slot.kind = "bench";
+      slot.player = {
+        playerId: slot.player.playerId,
+        name: slot.player.name,
+        points: slot.player.points,
+      };
+    }
+    allBench.currentTurn = null;
+    expect(
+      parseOnlineServerMessage({ type: "snapshot", snapshot: allBench }),
+    ).toBeNull();
+  });
+
+  it("rejects duplicate slot player IDs while currentTurn remains seated p0", () => {
+    const duplicateSlot = mutableSlotSnapshot(snapshotFixture());
+    expect(duplicateSlot.currentTurn).toBe("p0");
+    duplicateSlot.view.slots.left.player.playerId = "p0";
+
+    expect(
+      parseOnlineServerMessage({ type: "snapshot", snapshot: duplicateSlot }),
+    ).toBeNull();
+  });
+
+  it("rejects bench p3 as currentTurn with the complete distinct slot ID ring", () => {
+    const benchTurn = mutableSlotSnapshot(snapshotFixture());
+    expect(
+      ["self", "right", "across", "left"].map(
+        (position) => benchTurn.view.slots[position]?.player.playerId,
+      ),
+    ).toEqual(["p0", "p1", "p2", "p3"]);
+    expect(benchTurn.view.slots.left?.kind).toBe("bench");
+    benchTurn.currentTurn = "p3";
+
+    expect(
+      parseOnlineServerMessage({ type: "snapshot", snapshot: benchTurn }),
+    ).toBeNull();
+  });
+
+  it("rejects a currentTurn ID outside the slot player ID domain", () => {
+    expect(
+      parseOnlineServerMessage({
+        type: "snapshot",
+        snapshot: { ...snapshotFixture(), currentTurn: "p9" },
+      }),
+    ).toBeNull();
+  });
+
+  it("accepts a partial top-level players roster for p0 and non-p0 viewpoints", () => {
+    const p0Snapshot = snapshotFixture();
+    expect(p0Snapshot.players).toHaveLength(1);
+    expect(
+      parseOnlineServerMessage({ type: "snapshot", snapshot: p0Snapshot }),
+    ).toEqual({ type: "snapshot", snapshot: p0Snapshot });
+
+    const manager = new RoomManager();
+    const host = manager.create("ホスト");
+    const guest = manager.join(host.room.code, "ゲスト");
+    if (!guest) throw new Error("guest should join");
+    const nonP0Snapshot = manager.snapshot(guest.room, guest.player);
+    expect(nonP0Snapshot.you).toBe("p1");
+    expect(nonP0Snapshot.players).toHaveLength(2);
+    expect(
+      parseOnlineServerMessage({
+        type: "snapshot",
+        snapshot: nonP0Snapshot,
+      }),
+    ).toEqual({ type: "snapshot", snapshot: nonP0Snapshot });
   });
 
   it("validates real playing, win/draw roundEnd, and gameEnd snapshots", () => {
