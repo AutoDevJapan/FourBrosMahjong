@@ -286,6 +286,16 @@ export default function MatchHistoryList() {
       // フォーカスの行き先が無くなって body へ落ちるため(成功時と同じ a11y 契約を守る)。
       pendingFocusRef.current = "failure";
       setStatusMessage(CLEAR_FAILURE_MESSAGE[result]);
+      // 失敗時は確認UIがそのまま残るため、非同期の効果を待つと利用者が一時的に
+      // 破壊操作のボタンへ留まる。失敗処理の完了時点で安全側のキャンセルへ移し、
+      // focus() が到達できなかった場合だけ既存の効果による候補連鎖へ委ねる。
+      cancelButtonRef.current?.focus();
+      if (
+        cancelButtonRef.current?.ownerDocument.activeElement ===
+        cancelButtonRef.current
+      ) {
+        pendingFocusRef.current = null;
+      }
     } finally {
       clearTimeout(progressTimer);
       clearingRef.current = false;
