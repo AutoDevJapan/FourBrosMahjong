@@ -330,6 +330,54 @@ describe("parseOnlineServerMessage", () => {
     }
   });
 
+  it("requires canonical tile counts and identities for visible melds (#864)", () => {
+    const snapshot = snapshotFixture();
+    const tile = { suit: "pin" as const, rank: 5, isRed: false };
+    const meldWith = (meld: unknown): OnlineSnapshot => {
+      const candidate = structuredClone(snapshot) as unknown as {
+        view: {
+          slots: Record<string, { player: Record<string, unknown> }>;
+        };
+      };
+      candidate.view.slots.self.player.melds = [meld];
+      return candidate as unknown as OnlineSnapshot;
+    };
+    const repeated = (count: number) =>
+      Array.from({ length: count }, () => ({ ...tile }));
+
+    for (const meld of [
+      { type: "pon", tiles: [], concealed: false },
+      { type: "pon", tiles: repeated(2), concealed: false },
+      { type: "pon", tiles: repeated(3), concealed: true },
+      {
+        type: "pon",
+        tiles: [tile, { ...tile, rank: 6 }, { ...tile, rank: 5 }],
+        concealed: false,
+      },
+      { type: "kan", tiles: repeated(3), concealed: false },
+    ]) {
+      expect(
+        parseOnlineServerMessage({
+          type: "snapshot",
+          snapshot: meldWith(meld),
+        }),
+      ).toBeNull();
+    }
+
+    for (const meld of [
+      { type: "pon", tiles: repeated(3), concealed: false },
+      { type: "kan", tiles: repeated(4), concealed: false },
+      { type: "kan", tiles: repeated(4), concealed: true },
+    ]) {
+      expect(
+        parseOnlineServerMessage({
+          type: "snapshot",
+          snapshot: meldWith(meld),
+        }),
+      ).not.toBeNull();
+    }
+  });
+
   it("bounds win detail lists before WinDetails expands them (#858)", () => {
     const snapshot = snapshotForState(walkToGameEnd(2024).state);
     const roundSummary = snapshot.roundSummary;
