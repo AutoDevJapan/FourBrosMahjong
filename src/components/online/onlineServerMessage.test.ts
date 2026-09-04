@@ -12,6 +12,7 @@ import {
 import { RoomManager } from "../../../server/roomManager";
 import {
   MAX_MAINTENANCE_RETRY_AFTER_MS,
+  MAX_VISIBLE_HAND_TILES,
   MAX_WIN_PAYMENT_ENTRIES,
   MAX_WIN_YAKU_ENTRIES,
   parseOnlineServerMessage,
@@ -376,6 +377,92 @@ describe("parseOnlineServerMessage", () => {
         }),
       ).not.toBeNull();
     }
+  });
+
+  it("bounds pending tile options and the revealed winning hand before UI expansion (#863)", () => {
+    const snapshot = snapshotFixture();
+    const pending = snapshot.pending;
+    if (pending?.kind !== "humanDiscard") {
+      throw new Error("pending tile option fixture expected");
+    }
+    const tile = pending.riichiTiles[0] ?? {
+      suit: "man" as const,
+      rank: 1,
+      isRed: false,
+    };
+    const pendingFields = [
+      "riichiTiles",
+      "ankanTiles",
+      "kakanTiles",
+      "forbiddenDiscards",
+    ] as const;
+
+    for (const field of pendingFields) {
+      const atLimit = {
+        ...snapshot,
+        pending: {
+          ...pending,
+          [field]: Array.from({ length: MAX_VISIBLE_HAND_TILES }, () => tile),
+        },
+      };
+      const overLimit = {
+        ...snapshot,
+        pending: {
+          ...pending,
+          [field]: Array.from(
+            { length: MAX_VISIBLE_HAND_TILES + 1 },
+            () => tile,
+          ),
+        },
+      };
+
+      expect(
+        parseOnlineServerMessage({ type: "snapshot", snapshot: atLimit }),
+        field,
+      ).not.toBeNull();
+      expect(
+        parseOnlineServerMessage({ type: "snapshot", snapshot: overLimit }),
+        field,
+      ).toBeNull();
+    }
+
+    const gameEnd = snapshotForState(walkToGameEnd(2024).state);
+    const roundSummary = gameEnd.roundSummary;
+    const winDetails = roundSummary?.winDetails;
+    if (!roundSummary || !winDetails) {
+      throw new Error("win details fixture expected");
+    }
+    const handTile = winDetails.hand[0] ?? winDetails.winningTile;
+    const atLimit = {
+      ...gameEnd,
+      roundSummary: {
+        ...roundSummary,
+        winDetails: {
+          ...winDetails,
+          hand: Array.from({ length: MAX_VISIBLE_HAND_TILES }, () => handTile),
+        },
+      },
+    };
+    const overLimit = {
+      ...gameEnd,
+      roundSummary: {
+        ...roundSummary,
+        winDetails: {
+          ...winDetails,
+          hand: Array.from(
+            { length: MAX_VISIBLE_HAND_TILES + 1 },
+            () => handTile,
+          ),
+        },
+      },
+    };
+
+    expect(
+      parseOnlineServerMessage({ type: "snapshot", snapshot: atLimit }),
+    ).not.toBeNull();
+    expect(
+      parseOnlineServerMessage({ type: "snapshot", snapshot: overLimit }),
+    ).toBeNull();
   });
 
   it("bounds win detail lists before WinDetails expands them (#858)", () => {
