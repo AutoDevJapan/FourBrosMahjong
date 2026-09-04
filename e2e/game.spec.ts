@@ -80,6 +80,15 @@ async function expectGamePageScreenshot(page: Page, name: string) {
   });
 }
 
+/** 終局直後の一時演出が消え、静止した盤面をvisual baselineへ渡す。 */
+async function waitForGameEffectToSettle(page: Page): Promise<void> {
+  const overlay = page.locator('[data-effect-overlay="true"]');
+  // phase変更後のuseEffectで必ず一度表示されるresolution cueを観測してから、
+  // 固定sleepではなくDOMから消える完了条件を待つ(#842)。
+  await expect(overlay).toBeVisible();
+  await expect(overlay).toHaveCount(0);
+}
+
 /**
  * wheel を送った後、スクロール適用が終わるまで 2 フレーム進める。
  *
@@ -1604,6 +1613,7 @@ test.describe("対局画面(/game)", () => {
         .locator('[data-player-kind="bench"][data-character-id="p0"]')
         .filter({ visible: true }),
     ).toHaveCount(1);
+    await waitForGameEffectToSettle(page);
     await expectGamePageScreenshot(page, "tablet-768-dark-rotated-game.png");
   });
 
@@ -1623,6 +1633,7 @@ test.describe("対局画面(/game)", () => {
     await expect(
       page.getByRole("heading", { name: "和了内訳" }).first(),
     ).toBeVisible();
+    await waitForGameEffectToSettle(page);
     await expectGamePageScreenshot(page, "desktop-dark-game-end.png");
   });
 });
