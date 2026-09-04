@@ -248,13 +248,24 @@ function isFullRevision(value: unknown): value is string {
   );
 }
 
-function parseVersion(value: unknown): [number, number, number] | null {
+type ParsedVersion = {
+  core: [number, number, number];
+  prerelease: boolean;
+};
+
+function parseVersion(value: unknown): ParsedVersion | null {
   if (typeof value !== "string") return null;
-  const match = /^(\d+)\.(\d+)\.(\d+)(?:[-+][0-9A-Za-z.-]+)?$/.exec(value);
+  const match =
+    /^(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.-]+))?(?:\+([0-9A-Za-z.-]+))?$/.exec(
+      value,
+    );
   if (!match) return null;
   const parsed = match.slice(1, 4).map(Number);
   return parsed.every(Number.isSafeInteger)
-    ? (parsed as [number, number, number])
+    ? {
+        core: parsed as [number, number, number],
+        prerelease: match[4] !== undefined,
+      }
     : null;
 }
 
@@ -263,11 +274,14 @@ function versionAtLeast(value: unknown, minimum: string): boolean {
   const required = parseVersion(minimum);
   if (!actual || !required) return false;
   for (let index = 0; index < 3; index += 1) {
-    if (actual[index] !== required[index]) {
-      return actual[index]! > required[index]!;
+    if (actual.core[index] !== required.core[index]) {
+      return actual.core[index]! > required.core[index]!;
     }
   }
-  return true;
+  // A prerelease has lower precedence than the matching stable release. The
+  // migration contract's minimum is stable, so do not treat 5.42.1-rc.1 as
+  // proof that the required 5.42.1 CLI capability is available.
+  return required.prerelease || !actual.prerelease;
 }
 
 function isFreshTimestamp(value: unknown, nowMs: number): boolean {

@@ -578,6 +578,17 @@ describe("Railway IaC parity snapshot contract (#742)", () => {
     expect(reasonsFor(mutate)).toContain(reason);
   });
 
+  it("does not treat a prerelease as the stable CLI minimum", () => {
+    const prerelease = "5.42.1-rc.1";
+    expect(
+      reasonsFor((e) => {
+        e.cliEvidence.cliVersion = prerelease;
+        e.generatedIac.cliVersion = prerelease;
+        e.parityPlan.cliVersion = prerelease;
+      }),
+    ).toContain("cli-capability-unverified");
+  });
+
   it("requires the immutable pre-cutover legacy fixture", () => {
     expect(
       validateRailwayIacMigrationEvidence(
