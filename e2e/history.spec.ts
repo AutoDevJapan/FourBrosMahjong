@@ -290,6 +290,44 @@ test.describe("戦績のローカル保存・閲覧(#293)", () => {
     await expect(page.getByText(/削除できませんでした/)).toHaveCount(0);
   });
 
+  test("ストレージ削除失敗時は確認UIに安全にフォーカスを戻す(#843)", async ({
+    page,
+  }) => {
+    await page.addInitScript(
+      ({ key, value }) => {
+        localStorage.setItem(key, value);
+        const originalRemoveItem = Storage.prototype.removeItem;
+        Storage.prototype.removeItem = function (storageKey: string) {
+          if (storageKey === key) {
+            throw new DOMException("Storage is read-only", "SecurityError");
+          }
+          return originalRemoveItem.call(this, storageKey);
+        };
+      },
+      { key: HISTORY_KEY, value: SAVED_HISTORY },
+    );
+    await page.goto("/history");
+    await expect(
+      page.getByRole("list", { name: "保存された半荘結果" }),
+    ).toBeVisible();
+
+    await page.getByRole("button", { name: "戦績をすべて削除" }).click();
+    await page.getByRole("button", { name: "削除する" }).click();
+
+    await expect(
+      page
+        .getByRole("status")
+        .filter({ hasText: "この端末のストレージを操作できず" }),
+    ).toBeVisible();
+    await expect(
+      page.getByRole("list", { name: "保存された半荘結果" }),
+    ).toBeVisible();
+    await expect(
+      page.getByRole("button", { name: "キャンセル" }),
+    ).toBeFocused();
+    await expect(page.getByRole("button", { name: "削除する" })).toBeVisible();
+  });
+
   for (const failure of ["SecurityError", "QuotaExceededError"] as const) {
     test(`戦績保存が${failure}でも結果を表示し、保存失敗を通知する(issue #358)`, async ({
       page,
