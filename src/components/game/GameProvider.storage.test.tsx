@@ -23,6 +23,35 @@ function blockSessionStorage() {
   });
 }
 
+/** localStorageとStorage prototypeを共有するjsdomでも、sessionStorageだけを失敗させる。 */
+function failSessionStorageWrites(): () => void {
+  const storage = window.sessionStorage;
+  Object.defineProperty(window, "sessionStorage", {
+    configurable: true,
+    value: {
+      get length() {
+        return storage.length;
+      },
+      clear: () => storage.clear(),
+      getItem: (key: string) => storage.getItem(key),
+      key: (index: number) => storage.key(index),
+      removeItem: (key: string) => storage.removeItem(key),
+      setItem: () => {
+        throw new DOMException("Storage quota exceeded", "QuotaExceededError");
+      },
+    } satisfies Storage,
+  });
+  return () => {
+    if (originalStorageDescriptor) {
+      Object.defineProperty(
+        window,
+        "sessionStorage",
+        originalStorageDescriptor,
+      );
+    }
+  };
+}
+
 function StorageFailureProbe() {
   const { controls, view, sessionSaveStatus } = useGame();
   const self = view.slots.self;
@@ -71,12 +100,7 @@ describe("GameProvider storage failure fallback (#244)", () => {
   });
 
   it("新規ジャーナルのsessionStorage書き込み失敗を公開し、対局は開始する", () => {
-    vi.spyOn(
-      Object.getPrototypeOf(window.sessionStorage),
-      "setItem",
-    ).mockImplementation(() => {
-      throw new DOMException("Storage quota exceeded", "QuotaExceededError");
-    });
+    failSessionStorageWrites();
 
     render(
       <GameProvider>
@@ -131,18 +155,14 @@ describe("GameProvider storage failure fallback (#244)", () => {
         <StorageFailureProbe />
       </GameProvider>,
     );
-    const setItem = vi
-      .spyOn(Object.getPrototypeOf(window.sessionStorage), "setItem")
-      .mockImplementation(() => {
-        throw new DOMException("Storage quota exceeded", "QuotaExceededError");
-      });
+    const restoreStorage = failSessionStorageWrites();
 
     fireEvent.click(screen.getByRole("button", { name: "打牌" }));
     expect(screen.getByTestId("session-save-status")).toHaveTextContent(
       "failed",
     );
 
-    setItem.mockRestore();
+    restoreStorage();
     fireEvent.click(screen.getByRole("button", { name: "打牌" }));
 
     expect(screen.getByTestId("session-save-status")).toHaveTextContent(
@@ -156,12 +176,7 @@ describe("GameProvider storage failure fallback (#244)", () => {
   });
 
   it("sessionStorage書き込み失敗を対局画面へ明示する", () => {
-    vi.spyOn(
-      Object.getPrototypeOf(window.sessionStorage),
-      "setItem",
-    ).mockImplementation(() => {
-      throw new DOMException("Storage quota exceeded", "QuotaExceededError");
-    });
+    failSessionStorageWrites();
 
     render(
       <GameProvider>

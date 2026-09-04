@@ -31,6 +31,10 @@ const originalLocalStorageDescriptor = Object.getOwnPropertyDescriptor(
   window,
   "localStorage",
 );
+const originalSessionStorageDescriptor = Object.getOwnPropertyDescriptor(
+  window,
+  "sessionStorage",
+);
 
 const originalLocksDescriptor = Object.getOwnPropertyDescriptor(
   navigator,
@@ -44,6 +48,35 @@ function blockLocalStorage() {
       throw new DOMException("Storage is disabled", "SecurityError");
     },
   });
+}
+
+/** localStorageとStorage prototypeを共有するjsdomでも、sessionStorageだけを失敗させる。 */
+function failSessionStorageWrites(): () => void {
+  const storage = window.sessionStorage;
+  Object.defineProperty(window, "sessionStorage", {
+    configurable: true,
+    value: {
+      get length() {
+        return storage.length;
+      },
+      clear: () => storage.clear(),
+      getItem: (key: string) => storage.getItem(key),
+      key: (index: number) => storage.key(index),
+      removeItem: (key: string) => storage.removeItem(key),
+      setItem: () => {
+        throw new DOMException("Storage quota exceeded", "QuotaExceededError");
+      },
+    } satisfies Storage,
+  });
+  return () => {
+    if (originalSessionStorageDescriptor) {
+      Object.defineProperty(
+        window,
+        "sessionStorage",
+        originalSessionStorageDescriptor,
+      );
+    }
+  };
 }
 
 /** ジャーナル末尾の操作1つを UI 経由(controls)で実行するプローブ。 */
@@ -144,6 +177,13 @@ afterEach(() => {
       window,
       "localStorage",
       originalLocalStorageDescriptor,
+    );
+  }
+  if (originalSessionStorageDescriptor) {
+    Object.defineProperty(
+      window,
+      "sessionStorage",
+      originalSessionStorageDescriptor,
     );
   }
   window.sessionStorage.clear();
@@ -369,11 +409,7 @@ describe("GameProvider match history recording (#293)", () => {
         <LastActionProbe action={lastAction} />
       </GameProvider>,
     );
-    const setItem = vi
-      .spyOn(Object.getPrototypeOf(window.sessionStorage), "setItem")
-      .mockImplementation(() => {
-        throw new DOMException("Storage quota exceeded", "QuotaExceededError");
-      });
+    failSessionStorageWrites();
 
     fireEvent.click(screen.getByRole("button", { name: "最終操作" }));
 
@@ -390,7 +426,6 @@ describe("GameProvider match history recording (#293)", () => {
         "saved",
       ),
     );
-    setItem.mockRestore();
   });
 });
 
