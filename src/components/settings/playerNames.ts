@@ -32,6 +32,15 @@ export type { PlayerNames };
 /** `localStorage` の保存キー。スキーマ変更時は末尾の版番号を上げる。 */
 export const PLAYER_NAMES_STORAGE_KEY = "four-bros-mahjong.playerNames.v1";
 
+/**
+ * `localStorage` から同期的に読む対局者名JSONの最大サイズ。
+ *
+ * 保存値はメインスレッド上で `JSON.parse` するため、parse前にUTF-16の保存量
+ * (1 code unit = 2 bytes)を制限する。32KiBあれば、4人分の通常の12書記素名と
+ * 既存保存値の正規化に必要なJSONエスケープの余裕を十分に含められる。
+ */
+export const MAX_PLAYER_NAMES_BYTES = 32 * 1024;
+
 /** 入力欄のラベル。固定席を示さず、キャラクターSSOTのp0-p3順を使う。 */
 export const PLAYER_NAME_LABELS: readonly [string, string, string, string] = [
   CHARACTER_PROFILES.p0.defaultName,
@@ -59,6 +68,7 @@ export function resolvePlayerNames(
  * 呼び出し側で既定名へフォールバックさせる(後方互換: 未設定時は従来どおり既定名)。
  */
 export function parsePlayerNames(raw: string): PlayerNames | null {
+  if (raw.length * 2 > MAX_PLAYER_NAMES_BYTES) return null;
   try {
     const value: unknown = JSON.parse(raw);
     if (!Array.isArray(value) || value.length !== DEFAULT_NAMES.length) {
