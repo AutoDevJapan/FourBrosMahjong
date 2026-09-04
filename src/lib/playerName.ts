@@ -155,6 +155,19 @@ export function limitPlayerName(value: string): string {
     .join("");
 }
 
+/**
+ * IME変換中の候補を、書記素の上限を適用せずに安全な長さへ切り詰める。
+ *
+ * 変換中は読みや候補を途中で分割するとIMEの確定状態を壊すため、
+ * limitPlayerNameの書記素上限をまだ適用できない。一方、変換イベントの値を
+ * 無制限にstateへ保持すると、確定前の巨大な貼り付けや自動入力が各renderへ
+ * 流れ込む。code unitだけを先に制限し、境界でサロゲートを分断しない形へ
+ * 正規化することで、候補を保ったまま後続処理の計算量を固定する。
+ */
+export function boundPlayerNameInput(value: string): string {
+  return toWellFormed(value.slice(0, MAX_PLAYER_NAME_CODE_UNITS));
+}
+
 /** 保存・表示境界で使う名前の妥当性を検証する。 */
 export function isValidPlayerName(value: string): boolean {
   return (

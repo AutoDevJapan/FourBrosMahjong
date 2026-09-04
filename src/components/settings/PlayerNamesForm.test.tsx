@@ -5,6 +5,7 @@ import { DEFAULT_NAMES } from "@/domain/game/engine";
 import { PlayerNamesForm } from "./PlayerNamesForm";
 import {
   loadPlayerNames,
+  MAX_PLAYER_NAME_CODE_UNITS,
   MAX_PLAYER_NAME_LENGTH,
   PLAYER_NAMES_STORAGE_KEY,
 } from "./playerNames";
@@ -124,6 +125,18 @@ describe("PlayerNamesForm", () => {
     fireEvent.change(input, { target: { value: converted } });
     fireEvent.compositionEnd(input, { target: { value: converted } });
     expect(input).toHaveValue(converted);
+  });
+
+  it("IME変換中の巨大な候補をcode unit上限内に保持する(#878)", () => {
+    render(<PlayerNamesForm />);
+    const input = inputFor("竜二");
+    const huge = "あ".repeat(MAX_PLAYER_NAME_CODE_UNITS + 100_000);
+
+    fireEvent.compositionStart(input);
+    fireEvent.change(input, { target: { value: huge } });
+
+    expect(input).toHaveValue("あ".repeat(MAX_PLAYER_NAME_CODE_UNITS));
+    expect(input.value.length).toBeLessThanOrEqual(MAX_PLAYER_NAME_CODE_UNITS);
   });
 
   it("変換中でも他の入力欄には上限が効く(#484)", () => {

@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { DEFAULT_NAMES } from "@/domain/game/engine";
 import {
+  boundPlayerNameInput,
   isValidPlayerName,
   limitPlayerName,
   loadPlayerNames,
@@ -219,6 +220,33 @@ describe("limitPlayerName", () => {
     expect(limitPlayerName(zalgo).length).toBeLessThanOrEqual(
       MAX_PLAYER_NAME_CODE_UNITS,
     );
+  });
+});
+
+describe("boundPlayerNameInput", () => {
+  it("IME変換中の巨大入力を書記素制限なしでcode unit上限へ切り詰める(#878)", () => {
+    const huge = "あ".repeat(MAX_PLAYER_NAME_CODE_UNITS + 100_000);
+
+    expect(boundPlayerNameInput(huge)).toBe(
+      "あ".repeat(MAX_PLAYER_NAME_CODE_UNITS),
+    );
+    expect(boundPlayerNameInput(huge).length).toBeLessThanOrEqual(
+      MAX_PLAYER_NAME_CODE_UNITS,
+    );
+  });
+
+  it("code unit境界でサロゲートを分断しない(#878)", () => {
+    const value = "a".repeat(MAX_PLAYER_NAME_CODE_UNITS - 1) + "😀";
+    const bounded = boundPlayerNameInput(value);
+
+    expect(bounded.length).toBe(MAX_PLAYER_NAME_CODE_UNITS);
+    expect(
+      [...bounded].some(
+        (point) =>
+          point === String.fromCharCode(0xd800) ||
+          point === String.fromCharCode(0xdc00),
+      ),
+    ).toBe(false);
   });
 });
 

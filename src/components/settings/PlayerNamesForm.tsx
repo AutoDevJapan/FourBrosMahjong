@@ -28,6 +28,7 @@ import CharacterPortrait, {
 } from "@/components/game/CharacterPortrait";
 import { CHARACTER_PLAYER_IDS } from "@/domain/game/characters";
 import {
+  boundPlayerNameInput,
   DEFAULT_NAMES,
   getPlayerNamesSnapshot,
   getServerPlayerNamesSnapshot,
@@ -68,7 +69,9 @@ export function PlayerNamesForm() {
 
   const updateAt = (index: number, value: string, isComposing: boolean) => {
     const next = [...values] as unknown as [string, string, string, string];
-    next[index] = isComposing ? value : limitPlayerName(value);
+    next[index] = isComposing
+      ? boundPlayerNameInput(value)
+      : limitPlayerName(value);
     setDraft(next);
     setStatus({ kind: "idle" });
   };
