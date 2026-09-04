@@ -241,6 +241,48 @@ describe("createOnlineServer lifecycle", () => {
     }
   });
 
+  it("rejects binary WebSocket messages before JSON parsing", async () => {
+    const server = createOnlineServer({ environment: environment(false) });
+    const port = await listen(server);
+    const socket = await openWebSocket(port);
+    try {
+      const messages: unknown[] = [];
+      socket.on("message", (data) =>
+        messages.push(JSON.parse(data.toString())),
+      );
+      const closed = new Promise<{
+        readonly code: number;
+        readonly reason: string;
+      }>((resolve, reject) => {
+        const timer = setTimeout(
+          () => reject(new Error("binary WebSocket was not rejected")),
+          1_000,
+        );
+        socket.once("close", (code, reason) => {
+          clearTimeout(timer);
+          resolve({ code, reason: reason.toString() });
+        });
+      });
+
+      socket.send(
+        Buffer.from(JSON.stringify({ type: "create", name: "binary" })),
+      );
+
+      await expect(closed).resolves.toEqual({
+        code: 1003,
+        reason: "unsupported data",
+      });
+      expect(messages).toEqual([]);
+    } finally {
+      if (socket.readyState !== WebSocket.CLOSED) {
+        const closed = once(socket, "close");
+        socket.terminate();
+        await closed;
+      }
+      await server.handleSignal("SIGTERM");
+    }
+  });
+
   it("uses the injected Railway marker for WebSocket source rate limiting", async () => {
     const previousMarker = process.env.RAILWAY_ENVIRONMENT_ID;
     delete process.env.RAILWAY_ENVIRONMENT_ID;

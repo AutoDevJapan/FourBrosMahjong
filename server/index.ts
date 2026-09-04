@@ -67,6 +67,8 @@ import {
 } from "./upgradeDrainAdmission";
 
 const MAX_MESSAGE_BYTES = 32 * 1024;
+const UNSUPPORTED_DATA_CLOSE_CODE = 1003;
+const UNSUPPORTED_DATA_CLOSE_REASON = "unsupported data";
 const RATE_LIMIT_CLOSE_CODE = 1013;
 const ONLINE_HEARTBEAT_INTERVAL_MS = SERVER_HEARTBEAT_INTERVAL_MS;
 
@@ -665,10 +667,21 @@ export function createOnlineServer(
         afterRoomMutation();
       }
     });
-    socket.on("message", (data) => {
+    socket.on("message", (data, isBinary) => {
       // Replacement registration marks the old peer synchronously before its
       // close event. Ignore it before byte/rate accounting or any mutation.
       if (!isAuthoritativeConnection(client)) return;
+      // The application protocol is text JSON. Do not stringify a binary
+      // RawData value and accidentally admit it as an application message.
+      // Closing with the standard unsupported-data code also avoids spending
+      // parser or rate-limit work on a protocol violation.
+      if (isBinary) {
+        socket.close(
+          UNSUPPORTED_DATA_CLOSE_CODE,
+          UNSUPPORTED_DATA_CLOSE_REASON,
+        );
+        return;
+      }
       if (Buffer.byteLength(data.toString()) > MAX_MESSAGE_BYTES) {
         sendError(
           client,
