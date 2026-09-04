@@ -254,6 +254,18 @@ describe("parseOnlineServerMessage", () => {
     ).toBeNull();
   });
 
+  it.each([Number.MAX_SAFE_INTEGER + 1, 1e100])(
+    "rejects snapshot versions outside JavaScript's safe integer range: %s",
+    (version) => {
+      expect(
+        parseOnlineServerMessage({
+          type: "snapshot",
+          snapshot: { ...snapshotFixture(), version },
+        }),
+      ).toBeNull();
+    },
+  );
+
   it("rejects display counts above the game bounds before rendering", () => {
     const snapshot = snapshotFixture();
     const self = snapshot.view.slots.self;
