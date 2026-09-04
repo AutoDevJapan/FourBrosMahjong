@@ -13,6 +13,7 @@ import { selectView } from "@/components/game/gameView";
 import { createGame } from "@/domain/game/engine";
 import OnlineLobby, {
   isStaleOnlineSnapshot,
+  MAX_ONLINE_CREDENTIALS_BYTES,
   MAX_ONLINE_SERVER_MESSAGE_BYTES,
 } from "./OnlineLobby";
 import type { OnlineSnapshot } from "./types";
@@ -348,6 +349,27 @@ describe("OnlineLobby (#605)", () => {
     await waitFor(() =>
       expect(screen.getByLabelText("ルームコード")).toHaveValue(""),
     );
+  });
+
+  it("drops oversized saved credentials before JSON.parse or auto-connect", () => {
+    vi.useFakeTimers();
+    const raw = JSON.stringify({
+      code: "ABC234",
+      token: "t".repeat(MAX_ONLINE_CREDENTIALS_BYTES),
+    });
+    expect(raw.length * 2).toBeGreaterThan(MAX_ONLINE_CREDENTIALS_BYTES);
+    window.sessionStorage.setItem("four-bros-mahjong.online.session.v1", raw);
+    const parse = vi.spyOn(JSON, "parse");
+
+    render(
+      <StrictMode>
+        <OnlineLobby />
+      </StrictMode>,
+    );
+    act(() => vi.runAllTimers());
+
+    expect(parse).not.toHaveBeenCalled();
+    expect(sockets).toHaveLength(0);
   });
 
   it("does not restore a saved session whose code is no longer generated", async () => {
