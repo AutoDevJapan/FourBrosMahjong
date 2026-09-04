@@ -50,7 +50,7 @@ validatorの`pass`はauthorized cutover後のparity証拠が内部整合した�
 | parity plan | setting clear後のfresh redacted plan、exact target/file hash、detailed exit code |
 | source secret safety | ASTによる保守的scanとhuman reviewの両方 |
 
-normalized JSONは64KiB以下とし、raw variables、token、Authorization、cookie、full environment dumpをschema外にする。static source scanは`env`/`variables` objectのliteral値を拒否するが、secret不存在の完全な証明ではない。manual review完了を別fieldで要求し、どちらか一方だけではpassしない。
+normalized JSONは64KiB以下とし、raw variables、token、Authorization、cookie、full environment dumpをschema外にする。JSON object nameはnative parserへ渡す前に検査し、同一名（escape表現で同じdecoded nameになる場合を含む）の重複をrejectする。static source scanは`env`/`variables` objectのliteral値を拒否するが、secret不存在の完全な証明ではない。manual review完了を別fieldで要求し、どちらか一方だけではpassしない。
 
 `--out`のpinned plan artifactはrepository外へ保存し、review evidenceへSHA-256だけを記録する。`--json`のstdoutを別途保存する場合もredacted outputだけを扱う。validatorはnormalized hash、外部保存、生成sourceとの証拠上の結合を確認するが、artifactの真正性や内容を独立取得して証明しない。artifact pathはsecret・token・個人パスを反映しない`<outside-repository>/railway-plan.json`へ正規化する。
 

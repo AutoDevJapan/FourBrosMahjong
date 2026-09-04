@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import ts from "typescript";
+import { parseStrictJson } from "./strictJson";
 
 const RAILWAY_IAC_EVIDENCE_SCHEMA_VERSION = 1 as const;
 const RAILWAY_IAC_EVIDENCE_MAX_AGE_MS = 5 * 60 * 1_000;
@@ -391,7 +392,7 @@ function railwayJsonContentIsKnown(
 
   let parsed: unknown;
   try {
-    parsed = JSON.parse(source);
+    parsed = parseStrictJson(source);
   } catch {
     return false;
   }

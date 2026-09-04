@@ -422,29 +422,30 @@ describe("online rollout preflight", () => {
 
   it("exposes a fixed non-reflective stdin CLI contract", () => {
     const cliNow = new Date().toISOString();
+    const validInput = {
+      ...evidence(),
+      capturedAt: cliNow,
+      railwayObservedAt: cliNow,
+      client: {
+        ...evidence().client,
+        observedAt: cliNow,
+      },
+      operations: {
+        ...evidence().operations,
+        observedAt: cliNow,
+        acceptingReadiness: {
+          ...evidence().operations.acceptingReadiness,
+          observedAt: cliNow,
+        },
+      },
+    };
     const passed = spawnSync(
       process.execPath,
       ["--import", "tsx", "scripts/verify-online-rollout-preflight.ts"],
       {
         cwd: process.cwd(),
         encoding: "utf8",
-        input: JSON.stringify({
-          ...evidence(),
-          capturedAt: cliNow,
-          railwayObservedAt: cliNow,
-          client: {
-            ...evidence().client,
-            observedAt: cliNow,
-          },
-          operations: {
-            ...evidence().operations,
-            observedAt: cliNow,
-            acceptingReadiness: {
-              ...evidence().operations.acceptingReadiness,
-              observedAt: cliNow,
-            },
-          },
-        }),
+        input: JSON.stringify(validInput),
       },
     );
     expect(passed.status, `${passed.stdout}\n${passed.stderr}`).toBe(0);
@@ -452,6 +453,26 @@ describe("online rollout preflight", () => {
       repoPreflight: "pass",
       authorizesDeployment: false,
       externalMutationPerformed: false,
+    });
+
+    const duplicateKeys = JSON.stringify(validInput).replace(
+      '{"schemaVersion":1,',
+      '{"schemaVersion":1,"schemaVersion":1,',
+    );
+    const duplicateResult = spawnSync(
+      process.execPath,
+      ["--import", "tsx", "scripts/verify-online-rollout-preflight.ts"],
+      {
+        cwd: process.cwd(),
+        encoding: "utf8",
+        input: duplicateKeys,
+      },
+    );
+    expect(duplicateResult.status).toBe(1);
+    expect(duplicateResult.stderr).toBe("");
+    expect(JSON.parse(duplicateResult.stdout)).toMatchObject({
+      repoPreflight: "hold",
+      reasons: ["invalid-schema"],
     });
 
     const secret = "cli-secret-must-not-be-reflected";

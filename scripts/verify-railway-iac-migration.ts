@@ -16,6 +16,7 @@ import {
   type RailwayIacFilesystemEvidence,
   validateRailwayIacMigrationEvidence,
 } from "./railway-iac-migration-contract";
+import { parseStrictJson } from "./strictJson";
 
 const MAX_INPUT_BYTES = 64 * 1_024;
 export const MAX_GENERATED_IAC_BYTES = 64 * 1_024;
@@ -280,7 +281,7 @@ async function main(): Promise<void> {
   let input: unknown = null;
   if (!inputTooLarge) {
     try {
-      input = JSON.parse(Buffer.concat(chunks).toString("utf8"));
+      input = parseStrictJson(Buffer.concat(chunks).toString("utf8"));
     } catch {
       input = null;
     }
