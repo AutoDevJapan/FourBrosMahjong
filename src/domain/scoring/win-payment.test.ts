@@ -10,6 +10,7 @@ import {
 const D: SeatedPlayerRef = { id: "dealer", isDealer: true };
 const C1: SeatedPlayerRef = { id: "child1", isDealer: false };
 const C2: SeatedPlayerRef = { id: "child2", isDealer: false };
+const C3: SeatedPlayerRef = { id: "child3", isDealer: false };
 
 /** deltas が総和ゼロであることを検証。 */
 function expectZeroSum(deltas: Record<string, number>) {
@@ -112,6 +113,28 @@ describe("resolveWinPayment — 参加者境界", () => {
         score: mangan,
         paoResponsibleId: "missing-player",
         others: [D, C2],
+      }),
+    ).toThrow(RangeError);
+  });
+
+  it("着席3人に親がいなければ精算前に拒否する", () => {
+    expect(() =>
+      resolveWinPayment({
+        winner: C1,
+        winType: "tsumo",
+        score: mangan,
+        others: [C2, C3],
+      }),
+    ).toThrow(RangeError);
+  });
+
+  it("着席3人に親が2人いれば精算前に拒否する", () => {
+    expect(() =>
+      resolveWinPayment({
+        winner: C1,
+        winType: "tsumo",
+        score: mangan,
+        others: [D, { id: C2.id, isDealer: true }],
       }),
     ).toThrow(RangeError);
   });
