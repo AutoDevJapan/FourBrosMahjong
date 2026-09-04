@@ -146,7 +146,7 @@ export class OnlineAbuseControls {
 
   /**
    * Returns a rejection before a WebSocket upgrade is accepted. A successful
-   * admission reserves one connection until `releaseConnection` is called.
+   * admission reserves one connection until `releasePendingUpgrade` is called.
    */
   admitConnection(
     source: string,
@@ -186,7 +186,7 @@ export class OnlineAbuseControls {
     return null;
   }
 
-  releaseConnection(source: string): void {
+  releasePendingUpgrade(source: string): void {
     const state = this.sources.get(source);
     if (state === undefined) return;
     state.pendingUpgradeReservations = Math.max(

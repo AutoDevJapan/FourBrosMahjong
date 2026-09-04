@@ -24,7 +24,7 @@ describe("admitUpgradeDuringDrain", () => {
     expect(abuse.admitConnection(source, 0, 0)).toBeNull();
     const rollback = vi.fn(() => {
       pending.delete("upgrade");
-      abuse.releaseConnection(source);
+      abuse.releasePendingUpgrade(source);
     });
     expect(
       admitUpgradeDuringDrain({
@@ -35,7 +35,7 @@ describe("admitUpgradeDuringDrain", () => {
     ).toEqual({ outcome: "maintenance" });
     expect(rollback).toHaveBeenCalledOnce();
     expect(pending.size).toBe(0);
-    // The source bucket has all 32 slots again. Without releaseConnection the
+    // The source bucket has all 32 slots again. Without releasePendingUpgrade
     // final admission below would fail one attempt early.
     for (let index = 0; index < 32; index += 1) {
       expect(abuse.admitConnection(source, 0, 0)).toBeNull();

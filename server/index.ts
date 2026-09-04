@@ -697,7 +697,9 @@ export function createOnlineServer(
     socket.on("close", () => {
       finishHandshake();
       clients.delete(client);
-      abuseControls.releaseConnection(client.source);
+      // Successful handoff already released this socket's upgrade
+      // reservation. Established sockets do not own a pending reservation;
+      // releasing here could consume another in-flight upgrade's reservation.
       // 再接続時は旧ソケットのcloseが新ソケットの接続状態を上書きし得る。
       // 同じ席に生きたソケットが残っている間は、切断扱いにしない。
       if (client.room && client.player && !hasOpenPeer(client)) {
@@ -918,14 +920,14 @@ export function createOnlineServer(
       return { ok: true, phase: afterRoomMutation().phase };
     } catch (error) {
       pendingUpgrades.delete(socket);
-      abuseControls.releaseConnection(source);
+      abuseControls.releasePendingUpgrade(source);
       throw error;
     }
   }
 
   function releasePendingUpgrade(socket: Socket, source: string): boolean {
     if (!pendingUpgrades.delete(socket)) return false;
-    abuseControls.releaseConnection(source);
+    abuseControls.releasePendingUpgrade(source);
     afterRoomMutation();
     return true;
   }
@@ -986,7 +988,7 @@ export function createOnlineServer(
       if (!pendingUpgrades.delete(socket)) return false;
       socket.off("close", releaseReservation);
       socket.off("error", releaseReservation);
-      abuseControls.releaseConnection(source);
+      abuseControls.releasePendingUpgrade(source);
       // onConnection synchronously swaps this reservation for the established
       // client and performs one reevaluation; do not expose a zero-count gap.
       return true;
@@ -1058,7 +1060,7 @@ export function createOnlineServer(
     for (const [socket, source] of [...pendingUpgrades]) {
       if (!pendingUpgrades.delete(socket)) continue;
       changed = true;
-      abuseControls.releaseConnection(source);
+      abuseControls.releasePendingUpgrade(source);
       shutdownPendingSockets.add(socket);
       socket.once("close", () => {
         shutdownPendingSockets.delete(socket);
