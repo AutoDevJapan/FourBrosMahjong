@@ -6,6 +6,7 @@ import {
   loadPlayerNames,
   MAX_PLAYER_NAME_CODE_UNITS,
   MAX_PLAYER_NAME_LENGTH,
+  MAX_PLAYER_NAMES_BYTES,
   PLAYER_NAMES_STORAGE_KEY,
   type PlayerNames,
   parsePlayerNames,
@@ -274,6 +275,24 @@ describe("parsePlayerNames", () => {
     expect(playerNameGraphemes(parsed?.[0] ?? "")).toHaveLength(
       MAX_PLAYER_NAME_LENGTH,
     );
+  });
+
+  it("容量上限を超える保存値はJSON.parse前に拒否する", () => {
+    const oversized = JSON.stringify([
+      "x".repeat(Math.ceil(MAX_PLAYER_NAMES_BYTES / 2)),
+      "B",
+      "C",
+      "D",
+    ]);
+    const parseSpy = vi.spyOn(JSON, "parse");
+
+    try {
+      expect(oversized.length * 2).toBeGreaterThan(MAX_PLAYER_NAMES_BYTES);
+      expect(parsePlayerNames(oversized)).toBeNull();
+      expect(parseSpy).not.toHaveBeenCalled();
+    } finally {
+      parseSpy.mockRestore();
+    }
   });
 });
 
