@@ -66,5 +66,11 @@ describe("UnityDisplayReference (#828)", () => {
       screen.getByRole("group", { name: "演出プレビューの種類" }),
     ).toBeVisible();
     expect(screen.getByTestId("unity-display-bench-preview")).toBeVisible();
+
+    const benchCase = screen.getByTestId("unity-display-case-bench-warmers");
+    expect(benchCase).toHaveTextContent("slotShape");
+    expect(benchCase).toHaveTextContent("kind=seated");
+    expect(benchCase).toHaveTextContent("playerId=p3");
+    expect(benchCase).not.toHaveTextContent("[object Object]");
   });
 });
