@@ -931,7 +931,10 @@ export function createOnlineServer(
   }
 
   websocketServer.on("connection", (socket, request) => {
-    onConnection(socket, connectionSource(request));
+    onConnection(
+      socket,
+      connectionSource(request, environment.RAILWAY_ENVIRONMENT_ID),
+    );
   });
 
   httpServer.on("upgrade", (request: IncomingMessage, socket: Socket, head) => {
@@ -945,7 +948,10 @@ export function createOnlineServer(
       socket.destroy();
       return;
     }
-    const source = connectionSource(request);
+    const source = connectionSource(
+      request,
+      environment.RAILWAY_ENVIRONMENT_ID,
+    );
     let admission: UpgradeDrainAdmission<AbuseRejection>;
     try {
       admission = admitUpgradeDuringDrain({
