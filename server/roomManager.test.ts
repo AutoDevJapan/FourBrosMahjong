@@ -69,6 +69,7 @@ describe("online room manager", () => {
     expect(normalizePlayerName("   ")).toBe("ゲスト");
     expect(normalizePlayerName("\u200B\u2060\uFEFF")).toBe("ゲスト");
     expect(normalizePlayerName("A\u202EB")).toBe("AB");
+    expect(normalizePlayerName("A\u001bB\u0000C\u009bD")).toBe("ABCD");
     expect(normalizePlayerName("עברית")).toBe("עברית");
   });
 
@@ -98,6 +99,10 @@ describe("online room manager", () => {
     if (!guest) throw new Error("guest should join");
     expect(guest.player.name).toBe("א");
     expect(guest.room.state.players[1]?.name).toBe("א");
+
+    const controlRoom = manager.create("A\u001bB\u0000C\u009bD");
+    expect(controlRoom.player.name).toBe("ABCD");
+    expect(controlRoom.room.state.players[0]?.name).toBe("ABCD");
 
     const boundedInvisible = "\u0301 ".repeat(MAX_PLAYER_NAME_LENGTH - 1) + "A";
     const boundedHost = manager.create(boundedInvisible);
