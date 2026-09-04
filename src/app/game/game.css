@@ -399,6 +399,23 @@
   background: var(--ui-surface);
 }
 
+.game-page .game-session-save-notice {
+  border-color: color-mix(in srgb, var(--danger) 72%, var(--ui-frame));
+  color: var(--ui-text);
+  background: color-mix(in srgb, var(--danger) 12%, var(--ui-surface));
+}
+
+.game-page .game-session-save-notice strong {
+  display: block;
+  color: var(--ui-text);
+}
+
+.game-page .game-session-save-notice p {
+  margin-top: 0.25rem;
+  color: var(--ui-muted);
+  line-height: 1.6;
+}
+
 @container (max-width: 359px) {
   .game-page .game-table {
     min-height: auto;
@@ -480,6 +497,7 @@
   .game-page .game-action-panel,
   .game-page .game-action-button,
   .game-page .game-focus-toolbar,
+  .game-page .game-session-save-notice,
   .game-full-board-modal .game-player-area,
   .game-full-board-modal .game-bench-area,
   .game-full-board-modal .game-table {

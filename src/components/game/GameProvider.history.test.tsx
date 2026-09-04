@@ -11,7 +11,7 @@
  */
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { useSyncExternalStore } from "react";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { CHARACTER_PLAYER_IDS } from "@/domain/game/characters";
 import { restoreWebLocks, stubWebLocks } from "@/test/webLocksStub";
 import { walkToGameEnd } from "./finishedGameFixture";
@@ -31,6 +31,10 @@ const originalLocalStorageDescriptor = Object.getOwnPropertyDescriptor(
   window,
   "localStorage",
 );
+const originalSessionStorageDescriptor = Object.getOwnPropertyDescriptor(
+  window,
+  "sessionStorage",
+);
 
 const originalLocksDescriptor = Object.getOwnPropertyDescriptor(
   navigator,
@@ -46,9 +50,38 @@ function blockLocalStorage() {
   });
 }
 
+/** localStorageとStorage prototypeを共有するjsdomでも、sessionStorageだけを失敗させる。 */
+function failSessionStorageWrites(): () => void {
+  const storage = window.sessionStorage;
+  Object.defineProperty(window, "sessionStorage", {
+    configurable: true,
+    value: {
+      get length() {
+        return storage.length;
+      },
+      clear: () => storage.clear(),
+      getItem: (key: string) => storage.getItem(key),
+      key: (index: number) => storage.key(index),
+      removeItem: (key: string) => storage.removeItem(key),
+      setItem: () => {
+        throw new DOMException("Storage quota exceeded", "QuotaExceededError");
+      },
+    } satisfies Storage,
+  });
+  return () => {
+    if (originalSessionStorageDescriptor) {
+      Object.defineProperty(
+        window,
+        "sessionStorage",
+        originalSessionStorageDescriptor,
+      );
+    }
+  };
+}
+
 /** ジャーナル末尾の操作1つを UI 経由(controls)で実行するプローブ。 */
 function LastActionProbe({ action }: { action: GameAction }) {
-  const { controls, phase, historySaveStatus } = useGame();
+  const { controls, phase, historySaveStatus, sessionSaveStatus } = useGame();
   const run = () => {
     switch (action.type) {
       case "discard":
@@ -84,6 +117,7 @@ function LastActionProbe({ action }: { action: GameAction }) {
       </button>
       <output data-testid="phase">{phase}</output>
       <output data-testid="history-save-status">{historySaveStatus}</output>
+      <output data-testid="session-save-status">{sessionSaveStatus}</output>
     </>
   );
 }
@@ -137,11 +171,19 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  vi.restoreAllMocks();
   if (originalLocalStorageDescriptor) {
     Object.defineProperty(
       window,
       "localStorage",
       originalLocalStorageDescriptor,
+    );
+  }
+  if (originalSessionStorageDescriptor) {
+    Object.defineProperty(
+      window,
+      "sessionStorage",
+      originalSessionStorageDescriptor,
     );
   }
   window.sessionStorage.clear();
@@ -347,6 +389,41 @@ describe("GameProvider match history recording (#293)", () => {
     await waitFor(() =>
       expect(screen.getByTestId("history-save-status")).toHaveTextContent(
         "failed",
+      ),
+    );
+  });
+
+  it("終局直前のsessionStorage書き込み失敗でも結果を保ち、復元不可を公開する", async () => {
+    const lastAction = fixture.journal.actions.at(-1);
+    if (!lastAction) throw new Error("ジャーナルが空");
+    window.sessionStorage.setItem(
+      GAME_SESSION_KEY,
+      JSON.stringify({
+        ...fixture.journal,
+        actions: fixture.journal.actions.slice(0, -1),
+      }),
+    );
+
+    render(
+      <GameProvider>
+        <LastActionProbe action={lastAction} />
+      </GameProvider>,
+    );
+    failSessionStorageWrites();
+
+    fireEvent.click(screen.getByRole("button", { name: "最終操作" }));
+
+    expect(screen.getByTestId("phase")).toHaveTextContent("gameEnd");
+    expect(screen.getByTestId("session-save-status")).toHaveTextContent(
+      "failed",
+    );
+    expect(
+      JSON.parse(window.sessionStorage.getItem(GAME_SESSION_KEY) ?? "null")
+        .actions,
+    ).toHaveLength(fixture.journal.actions.length - 1);
+    await waitFor(() =>
+      expect(screen.getByTestId("history-save-status")).toHaveTextContent(
+        "saved",
       ),
     );
   });

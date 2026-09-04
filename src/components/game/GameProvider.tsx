@@ -5,7 +5,8 @@
  *
  * React stateに実対局エンジン状態を保持し、同一タブの`sessionStorage`には
  * **seed + 検証済み操作履歴**を保存する。リロード時は通常のengine APIで履歴を再生するため、
- * Wall/RNG/台帳などのclassを不完全なJSONへ変換せず安全に復元できる。
+ * Wall/RNG/台帳などのclassを不完全なJSONへ変換せず安全に復元できる。Storageの一時的な
+ * 書き込み失敗ではジャーナルをメモリに保持し、復旧後の次の操作で再保存する。
  * `/game`(対局画面)と `/game/result`(結果画面)の間で同一インスタンスを共有する。`/game` 配下の
  * 共有レイアウト(`app/game/layout.tsx`)に配置することで、ページ遷移してもプロバイダは再生成されず
  * 半荘の状態(進行・精算・結果)が保たれる(スペック6 6.5 / 6.9)。
@@ -93,6 +94,8 @@ export interface GameContextValue {
   readonly pending: Pending;
   /** 直前局の決着サマリ(未決着時は null)。 */
   readonly roundSummary: RoundSummary | null;
+  /** 現在の半荘ジャーナルをこのタブの sessionStorage へ保存できた状態。 */
+  readonly sessionSaveStatus: "idle" | "saved" | "failed";
   /** 現在の半荘結果をこの端末の戦績へ保存した状態。 */
   readonly historySaveStatus: "idle" | "pending" | "saved" | "failed";
   /** 対局操作。 */
@@ -182,7 +185,7 @@ export function freshSeed(): number {
  * seed はジャーナルの seed をそのまま半荘の識別子に使い、`appendHistory` 側の
  * 重複排除で「終局済みジャーナルのリロード再生」による二重保存を防ぐ。逆に、
  * 終局の瞬間に保存へ失敗していても、リロード復元時に同じ seed で再追記されるため
- * 保存漏れを補完できる。ジャーナルが無い対局(テスト注入・Storage 無効環境)は
+ * 保存漏れを補完できる。ジャーナルが無い対局(テスト用の初期エンジン注入など)は
  * seed を持たないため保存対象外とする。
  *
  * 実際に追記できたときは購読者へ通知する(issue #310)。永続化と通知は
@@ -233,24 +236,32 @@ function currentPlayerNames(): PlayerNames {
   return storage === null ? DEFAULT_NAMES : loadPlayerNames(storage);
 }
 
-/** 新規半荘のジャーナルを作る(`null` = sessionStorage 不可でメモリ内対局)。 */
-function newJournal(
+/** 新規半荘のジャーナルを作る。保存不可でも復旧後の再保存用にメモリへ保持する。 */
+function newJournal(seed: number, names: PlayerNames): GameJournal {
+  return { version: 3, seed, names, explicitKita: true, actions: [] };
+}
+
+/** `sessionStorage` が使えない場合も対局を継続し、状態だけを失敗として公開する。 */
+function persistSessionJournal(
   storage: Storage | null,
-  seed: number,
-  names: PlayerNames,
-): GameJournal | null {
-  return storage === null
-    ? null
-    : { version: 3, seed, names, explicitKita: true, actions: [] };
+  journal: GameJournal,
+): "saved" | "failed" {
+  return storage === null ? "failed" : saveJournal(storage, journal);
 }
 
 function initialSession(initialGame?: EngineState): {
   engine: EngineState;
   journal: GameJournal | null;
   historySaveStatus: GameContextValue["historySaveStatus"];
+  sessionSaveStatus: GameContextValue["sessionSaveStatus"];
 } {
   if (initialGame) {
-    return { engine: initialGame, journal: null, historySaveStatus: "idle" };
+    return {
+      engine: initialGame,
+      journal: null,
+      sessionSaveStatus: "idle",
+      historySaveStatus: "idle",
+    };
   }
   const seedQuery = seedQueryFromLocation();
   const storage = sessionStorageOrNull();
@@ -263,11 +274,12 @@ function initialSession(initialGame?: EngineState): {
     try {
       const engine = replayJournal(stored);
       // v1/v2からの移行も新keyへだけ保存する。旧keyは旧client/rollback用に保持する。
-      if (storage !== null) saveJournal(storage, stored);
+      const sessionSaveStatus = persistSessionJournal(storage, stored);
       // 復元時の戦績追記(終局時の保存失敗の補完)はマウント効果側で行う(#310)。
       return {
         engine,
         journal: stored,
+        sessionSaveStatus,
         historySaveStatus: engine.phase === "gameEnd" ? "pending" : "idle",
       };
     } catch {
@@ -276,11 +288,11 @@ function initialSession(initialGame?: EngineState): {
   }
   const seed = seedQuery.value ?? freshSeed();
   const names = currentPlayerNames();
-  const journal = newJournal(storage, seed, names);
-  if (storage !== null && journal !== null) saveJournal(storage, journal);
+  const journal = newJournal(seed, names);
   return {
     engine: createGame({ seed, names }),
     journal,
+    sessionSaveStatus: persistSessionJournal(storage, journal),
     historySaveStatus: "idle",
   };
 }
@@ -368,6 +380,7 @@ export function GameProvider({ children, initialGame }: GameProviderProps) {
         const nextSession = {
           engine: nextEngine,
           journal: null,
+          sessionSaveStatus: sessionRef.current.sessionSaveStatus,
           historySaveStatus,
         };
         sessionRef.current = nextSession;
@@ -378,15 +391,16 @@ export function GameProvider({ children, initialGame }: GameProviderProps) {
         ...journal,
         actions: [...journal.actions, action],
       };
+      const storage = sessionStorageOrNull();
+      const sessionSaveStatus = persistSessionJournal(storage, nextJournal);
       const nextSession = {
         engine: nextEngine,
         journal: nextJournal,
+        sessionSaveStatus,
         historySaveStatus,
       };
       // storage / React state より先に同期 ref を進め、同一 tick の次イベントを直列化する。
       sessionRef.current = nextSession;
-      const storage = sessionStorageOrNull();
-      if (storage !== null) saveJournal(storage, nextJournal);
       setSession(nextSession);
       if (nextEngine.phase === "gameEnd" && journal !== null) {
         void recordFinishedGame(nextEngine, journal.seed).then(
@@ -425,16 +439,15 @@ export function GameProvider({ children, initialGame }: GameProviderProps) {
         const storage = sessionStorageOrNull();
         // 「もう一半荘」は新しい半荘の開始なので、設定で変更された名前をここで取り込む。
         const names = currentPlayerNames();
-        const nextJournal = newJournal(storage, seed, names);
+        const nextJournal = newJournal(seed, names);
         const nextSession = {
           engine: createGame({ seed, names }),
           journal: nextJournal,
+          sessionSaveStatus: persistSessionJournal(storage, nextJournal),
           historySaveStatus: "idle" as const,
         };
         markAccepted();
         sessionRef.current = nextSession;
-        if (storage !== null && nextJournal !== null)
-          saveJournal(storage, nextJournal);
         setSession(nextSession);
       },
     };
@@ -448,10 +461,11 @@ export function GameProvider({ children, initialGame }: GameProviderProps) {
       phase: engine.phase,
       pending: engine.pending,
       roundSummary: engine.lastRound,
+      sessionSaveStatus: session.sessionSaveStatus,
       historySaveStatus: session.historySaveStatus,
       controls,
     }),
-    [engine, session.historySaveStatus, controls],
+    [engine, session.sessionSaveStatus, session.historySaveStatus, controls],
   );
 
   return <GameContext.Provider value={value}>{children}</GameContext.Provider>;
