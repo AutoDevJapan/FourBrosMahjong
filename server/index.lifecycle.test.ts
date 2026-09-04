@@ -2,6 +2,7 @@ import { once } from "node:events";
 import { createConnection } from "node:net";
 import { describe, expect, it, vi } from "vitest";
 import { WebSocket } from "ws";
+import { ABUSE_LIMITS } from "./abuseControl";
 import { createOnlineServer } from "./index";
 
 const ORIGIN = "http://shutdown.local";
@@ -29,12 +30,63 @@ async function listen(server: ReturnType<typeof createOnlineServer>) {
   return address.port;
 }
 
-async function openWebSocket(port: number): Promise<WebSocket> {
+async function openWebSocket(
+  port: number,
+  headers: Record<string, string> = {},
+): Promise<WebSocket> {
   const socket = new WebSocket(`ws://127.0.0.1:${port}/ws`, {
     origin: ORIGIN,
+    headers,
   });
   await once(socket, "open");
   return socket;
+}
+
+async function sendApplicationPings(
+  socket: WebSocket,
+  count: number,
+): Promise<{ readonly pongs: number; readonly rateLimited: boolean }> {
+  return new Promise((resolve, reject) => {
+    let pongs = 0;
+    let settled = false;
+    const timer = setTimeout(
+      () => finishReject(new Error("application ping responses timed out")),
+      5_000,
+    );
+    const finish = (result: {
+      readonly pongs: number;
+      readonly rateLimited: boolean;
+    }) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      socket.off("message", onMessage);
+      resolve(result);
+    };
+    const finishReject = (error: Error) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      socket.off("message", onMessage);
+      reject(error);
+    };
+    const onMessage = (data: Buffer) => {
+      const message = JSON.parse(data.toString()) as {
+        readonly type?: string;
+        readonly code?: string;
+      };
+      if (message.type === "pong") {
+        pongs += 1;
+        if (pongs === count) finish({ pongs, rateLimited: false });
+      } else if (message.type === "error" && message.code === "rate_limited") {
+        finish({ pongs, rateLimited: true });
+      }
+    };
+    socket.on("message", onMessage);
+    for (let index = 0; index < count; index += 1) {
+      socket.send(JSON.stringify({ type: "ping" }));
+    }
+  });
 }
 
 function waitForMessage(
@@ -186,6 +238,63 @@ describe("createOnlineServer lifecycle", () => {
       expect(statuses).toEqual(Array.from({ length: 11 }, () => 200));
     } finally {
       await server.handleSignal("SIGTERM");
+    }
+  });
+
+  it("uses the injected Railway marker for WebSocket source rate limiting", async () => {
+    const previousMarker = process.env.RAILWAY_ENVIRONMENT_ID;
+    delete process.env.RAILWAY_ENVIRONMENT_ID;
+    const server = createOnlineServer({
+      environment: {
+        ...environment(false),
+        RAILWAY_ENVIRONMENT_ID: "injected-railway",
+      },
+    });
+    const port = await listen(server);
+    const sockets: WebSocket[] = [];
+    try {
+      for (
+        let index = 0;
+        index <= ABUSE_LIMITS.maxConnectionsPerSource;
+        index += 1
+      ) {
+        sockets.push(
+          await openWebSocket(port, {
+            "X-Real-IP": `203.0.113.${index + 1}`,
+          }),
+        );
+      }
+      expect(sockets).toHaveLength(ABUSE_LIMITS.maxConnectionsPerSource + 1);
+
+      const pingResults = await Promise.all(
+        sockets.slice(0, 3).map((socket) => sendApplicationPings(socket, 201)),
+      );
+      expect(pingResults).toEqual(
+        Array.from({ length: 3 }, () => ({
+          pongs: 201,
+          rateLimited: false,
+        })),
+      );
+    } finally {
+      await Promise.allSettled(
+        sockets.map(
+          (socket) =>
+            new Promise<void>((resolve) => {
+              if (socket.readyState === WebSocket.CLOSED) {
+                resolve();
+                return;
+              }
+              socket.once("close", () => resolve());
+              socket.close();
+            }),
+        ),
+      );
+      await server.handleSignal("SIGTERM");
+      if (previousMarker === undefined) {
+        delete process.env.RAILWAY_ENVIRONMENT_ID;
+      } else {
+        process.env.RAILWAY_ENVIRONMENT_ID = previousMarker;
+      }
     }
   });
 
