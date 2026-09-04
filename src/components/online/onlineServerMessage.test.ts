@@ -685,6 +685,58 @@ describe("parseOnlineServerMessage", () => {
     }
   });
 
+  it.each([
+    "normal",
+    "mangan",
+    "haneman",
+    "baiman",
+    "sanbaiman",
+    "yakuman",
+  ] as const)("accepts the online snapshot ScoreCategory %s", (category) => {
+    const { state } = walkToGameEnd(2024);
+    const roundSummary = state.lastRound;
+    const winDetails = roundSummary?.winDetails;
+    if (!roundSummary || !winDetails) {
+      throw new Error("winDetails fixture expected");
+    }
+    const snapshot = snapshotForState(state);
+    const valid = {
+      ...snapshot,
+      roundSummary: {
+        ...roundSummary,
+        winDetails: { ...winDetails, category },
+      },
+    };
+
+    expect(
+      parseOnlineServerMessage({ type: "snapshot", snapshot: valid }),
+    ).not.toBeNull();
+  });
+
+  it.each(["__proto__", "constructor", "toString", "future-category"])(
+    "rejects an unsafe online snapshot winDetails category: %s",
+    (category) => {
+      const { state } = walkToGameEnd(2024);
+      const roundSummary = state.lastRound;
+      const winDetails = roundSummary?.winDetails;
+      if (!roundSummary || !winDetails) {
+        throw new Error("winDetails fixture expected");
+      }
+      const snapshot = snapshotForState(state);
+      const malformed = {
+        ...snapshot,
+        roundSummary: {
+          ...roundSummary,
+          winDetails: { ...winDetails, category },
+        },
+      };
+
+      expect(
+        parseOnlineServerMessage({ type: "snapshot", snapshot: malformed }),
+      ).toBeNull();
+    },
+  );
+
   it("rejects opponent private hands and another player's pending action", () => {
     const snapshot = snapshotFixture();
     const self = snapshot.view.slots.self;
