@@ -37,6 +37,6 @@ export const config = {
   matcher: [
     // HTML/app requests only. Immutable framework assets and image/font files
     // cannot execute in a top-level browsing context and need no per-request nonce.
-    "/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico|woff2?)$).*)",
+    "/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp|avif|ico|woff2?|ttf|otf)$).*)",
   ],
 };
