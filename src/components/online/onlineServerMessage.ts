@@ -430,6 +430,26 @@ function isGameView(value: unknown, you: OnlineSnapshot["you"]): boolean {
   );
 }
 
+/**
+ * The roster and the view are two projections of the same current seat. Keep
+ * their names aligned so an untrusted snapshot cannot make one player appear
+ * under two identities in the lobby header and the table.
+ *
+ * Result names are intentionally excluded: they describe the historical
+ * result and may legitimately differ after a seat is explicitly reused.
+ */
+function hasConsistentRosterNames(
+  view: OnlineSnapshot["view"],
+  players: readonly Pick<OnlineSnapshot["players"][number], "id" | "name">[],
+): boolean {
+  const slotNames = new Map<string, string>();
+  for (const position of SLOT_POSITIONS) {
+    const player = view.slots[position].player;
+    slotNames.set(player.playerId, player.name);
+  }
+  return players.every((player) => slotNames.get(player.id) === player.name);
+}
+
 function isSeatedPlayerId(
   view: OnlineSnapshot["view"],
   playerId: unknown,
@@ -614,6 +634,7 @@ function isOnlineSnapshot(value: OnlineSnapshot): boolean {
       value.phase === "roundEnd" ||
       value.phase === "gameEnd") &&
     isGameView(value.view, value.you) &&
+    hasConsistentRosterNames(value.view, players) &&
     isPending(value.pending, value.you) &&
     isRoundSummary(value.roundSummary) &&
     (value.currentTurn === null ||

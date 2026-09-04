@@ -122,7 +122,11 @@ class TestWebSocket {
 const sockets: TestWebSocket[] = [];
 
 function snapshotFixture(): OnlineSnapshot {
-  const engine = createGame({ seed: 31, humanPlayerIds: ["p0"] });
+  const engine = createGame({
+    seed: 31,
+    names: ["たろう", "ゲスト2", "ゲスト3", "ゲスト4"],
+    humanPlayerIds: ["p0"],
+  });
   return {
     code: "ABC234",
     version: 0,
@@ -988,6 +992,7 @@ describe("OnlineLobby connection recovery", () => {
 
     const handoffEngine = createGame({
       seed: 31,
+      names: ["ホスト", "ゲスト", "ゲスト3", "ゲスト4"],
       humanPlayerIds: ["p0", "p1"],
     });
     const handoff = {
@@ -1031,6 +1036,11 @@ describe("OnlineLobby connection recovery", () => {
     });
     fireEvent.click(screen.getByRole("button", { name: "新しいルームを作る" }));
 
+    const departureEngine = createGame({
+      seed: 31,
+      names: ["ホスト", "ゲスト", "ゲスト3", "ゲスト4"],
+      humanPlayerIds: ["p0"],
+    });
     act(() => {
       sockets[0]?.open();
       sockets[0]?.message({
@@ -1038,6 +1048,7 @@ describe("OnlineLobby connection recovery", () => {
         token: "t".repeat(24),
         snapshot: {
           ...snapshotFixture(),
+          view: selectView(departureEngine, "p0"),
           players: [
             { id: "p0", name: "ホスト", connected: true, isHost: true },
             { id: "p1", name: "ゲスト", connected: false, isHost: false },

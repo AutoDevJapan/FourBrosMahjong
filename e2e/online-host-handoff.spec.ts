@@ -27,13 +27,23 @@ function snapshotFor(
   phase: "roundEnd" | "gameEnd",
   hostId: "p0" | "p1",
 ): OnlineSnapshot {
+  const sourceView = selectView(state, "p1");
+  const view = {
+    ...sourceView,
+    slots: {
+      self: withOnlineName(sourceView.slots.self),
+      right: withOnlineName(sourceView.slots.right),
+      across: withOnlineName(sourceView.slots.across),
+      left: withOnlineName(sourceView.slots.left),
+    },
+  };
   return {
     code: "ABC234",
     version: 1,
     you: "p1",
     hostId,
     phase,
-    view: selectView(state, "p1"),
+    view,
     pending: null,
     roundSummary: state.lastRound,
     players: [
@@ -59,6 +69,18 @@ function snapshotFor(
           }
         : null,
   };
+}
+
+function withOnlineName<T extends OnlineSnapshot["view"]["slots"]["self"]>(
+  slot: T,
+): T {
+  const name =
+    slot.player.playerId === "p0"
+      ? "ホスト"
+      : slot.player.playerId === "p1"
+        ? "ゲスト"
+        : undefined;
+  return name ? { ...slot, player: { ...slot.player, name } } : slot;
 }
 
 async function openOnlineSnapshot(

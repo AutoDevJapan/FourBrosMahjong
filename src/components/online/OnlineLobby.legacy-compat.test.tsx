@@ -74,10 +74,20 @@ const sockets: LegacyTestWebSocket[] = [];
 function legacyGameEndSnapshot(you: PlayerId): Record<string, unknown> {
   const state = walkToGameEnd(1).state;
   const view = structuredClone(selectView(state, you)) as unknown as {
-    slots: Record<string, { player: { playerId?: PlayerId } }>;
+    slots: Record<string, { player: { playerId?: PlayerId; name: string } }>;
     result: { players: Array<{ playerId?: PlayerId }> } | null;
   };
-  for (const slot of Object.values(view.slots)) delete slot.player.playerId;
+  const playerNames: Record<PlayerId, string> = {
+    p0: "ホスト",
+    p1: "ゲスト",
+    p2: "ゲスト3",
+    p3: "ゲスト4",
+  };
+  for (const slot of Object.values(view.slots)) {
+    const playerId = slot.player.playerId;
+    if (playerId) slot.player.name = playerNames[playerId];
+    delete slot.player.playerId;
+  }
   for (const player of view.result?.players ?? []) delete player.playerId;
   return {
     code: "ABC234",

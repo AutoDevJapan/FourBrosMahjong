@@ -19,7 +19,11 @@ import {
 import type { OnlineSnapshot } from "./types";
 
 function snapshotFixture(): OnlineSnapshot {
-  const engine = createGame({ seed: 31, humanPlayerIds: ["p0"] });
+  const engine = createGame({
+    seed: 31,
+    names: ["たろう", "ゲスト2", "ゲスト3", "ゲスト4"],
+    humanPlayerIds: ["p0"],
+  });
   return {
     code: "ABC234",
     version: 0,
@@ -603,6 +607,62 @@ describe("parseOnlineServerMessage", () => {
         snapshot: nonP0Snapshot,
       }),
     ).toEqual({ type: "snapshot", snapshot: nonP0Snapshot });
+  });
+
+  it("rejects roster/slot name mismatches without treating historical result names as current identities", () => {
+    const snapshot = snapshotFixture();
+    expect(
+      parseOnlineServerMessage({
+        type: "snapshot",
+        snapshot: {
+          ...snapshot,
+          players: [{ ...snapshot.players[0]!, name: "名簿だけの名前" }],
+        },
+      }),
+    ).toBeNull();
+
+    const slot = snapshot.view.slots.self;
+    expect(slot.kind).toBe("seated");
+    if (slot.kind !== "seated") throw new Error("self slot should be seated");
+    expect(
+      parseOnlineServerMessage({
+        type: "snapshot",
+        snapshot: {
+          ...snapshot,
+          view: {
+            ...snapshot.view,
+            slots: {
+              ...snapshot.view.slots,
+              self: {
+                ...slot,
+                player: { ...slot.player, name: "卓上だけの名前" },
+              },
+            },
+          },
+        },
+      }),
+    ).toBeNull();
+
+    const finished = snapshotForState(walkToGameEnd(2024).state);
+    const result = finished.view.result;
+    if (!result) throw new Error("gameEnd result expected");
+    const historicalName = {
+      ...finished,
+      view: {
+        ...finished.view,
+        result: {
+          players: result.players.map((player, index) =>
+            index === 0 ? { ...player, name: "過去の対局者" } : player,
+          ),
+        },
+      },
+    };
+    expect(
+      parseOnlineServerMessage({
+        type: "snapshot",
+        snapshot: historicalName,
+      }),
+    ).not.toBeNull();
   });
 
   it("validates real playing, win/draw roundEnd, and gameEnd snapshots", () => {
