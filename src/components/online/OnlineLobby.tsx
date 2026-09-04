@@ -1023,6 +1023,9 @@ export default function OnlineLobby() {
           }
           if (message.type === "error") {
             if (message.code === "maintenance") {
+              const isPendingResume =
+                pendingSessionSocketRef.current === next &&
+                request.type === "resume";
               applyMaintenanceError(message.retryAfterMs);
               const failure: ConnectionFailure = {
                 message: MAINTENANCE_OPERATION_MESSAGE,
@@ -1031,6 +1034,20 @@ export default function OnlineLobby() {
                   : { retryAfterMs: message.retryAfterMs }),
               };
               if (pendingSessionSocketRef.current === next) {
+                if (isPendingResume) {
+                  // A resume handshake is only rejected with the maintenance
+                  // code after the server has sealed its drain. The previous
+                  // notice may still be only `draining` (for example after a
+                  // reload), so settleMaintenanceDisconnect cannot infer the
+                  // terminal boundary from the current UI state. Invalidate
+                  // the stale session before closing this failed handshake;
+                  // established sockets keep their credentials on the same
+                  // operation error path.
+                  credentialsRef.current = null;
+                  setActiveRequest(null);
+                  setCredentials(null);
+                  saveCredentials(null);
+                }
                 failHandshake(next, failure);
               }
               return;

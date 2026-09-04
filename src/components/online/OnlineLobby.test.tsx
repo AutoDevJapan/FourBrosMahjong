@@ -1959,6 +1959,37 @@ describe("OnlineLobby maintenance client-first (#726)", () => {
     ).not.toBeNull();
   });
 
+  it("保存済みresumeが終端maintenanceで拒否されたらstale credentialを失効する", () => {
+    vi.useFakeTimers();
+    window.sessionStorage.setItem(
+      "four-bros-mahjong.online.session.v1",
+      JSON.stringify({ code: "ABC234", token: "t".repeat(24) }),
+    );
+    render(<OnlineLobby />);
+
+    act(() => vi.advanceTimersByTime(0));
+    const socket = sockets[0];
+    if (!socket) throw new Error("restored resume socket expected");
+
+    act(() => {
+      socket.open();
+      socket.message({
+        type: "error",
+        code: "maintenance",
+        message: "server wording is not trusted",
+      });
+    });
+
+    expect(
+      document.querySelector('[data-maintenance-source="rejection"]'),
+    ).toBeInTheDocument();
+    expect(
+      window.sessionStorage.getItem("four-bros-mahjong.online.session.v1"),
+    ).toBeNull();
+    act(() => vi.advanceTimersByTime(60_000));
+    expect(sockets).toHaveLength(1);
+  });
+
   it("maintenance中は結果snapshotを保持し、hostの新しい半荘を表示とsendの両方で止める", () => {
     render(<OnlineLobby />);
     const socket = startSession(finishedSnapshotFixture());
