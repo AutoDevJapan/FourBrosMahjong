@@ -125,22 +125,43 @@ export function deterministicSeedEnabled(
 
 const MAX_SEED = 0xffffffff;
 
-export function seedFromLocation(): number | null {
+interface SeedQuery {
+  /** 決定的 seed 機能が有効な環境で `seed` クエリが明示されたか。 */
+  readonly present: boolean;
+  /** 有効な uint32 seed。不正な明示値は null。 */
+  readonly value: number | null;
+}
+
+/**
+ * URL の seed 値と「クエリが存在したか」を分離して読む。
+ *
+ * `null` だけではクエリ無しと不正値を区別できない。前者は既存ジャーナルを復元する
+ * べきだが、後者は指定を無視して古い対局を復元せず、新しい乱数へフォールバックする。
+ */
+function seedQueryFromLocation(): SeedQuery {
   if (
     !deterministicSeedEnabled(
       process.env.NODE_ENV,
       process.env.NEXT_PUBLIC_E2E_SEED_ENABLED,
     )
   ) {
-    return null;
+    // production の通常ビルドでは seed クエリ自体を機能対象外として扱う。
+    return { present: false, value: null };
   }
-  if (typeof window === "undefined") return null;
-  const raw = new URLSearchParams(window.location.search).get("seed");
-  if (raw === null || raw.trim() === "") return null;
+  if (typeof window === "undefined") return { present: false, value: null };
+
+  const params = new URLSearchParams(window.location.search);
+  if (!params.has("seed")) return { present: false, value: null };
+  const raw = params.get("seed");
+  if (raw === null || raw.trim() === "") return { present: true, value: null };
   const seed = Number(raw);
   return Number.isSafeInteger(seed) && seed >= 0 && seed <= MAX_SEED
-    ? seed
-    : null;
+    ? { present: true, value: seed }
+    : { present: true, value: null };
+}
+
+export function seedFromLocation(): number | null {
+  return seedQueryFromLocation().value;
 }
 
 /**
@@ -231,10 +252,14 @@ function initialSession(initialGame?: EngineState): {
   if (initialGame) {
     return { engine: initialGame, journal: null, historySaveStatus: "idle" };
   }
-  const urlSeed = seedFromLocation();
+  const seedQuery = seedQueryFromLocation();
   const storage = sessionStorageOrNull();
   const stored = storage === null ? null : loadJournal(storage);
-  if (stored && (urlSeed === null || stored.seed === urlSeed)) {
+  if (
+    stored &&
+    (!seedQuery.present ||
+      (seedQuery.value !== null && stored.seed === seedQuery.value))
+  ) {
     try {
       const engine = replayJournal(stored);
       // v1/v2からの移行も新keyへだけ保存する。旧keyは旧client/rollback用に保持する。
@@ -249,7 +274,7 @@ function initialSession(initialGame?: EngineState): {
       // 現在版engineで再生できない記録は新規対局へ安全にフォールバックする。
     }
   }
-  const seed = urlSeed ?? freshSeed();
+  const seed = seedQuery.value ?? freshSeed();
   const names = currentPlayerNames();
   const journal = newJournal(storage, seed, names);
   if (storage !== null && journal !== null) saveJournal(storage, journal);

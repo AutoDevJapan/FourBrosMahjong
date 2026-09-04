@@ -1,9 +1,13 @@
 // @vitest-environment jsdom
 
+import { render } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { DEFAULT_NAMES } from "@/domain/game/engine";
+import { saveJournal } from "@/domain/game/gamePersistence";
 import {
   deterministicSeedEnabled,
   freshSeed,
+  GameProvider,
   seedFromLocation,
 } from "./GameProvider";
 
@@ -52,6 +56,7 @@ describe("freshSeed", () => {
 describe("seedFromLocation", () => {
   afterEach(() => {
     window.history.replaceState(null, "", "/");
+    window.sessionStorage.clear();
   });
 
   it("uint32範囲内のURL seedだけを受け入れる", () => {
@@ -69,4 +74,34 @@ describe("seedFromLocation", () => {
       expect(seedFromLocation()).toBeNull();
     },
   );
+
+  it("不正なseedクエリは既存ジャーナルを復元せず、新しい乱数へフォールバックする", () => {
+    window.history.replaceState(null, "", "/game?seed=1.5");
+    saveJournal(window.sessionStorage, {
+      version: 3,
+      seed: 7,
+      names: DEFAULT_NAMES,
+      explicitKita: true,
+      actions: [],
+    });
+    const getRandomValues = vi
+      .spyOn(globalThis.crypto, "getRandomValues")
+      .mockImplementation((array) => {
+        (array as Uint32Array)[0] = 42;
+        return array;
+      });
+
+    expect(() => {
+      // `initialSession` は GameProvider の state lazy initializer で評価される。
+      // 子要素は不要だが、React経由で実際の復元境界を通す。
+      const { unmount } = render(<GameProvider>{null}</GameProvider>);
+      unmount();
+    }).not.toThrow();
+    expect(getRandomValues).toHaveBeenCalledOnce();
+    expect(
+      JSON.parse(
+        window.sessionStorage.getItem("four-bros-mahjong.game.v3") ?? "null",
+      ),
+    ).toMatchObject({ seed: 42, actions: [] });
+  });
 });
