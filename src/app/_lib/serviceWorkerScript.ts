@@ -116,6 +116,11 @@ function buildAssetUrlsFromHtml(html, baseUrl) {
         url.origin === self.location.origin &&
         url.pathname.startsWith("/_next/static/")
       ) {
+        // Runtime asset requests use canonical pathname-only keys to avoid a
+        // separate cache entry for every deployment/query variant. Store the
+        // same key during install; otherwise a query-bearing Next/Vercel asset
+        // is precached under its full URL but cannot be found offline.
+        url.search = "";
         url.hash = "";
         assets.add(url.href);
       }
