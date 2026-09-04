@@ -28,6 +28,27 @@ Issue #663 の受け入れ条件に基づき、外部 Action と reusable workfl
 }
 ```
 
+## Latest read-only re-audit
+
+2026-09-05 JST に、専用worktreeの `HEAD=3d57255ec5e3835e571fff8f47dc9aec1c483089` と `origin/main` の一致を確認して再監査しました。repository policy の GET は次のとおりです。
+
+```json
+{
+  "allowed_actions": "all",
+  "enabled": true,
+  "sha_pinning_required": true
+}
+```
+
+- `GET /repos/AutoDevJapan/FourBrosMahjong/actions/permissions/selected-actions` は HTTP 409 `All actions and workflows are allowed on this repository`。allow-all を維持しており、allowlist の変更や暗黙の拡大はありません。
+- `GET /orgs/AutoDevJapan/actions/permissions` と `GET /orgs/AutoDevJapan/actions/permissions/workflow` はともに HTTP 403。現在のcredentialには organization admin または Actions policies 権限がなく、organization policy の実効値・precedence・ownerは未確定です。
+- `GET /repos/AutoDevJapan/FourBrosMahjong/actions/permissions/workflow` は `default_workflow_permissions=write`、`can_approve_pull_request_reviews=true`。既存設定の再確認のみで、変更していません。
+- 5つのrepository workflowにある外部 `uses:` 20件は全て完全40桁SHA固定で、local workflow/action参照は0件です。repository policy、workflow参照、local recursive auditの契約テストは **173 tests pass** でした。
+- 現行mainの同一SHAに対するCI [run 33890039446](https://github.com/AutoDevJapan/FourBrosMahjong/actions/runs/33890039446)、gitleaks [run 33890039579](https://github.com/AutoDevJapan/FourBrosMahjong/actions/runs/33890039579)、CodeQL [run 33890039180](https://github.com/AutoDevJapan/FourBrosMahjong/actions/runs/33890039180) はすべて成功しています。gitleaks version updaterの直近成功runは [run 33465805332](https://github.com/AutoDevJapan/FourBrosMahjong/actions/runs/33465805332) です。
+- `v*` tag、GitHub Release、Release workflow runは0件です。承認済みの実Releaseを作成してpolicy下の `release.yml` を実行することは、外部のRelease運用承認なしには行いません。
+
+この再監査では policy、allowlist、organization設定、tag、Release、workflow dispatch、repository file、外部環境を変更していません。repository側のSHA固定は完了済みですが、#663のorganization policyのscope/owner確定と実Releaseによる検証は、権限保持者・承認済みRelease運用待ちとしてOPENのまま引き継ぎます。
+
 `allowed_actions=all` のため selected-actions API は HTTP 409 `All actions and workflows are allowed on this repository` を返します。これは allowlist を暗黙に拡大した結果ではなく、既存の allow-all 判断を変更していないことを示します。
 
 ## Effective scope と権限境界
