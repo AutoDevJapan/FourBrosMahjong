@@ -36,7 +36,7 @@ import { tileLabel } from "../common/tileLabel";
 import ActionPanel, { type ActionItem } from "./ActionPanel";
 import EffectOverlay from "./effects/EffectOverlay";
 import { useGameEffects } from "./effects/useGameEffects";
-import { useGame } from "./GameProvider";
+import { type GameContextValue, useGame } from "./GameProvider";
 import type { HandProps, HandTileState } from "./Hand";
 import LiveRegion from "./LiveRegion";
 import PlayerSlot from "./PlayerSlot";
@@ -47,6 +47,32 @@ import WinDetails from "./WinDetails";
 /** 外部ストア購読なしのダミー(クライアント判定にのみ使う)。 */
 const noopSubscribe = () => () => {};
 const HOST_CONTROL_WAITING_MESSAGE = "ホストの操作を待っています。";
+
+/** 対局ジャーナルの保存失敗を戦績(`localStorage`)と混同せずに案内する。 */
+function SessionSaveNotice({
+  status,
+}: {
+  readonly status: GameContextValue["sessionSaveStatus"];
+}) {
+  if (status !== "failed") return null;
+
+  return (
+    <div
+      role="status"
+      aria-live="polite"
+      aria-atomic="true"
+      data-session-save-status="failed"
+      className="game-session-save-notice mx-auto mt-3 max-w-2xl rounded-lg border px-3 py-2 text-sm"
+    >
+      <strong>
+        対局状態をこのタブの保存領域(sessionStorage)へ保存できませんでした。
+      </strong>
+      <p>
+        現在の対局は続けられますが、ページを再読み込みすると復元できない可能性があります。ブラウザのストレージ設定や空き容量を確認してください。次の操作で保存を再試行します。
+      </p>
+    </div>
+  );
+}
 
 interface KitaObservation {
   readonly roundKey: string;
@@ -95,7 +121,15 @@ export default function GameBoard({
   interactionDisabled = false,
   interactionDisabledReason = "reconnecting",
 }: GameBoardProps) {
-  const { view, phase, pending, roundSummary, controls, isHost } = useGame();
+  const {
+    view,
+    phase,
+    pending,
+    roundSummary,
+    controls,
+    isHost,
+    sessionSaveStatus,
+  } = useGame();
   const { slots, tableInfo, dora } = view;
   const router = useRouter();
   const narrowBoardDescriptionId = useId();
@@ -748,6 +782,8 @@ export default function GameBoard({
           </div>
         </Modal>
       ) : null}
+
+      <SessionSaveNotice status={sessionSaveStatus} />
 
       {kitaAnnouncement ? (
         <p

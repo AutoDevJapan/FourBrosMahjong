@@ -116,7 +116,7 @@ src/app/
         └── page.tsx               # `/game/result`  結果画面
 ```
 
-- `/game/layout.tsx` に対局状態(手牌・河・得点・進行フェーズ等)を保持する `GameProvider`(Client Component)を置き、`/game` と `/game/result` の間で同一の状態を共有する。バックエンド/永続化層は未設計のため、現時点では**単一デバイス上のブラウザメモリ内状態**を前提とする(6.8節の前提条件を参照)。
+- `/game/layout.tsx` に対局状態(手牌・河・得点・進行フェーズ等)を保持する `GameProvider`(Client Component)を置き、`/game` と `/game/result` の間で同一の状態を共有する。バックエンド/サーバー永続化層は未設計だが、同一タブのリロード復元用に操作ジャーナルを `sessionStorage` へ保存する。Storageが利用できない場合も**単一デバイス上のブラウザメモリ内状態**で対局を継続し、復元できない可能性を対局画面へ明示する(6.8節・6.9節を参照)。
 - `/game/result` を独立ルートにするのは、ブラウザの戻る/共有URLとして結果画面に直接アクセス可能にするため。ネストされたレイアウト(`game/layout.tsx`)配下に置くことで、ページ遷移時も `GameProvider` のインスタンスは再生成されず状態が保持される。
 
 ## 6.6 Server/Client Component 境界方針
@@ -183,6 +183,7 @@ Q9〜Q13 は**すべて解決済み**(`質問リスト.md`)。UI は引き続き
 ## 6.9 対局中の状態管理に関する前提
 
 - 半荘終了時の確定結果(最終順位・ソシー内訳・終了日時)は、`GameProvider` が `localStorage`(キー `four-bros-mahjong.history.v1`)へ**戦績**として追記保存し、`/history` で閲覧・全件削除できる(issue #293)。保存件数は直近20件を上限とし、超過時は最古から破棄する。進行中の半荘のジャーナル(`sessionStorage`)と同様に読み込み時の厳密検証と容量上限で防御する。複数タブの追記と全件削除は同じ Web Lock で直列化し、削除前の履歴を古い読み取り結果から復活させない(issue #482。排他制御の詳細は 6.9.1)。保存はこの端末のブラウザ内で完結し、以下のバックエンド不在の前提を変えない。
+- 進行中の半荘の操作ジャーナルは、`sessionStorage`(キー `four-bros-mahjong.game.v3`)へ書き込めた場合だけリロード後の復元を保証する。`setItem` の例外やStorage getterの `SecurityError` は対局を中断させず、`GameProvider` は最新ジャーナルをメモリに保持して `sessionSaveStatus: "failed"` を公開し、対局画面で「このタブの保存領域(sessionStorage)」の失敗とリロードによる復元不能の可能性を通知する。Storageが復旧した後の次の受理操作または新規半荘開始で、保持中の最新ジャーナル全体を再保存し、成功すれば `sessionSaveStatus: "saved"` に戻す。これは終局結果を `localStorage` へ保存する `historySaveStatus` とは別契約である。
 - 現時点でバックエンド/永続化層・認証・複数デバイス間同期の設計は存在しない。本スペックは、四兄弟麻雀の実演形式(1台のデバイス/画面を囲んで進行する想定)に合わせ、**単一デバイス上のクライアントサイド状態(`GameProvider` の React state)** で対局を進行させることを前提とする。
 - この前提はドメイン層(スペック4)の設計とは独立しており、将来的にサーバー同期やマルチデバイス対応が必要になった場合は改めて設計を見直す(本スペックの対象外)。
 - **オフライン動作(PWA / issue #292 / #506)**: 対局がクライアント内で完結する上記前提を活かし、service worker(`/sw.js`、`src/app/sw.js/route.ts` がビルド毎バージョン付きで生成)が App シェル 6 ルート(`/`・`/rules`・`/settings`・`/history`・`/game`・`/game/result`)と静的アセット(牌 SVG・アイコン・manifest)をキャッシュする。install 中に各 App シェル HTML の `src` / `href` から同一 origin の build 固有 `/_next/static/` JS/CSS/font も抽出・プリキャッシュし、初回登録ページが SW 非制御のままでも、追加のオンライン再読込みなしで次回のオフライン起動を hydrate できることを必須とする。App shell は 2xx + `text/html`、牌 SVG・アイコン・manifest と build asset は各パスに対応する Content-Type を保存前に検証する。必要応答を1つでも取得・検証できなければ install を失敗させ、当該versionの部分cacheを削除してHTMLだけ・牌素材だけの不完全なシェルをactivateしない。ナビゲーションは network-first(オンライン時は常に最新シェル、オフライン時のみキャッシュ応答)、ハッシュ付き `/_next/static/` と牌素材は cache-first。デプロイでバージョンが変わると activate 時に旧 `fbm-*` キャッシュを全破棄する。登録は production のみ(dev / E2E の dev サーバーではキャッシュ汚染防止のため無効)。オフライン時も `sessionStorage` ジャーナルによる対局復元(#190)とそのまま両立する。

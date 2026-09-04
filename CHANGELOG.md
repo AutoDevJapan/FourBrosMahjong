@@ -33,6 +33,7 @@
 
 ### Fixed
 
+- 対局中の `sessionStorage` ジャーナル保存失敗を握りつぶさず、メモリ内の最新ジャーナルを保持して保存状態を対局画面へ通知し、Storage復旧後の次の操作で再保存するよう修正 (#872)。`localStorage` の戦績保存状態とは別に扱う。
 - GitHub Releaseの`contents: write` jobからcheckoutとrepository管理shellを撤去し、read-only検証jobが生成した同一run・固定名のrelease notes artifactだけをSHA固定Actionで受け渡すよう修正 (#747)。
 - 別タブのtheme変更がhydration前に発生しても、storage listenerを先に登録してから現在値へ再同期し、保存値・radio・`html[data-theme]`を収束させるよう修正 (#752)。
 - GitHub Release guard を、tagged SHA の CI だけでなく gitleaks と GitHub default CodeQL の exact workflow/check suite・期待 category 成功も確認する fail-closed gate へ拡張。これは GitHub Release 公開だけの gate で、`main` merge を起点とする Vercel Production deploy は待機・再実行しない (#748)。
