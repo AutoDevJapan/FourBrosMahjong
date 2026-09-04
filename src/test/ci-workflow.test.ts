@@ -95,6 +95,7 @@ const PRODUCTION_E2E_EXCLUDED_SPECS = [
   // resultのproduction/offline parityはpwa-offline.spec.tsが担い、platform別VRTはdev E2Eで行う。
   "e2e/result.spec.ts",
   "e2e/rules-navigation.spec.ts",
+  "e2e/unity-display-reference.spec.ts",
   // settingsのproduction/offline parityはpwa-offline.spec.tsが担い、platform別VRTはdev E2Eで行う。
   "e2e/settings.spec.ts",
 ] as const;
