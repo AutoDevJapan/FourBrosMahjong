@@ -21,7 +21,7 @@ GitHub Release の公開識別子である `v*` tag を、公開後に付け替�
 
 この再監査では ruleset、Team、collaborator 権限、tag、Release、workflow、repository file を変更していない。B の不変性は継続して検証済みだが、owner が Release Operators / break-glass governance と実検証用アカウントを承認するまで、A の作成認可と実アカウントによる拒否テストは未完了のまま HOLD とする。
 
-`main` の branch protection（PR・必須 check・force push/deletion 禁止・admin 適用）も有効だが、branch protection は tag ref を保護しない。`.github/workflows/release.yml` の公開前 guard と本 ruleset は責務が異なり、guard は tag の内容と CI 証拠を、ruleset は公開後の ref 不変性を担保する。
+`main` の branch protection（PR・必須 check・force push/deletion 禁止・admin 適用）も有効だが、branch protection は tag ref を保護しない。`.github/workflows/release.yml` の公開前 guard と本 ruleset は責務が異なり、guard は新規 tag push のイベント（既存 tag の再 push/付け替えは fail closed）・tag の内容・CI 証拠を、ruleset は公開後の ref 不変性を担保する。イベント guard は ruleset B の代替ではなく、設定誤りや一時 bypass 時の補完層である。
 
 ### 残っている外部承認 blocker
 

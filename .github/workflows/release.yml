@@ -4,7 +4,7 @@
 #   Git タグ = リリースバージョン。`vMAJOR.MINOR.PATCH` 形式のタグ (例: v0.1.0) を
 #   push することがリリースの起点になります。
 #
-# 動作: `v*` タグの push を契機に GitHub Release を自動作成します。
+# 動作: 新規作成された `v*` タグの push を契機に GitHub Release を自動作成します。
 #   - 外部シークレット不要 (組み込みの GITHUB_TOKEN のみを使用)。
 #   - 公開前 guard が SemVer・package/CHANGELOG・main ancestry と、同じ SHA の
 #     trusted CI・gitleaks・CodeQL を照合し、
@@ -19,7 +19,8 @@ on:
     tags:
       - "v*"
 
-# 同じタグへの再 push (タグ付け直し) で二重に Release を作らないよう、タグ単位で直列化する。
+# 同じタグへの再 push (タグ付け直し) は guard が fail closed で拒否する。
+# タグ単位の直列化も維持し、許可された同一イベントの再実行だけを順序づける。
 # `cancel-in-progress` は **false**。Release 作成は途中で中断すると「タグはあるが Release が無い」
 # 中途半端な状態を残すため、CI と違って進行中の実行は必ず完走させる (#491)。
 concurrency:
@@ -49,6 +50,7 @@ jobs:
         env:
           RELEASE_TAG: ${{ github.ref_name }}
           RELEASE_SHA: ${{ github.sha }}
+          RELEASE_TAG_CREATED: ${{ github.event.created }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: node .github/scripts/release-guard.mjs
 

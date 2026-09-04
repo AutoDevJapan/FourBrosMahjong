@@ -38,6 +38,20 @@ export function versionFromTag(tag) {
 }
 
 /**
+ * Keep a tag update from reaching the release publisher even if the external
+ * immutable-tag ruleset is misconfigured or temporarily bypassed. Re-running
+ * the same workflow after a validation failure keeps the original push event,
+ * so a legitimate retry still has `created=true`.
+ *
+ * @param {{tagCreated: string}} input
+ */
+export function validateReleaseTagCreation({ tagCreated }) {
+  if (tagCreated !== "true") {
+    throw new Error("release trigger must create a new tag");
+  }
+}
+
+/**
  * Return the exact body published for a release. Validation and release.yml
  * share this parser so a section cannot pass the guard but publish an empty or
  * different body.
@@ -641,7 +655,9 @@ export async function verifyTagOnMain({ repo, sha, api }) {
 async function main() {
   const tag = String(process.env.RELEASE_TAG ?? "");
   const sha = String(process.env.RELEASE_SHA ?? "");
+  const tagCreated = String(process.env.RELEASE_TAG_CREATED ?? "");
   const repo = String(process.env.GITHUB_REPOSITORY ?? "");
+  validateReleaseTagCreation({ tagCreated });
   validateReleaseMetadata({
     tag,
     packageJson: readFileSync("package.json", "utf8"),

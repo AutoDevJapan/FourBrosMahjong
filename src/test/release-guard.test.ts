@@ -13,6 +13,7 @@ import {
   MAX_CODEQL_CANDIDATES,
   releaseNotesFromChangelog,
   validateReleaseMetadata,
+  validateReleaseTagCreation,
   verifyTagOnMain,
   versionFromTag,
 } from "../../.github/scripts/release-guard.mjs";
@@ -130,6 +131,15 @@ const releaseEvidenceApi = (options: EvidenceApiOptions = {}) => {
 };
 
 describe("release metadata guard (#507)", () => {
+  it("accepts only a newly-created tag push as a release trigger (#508)", () => {
+    expect(validateReleaseTagCreation({ tagCreated: "true" })).toBeUndefined();
+    for (const tagCreated of ["", "false", "TRUE", "1"]) {
+      expect(() => validateReleaseTagCreation({ tagCreated })).toThrow(
+        "release trigger must create a new tag",
+      );
+    }
+  });
+
   it("keeps the repository's current package version releasable from its documented section", () => {
     const packageJson = readFileSync(
       resolve(process.cwd(), "package.json"),
@@ -1313,6 +1323,7 @@ describe("release workflow contract (#507 / #747)", () => {
     expect(guard.env).toEqual({
       RELEASE_TAG: "${{ github.ref_name }}",
       RELEASE_SHA: "${{ github.sha }}",
+      RELEASE_TAG_CREATED: "${{ github.event.created }}",
       GITHUB_TOKEN: "${{ secrets.GITHUB_TOKEN }}",
     });
 
