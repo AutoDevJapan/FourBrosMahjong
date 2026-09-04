@@ -11,7 +11,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { walkToGameEnd } from "@/components/game/finishedGameFixture";
 import { selectView } from "@/components/game/gameView";
 import { createGame } from "@/domain/game/engine";
-import OnlineLobby from "./OnlineLobby";
+import OnlineLobby, { isStaleOnlineSnapshot } from "./OnlineLobby";
 import type { OnlineSnapshot } from "./types";
 
 vi.mock("@/components/game/GameBoard", () => ({
@@ -179,6 +179,68 @@ afterEach(() => {
 });
 
 describe("OnlineLobby (#605)", () => {
+  it.each([
+    ["初回snapshot", null, { code: "ABC234", version: 0 }, false],
+    [
+      "同じroomの同version",
+      { code: "ABC234", version: 2 },
+      { code: "ABC234", version: 2 },
+      false,
+    ],
+    [
+      "同じroomの新しいversion",
+      { code: "ABC234", version: 2 },
+      { code: "ABC234", version: 3 },
+      false,
+    ],
+    [
+      "同じroomの古いversion",
+      { code: "ABC234", version: 2 },
+      { code: "ABC234", version: 1 },
+      true,
+    ],
+    [
+      "別roomの初期version",
+      { code: "ABC234", version: 2 },
+      { code: "XYZ234", version: 0 },
+      false,
+    ],
+  ] as const)(
+    "snapshotのversion順序をroom単位で判定する(#818): %s",
+    (_name, current, next, expected) => {
+      expect(isStaleOnlineSnapshot(current, next)).toBe(expected);
+    },
+  );
+
+  it("同じroomのstale snapshotで最新状態と操作エラーを巻き戻さない(#818)", () => {
+    render(<OnlineLobby />);
+
+    fireEvent.change(screen.getByLabelText("表示名"), {
+      target: { value: "たろう" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "新しいルームを作る" }));
+
+    const socket = sockets[0];
+    if (!socket) throw new Error("stale snapshot test socket expected");
+    const current = { ...snapshotFixture(), version: 2 };
+    const stale = { ...finishedSnapshotFixture(), version: 1 };
+    const staleOperationMessage = "最新状態を確認してから再試行してください。";
+
+    act(() => {
+      socket.open();
+      socket.message({
+        type: "session",
+        token: "t".repeat(24),
+        snapshot: current,
+      });
+      socket.message({ type: "error", message: staleOperationMessage });
+      socket.message({ type: "snapshot", snapshot: stale });
+    });
+
+    expect(screen.getByTestId("game-board")).toBeInTheDocument();
+    expect(screen.getByText(staleOperationMessage)).toBeInTheDocument();
+  });
+
   it("prefills a valid room code from a shared URL", async () => {
     window.history.replaceState({}, "", "/online?room=abc234");
 
@@ -1853,7 +1915,7 @@ describe("OnlineLobby の終局結果導線", () => {
     act(() => {
       sockets[0]?.message({
         type: "snapshot",
-        snapshot: snapshotFixture(),
+        snapshot: { ...snapshotFixture(), version: 2 },
       });
     });
     expect(screen.getByTestId("game-board")).toBeInTheDocument();
@@ -1927,7 +1989,7 @@ describe("OnlineLobby の終局結果導線", () => {
     act(() => {
       sockets[0]?.message({
         type: "snapshot",
-        snapshot: snapshotFixture(),
+        snapshot: { ...snapshotFixture(), version: 2 },
       });
     });
     expect(
@@ -1939,7 +2001,7 @@ describe("OnlineLobby の終局結果導線", () => {
     act(() => {
       sockets[0]?.message({
         type: "snapshot",
-        snapshot: finishedSnapshotFixture(),
+        snapshot: { ...finishedSnapshotFixture(), version: 3 },
       });
     });
     expect(
