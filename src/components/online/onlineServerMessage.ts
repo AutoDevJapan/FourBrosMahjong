@@ -25,6 +25,7 @@ const MAX_MELD_TILES = 4;
 const MAX_MELD_COUNT = 4;
 const MAX_KITA_COUNT = COPIES_PER_TILE;
 const MAX_DORA_INDICATOR_COUNT = MAX_OMOTE_DORA_COUNT;
+const RESULT_RANKS = [1, 2, 3, 4] as const;
 const ISO_TIMESTAMP =
   /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.\d{1,3})?(?:Z|[+-](\d{2}):(\d{2}))$/u;
 
@@ -309,6 +310,15 @@ function isGameResult(value: unknown): boolean {
     !Array.isArray(value.players) ||
     value.players.length !== 4 ||
     !value.players.every(isResultPlayer)
+  ) {
+    return false;
+  }
+  const ranks = new Set(
+    value.players.map((player) => (isRecord(player) ? player.rank : undefined)),
+  );
+  if (
+    ranks.size !== RESULT_RANKS.length ||
+    !RESULT_RANKS.every((rank) => ranks.has(rank))
   ) {
     return false;
   }
