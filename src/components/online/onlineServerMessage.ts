@@ -1,6 +1,8 @@
 import { MAX_OMOTE_DORA_COUNT } from "@/domain/dora/dice";
 import { CHARACTER_PLAYER_IDS } from "@/domain/game/characters";
 import type { TileData } from "@/domain/game/viewTypes";
+import { ROUNDS_PER_WIND } from "@/domain/round/round";
+import { TOTAL_POINTS } from "@/domain/scoring/settlement";
 import { COPIES_PER_TILE, TOTAL_TILE_COUNT } from "@/domain/tiles/tileSet";
 import {
   hasDisallowedPlayerNameControls,
@@ -30,6 +32,27 @@ const MAX_DORA_INDICATOR_COUNT = MAX_OMOTE_DORA_COUNT;
 export const MAX_WIN_YAKU_ENTRIES = 32;
 /** 和了者以外の4兄弟全員が支払者になり得る場合の最大支払い件数。 */
 export const MAX_WIN_PAYMENT_ENTRIES = CHARACTER_PLAYER_IDS.length - 1;
+/** 現行engineの安全な局数上限(連荘を含む)。 */
+const MAX_SNAPSHOT_ROUNDS = 32;
+/** 現行engineの着席人数。 */
+const SEATED_PLAYER_COUNT = CHARACTER_PLAYER_IDS.length - 1;
+/** 対局中に表示できる1人分の持ち点の絶対上限。 */
+export const MAX_SNAPSHOT_POINTS = TOTAL_POINTS;
+/** 局の点差・支払額・残余供託を含む表示点数の絶対上限。 */
+export const MAX_SNAPSHOT_POINT_DELTA = TOTAL_POINTS * 2;
+/** 精算表示の各数値に役満祝儀・ウマを含めるための絶対上限。 */
+export const MAX_SNAPSHOT_RESULT_VALUE = TOTAL_POINTS * 2;
+/** 1つの役/ドラ内訳が取り得る、物理牌数を基準にした翻数上限。 */
+export const MAX_SNAPSHOT_HAN = TOTAL_TILE_COUNT;
+/** 現行役カタログで同時に成立し得る役満倍数の上限。 */
+export const MAX_SNAPSHOT_YAKUMAN = 4;
+/** 東南戦の局番号上限。 */
+export const MAX_SNAPSHOT_HAND_NUMBER = ROUNDS_PER_WIND;
+/** 現行engineの局数安全上限から導出した本場上限。 */
+export const MAX_SNAPSHOT_HONBA = MAX_SNAPSHOT_ROUNDS;
+/** 1局3人までのリーチ宣言を局数安全上限まで積み上げた供託本数上限。 */
+export const MAX_SNAPSHOT_RIICHI_STICKS =
+  MAX_SNAPSHOT_ROUNDS * SEATED_PLAYER_COUNT;
 const RESULT_RANKS = [1, 2, 3, 4] as const;
 const SCORE_CATEGORIES = [
   "normal",
@@ -193,7 +216,23 @@ function isBoundedNonNegativeInteger(
   value: unknown,
   maximum: number,
 ): value is number {
-  return isInteger(value) && value >= 0 && value <= maximum;
+  return isBoundedInteger(value, 0, maximum);
+}
+
+function isBoundedInteger(
+  value: unknown,
+  minimum: number,
+  maximum: number,
+): value is number {
+  return isSafeInteger(value) && value >= minimum && value <= maximum;
+}
+
+function isOptionalBoundedInteger(
+  value: unknown,
+  minimum: number,
+  maximum: number,
+): boolean {
+  return value === undefined || isBoundedInteger(value, minimum, maximum);
 }
 
 function isBoundedString(value: unknown, maximum = 2_048): value is string {
@@ -225,8 +264,12 @@ function isOptionalBoolean(value: unknown): boolean {
   return value === undefined || typeof value === "boolean";
 }
 
-function isOptionalNumber(value: unknown): boolean {
-  return value === undefined || isFiniteNumber(value);
+function isOptionalPointDelta(value: unknown): boolean {
+  return isOptionalBoundedInteger(
+    value,
+    -MAX_SNAPSHOT_POINT_DELTA,
+    MAX_SNAPSHOT_POINT_DELTA,
+  );
 }
 
 function isTile(value: unknown): value is TileData {
@@ -294,8 +337,8 @@ function isBenchPlayer(value: unknown): boolean {
     isRecord(value) &&
     isPlayerId(value.playerId) &&
     isPlayerName(value.name) &&
-    isFiniteNumber(value.points) &&
-    isOptionalNumber(value.pointsDelta) &&
+    isBoundedInteger(value.points, -MAX_SNAPSHOT_POINTS, MAX_SNAPSHOT_POINTS) &&
+    isOptionalPointDelta(value.pointsDelta) &&
     !Object.hasOwn(value, "hand") &&
     !Object.hasOwn(value, "handCount")
   );
@@ -306,8 +349,8 @@ function isSeatedPlayer(value: unknown): boolean {
     isRecord(value) &&
     isPlayerId(value.playerId) &&
     isPlayerName(value.name) &&
-    isFiniteNumber(value.points) &&
-    isOptionalNumber(value.pointsDelta) &&
+    isBoundedInteger(value.points, -MAX_SNAPSHOT_POINTS, MAX_SNAPSHOT_POINTS) &&
+    isOptionalPointDelta(value.pointsDelta) &&
     (value.seatWind === "east" ||
       value.seatWind === "south" ||
       value.seatWind === "west") &&
@@ -337,13 +380,27 @@ function isResultPlayer(value: unknown): boolean {
   return (
     isRecord(value) &&
     isPlayerName(value.name) &&
-    isInteger(value.rank) &&
-    value.rank >= 1 &&
-    value.rank <= 4 &&
-    isFiniteNumber(value.rawScore) &&
-    isFiniteNumber(value.uma) &&
-    isFiniteNumber(value.bonus) &&
-    isFiniteNumber(value.soshiiTotal)
+    isBoundedInteger(value.rank, 1, 4) &&
+    isBoundedInteger(
+      value.rawScore,
+      -MAX_SNAPSHOT_RESULT_VALUE,
+      MAX_SNAPSHOT_RESULT_VALUE,
+    ) &&
+    isBoundedInteger(
+      value.uma,
+      -MAX_SNAPSHOT_RESULT_VALUE,
+      MAX_SNAPSHOT_RESULT_VALUE,
+    ) &&
+    isBoundedInteger(
+      value.bonus,
+      -MAX_SNAPSHOT_RESULT_VALUE,
+      MAX_SNAPSHOT_RESULT_VALUE,
+    ) &&
+    isBoundedInteger(
+      value.soshiiTotal,
+      -MAX_SNAPSHOT_RESULT_VALUE,
+      MAX_SNAPSHOT_RESULT_VALUE,
+    )
   );
 }
 
@@ -425,17 +482,16 @@ function isGameView(value: unknown, you: OnlineSnapshot["you"]): boolean {
   const dora = value.dora;
   return (
     (table.roundWind === "east" || table.roundWind === "south") &&
-    isInteger(table.handNumber) &&
-    table.handNumber >= 1 &&
-    isInteger(table.honba) &&
-    table.honba >= 0 &&
-    isInteger(table.riichiSticks) &&
-    table.riichiSticks >= 0 &&
-    isInteger(table.remainingLiveTiles) &&
-    table.remainingLiveTiles >= 0 &&
+    isBoundedInteger(table.handNumber, 1, MAX_SNAPSHOT_HAND_NUMBER) &&
+    isBoundedNonNegativeInteger(table.honba, MAX_SNAPSHOT_HONBA) &&
+    isBoundedNonNegativeInteger(
+      table.riichiSticks,
+      MAX_SNAPSHOT_RIICHI_STICKS,
+    ) &&
+    isBoundedNonNegativeInteger(table.remainingLiveTiles, TOTAL_TILE_COUNT) &&
     Array.isArray(table.dice) &&
     table.dice.length === 2 &&
-    table.dice.every((die) => isInteger(die) && die >= 1 && die <= 6) &&
+    table.dice.every((die) => isBoundedInteger(die, 1, 6)) &&
     isBoundedNonNegativeInteger(table.doraCount, MAX_DORA_INDICATOR_COUNT) &&
     isTileArray(dora.indicators, MAX_DORA_INDICATOR_COUNT) &&
     (dora.uraIndicatorCount === undefined ||
@@ -520,7 +576,13 @@ function isPending(value: unknown, you: OnlineSnapshot["you"]): boolean {
 function isDeltas(value: unknown): boolean {
   return (
     isRecord(value) &&
-    CHARACTER_PLAYER_IDS.every((playerId) => isFiniteNumber(value[playerId]))
+    CHARACTER_PLAYER_IDS.every((playerId) =>
+      isBoundedInteger(
+        value[playerId],
+        -MAX_SNAPSHOT_POINT_DELTA,
+        MAX_SNAPSHOT_POINT_DELTA,
+      ),
+    )
   );
 }
 
@@ -542,27 +604,30 @@ function isWinDetails(value: unknown): boolean {
       (yaku) =>
         isRecord(yaku) &&
         isBoundedString(yaku.name, 128) &&
-        isFiniteNumber(yaku.han) &&
-        isFiniteNumber(yaku.yakuman),
+        isBoundedNonNegativeInteger(yaku.han, MAX_SNAPSHOT_HAN) &&
+        isBoundedNonNegativeInteger(yaku.yakuman, MAX_SNAPSHOT_YAKUMAN),
     ) &&
-    isFiniteNumber(value.yakuHan) &&
+    isBoundedNonNegativeInteger(value.yakuHan, MAX_SNAPSHOT_HAN) &&
     ["omote", "ura", "aka", "gari", "total"].every((key) =>
-      isFiniteNumber(dora[key]),
+      isBoundedNonNegativeInteger(dora[key], MAX_SNAPSHOT_HAN),
     ) &&
-    isFiniteNumber(value.totalHan) &&
-    isFiniteNumber(value.yakuman) &&
+    isBoundedNonNegativeInteger(value.totalHan, MAX_SNAPSHOT_HAN) &&
+    isBoundedNonNegativeInteger(value.yakuman, MAX_SNAPSHOT_YAKUMAN) &&
     isScoreCategory(value.category) &&
-    isFiniteNumber(value.honba) &&
-    isFiniteNumber(value.riichiSticks) &&
+    isBoundedNonNegativeInteger(value.honba, MAX_SNAPSHOT_HONBA) &&
+    isBoundedNonNegativeInteger(
+      value.riichiSticks,
+      MAX_SNAPSHOT_RIICHI_STICKS,
+    ) &&
     Array.isArray(value.payments) &&
     value.payments.length <= MAX_WIN_PAYMENT_ENTRIES &&
     value.payments.every(
       (payment) =>
         isRecord(payment) &&
         isBoundedString(payment.name, 384) &&
-        isFiniteNumber(payment.amount),
+        isBoundedNonNegativeInteger(payment.amount, MAX_SNAPSHOT_POINT_DELTA),
     ) &&
-    isFiniteNumber(value.stickPayout)
+    isBoundedNonNegativeInteger(value.stickPayout, MAX_SNAPSHOT_POINT_DELTA)
   );
 }
 
@@ -579,9 +644,14 @@ function isRoundSummary(value: unknown): boolean {
       (isRecord(value.residualSticks) &&
         isPlayerId(value.residualSticks.recipientId) &&
         isPlayerName(value.residualSticks.recipientName) &&
-        isInteger(value.residualSticks.sticks) &&
-        value.residualSticks.sticks >= 0 &&
-        isFiniteNumber(value.residualSticks.points))) &&
+        isBoundedNonNegativeInteger(
+          value.residualSticks.sticks,
+          MAX_SNAPSHOT_RIICHI_STICKS,
+        ) &&
+        isBoundedNonNegativeInteger(
+          value.residualSticks.points,
+          MAX_SNAPSHOT_POINT_DELTA,
+        ))) &&
     (value.winDetails === undefined || isWinDetails(value.winDetails))
   );
 }
