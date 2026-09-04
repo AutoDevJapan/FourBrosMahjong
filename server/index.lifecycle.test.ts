@@ -158,6 +158,37 @@ describe("createOnlineServer lifecycle", () => {
     }
   });
 
+  it("uses the injected Railway marker for per-source ops rate limiting", async () => {
+    const token = "P".repeat(32);
+    const server = createOnlineServer({
+      environment: {
+        ...environment(false),
+        RAILWAY_ENVIRONMENT_ID: "test-railway",
+        ONLINE_OPS_REQUIRED: "true",
+        ONLINE_OPS_TOKEN: token,
+        ONLINE_SOURCE_REVISION: "e".repeat(40),
+      },
+    });
+    const port = await listen(server);
+    try {
+      const statuses: number[] = [];
+      for (let attempt = 0; attempt < 11; attempt += 1) {
+        const response = await fetch(`http://127.0.0.1:${port}/ops/status`, {
+          headers: {
+            authorization: `Bearer ${token}`,
+            "x-real-ip": `203.0.113.${attempt + 1}`,
+          },
+        });
+        statuses.push(response.status);
+        await response.arrayBuffer();
+      }
+
+      expect(statuses).toEqual(Array.from({ length: 11 }, () => 200));
+    } finally {
+      await server.handleSignal("SIGTERM");
+    }
+  });
+
   it.each([
     { configuredOrigins: "*", handshakeOrigin: "*" },
     {

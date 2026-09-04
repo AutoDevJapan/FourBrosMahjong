@@ -754,7 +754,8 @@ export function createOnlineServer(
     replicaId: opsConfiguration.config.replicaId,
     uptimeMs: () => Math.max(0, Math.floor(monotonicNow() - processStartedAt)),
     observedAtMs: wallNow,
-    sourceFor: (request: IncomingMessage) => connectionSource(request),
+    sourceFor: (request: IncomingMessage) =>
+      connectionSource(request, environment.RAILWAY_ENVIRONMENT_ID),
     observeStatus: observeDrainStatus,
     broadcastDrainStatus,
     broadcastAccepting,
