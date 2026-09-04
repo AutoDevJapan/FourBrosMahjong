@@ -17,7 +17,11 @@ export interface OnlineTestWindow extends Window {
 }
 
 export function onlineSnapshotFixture(): OnlineSnapshot {
-  const engine = createGame({ seed: 31, humanPlayerIds: ["p0"] });
+  const engine = createGame({
+    seed: 31,
+    names: ["たろう", "ゲスト2", "ゲスト3", "ゲスト4"],
+    humanPlayerIds: ["p0"],
+  });
   return {
     code: "ABC234",
     version: 0,
