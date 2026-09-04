@@ -52,6 +52,13 @@ const JOIN_REQUIREMENT_ID = "online-lobby-join-requirement";
 const MAINTENANCE_NOTICE_ID = "online-maintenance-notice";
 const MAINTENANCE_RECOVERY_NOTICE_MS = 5_000;
 const MAX_AUTOMATIC_RECONNECT_ATTEMPTS = 5;
+/**
+ * Bound the same-tab resume record before synchronous JSON.parse can see it.
+ * A generated credential is only a few dozen bytes; the extra room preserves
+ * opaque-token compatibility without allowing a corrupted storage value to
+ * monopolize the main thread during online-lobby startup.
+ */
+export const MAX_ONLINE_CREDENTIALS_BYTES = 4 * 1024;
 /** Drop untrusted server frames before synchronous JSON.parse can see them. */
 export const MAX_ONLINE_SERVER_MESSAGE_BYTES = 64 * 1024;
 const ONLINE_SERVER_MESSAGE_ENCODER = new TextEncoder();
@@ -137,6 +144,10 @@ function readCredentials(): OnlineCredentials | null {
   try {
     const raw = window.sessionStorage.getItem(ONLINE_SESSION_KEY);
     if (!raw) return null;
+    // Storage strings are UTF-16. Use the same conservative accounting as the
+    // other browser-persisted records and reject before parsing or allocating
+    // an object graph from untrusted same-origin state.
+    if (raw.length * 2 > MAX_ONLINE_CREDENTIALS_BYTES) return null;
     const parsed = JSON.parse(raw) as Partial<OnlineCredentials>;
     const code = normalizeRoomCode(parsed.code);
     if (
