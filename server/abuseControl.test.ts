@@ -17,7 +17,7 @@ describe("online abuse controls", () => {
     ).toMatchObject({ code: "connection_limit" });
 
     for (let index = 0; index < ABUSE_LIMITS.maxConnections; index += 1)
-      controls.releaseConnection(`source-${index}`);
+      controls.releasePendingUpgrade(`source-${index}`);
     now += ABUSE_LIMITS.connectionAttempts.windowMs + 1;
     controls.cleanup();
 
@@ -46,13 +46,13 @@ describe("online abuse controls", () => {
       index += 1
     ) {
       expect(controls.admitConnection("source", 0, 0)).toBeNull();
-      controls.releaseConnection("source");
+      controls.releasePendingUpgrade("source");
     }
     expect(controls.admitConnection("source", 0, 0)).toMatchObject({
       code: "rate_limited",
       scope: "connection",
     });
-    controls.releaseConnection("source");
+    controls.releasePendingUpgrade("source");
     now += ABUSE_LIMITS.connectionAttempts.windowMs;
     expect(controls.admitConnection("source", 0, 0)).toBeNull();
 
@@ -149,7 +149,7 @@ describe("online abuse controls", () => {
     let now = 0;
     const controls = new OnlineAbuseControls(() => now);
     expect(controls.admitConnection("source", 0, 0)).toBeNull();
-    controls.releaseConnection("source");
+    controls.releasePendingUpgrade("source");
     expect(controls.trackedSourceCount).toBe(1);
     now += 10 * 60 * 1_000 + 1;
     controls.cleanup();

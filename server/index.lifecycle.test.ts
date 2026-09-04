@@ -2,7 +2,7 @@ import { once } from "node:events";
 import { createConnection } from "node:net";
 import { describe, expect, it, vi } from "vitest";
 import { WebSocket } from "ws";
-import { ABUSE_LIMITS } from "./abuseControl";
+import { ABUSE_LIMITS, OnlineAbuseControls } from "./abuseControl";
 import { createOnlineServer } from "./index";
 
 const ORIGIN = "http://shutdown.local";
@@ -295,6 +295,29 @@ describe("createOnlineServer lifecycle", () => {
       } else {
         process.env.RAILWAY_ENVIRONMENT_ID = previousMarker;
       }
+    }
+  });
+
+  it("does not release a pending upgrade reservation when an established peer closes", async () => {
+    const releasePendingUpgrade = vi.spyOn(
+      OnlineAbuseControls.prototype,
+      "releasePendingUpgrade",
+    );
+    const server = createOnlineServer({ environment: environment(false) });
+    try {
+      const port = await listen(server);
+      const socket = await openWebSocket(port);
+      const closed = once(socket, "close");
+      socket.close();
+      await closed;
+
+      // The reservation is released exactly once during upgrade handoff. An
+      // established socket owns no pending reservation and must not release a
+      // different in-flight upgrade when it later closes.
+      expect(releasePendingUpgrade).toHaveBeenCalledOnce();
+    } finally {
+      await server.handleSignal("SIGTERM");
+      releasePendingUpgrade.mockRestore();
     }
   });
 
