@@ -21,7 +21,7 @@ export const MAX_MAINTENANCE_RETRY_AFTER_MS = 10 * 60 * 1_000;
 
 const SLOT_POSITIONS = ["self", "right", "across", "left"] as const;
 /** 表示コンポーネントが配列を展開する値のゲーム上の上限。 */
-const MAX_VISIBLE_HAND_TILES = 14;
+export const MAX_VISIBLE_HAND_TILES = 14;
 const MAX_MELD_TILES = 4;
 const MAX_MELD_COUNT = 4;
 const MAX_KITA_COUNT = COPIES_PER_TILE;
@@ -491,11 +491,11 @@ function isPending(value: unknown, you: OnlineSnapshot["you"]): boolean {
       (value.playerId === undefined || isPlayerId(value.playerId)) &&
       typeof value.canTsumo === "boolean" &&
       typeof value.canRiichi === "boolean" &&
-      isTileArray(value.riichiTiles) &&
-      isTileArray(value.ankanTiles) &&
-      isTileArray(value.kakanTiles) &&
+      isTileArray(value.riichiTiles, MAX_VISIBLE_HAND_TILES) &&
+      isTileArray(value.ankanTiles, MAX_VISIBLE_HAND_TILES) &&
+      isTileArray(value.kakanTiles, MAX_VISIBLE_HAND_TILES) &&
       isOptionalBoolean(value.canKita) &&
-      isTileArray(value.forbiddenDiscards) &&
+      isTileArray(value.forbiddenDiscards, MAX_VISIBLE_HAND_TILES) &&
       typeof value.locked === "boolean"
     );
   }
@@ -534,7 +534,7 @@ function isWinDetails(value: unknown): boolean {
     (value.winnerSeat === "east" ||
       value.winnerSeat === "south" ||
       value.winnerSeat === "west") &&
-    isTileArray(value.hand) &&
+    isTileArray(value.hand, MAX_VISIBLE_HAND_TILES) &&
     isTile(value.winningTile) &&
     Array.isArray(value.yaku) &&
     value.yaku.length <= MAX_WIN_YAKU_ENTRIES &&
