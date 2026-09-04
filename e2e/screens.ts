@@ -78,6 +78,16 @@ export const SCREENS: readonly NonTextContrastScreen[] = [
     nonTextContrastMinMeasured: 2,
   },
   {
+    path: "/prototype/unity-display",
+    name: "Unity表示リファレンス",
+    heading: "Unity表示リファレンス",
+    clientReady: (page) =>
+      page
+        .getByTestId("unity-reference-board")
+        .getByRole("group", { name: "対局盤面" }),
+    nonTextContrastMinMeasured: 5,
+  },
+  {
     path: "/rules",
     name: "ルール説明",
     heading: "ルール説明",

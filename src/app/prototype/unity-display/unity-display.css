@@ -1,0 +1,436 @@
+/* #828: Unity導入前の表示契約リファレンス専用スタイル。 */
+.unity-display-page .unity-display-main {
+  display: flex;
+  width: 100%;
+  max-width: 104rem;
+  min-width: 0;
+  min-height: 100svh;
+  margin-inline: auto;
+  padding: clamp(0.75rem, 2.5vw, 2rem);
+  flex-direction: column;
+  gap: clamp(0.9rem, 2vw, 1.5rem);
+}
+
+.unity-display-page .unity-display-header {
+  display: flex;
+  min-width: 0;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.unity-display-page .unity-display-heading-copy {
+  min-width: 0;
+}
+
+.unity-display-page .unity-display-kicker,
+.unity-display-page .unity-display-section-kicker {
+  color: var(--ui-gold-text);
+  font-size: 0.75rem;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.unity-display-page .unity-display-title {
+  margin-top: 0.25rem;
+  color: var(--ui-text);
+  font-family:
+    var(--font-yuji-syuku), "Yu Mincho", "Hiragino Mincho ProN", serif;
+  font-size: clamp(2rem, 5vw, 4rem);
+  font-weight: 400;
+  letter-spacing: 0.08em;
+  line-height: 1.1;
+}
+
+.unity-display-page .unity-display-lede {
+  max-width: 52rem;
+  margin-top: 0.65rem;
+  color: var(--ui-muted);
+  font-size: clamp(0.85rem, 1.6vw, 1rem);
+  line-height: 1.7;
+}
+
+.unity-display-page .unity-display-back-link {
+  flex: none;
+  gap: 0.4rem;
+  padding: 0.55rem 0.9rem;
+}
+
+.unity-display-page .unity-display-status,
+.unity-display-page .unity-display-boundary-panel {
+  min-width: 0;
+  padding: clamp(0.8rem, 2vw, 1.25rem);
+  border: 1px solid var(--ui-frame);
+  border-radius: 1rem;
+  background: color-mix(in srgb, var(--ui-surface) 93%, transparent);
+}
+
+.unity-display-page .unity-display-status {
+  border-color: color-mix(
+    in srgb,
+    var(--ui-gold-decoration) 45%,
+    var(--ui-frame)
+  );
+}
+
+.unity-display-page .unity-display-status h2,
+.unity-display-page .unity-display-boundary-panel h2 {
+  color: var(--ui-text);
+  font-size: 1rem;
+  font-weight: 800;
+}
+
+.unity-display-page .unity-display-status p,
+.unity-display-page .unity-display-boundary-panel p {
+  margin-top: 0.45rem;
+  color: var(--ui-muted);
+  font-size: 0.875rem;
+  line-height: 1.7;
+}
+
+.unity-display-page .unity-display-facts {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0.65rem;
+  margin-top: 0.9rem;
+}
+
+.unity-display-page .unity-display-facts > div {
+  min-width: 0;
+  padding: 0.6rem 0.7rem;
+  border: 1px solid color-mix(in srgb, var(--ui-frame) 72%, transparent);
+  border-radius: 0.65rem;
+  background: color-mix(in srgb, var(--ui-surface-raised) 58%, transparent);
+}
+
+.unity-display-page .unity-display-facts dt {
+  color: var(--ui-muted);
+  font-size: 0.7rem;
+  font-weight: 700;
+}
+
+.unity-display-page .unity-display-facts dd {
+  margin-top: 0.25rem;
+  color: var(--ui-text);
+  font-size: 0.8rem;
+  overflow-wrap: anywhere;
+}
+
+.unity-display-page .unity-display-columns {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: minmax(0, 1.55fr) minmax(20rem, 0.85fr);
+  align-items: start;
+  gap: clamp(0.9rem, 2vw, 1.5rem);
+}
+
+.unity-display-page .unity-display-board-panel,
+.unity-display-page .unity-display-contract-panel,
+.unity-display-page .unity-display-visual-panel,
+.unity-display-page .unity-display-rotation-panel {
+  min-width: 0;
+  padding: clamp(0.7rem, 1.8vw, 1.25rem);
+}
+
+.unity-display-page .unity-display-section-heading {
+  display: flex;
+  min-width: 0;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin-bottom: 0.85rem;
+}
+
+.unity-display-page .unity-display-section-heading h2 {
+  margin-top: 0.2rem;
+  color: var(--ui-text);
+  font-size: clamp(1.1rem, 2vw, 1.45rem);
+  font-weight: 800;
+  letter-spacing: 0.04em;
+}
+
+.unity-display-page .unity-display-seed-badge,
+.unity-display-page .unity-display-contract-badge,
+.unity-display-page .unity-display-reference-badge {
+  flex: none;
+  padding: 0.25rem 0.5rem;
+  border: 1px solid var(--ui-frame);
+  border-radius: 999px;
+  color: var(--ui-muted);
+  background: color-mix(in srgb, var(--ui-surface-raised) 72%, transparent);
+  font-size: 0.7rem;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.unity-display-page .unity-display-board-host {
+  min-width: 0;
+}
+
+.unity-display-page .unity-display-case-list {
+  display: grid;
+  gap: 0.65rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.unity-display-page .unity-display-case-item {
+  min-width: 0;
+  padding: 0.75rem;
+  border: 1px solid color-mix(in srgb, var(--ui-frame) 75%, transparent);
+  border-radius: 0.8rem;
+  background: color-mix(in srgb, var(--ui-surface-raised) 45%, transparent);
+}
+
+.unity-display-page .unity-display-case-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.unity-display-page .unity-display-case-number,
+.unity-display-page .unity-display-source-component {
+  color: var(--ui-muted);
+  font-family: var(--font-geist-mono), monospace;
+  font-size: 0.66rem;
+  overflow-wrap: anywhere;
+}
+
+.unity-display-page .unity-display-case-status {
+  color: var(--positive);
+  font-size: 0.68rem;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.unity-display-page .unity-display-case-item h3,
+.unity-display-page .unity-display-visual-case h3 {
+  margin-top: 0.45rem;
+  color: var(--ui-text);
+  font-size: 0.95rem;
+  font-weight: 800;
+}
+
+.unity-display-page .unity-display-case-item p {
+  margin-top: 0.25rem;
+  color: var(--ui-muted);
+  font-size: 0.78rem;
+  line-height: 1.55;
+}
+
+.unity-display-page .unity-display-source-component {
+  display: inline-block;
+  margin-top: 0.45rem;
+  color: var(--ui-gold-text);
+}
+
+.unity-display-page .unity-display-assertion-list {
+  display: grid;
+  gap: 0.2rem;
+  margin-top: 0.55rem;
+  padding-left: 1rem;
+  color: var(--ui-muted);
+  font-size: 0.72rem;
+  line-height: 1.45;
+}
+
+.unity-display-page .unity-display-visual-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.85rem;
+}
+
+.unity-display-page .unity-display-visual-case {
+  min-width: 0;
+  padding: 0.75rem;
+  border: 1px solid color-mix(in srgb, var(--ui-frame) 75%, transparent);
+  border-radius: 0.8rem;
+  background: color-mix(in srgb, var(--ui-surface-raised) 38%, transparent);
+}
+
+.unity-display-page .unity-display-case-preview {
+  min-width: 0;
+  margin-top: 0.65rem;
+  padding: 0.65rem;
+  border: 1px solid color-mix(in srgb, var(--ui-frame) 58%, transparent);
+  border-radius: 0.65rem;
+  background: color-mix(in srgb, var(--table-felt) 12%, var(--ui-surface));
+}
+
+.unity-display-page .unity-display-river-preview .game-river {
+  min-height: 7rem;
+}
+
+.unity-display-page .unity-display-hand-preview .game-hand-surface {
+  padding: 0.35rem;
+}
+
+.unity-display-page .unity-display-preview-caption {
+  margin-top: 0.55rem;
+  color: var(--ui-muted);
+  font-size: 0.7rem;
+  line-height: 1.5;
+}
+
+.unity-display-page .unity-display-effect-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+
+.unity-display-page .unity-display-effect-button {
+  min-height: 2.25rem;
+  padding: 0.25rem 0.5rem;
+  border: 1px solid var(--control-border);
+  border-radius: 0.45rem;
+  color: var(--ui-text);
+  background: var(--ui-surface-raised);
+  font-size: 0.72rem;
+  font-weight: 700;
+}
+
+.unity-display-page .unity-display-effect-button[aria-pressed="true"] {
+  border-color: var(--turn-highlight);
+  box-shadow: 0 0 0 2px
+    color-mix(in srgb, var(--turn-highlight) 22%, transparent);
+}
+
+.unity-display-page .unity-display-effect-stage {
+  position: relative;
+  min-height: 7rem;
+  margin-top: 0.45rem;
+  overflow: hidden;
+  border-radius: 0.5rem;
+  background: color-mix(in srgb, var(--table-felt) 18%, transparent);
+}
+
+.unity-display-page .unity-display-effect-stage [data-effect-overlay] > div {
+  /* 比較用リファレンスは静止画として監査できるよう、半透明pulseを止める。 */
+  animation: none;
+  opacity: 1;
+}
+
+.unity-display-page .unity-display-effect-stage .unity-display-preview-caption {
+  position: absolute;
+  right: 0.5rem;
+  bottom: 0.4rem;
+  left: 0.5rem;
+  z-index: 1;
+  margin: 0;
+  padding: 0.2rem 0.35rem;
+  border-radius: 0.35rem;
+  color: var(--ui-text);
+  background: var(--ui-surface);
+  text-align: center;
+}
+
+.unity-display-page .unity-display-bench-preview > div {
+  min-width: 0;
+}
+
+.unity-display-page .unity-display-table-wrap {
+  overflow-x: auto;
+}
+
+.unity-display-page .unity-display-rotation-table {
+  width: 100%;
+  min-width: 48rem;
+  border-collapse: collapse;
+  color: var(--ui-text);
+  font-size: 0.78rem;
+}
+
+.unity-display-page .unity-display-rotation-table th,
+.unity-display-page .unity-display-rotation-table td {
+  padding: 0.65rem 0.7rem;
+  border-bottom: 1px solid color-mix(in srgb, var(--ui-frame) 62%, transparent);
+  text-align: left;
+  vertical-align: top;
+}
+
+.unity-display-page .unity-display-rotation-table thead th {
+  color: var(--ui-muted);
+  font-size: 0.7rem;
+  font-weight: 800;
+}
+
+.unity-display-page .unity-display-rotation-table tbody th {
+  color: var(--ui-gold-text);
+  font-family: var(--font-geist-mono), monospace;
+  font-size: 0.72rem;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.unity-display-page .unity-display-rotation-table td {
+  color: var(--ui-muted);
+  font-family: var(--font-geist-mono), monospace;
+  font-size: 0.7rem;
+  line-height: 1.55;
+}
+
+.unity-display-page .unity-display-note {
+  margin-top: 0.75rem;
+  color: var(--ui-muted);
+  font-size: 0.78rem;
+  line-height: 1.6;
+}
+
+.unity-display-page .unity-display-boundary-panel ul {
+  display: grid;
+  gap: 0.35rem;
+  margin-top: 0.75rem;
+  padding-left: 1.25rem;
+  color: var(--ui-muted);
+  font-size: 0.8rem;
+  line-height: 1.55;
+}
+
+@media (max-width: 72rem) {
+  .unity-display-page .unity-display-columns {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .unity-display-page .unity-display-contract-panel {
+    order: -1;
+  }
+}
+
+@media (max-width: 48rem) {
+  .unity-display-page .unity-display-header {
+    flex-direction: column;
+  }
+
+  .unity-display-page .unity-display-back-link {
+    align-self: flex-start;
+  }
+
+  .unity-display-page .unity-display-facts,
+  .unity-display-page .unity-display-visual-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 30rem) {
+  .unity-display-page .unity-display-main {
+    padding-inline: 0.55rem;
+  }
+
+  .unity-display-page .unity-display-facts,
+  .unity-display-page .unity-display-visual-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .unity-display-page .unity-display-section-heading {
+    flex-direction: column;
+  }
+
+  .unity-display-page .unity-display-seed-badge,
+  .unity-display-page .unity-display-contract-badge,
+  .unity-display-page .unity-display-reference-badge {
+    align-self: flex-start;
+  }
+}

@@ -7,6 +7,7 @@ import HistoryPage from "@/app/history/page";
 import NotFound from "@/app/not-found";
 import OnlinePage from "@/app/online/page";
 import HomePage from "@/app/page";
+import UnityDisplayPage from "@/app/prototype/unity-display/page";
 import RulesPage from "@/app/rules/page";
 import SettingsPage from "@/app/settings/page";
 import { GameProvider } from "@/components/game/GameProvider";
@@ -18,6 +19,7 @@ import { bannerLandmarks, describeElement } from "./bannerLandmarks";
 // `/game` は `/game/result` へstyleを漏らさないようexact page境界でCSSを読む。
 // このcomponent testはsemantic DOMだけを監査するため、Next route CSSを空moduleへ置換する。
 vi.mock("@/app/game/game.css", () => ({}));
+vi.mock("@/app/prototype/unity-display/unity-display.css", () => ({}));
 
 /**
  * `<h1>`・ページヘッダーの配置規約(spec 5.2.6 / #431)を全ルートで固定する。
@@ -98,6 +100,7 @@ const ROUTE_ELEMENTS: Readonly<Record<string, () => ReactElement>> = {
   "/settings": () => <SettingsPage />,
   "/history": () => <HistoryPage />,
   "/online": () => <OnlinePage />,
+  "/prototype/unity-display": () => <UnityDisplayPage />,
   "/game": () => (
     <GameProvider initialGame={createGame({ seed: 0 })}>
       <GamePage />

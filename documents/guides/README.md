@@ -13,6 +13,7 @@
 | [railway-iac-migration.md](./railway-iac-migration.md) | Config as Code ownership cutover直後のparity証拠、HOLD、legacy contingency |
 | [release-tag-protection-runbook.md](./release-tag-protection-runbook.md) | `v*` Release tag の担当ロール・GitHub Ruleset・拒否検証・break-glass・新 version rollback 手順 |
 | [unity-display-feasibility.md](./unity-display-feasibility.md) | Unity版の表示専用契約、固定ローテーションfixture、実行前のGo/No-Go境界 |
+| [unity-display-reference.md](./unity-display-reference.md) | #828のUnity導入前ブラウザ・リファレンスと確認手順 |
 
 ## 関連
 
