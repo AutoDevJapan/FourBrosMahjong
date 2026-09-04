@@ -37,6 +37,7 @@ function resultContext(
     phase: state.phase,
     pending: state.pending,
     roundSummary: state.lastRound,
+    sessionSaveStatus: "idle",
     historySaveStatus,
     controls: {
       discard: noop,

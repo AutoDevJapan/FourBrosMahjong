@@ -59,6 +59,9 @@ export interface GameJournal {
   readonly actions: readonly GameAction[];
 }
 
+/** ジャーナルの保存結果。失敗しても呼び出し側のメモリ内対局は継続できる。 */
+export type JournalSaveResult = "saved" | "failed";
+
 const noTileActions = new Set([
   "tsumogiri",
   "tsumo",
@@ -292,7 +295,10 @@ export function loadJournal(storage: Storage): GameJournal | null {
   }
 }
 
-export function saveJournal(storage: Storage, journal: GameJournal): void {
+export function saveJournal(
+  storage: Storage,
+  journal: GameJournal,
+): JournalSaveResult {
   try {
     storage.setItem(
       GAME_SESSION_KEY,
@@ -304,7 +310,9 @@ export function saveJournal(storage: Storage, journal: GameJournal): void {
         actions: journal.actions,
       } satisfies GameJournal),
     );
+    return "saved";
   } catch {
     // 保存不可でも現在タブの対局は継続する。
+    return "failed";
   }
 }

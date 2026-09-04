@@ -210,7 +210,7 @@ describe("game persistence journal", () => {
       explicitKita: true,
       actions: [],
     };
-    saveJournal(storage, journal);
+    expect(saveJournal(storage, journal)).toBe("saved");
     expect(loadJournal(storage)).toEqual(journal);
   });
 
@@ -622,13 +622,15 @@ describe("game persistence journal", () => {
       throw new Error("quota");
     });
 
-    saveJournal(storage, {
-      version: 3,
-      seed: 1,
-      names: DEFAULT_NAMES,
-      explicitKita: true,
-      actions: [],
-    });
+    expect(
+      saveJournal(storage, {
+        version: 3,
+        seed: 1,
+        names: DEFAULT_NAMES,
+        explicitKita: true,
+        actions: [],
+      }),
+    ).toBe("failed");
 
     expect(storage.getItem(LEGACY_GAME_SESSION_KEY)).toBe(legacy);
     expect(storage.getItem(GAME_SESSION_KEY)).toBeNull();

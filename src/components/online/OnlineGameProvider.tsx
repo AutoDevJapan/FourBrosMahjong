@@ -165,6 +165,7 @@ export default function OnlineGameProvider({
       phase: snapshot.phase,
       pending: snapshot.pending,
       roundSummary: snapshot.roundSummary,
+      sessionSaveStatus: "idle",
       historySaveStatus: "idle",
       controls,
     }),

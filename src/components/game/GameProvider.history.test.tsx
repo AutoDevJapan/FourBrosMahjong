@@ -11,7 +11,7 @@
  */
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { useSyncExternalStore } from "react";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { CHARACTER_PLAYER_IDS } from "@/domain/game/characters";
 import { restoreWebLocks, stubWebLocks } from "@/test/webLocksStub";
 import { walkToGameEnd } from "./finishedGameFixture";
@@ -48,7 +48,7 @@ function blockLocalStorage() {
 
 /** ジャーナル末尾の操作1つを UI 経由(controls)で実行するプローブ。 */
 function LastActionProbe({ action }: { action: GameAction }) {
-  const { controls, phase, historySaveStatus } = useGame();
+  const { controls, phase, historySaveStatus, sessionSaveStatus } = useGame();
   const run = () => {
     switch (action.type) {
       case "discard":
@@ -84,6 +84,7 @@ function LastActionProbe({ action }: { action: GameAction }) {
       </button>
       <output data-testid="phase">{phase}</output>
       <output data-testid="history-save-status">{historySaveStatus}</output>
+      <output data-testid="session-save-status">{sessionSaveStatus}</output>
     </>
   );
 }
@@ -137,6 +138,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  vi.restoreAllMocks();
   if (originalLocalStorageDescriptor) {
     Object.defineProperty(
       window,
@@ -349,6 +351,46 @@ describe("GameProvider match history recording (#293)", () => {
         "failed",
       ),
     );
+  });
+
+  it("終局直前のsessionStorage書き込み失敗でも結果を保ち、復元不可を公開する", async () => {
+    const lastAction = fixture.journal.actions.at(-1);
+    if (!lastAction) throw new Error("ジャーナルが空");
+    window.sessionStorage.setItem(
+      GAME_SESSION_KEY,
+      JSON.stringify({
+        ...fixture.journal,
+        actions: fixture.journal.actions.slice(0, -1),
+      }),
+    );
+
+    render(
+      <GameProvider>
+        <LastActionProbe action={lastAction} />
+      </GameProvider>,
+    );
+    const setItem = vi
+      .spyOn(Object.getPrototypeOf(window.sessionStorage), "setItem")
+      .mockImplementation(() => {
+        throw new DOMException("Storage quota exceeded", "QuotaExceededError");
+      });
+
+    fireEvent.click(screen.getByRole("button", { name: "最終操作" }));
+
+    expect(screen.getByTestId("phase")).toHaveTextContent("gameEnd");
+    expect(screen.getByTestId("session-save-status")).toHaveTextContent(
+      "failed",
+    );
+    expect(
+      JSON.parse(window.sessionStorage.getItem(GAME_SESSION_KEY) ?? "null")
+        .actions,
+    ).toHaveLength(fixture.journal.actions.length - 1);
+    await waitFor(() =>
+      expect(screen.getByTestId("history-save-status")).toHaveTextContent(
+        "saved",
+      ),
+    );
+    setItem.mockRestore();
   });
 });
 
