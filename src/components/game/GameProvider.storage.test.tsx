@@ -25,6 +25,10 @@ function blockSessionStorage() {
 
 /** localStorageとStorage prototypeを共有するjsdomでも、sessionStorageだけを失敗させる。 */
 function failSessionStorageWrites(): () => void {
+  const descriptorBeforeFailure = Object.getOwnPropertyDescriptor(
+    window,
+    "sessionStorage",
+  );
   const storage = window.sessionStorage;
   Object.defineProperty(window, "sessionStorage", {
     configurable: true,
@@ -42,12 +46,8 @@ function failSessionStorageWrites(): () => void {
     } satisfies Storage,
   });
   return () => {
-    if (originalStorageDescriptor) {
-      Object.defineProperty(
-        window,
-        "sessionStorage",
-        originalStorageDescriptor,
-      );
+    if (descriptorBeforeFailure) {
+      Object.defineProperty(window, "sessionStorage", descriptorBeforeFailure);
     }
   };
 }
