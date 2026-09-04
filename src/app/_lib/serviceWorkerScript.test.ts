@@ -281,6 +281,19 @@ describe("buildServiceWorkerScript", () => {
         key.includes("/_next/static/chunks/app.123.js?"),
       ),
     ).toHaveLength(0);
+
+    // Runtime fetches keep their deployment query, while the cache lookup
+    // canonicalizes it away. Verify the query-bearing request still hits the
+    // install cache without touching the network when offline.
+    sw.setFetchImpl(OFFLINE);
+    const offlineEvent = await sw.dispatchFetch(
+      request("/_next/static/chunks/app.123.js?dpl=runtime"),
+    );
+    const offlineResponse: Response =
+      await offlineEvent.respondWith.mock.calls[0][0];
+    expect(await offlineResponse.text()).toBe(
+      "asset:/_next/static/chunks/app.123.js",
+    );
     expect(
       precache?.store.has("https://cdn.example.net/_next/static/foreign.js"),
     ).toBe(false);
