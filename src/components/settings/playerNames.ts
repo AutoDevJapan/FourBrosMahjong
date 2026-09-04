@@ -19,6 +19,7 @@ import { DEFAULT_NAMES, type PlayerNames } from "@/domain/game/engine";
 import { sanitizePlayerName } from "@/lib/playerName";
 
 export {
+  boundPlayerNameInput,
   isValidPlayerName,
   limitPlayerName,
   MAX_PLAYER_NAME_CODE_UNITS,

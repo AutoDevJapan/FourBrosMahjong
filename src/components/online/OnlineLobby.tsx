@@ -17,6 +17,7 @@ import RankingTable from "@/components/result/RankingTable";
 import { SOSHII_BREAKDOWN_HEADING } from "@/components/result/resultLabels";
 import SoshiiBreakdown from "@/components/result/SoshiiBreakdown";
 import {
+  boundPlayerNameInput,
   limitPlayerName,
   MAX_PLAYER_NAME_LENGTH,
   sanitizePlayerName,
@@ -1536,7 +1537,7 @@ export default function OnlineLobby() {
               onChange={(event) =>
                 setName(
                   composingNameRef.current
-                    ? event.target.value
+                    ? boundPlayerNameInput(event.target.value)
                     : limitPlayerName(event.target.value),
                 )
               }

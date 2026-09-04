@@ -11,6 +11,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { walkToGameEnd } from "@/components/game/finishedGameFixture";
 import { selectView } from "@/components/game/gameView";
 import { createGame } from "@/domain/game/engine";
+import { MAX_PLAYER_NAME_CODE_UNITS } from "@/lib/playerName";
 import OnlineLobby, {
   isStaleOnlineSnapshot,
   MAX_ONLINE_CREDENTIALS_BYTES,
@@ -867,6 +868,20 @@ describe("OnlineLobby の参加条件", () => {
     fireEvent.change(input, { target: { value: tooLong } });
     fireEvent.compositionEnd(input, { target: { value: tooLong } });
     expect(input).toHaveValue("あ".repeat(12));
+  });
+
+  it("IME変換中の巨大な候補をcode unit上限内に保持する(#878)", () => {
+    render(<OnlineLobby />);
+    const input = screen.getByLabelText("表示名");
+    const huge = "あ".repeat(MAX_PLAYER_NAME_CODE_UNITS + 100_000);
+
+    fireEvent.compositionStart(input);
+    fireEvent.change(input, { target: { value: huge } });
+
+    expect(input).toHaveValue("あ".repeat(MAX_PLAYER_NAME_CODE_UNITS));
+    expect((input as HTMLInputElement).value.length).toBeLessThanOrEqual(
+      MAX_PLAYER_NAME_CODE_UNITS,
+    );
   });
 });
 
