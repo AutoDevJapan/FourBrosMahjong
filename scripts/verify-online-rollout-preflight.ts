@@ -1,5 +1,6 @@
 import { stdin, stdout } from "node:process";
 import { validateOnlineRolloutPreflight } from "../server/rolloutPreflight";
+import { parseStrictJson } from "./strictJson";
 
 const MAX_INPUT_BYTES = 64 * 1_024;
 
@@ -20,7 +21,7 @@ async function readBoundedStdin(): Promise<string> {
 async function main(): Promise<void> {
   let evidence: unknown = null;
   try {
-    evidence = JSON.parse(await readBoundedStdin());
+    evidence = parseStrictJson(await readBoundedStdin());
   } catch {
     // Parse, encoding, and size failures intentionally share the same fixed,
     // non-reflective result as all other schema failures.

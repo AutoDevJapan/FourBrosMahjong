@@ -1189,6 +1189,22 @@ describe("Railway IaC parity snapshot contract (#742)", () => {
     expect(result.reasons).toContain("legacy-config-missing");
   });
 
+  it("holds when current railway.json contains duplicate object names", () => {
+    const duplicateDeployKeys = CURRENT_REPOSITORY_SOURCE.replace(
+      /("deploy"\s*:\s*)\{/,
+      '$1{"startCommand":"node --import tsx server/start.ts"},"deploy":{',
+    );
+    expect(duplicateDeployKeys).not.toBe(CURRENT_REPOSITORY_SOURCE);
+
+    const result = validateRailwayIacMigrationEvidence(
+      validEvidence(),
+      filesystemWithCurrentRepositorySource(duplicateDeployKeys),
+      NOW,
+    );
+    expect(result.migrationEvidence).toBe("hold");
+    expect(result.reasons).toContain("legacy-config-missing");
+  });
+
   it("accepts only the strict current /readyz railway.json target", () => {
     expect(
       validateRailwayIacMigrationEvidence(
@@ -1311,6 +1327,31 @@ describe("Railway IaC parity snapshot contract (#742)", () => {
         "ownership-cutover-unverified",
         "secret-safety-unverified",
       ],
+    });
+
+    const duplicateKeys = JSON.stringify(currentEvidence).replace(
+      '{"schemaVersion":1,',
+      '{"schemaVersion":1,"schemaVersion":1,',
+    );
+    const duplicateResult = spawnSync(
+      process.execPath,
+      ["--import", "tsx", "scripts/verify-railway-iac-migration.ts"],
+      {
+        cwd: process.cwd(),
+        input: duplicateKeys,
+        encoding: "utf8",
+      },
+    );
+    expect(duplicateResult.status).toBe(1);
+    expect(duplicateResult.stderr).toBe("");
+    expect(JSON.parse(duplicateResult.stdout)).toEqual({
+      schemaVersion: 1,
+      migrationEvidence: "hold",
+      authorizesMigration: false,
+      authorizesApply: false,
+      authorizesDeployment: false,
+      externalMutationPerformed: false,
+      reasons: ["invalid-schema"],
     });
 
     const malformedResult = spawnSync(
