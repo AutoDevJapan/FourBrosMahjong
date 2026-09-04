@@ -251,9 +251,10 @@ describe("buildServiceWorkerScript", () => {
       if (PRECACHE_ROUTES.includes(url.pathname)) {
         return htmlResponse(`
           <link rel="stylesheet" href="/_next/static/css/app.abc.css">
-          <link rel="preload" href="/_next/static/media/game.def.woff2" as="font">
+          <link rel="preload" href="/_next/static/media/game.def.woff2?dpl=build#font" as="font">
           <script src="/_next/static/chunks/app.123.js"></script>
-          <script src="/_next/static/chunks/app.123.js#duplicate"></script>
+          <script src="/_next/static/chunks/app.123.js?dpl=build#duplicate"></script>
+          <script src="/_next/static/chunks/app.123.js?dpl=another-build"></script>
           <script src="https://cdn.example.net/_next/static/foreign.js"></script>
           <script src="/api/not-a-build-asset"></script>
         `);
@@ -275,6 +276,24 @@ describe("buildServiceWorkerScript", () => {
     ]) {
       expect(precache?.store.has(`${ORIGIN}${path}`)).toBe(true);
     }
+    expect(
+      [...(precache?.store.keys() ?? [])].filter((key) =>
+        key.includes("/_next/static/chunks/app.123.js?"),
+      ),
+    ).toHaveLength(0);
+
+    // Runtime fetches keep their deployment query, while the cache lookup
+    // canonicalizes it away. Verify the query-bearing request still hits the
+    // install cache without touching the network when offline.
+    sw.setFetchImpl(OFFLINE);
+    const offlineEvent = await sw.dispatchFetch(
+      request("/_next/static/chunks/app.123.js?dpl=runtime"),
+    );
+    const offlineResponse: Response =
+      await offlineEvent.respondWith.mock.calls[0][0];
+    expect(await offlineResponse.text()).toBe(
+      "asset:/_next/static/chunks/app.123.js",
+    );
     expect(
       precache?.store.has("https://cdn.example.net/_next/static/foreign.js"),
     ).toBe(false);
