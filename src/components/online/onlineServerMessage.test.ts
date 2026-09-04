@@ -801,6 +801,63 @@ describe("parseOnlineServerMessage", () => {
     ).toBeNull();
   });
 
+  it("rejects duplicate result ranks in current and legacy snapshots", () => {
+    const snapshot = snapshotForState(walkToGameEnd(2024).state);
+    const currentPlayers = snapshot.view.result?.players;
+    if (!currentPlayers) throw new Error("gameEnd result expected");
+    const duplicateRank = currentPlayers[0]?.rank;
+    if (duplicateRank === undefined) throw new Error("result rank expected");
+
+    const duplicatedCurrent = {
+      ...snapshot,
+      view: {
+        ...snapshot.view,
+        result: {
+          players: currentPlayers.map((player, index) =>
+            index === 1 ? { ...player, rank: duplicateRank } : player,
+          ),
+        },
+      },
+    };
+    expect(
+      parseOnlineServerMessage({
+        type: "snapshot",
+        snapshot: duplicatedCurrent,
+      }),
+    ).toBeNull();
+
+    const legacyPlayers = currentPlayers.map((player, index) => {
+      const legacyPlayer = { ...player };
+      delete legacyPlayer.playerId;
+      if (index === 1) legacyPlayer.rank = duplicateRank;
+      return legacyPlayer;
+    });
+    const duplicatedLegacy = structuredClone(snapshot) as unknown as {
+      hostId?: unknown;
+      hostNotice?: unknown;
+      explicitKita?: unknown;
+      departureNotice?: unknown;
+      view: {
+        result: { players: typeof legacyPlayers };
+        slots: Record<string, { player: { playerId?: unknown } }>;
+      };
+    };
+    delete duplicatedLegacy.hostId;
+    delete duplicatedLegacy.hostNotice;
+    delete duplicatedLegacy.explicitKita;
+    delete duplicatedLegacy.departureNotice;
+    duplicatedLegacy.view.result = { players: legacyPlayers };
+    for (const slot of Object.values(duplicatedLegacy.view.slots)) {
+      delete slot.player.playerId;
+    }
+    expect(
+      parseOnlineServerMessage({
+        type: "snapshot",
+        snapshot: duplicatedLegacy,
+      }),
+    ).toBeNull();
+  });
+
   it("rejects mixed or ambiguous legacy/current identity fields", () => {
     const current = snapshotFixture();
     expect(
