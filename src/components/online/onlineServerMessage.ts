@@ -180,6 +180,10 @@ function isInteger(value: unknown): value is number {
   return isFiniteNumber(value) && Number.isInteger(value);
 }
 
+function isSafeInteger(value: unknown): value is number {
+  return typeof value === "number" && Number.isSafeInteger(value);
+}
+
 function isBoundedNonNegativeInteger(
   value: unknown,
   maximum: number,
@@ -595,7 +599,7 @@ function isOnlineSnapshot(value: OnlineSnapshot): boolean {
         hosts[0]?.id === value.hostId;
   return (
     /^[A-HJ-NP-Z2-9]{6}$/u.test(value.code) &&
-    isInteger(value.version) &&
+    isSafeInteger(value.version) &&
     value.version >= 0 &&
     isPlayerId(value.you) &&
     isOptionalBoolean(value.explicitKita) &&
