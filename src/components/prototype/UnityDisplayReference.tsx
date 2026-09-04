@@ -180,12 +180,14 @@ const SAMPLE_BENCH: SlotContent = {
 };
 
 function formatAssertionValue(value: unknown): string {
-  if (Array.isArray(value)) return value.join(" / ");
+  if (Array.isArray(value)) {
+    return `[${value.map(formatAssertionValue).join(", ")}]`;
+  }
   if (typeof value === "boolean") return value ? "はい" : "いいえ";
   if (value !== null && typeof value === "object") {
-    return Object.entries(value)
-      .map(([key, nested]) => `${key}=${String(nested)}`)
-      .join(" / ");
+    return `{${Object.entries(value)
+      .map(([key, nested]) => `${key}=${formatAssertionValue(nested)}`)
+      .join(", ")}}`;
   }
   return String(value);
 }
