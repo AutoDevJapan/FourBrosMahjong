@@ -114,6 +114,12 @@ describe("sanitizePlayerName", () => {
     );
     expect(limitPlayerName("A\u2060B")).toBe("AB");
   });
+
+  it("C0/C1制御文字を除去し、空白制御は既存どおり空白へ正規化する", () => {
+    expect(sanitizePlayerName("A\u001bB\u0000C\u009bD")).toBe("ABCD");
+    expect(sanitizePlayerName("\u0000\u001b\u009b")).toBeNull();
+    expect(limitPlayerName("A\u001bB")).toBe("AB");
+  });
 });
 
 describe("playerNameGraphemes", () => {
@@ -164,12 +170,19 @@ describe("isValidPlayerName", () => {
     );
   });
 
-  it.each(["\u200B", "\u200C", "\u200D", "\u2060", "\uFEFF", "A\u202EB"])(
-    "不可視/Bidi制御文字を含む生値(%s)は拒否する",
-    (value) => {
-      expect(isValidPlayerName(value)).toBe(false);
-    },
-  );
+  it.each([
+    "\u200B",
+    "\u200C",
+    "\u200D",
+    "\u2060",
+    "\uFEFF",
+    "A\u202EB",
+    "A\u001bB",
+    "A\u0000B",
+    "A\u009bB",
+  ])("不可視/Bidi制御文字を含む生値(%s)は拒否する", (value) => {
+    expect(isValidPlayerName(value)).toBe(false);
+  });
 
   it("巨大入力は書記素分割へ渡さず code unit 長で拒否する(#484)", () => {
     // 分割コストを払う前に O(1) で弾く防御。上限は 12書記素がどんな構成でも

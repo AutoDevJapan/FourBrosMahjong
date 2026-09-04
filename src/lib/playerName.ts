@@ -20,18 +20,19 @@ export const MAX_PLAYER_NAME_LENGTH = 12;
 export const MAX_PLAYER_NAME_CODE_UNITS = MAX_PLAYER_NAME_LENGTH * 32;
 
 /**
- * 表示名へ持ち込ませない不可視の書式制御文字。
+ * 表示名へ持ち込ませない制御文字。
  *
- * `Cf` を一括で除去すると、絵文字の ZWJ・正規のRTL表記に使うZWNJ・emoji tag
- * sequenceまで壊してしまうため、表示に意味のある列の構成要素だけを保持する。
- * `Bidi_Control` (LRM/RLM、embedding/override、isolate等)や U+200B/U+2060/U+FEFF は
- * 保持対象外である。
+ * `Cc` は非空白を含めて除去する。`Cf` を一括で除去すると、絵文字の ZWJ・正規の
+ * RTL表記に使うZWNJ・emoji tag sequenceまで壊してしまうため、表示に意味のある
+ * 列の構成要素だけを保持する。`Bidi_Control` (LRM/RLM、embedding/override、
+ * isolate等)や U+200B/U+2060/U+FEFF は保持対象外である。
  */
+const PLAYER_NAME_CONTROL = /\p{Cc}/u;
 const PLAYER_NAME_FORMAT = /\p{Cf}/u;
 const PRESERVED_PLAYER_NAME_FORMAT =
   /(?:[\u200C\u200D]|\u{E0001}|[\u{E0020}-\u{E007F}])/u;
 const NON_RENDERING_PLAYER_NAME_POINT =
-  /(?:\p{Mark}|\p{White_Space}|\p{Cf}|[\uFE0E\uFE0F\u{E0100}-\u{E01EF}])/u;
+  /(?:\p{Cc}|\p{Mark}|\p{White_Space}|\p{Cf}|[\uFE0E\uFE0F\u{E0100}-\u{E01EF}])/u;
 
 /** 不正な UTF-16 を U+FFFD へ置換し、サロゲートペアを分断しない文字列にする。 */
 function toWellFormed(value: string): string {
@@ -54,8 +55,9 @@ function toWellFormed(value: string): string {
 export function hasDisallowedPlayerNameControls(value: string): boolean {
   return [...toWellFormed(value)].some(
     (point) =>
-      PLAYER_NAME_FORMAT.test(point) &&
-      !PRESERVED_PLAYER_NAME_FORMAT.test(point),
+      PLAYER_NAME_CONTROL.test(point) ||
+      (PLAYER_NAME_FORMAT.test(point) &&
+        !PRESERVED_PLAYER_NAME_FORMAT.test(point)),
   );
 }
 
@@ -66,13 +68,20 @@ export function isWellFormedPlayerName(value: string): boolean {
 
 function stripDisallowedPlayerNameControls(value: string): string {
   return [...toWellFormed(value)]
-    .filter(
-      (point) =>
-        !(
-          PLAYER_NAME_FORMAT.test(point) &&
-          !PRESERVED_PLAYER_NAME_FORMAT.test(point)
-        ),
-    )
+    .map((point) => {
+      // Keep the existing whitespace normalization behavior for pasted line
+      // breaks/tabs while dropping non-whitespace C0/C1 controls entirely.
+      if (PLAYER_NAME_CONTROL.test(point)) {
+        return /\s/u.test(point) ? " " : "";
+      }
+      if (
+        PLAYER_NAME_FORMAT.test(point) &&
+        !PRESERVED_PLAYER_NAME_FORMAT.test(point)
+      ) {
+        return "";
+      }
+      return point;
+    })
     .join("");
 }
 
