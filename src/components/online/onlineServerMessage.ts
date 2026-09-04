@@ -26,6 +26,15 @@ const MAX_MELD_COUNT = 4;
 const MAX_KITA_COUNT = COPIES_PER_TILE;
 const MAX_DORA_INDICATOR_COUNT = MAX_OMOTE_DORA_COUNT;
 const RESULT_RANKS = [1, 2, 3, 4] as const;
+const SCORE_CATEGORIES = [
+  "normal",
+  "mangan",
+  "haneman",
+  "baiman",
+  "sanbaiman",
+  "yakuman",
+] as const;
+type ScoreCategory = (typeof SCORE_CATEGORIES)[number];
 const ISO_TIMESTAMP =
   /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.\d{1,3})?(?:Z|[+-](\d{2}):(\d{2}))$/u;
 
@@ -184,6 +193,13 @@ function isBoundedString(value: unknown, maximum = 2_048): value is string {
     value.length <= maximum &&
     isWellFormedPlayerName(value) &&
     !hasDisallowedPlayerNameControls(value)
+  );
+}
+
+function isScoreCategory(value: unknown): value is ScoreCategory {
+  return (
+    typeof value === "string" &&
+    SCORE_CATEGORIES.includes(value as ScoreCategory)
   );
 }
 
@@ -487,7 +503,7 @@ function isWinDetails(value: unknown): boolean {
     ) &&
     isFiniteNumber(value.totalHan) &&
     isFiniteNumber(value.yakuman) &&
-    isBoundedString(value.category, 128) &&
+    isScoreCategory(value.category) &&
     isFiniteNumber(value.honba) &&
     isFiniteNumber(value.riichiSticks) &&
     Array.isArray(value.payments) &&

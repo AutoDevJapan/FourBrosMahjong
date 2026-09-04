@@ -258,4 +258,19 @@ describe("WinDetails", () => {
       "2倍役満",
     );
   });
+
+  it.each(["__proto__", "constructor", "toString", "future-category"])(
+    "予約キーや未知のcategoryを安全な文字列として表示する: %s",
+    (category) => {
+      const summary: RoundSummary = {
+        ...winSummary,
+        winDetails: { ...winSummary.winDetails!, category },
+      };
+
+      expect(() => render(<WinDetails summary={summary} />)).not.toThrow();
+      expect(
+        screen.getByRole("region", { name: "和了内訳" }),
+      ).toHaveTextContent(category);
+    },
+  );
 });

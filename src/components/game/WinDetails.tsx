@@ -21,6 +21,12 @@ export default function WinDetails({ summary }: { summary: RoundSummary }) {
   // aria-labelledby を必ず自身の見出しへ結び付ける。
   const titleId = useId();
   if (!detail) return null;
+  // category normally comes from a finite scoring domain, but this component
+  // is also used at the online untrusted-payload boundary. Guard the lookup so
+  // inherited keys such as __proto__ never become React children.
+  const categoryLabel = Object.hasOwn(CATEGORY, detail.category)
+    ? CATEGORY[detail.category]
+    : detail.category;
   return (
     <section
       aria-labelledby={titleId}
@@ -34,8 +40,7 @@ export default function WinDetails({ summary }: { summary: RoundSummary }) {
           {detail.winnerName}({SEAT_WIND_LABEL[detail.winnerSeat]})
         </span>
         ・{detail.dealer ? "親" : "子"}・
-        {detail.winType === "tsumo" ? "ツモ" : "ロン"}・
-        {CATEGORY[detail.category] ?? detail.category}
+        {detail.winType === "tsumo" ? "ツモ" : "ロン"}・{categoryLabel}
       </p>
       {/*
         和了形の開示(#259): 和了確定時に engine が固定した門前手牌+和了牌を表向きで示す。
