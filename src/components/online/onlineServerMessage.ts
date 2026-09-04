@@ -1,5 +1,6 @@
 import { MAX_OMOTE_DORA_COUNT } from "@/domain/dora/dice";
 import { CHARACTER_PLAYER_IDS } from "@/domain/game/characters";
+import type { TileData } from "@/domain/game/viewTypes";
 import { COPIES_PER_TILE, TOTAL_TILE_COUNT } from "@/domain/tiles/tileSet";
 import {
   hasDisallowedPlayerNameControls,
@@ -228,7 +229,7 @@ function isOptionalNumber(value: unknown): boolean {
   return value === undefined || isFiniteNumber(value);
 }
 
-function isTile(value: unknown): boolean {
+function isTile(value: unknown): value is TileData {
   if (!isRecord(value)) return false;
   const validSuit =
     value.suit === "man" ||
@@ -244,7 +245,10 @@ function isTile(value: unknown): boolean {
   );
 }
 
-function isTileArray(value: unknown, maximum = TOTAL_TILE_COUNT): boolean {
+function isTileArray(
+  value: unknown,
+  maximum = TOTAL_TILE_COUNT,
+): value is readonly TileData[] {
   return Array.isArray(value) && value.length <= maximum && value.every(isTile);
 }
 
@@ -262,11 +266,26 @@ function isPlayerStatus(value: unknown): boolean {
 }
 
 function isMeld(value: unknown): boolean {
+  if (
+    !isRecord(value) ||
+    (value.type !== "pon" && value.type !== "kan") ||
+    !isTileArray(value.tiles, MAX_MELD_TILES) ||
+    typeof value.concealed !== "boolean"
+  ) {
+    return false;
+  }
+
+  const tiles = value.tiles;
+  const expectedTileCount = value.type === "pon" ? 3 : 4;
+  if (tiles.length !== expectedTileCount) return false;
+
+  const firstTile = tiles[0];
+  if (!firstTile) return false;
   return (
-    isRecord(value) &&
-    (value.type === "pon" || value.type === "kan") &&
-    isTileArray(value.tiles, MAX_MELD_TILES) &&
-    typeof value.concealed === "boolean"
+    (value.type === "kan" || value.concealed === false) &&
+    tiles.every(
+      (tile) => tile.suit === firstTile.suit && tile.rank === firstTile.rank,
+    )
   );
 }
 
