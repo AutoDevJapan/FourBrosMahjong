@@ -151,6 +151,15 @@ function assertWinParticipants(input: WinPaymentInput): void {
     opponentIds.add(other.id);
   }
 
+  const dealerCount = [input.winner, ...input.others].filter(
+    (player) => player.isDealer,
+  ).length;
+  if (dealerCount !== 1) {
+    throw new RangeError(
+      `winner and opponents must contain exactly one dealer, received ${dealerCount}.`,
+    );
+  }
+
   if (input.winType === "ron") {
     if (
       input.discarderId === undefined ||
