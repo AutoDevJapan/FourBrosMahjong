@@ -12,6 +12,8 @@ import {
 import { RoomManager } from "../../../server/roomManager";
 import {
   MAX_MAINTENANCE_RETRY_AFTER_MS,
+  MAX_WIN_PAYMENT_ENTRIES,
+  MAX_WIN_YAKU_ENTRIES,
   parseOnlineServerMessage,
 } from "./onlineServerMessage";
 import type { OnlineSnapshot } from "./types";
@@ -322,6 +324,55 @@ describe("parseOnlineServerMessage", () => {
         parseOnlineServerMessage({ type: "snapshot", snapshot: candidate }),
       ).toBeNull();
     }
+  });
+
+  it("bounds win detail lists before WinDetails expands them (#858)", () => {
+    const snapshot = snapshotForState(walkToGameEnd(2024).state);
+    const roundSummary = snapshot.roundSummary;
+    const winDetails = roundSummary?.winDetails;
+    if (!roundSummary || !winDetails) {
+      throw new Error("winDetails fixture expected");
+    }
+    const yaku = winDetails.yaku[0] ?? { name: "立直", han: 1, yakuman: 0 };
+    const payment = winDetails.payments[0] ?? { name: "支払者", amount: 1000 };
+    const withLists = (
+      nextYaku: readonly (typeof yaku)[],
+      nextPayments: readonly (typeof payment)[],
+    ) => ({
+      ...snapshot,
+      roundSummary: {
+        ...roundSummary,
+        winDetails: { ...winDetails, yaku: nextYaku, payments: nextPayments },
+      },
+    });
+
+    expect(
+      parseOnlineServerMessage({
+        type: "snapshot",
+        snapshot: withLists(
+          Array.from({ length: MAX_WIN_YAKU_ENTRIES }, () => yaku),
+          Array.from({ length: MAX_WIN_PAYMENT_ENTRIES }, () => payment),
+        ),
+      }),
+    ).not.toBeNull();
+    expect(
+      parseOnlineServerMessage({
+        type: "snapshot",
+        snapshot: withLists(
+          Array.from({ length: MAX_WIN_YAKU_ENTRIES + 1 }, () => yaku),
+          [],
+        ),
+      }),
+    ).toBeNull();
+    expect(
+      parseOnlineServerMessage({
+        type: "snapshot",
+        snapshot: withLists(
+          [],
+          Array.from({ length: MAX_WIN_PAYMENT_ENTRIES + 1 }, () => payment),
+        ),
+      }),
+    ).toBeNull();
   });
 
   it("rejects invisible and bidi-controlled names before they reach the UI", () => {
