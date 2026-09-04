@@ -25,6 +25,10 @@ const MAX_MELD_TILES = 4;
 const MAX_MELD_COUNT = 4;
 const MAX_KITA_COUNT = COPIES_PER_TILE;
 const MAX_DORA_INDICATOR_COUNT = MAX_OMOTE_DORA_COUNT;
+/** 和了内訳で展開する役の最大数。現行役カタログに将来追加分の余裕を持たせる。 */
+export const MAX_WIN_YAKU_ENTRIES = 32;
+/** 和了者以外の4兄弟全員が支払者になり得る場合の最大支払い件数。 */
+export const MAX_WIN_PAYMENT_ENTRIES = CHARACTER_PLAYER_IDS.length - 1;
 const RESULT_RANKS = [1, 2, 3, 4] as const;
 const SCORE_CATEGORIES = [
   "normal",
@@ -494,6 +498,7 @@ function isWinDetails(value: unknown): boolean {
     isTileArray(value.hand) &&
     isTile(value.winningTile) &&
     Array.isArray(value.yaku) &&
+    value.yaku.length <= MAX_WIN_YAKU_ENTRIES &&
     value.yaku.every(
       (yaku) =>
         isRecord(yaku) &&
@@ -511,6 +516,7 @@ function isWinDetails(value: unknown): boolean {
     isFiniteNumber(value.honba) &&
     isFiniteNumber(value.riichiSticks) &&
     Array.isArray(value.payments) &&
+    value.payments.length <= MAX_WIN_PAYMENT_ENTRIES &&
     value.payments.every(
       (payment) =>
         isRecord(payment) &&
