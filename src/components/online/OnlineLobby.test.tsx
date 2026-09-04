@@ -11,6 +11,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { walkToGameEnd } from "@/components/game/finishedGameFixture";
 import { selectView } from "@/components/game/gameView";
 import { createGame } from "@/domain/game/engine";
+import { ONLINE_RESUME_TOKEN_MAX_LENGTH } from "@/domain/online/types";
 import { MAX_PLAYER_NAME_CODE_UNITS } from "@/lib/playerName";
 import OnlineLobby, {
   isStaleOnlineSnapshot,
@@ -371,6 +372,47 @@ describe("OnlineLobby (#605)", () => {
 
     expect(parse).not.toHaveBeenCalled();
     expect(sockets).toHaveLength(0);
+  });
+
+  it("drops saved credentials whose token exceeds the protocol bound", () => {
+    vi.useFakeTimers();
+    const raw = JSON.stringify({
+      code: "ABC234",
+      token: "t".repeat(ONLINE_RESUME_TOKEN_MAX_LENGTH + 1),
+    });
+    expect(raw.length * 2).toBeLessThan(MAX_ONLINE_CREDENTIALS_BYTES);
+    window.sessionStorage.setItem("four-bros-mahjong.online.session.v1", raw);
+
+    render(
+      <StrictMode>
+        <OnlineLobby />
+      </StrictMode>,
+    );
+    act(() => vi.runAllTimers());
+
+    expect(sockets).toHaveLength(0);
+  });
+
+  it("restores a saved session at the protocol token upper bound", async () => {
+    const token = "t".repeat(ONLINE_RESUME_TOKEN_MAX_LENGTH);
+    window.sessionStorage.setItem(
+      "four-bros-mahjong.online.session.v1",
+      JSON.stringify({ code: "ABC234", token }),
+    );
+
+    render(
+      <StrictMode>
+        <OnlineLobby />
+      </StrictMode>,
+    );
+
+    await waitFor(() => expect(sockets).toHaveLength(1));
+    act(() => sockets[0]?.open());
+    expect(JSON.parse(sockets[0]?.sent[0] ?? "{}")).toMatchObject({
+      type: "resume",
+      code: "ABC234",
+      token,
+    });
   });
 
   it("does not restore a saved session whose code is no longer generated", async () => {

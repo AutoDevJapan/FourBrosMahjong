@@ -4,6 +4,10 @@ import { replayJournal } from "@/components/game/gamePersistence";
 import { selectView } from "@/components/game/gameView";
 import { MAX_OMOTE_DORA_COUNT } from "@/domain/dora/dice";
 import { createGame, type EngineState } from "@/domain/game/engine";
+import {
+  ONLINE_RESUME_TOKEN_MAX_LENGTH,
+  ONLINE_RESUME_TOKEN_MIN_LENGTH,
+} from "@/domain/online/types";
 import { COPIES_PER_TILE, TOTAL_TILE_COUNT } from "@/domain/tiles/tileSet";
 import {
   LEGACY_1C8CC9_PLAYING_SNAPSHOT,
@@ -284,6 +288,33 @@ describe("parseOnlineServerMessage", () => {
       }),
     ).toBeNull();
   });
+
+  it.each([
+    ONLINE_RESUME_TOKEN_MIN_LENGTH - 1,
+    ONLINE_RESUME_TOKEN_MAX_LENGTH + 1,
+  ])("rejects session tokens outside the shared bounds: %s", (length) => {
+    expect(
+      parseOnlineServerMessage({
+        type: "session",
+        token: "t".repeat(length),
+        snapshot: snapshotFixture(),
+      }),
+    ).toBeNull();
+  });
+
+  it.each([ONLINE_RESUME_TOKEN_MIN_LENGTH, ONLINE_RESUME_TOKEN_MAX_LENGTH])(
+    "accepts session tokens at the shared bounds: %s",
+    (length) => {
+      const token = "t".repeat(length);
+      expect(
+        parseOnlineServerMessage({
+          type: "session",
+          token,
+          snapshot: snapshotFixture(),
+        }),
+      ).toMatchObject({ type: "session", token });
+    },
+  );
 
   it.each([Number.MAX_SAFE_INTEGER + 1, 1e100])(
     "rejects snapshot versions outside JavaScript's safe integer range: %s",

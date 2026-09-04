@@ -53,6 +53,13 @@ export interface OnlineCredentials {
   readonly token: string;
 }
 
+/**
+ * Resume tokens are opaque strings, but both the persisted-session boundary
+ * and the WebSocket session envelope must agree on their bounded shape.
+ */
+export const ONLINE_RESUME_TOKEN_MIN_LENGTH = 16;
+export const ONLINE_RESUME_TOKEN_MAX_LENGTH = 512;
+
 export type OnlineErrorCode =
   | "connection_limit"
   | "maintenance"
