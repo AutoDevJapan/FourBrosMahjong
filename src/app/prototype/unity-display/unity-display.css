@@ -307,6 +307,12 @@
   background: color-mix(in srgb, var(--table-felt) 18%, transparent);
 }
 
+.unity-display-page .unity-display-effect-stage [data-effect-overlay] > div {
+  /* 比較用リファレンスは静止画として監査できるよう、半透明pulseを止める。 */
+  animation: none;
+  opacity: 1;
+}
+
 .unity-display-page .unity-display-effect-stage .unity-display-preview-caption {
   position: absolute;
   right: 0.5rem;
