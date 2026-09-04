@@ -57,6 +57,7 @@ describe("seedFromLocation", () => {
   afterEach(() => {
     window.history.replaceState(null, "", "/");
     window.sessionStorage.clear();
+    vi.restoreAllMocks();
   });
 
   it("uint32範囲内のURL seedだけを受け入れる", () => {
