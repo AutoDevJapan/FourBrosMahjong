@@ -643,11 +643,14 @@ test.describe("オンラインロビーの接続失敗復帰", () => {
     });
     expect(newGameRequest).toEqual({ type: "newGame" });
 
-    await page.evaluate((snapshot) => {
-      const socket = (window as unknown as OnlineTestWindow)
-        .__fourBrosOnlineSockets[0];
-      socket?.message({ type: "snapshot", snapshot });
-    }, onlineSnapshotFixture());
+    await page.evaluate(
+      (snapshot) => {
+        const socket = (window as unknown as OnlineTestWindow)
+          .__fourBrosOnlineSockets[0];
+        socket?.message({ type: "snapshot", snapshot });
+      },
+      { ...onlineSnapshotFixture(), version: 2 },
+    );
     await expect(page.locator('[data-phase="playing"]')).toBeVisible();
     await expect(
       page.getByRole("heading", { level: 2, name: "対局結果" }),
@@ -657,11 +660,14 @@ test.describe("オンラインロビーの接続失敗復帰", () => {
     ).toBeFocused();
 
     // 終局snapshotを受けても、結果ビューは「結果を見る」まで再表示しない。
-    await page.evaluate((snapshot) => {
-      const socket = (window as unknown as OnlineTestWindow)
-        .__fourBrosOnlineSockets[0];
-      socket?.message({ type: "snapshot", snapshot });
-    }, onlineFinishedSnapshotFixture());
+    await page.evaluate(
+      (snapshot) => {
+        const socket = (window as unknown as OnlineTestWindow)
+          .__fourBrosOnlineSockets[0];
+        socket?.message({ type: "snapshot", snapshot });
+      },
+      { ...onlineFinishedSnapshotFixture(), version: 3 },
+    );
     await expect(
       page.getByRole("heading", { level: 2, name: "対局結果" }),
     ).toHaveCount(0);

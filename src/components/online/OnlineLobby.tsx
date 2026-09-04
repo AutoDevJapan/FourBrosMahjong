@@ -83,6 +83,24 @@ interface ErrorFeedback {
   readonly message: string;
 }
 
+/**
+ * 同じroomで既に適用したsnapshotより古い状態を表示へ戻さない。
+ *
+ * WebSocketの送信順と到着順は一致するとは限らないため、versionだけで比較すると
+ * 別roomの初期versionを誤って捨てる。room codeも一緒に境界へ含め、同じroomでは
+ * equal versionを許可して接続状態などの権威ある更新を受け入れる。
+ */
+export function isStaleOnlineSnapshot(
+  current: Pick<OnlineSnapshot, "code" | "version"> | null,
+  next: Pick<OnlineSnapshot, "code" | "version">,
+): boolean {
+  return (
+    current !== null &&
+    current.code === next.code &&
+    next.version < current.version
+  );
+}
+
 type MaintenanceClientState =
   | {
       readonly source: "notice";
@@ -523,6 +541,8 @@ export default function OnlineLobby() {
 
   const applyOnlineSnapshot = useCallback(
     (nextSnapshot: OnlineSnapshot) => {
+      if (isStaleOnlineSnapshot(snapshotRef.current, nextSnapshot)) return;
+
       snapshotRef.current = nextSnapshot;
       setSnapshot(nextSnapshot);
       setRoomCode(nextSnapshot.code);
