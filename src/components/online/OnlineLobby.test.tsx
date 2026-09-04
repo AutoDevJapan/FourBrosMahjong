@@ -11,7 +11,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { walkToGameEnd } from "@/components/game/finishedGameFixture";
 import { selectView } from "@/components/game/gameView";
 import { createGame } from "@/domain/game/engine";
-import OnlineLobby, { isStaleOnlineSnapshot } from "./OnlineLobby";
+import OnlineLobby, {
+  isStaleOnlineSnapshot,
+  MAX_ONLINE_SERVER_MESSAGE_BYTES,
+} from "./OnlineLobby";
 import type { OnlineSnapshot } from "./types";
 
 vi.mock("@/components/game/GameBoard", () => ({
@@ -114,6 +117,10 @@ class TestWebSocket {
     );
   }
 
+  rawMessage(data: unknown): void {
+    this.emit("message", new MessageEvent("message", { data }));
+  }
+
   private emit(type: string, event: Event = new Event(type)): void {
     for (const listener of this.listeners.get(type) ?? []) listener(event);
   }
@@ -183,6 +190,75 @@ afterEach(() => {
 });
 
 describe("OnlineLobby (#605)", () => {
+  it("drops oversized server text frames before JSON.parse", () => {
+    render(<OnlineLobby />);
+
+    fireEvent.change(screen.getByLabelText("表示名"), {
+      target: { value: "たろう" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "新しいルームを作る" }));
+
+    const socket = sockets[0];
+    if (!socket) throw new Error("server message size test socket expected");
+    act(() => {
+      socket.open();
+      socket.message({
+        type: "session",
+        token: "t".repeat(24),
+        snapshot: snapshotFixture(),
+      });
+    });
+
+    const parse = vi.spyOn(JSON, "parse");
+    parse.mockClear();
+    const oversized = JSON.stringify({
+      type: "pong",
+      padding: "あ".repeat(Math.ceil(MAX_ONLINE_SERVER_MESSAGE_BYTES / 3)),
+    });
+    expect(oversized.length).toBeLessThan(MAX_ONLINE_SERVER_MESSAGE_BYTES);
+    expect(new TextEncoder().encode(oversized).byteLength).toBeGreaterThan(
+      MAX_ONLINE_SERVER_MESSAGE_BYTES,
+    );
+    act(() => {
+      socket.rawMessage(oversized);
+    });
+
+    expect(parse).not.toHaveBeenCalled();
+    expect(
+      document.querySelector('[data-connection-status="failed"]'),
+    ).toBeNull();
+  });
+
+  it("keeps the JSON protocol for a UTF-8 frame at the byte boundary", () => {
+    render(<OnlineLobby />);
+
+    fireEvent.change(screen.getByLabelText("表示名"), {
+      target: { value: "たろう" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "新しいルームを作る" }));
+
+    const socket = sockets[0];
+    if (!socket)
+      throw new Error("server message boundary test socket expected");
+    act(() => socket.open());
+    const parse = vi.spyOn(JSON, "parse");
+    parse.mockClear();
+    const prefix = '{"type":"pong","padding":"';
+    const suffix = '"}';
+    const raw = `${prefix}${"x".repeat(
+      MAX_ONLINE_SERVER_MESSAGE_BYTES - prefix.length - suffix.length,
+    )}${suffix}`;
+    expect(new TextEncoder().encode(raw).byteLength).toBe(
+      MAX_ONLINE_SERVER_MESSAGE_BYTES,
+    );
+    act(() => socket.rawMessage(raw));
+
+    expect(parse).toHaveBeenCalledTimes(1);
+    expect(
+      document.querySelector('[data-connection-status="failed"]'),
+    ).toBeNull();
+  });
+
   it.each([
     ["初回snapshot", null, { code: "ABC234", version: 0 }, false],
     [

@@ -52,6 +52,12 @@ const JOIN_REQUIREMENT_ID = "online-lobby-join-requirement";
 const MAINTENANCE_NOTICE_ID = "online-maintenance-notice";
 const MAINTENANCE_RECOVERY_NOTICE_MS = 5_000;
 const MAX_AUTOMATIC_RECONNECT_ATTEMPTS = 5;
+/** Drop untrusted server frames before synchronous JSON.parse can see them. */
+export const MAX_ONLINE_SERVER_MESSAGE_BYTES = 64 * 1024;
+const ONLINE_SERVER_MESSAGE_ENCODER = new TextEncoder();
+const ONLINE_SERVER_MESSAGE_BYTE_BUFFER = new Uint8Array(
+  MAX_ONLINE_SERVER_MESSAGE_BYTES + 1,
+);
 // サーバーからの異常値で、UIを長時間ロックしないための上限。
 const MAX_SERVER_RETRY_AFTER_MS = MAX_MAINTENANCE_RETRY_AFTER_MS;
 // The application ping also exercises the server's JSON response path.
@@ -81,6 +87,21 @@ type ErrorFeedbackKind = "connection" | "maintenance" | "operation";
 interface ErrorFeedback {
   readonly kind: ErrorFeedbackKind;
   readonly message: string;
+}
+
+/**
+ * Check the WebSocket text boundary without allocating a buffer proportional
+ * to attacker-controlled input. `encodeInto` writes into one fixed-size
+ * buffer, and non-text frames are not part of the JSON protocol.
+ */
+function isBoundedOnlineServerMessage(value: unknown): value is string {
+  if (typeof value !== "string") return false;
+  if (value.length > MAX_ONLINE_SERVER_MESSAGE_BYTES) return false;
+  const { read, written } = ONLINE_SERVER_MESSAGE_ENCODER.encodeInto(
+    value,
+    ONLINE_SERVER_MESSAGE_BYTE_BUFFER,
+  );
+  return read === value.length && written <= MAX_ONLINE_SERVER_MESSAGE_BYTES;
 }
 
 /**
@@ -937,8 +958,9 @@ export default function OnlineLobby() {
       });
       next.addEventListener("message", (event) => {
         if (socketRef.current !== next) return;
+        if (!isBoundedOnlineServerMessage(event.data)) return;
         try {
-          const raw = JSON.parse(String(event.data));
+          const raw = JSON.parse(event.data);
           const message = parseOnlineServerMessage(raw);
           if (!message) return;
           if (message.type === "pong") {
