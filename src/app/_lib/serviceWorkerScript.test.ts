@@ -173,6 +173,21 @@ function htmlResponse(body: string): Response {
   return new Response(body, { headers: { "Content-Type": "text/html" } });
 }
 
+function redirectedResponse(
+  body: string,
+  contentType: string,
+  url: string,
+): Response {
+  const response = new Response(body, {
+    headers: { "Content-Type": contentType },
+  });
+  Object.defineProperties(response, {
+    redirected: { value: true },
+    url: { value: url },
+  });
+  return response;
+}
+
 function buildAssetResponse(pathname: string, body = "asset"): Response {
   const contentType = pathname.endsWith(".css")
     ? "text/css"
@@ -395,6 +410,30 @@ describe("buildServiceWorkerScript", () => {
 
     await expect(sw.dispatchLifecycle("install")).rejects.toThrow(
       "Invalid precached static asset response: /tiles/Back.svg",
+    );
+    expect(sw.cacheStorage.caches.has("fbm-precache-v1")).toBe(false);
+  });
+
+  it("cross-origin redirectされたApp shellをprecacheせずinstallを失敗させる", async () => {
+    const sw = bootServiceWorker();
+    sw.setFetchImpl(
+      vi.fn(async (input) => {
+        const url = new URL(String(input), ORIGIN);
+        if (url.pathname === "/game") {
+          return redirectedResponse(
+            "external shell",
+            "text/html",
+            "https://external.example.net/game",
+          );
+        }
+        return PRECACHE_ROUTES.includes(url.pathname)
+          ? htmlResponse("shell")
+          : staticAssetResponse(url.pathname);
+      }),
+    );
+
+    await expect(sw.dispatchLifecycle("install")).rejects.toThrow(
+      "Invalid precached App shell response: /game",
     );
     expect(sw.cacheStorage.caches.has("fbm-precache-v1")).toBe(false);
   });
@@ -660,6 +699,47 @@ describe("buildServiceWorkerScript", () => {
 
     await sw.dispatchFetch(request("/_next/static/chunks/app.js"));
     expect(fetchSpy).toHaveBeenCalledTimes(2);
+  });
+
+  it("cross-origin redirectされたruntime responseを保存しない", async () => {
+    const sw = bootServiceWorker();
+    sw.setFetchImpl(
+      vi
+        .fn<typeof fetch>()
+        .mockResolvedValueOnce(
+          redirectedResponse(
+            "external shell",
+            "text/html",
+            "https://external.example.net/game",
+          ),
+        )
+        .mockResolvedValueOnce(
+          redirectedResponse(
+            "external chunk",
+            "application/javascript",
+            "https://external.example.net/chunk.js",
+          ),
+        ),
+    );
+
+    const navigation = await sw.dispatchFetch(
+      request("/game", { mode: "navigate" }),
+    );
+    const navigationResponse: Response =
+      await navigation.respondWith.mock.calls[0][0];
+    expect(await navigationResponse.text()).toBe("external shell");
+
+    const asset = await sw.dispatchFetch(
+      request("/_next/static/chunks/app.js"),
+    );
+    const assetResponse: Response = await asset.respondWith.mock.calls[0][0];
+    expect(await assetResponse.text()).toBe("external chunk");
+
+    const runtime = sw.cacheStorage.caches.get("fbm-runtime-v1");
+    expect(runtime?.store.has(`${ORIGIN}/game`) ?? false).toBe(false);
+    expect(
+      runtime?.store.has(`${ORIGIN}/_next/static/chunks/app.js`) ?? false,
+    ).toBe(false);
   });
 
   it("非GET・クロスオリジンのリクエストには介入しない", async () => {
