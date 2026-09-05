@@ -30,7 +30,7 @@ Issue #663 の受け入れ条件に基づき、外部 Action と reusable workfl
 
 ## Latest read-only re-audit
 
-2026-09-05 JST に、専用worktreeの `HEAD=3d57255ec5e3835e571fff8f47dc9aec1c483089` と `origin/main` の一致を確認して再監査しました。repository policy の GET は次のとおりです。
+2026-09-05 JST に、専用worktreeの `HEAD=cec33436516d6e2080b3e26a85bc0c92e75d0992` と `origin/main` の一致を確認して再監査しました。repository policy の GET は次のとおりです。
 
 ```json
 {
@@ -42,9 +42,9 @@ Issue #663 の受け入れ条件に基づき、外部 Action と reusable workfl
 
 - `GET /repos/AutoDevJapan/FourBrosMahjong/actions/permissions/selected-actions` は HTTP 409 `All actions and workflows are allowed on this repository`。allow-all を維持しており、allowlist の変更や暗黙の拡大はありません。
 - `GET /orgs/AutoDevJapan/actions/permissions` と `GET /orgs/AutoDevJapan/actions/permissions/workflow` はともに HTTP 403。現在のcredentialには organization admin または Actions policies 権限がなく、organization policy の実効値・precedence・ownerは未確定です。
-- `GET /repos/AutoDevJapan/FourBrosMahjong/actions/permissions/workflow` は `default_workflow_permissions=write`、`can_approve_pull_request_reviews=true`。既存設定の再確認のみで、変更していません。
-- 5つのrepository workflowにある外部 `uses:` 20件は全て完全40桁SHA固定で、local workflow/action参照は0件です。repository policy、workflow参照、local recursive auditの契約テストは **173 tests pass** でした。
-- 現行mainの同一SHAに対するCI [run 33890039446](https://github.com/AutoDevJapan/FourBrosMahjong/actions/runs/33890039446)、gitleaks [run 33890039579](https://github.com/AutoDevJapan/FourBrosMahjong/actions/runs/33890039579)、CodeQL [run 33890039180](https://github.com/AutoDevJapan/FourBrosMahjong/actions/runs/33890039180) はすべて成功しています。gitleaks version updaterの直近成功runは [run 33465805332](https://github.com/AutoDevJapan/FourBrosMahjong/actions/runs/33465805332) です。
+- `GET /repos/AutoDevJapan/FourBrosMahjong/actions/permissions/workflow` は `default_workflow_permissions=read`、`can_approve_pull_request_reviews=false`。#936で強化されたrepository defaultを再確認したもので、追加変更はしていません。
+- 5つのrepository workflowにある外部 `uses:` 20件は全て完全40桁SHA固定で、local workflow/action参照は0件です。`src/test/actions-sha-pinning.test.ts` のrepository-side SHA auditは **5 tests pass**、`actionlint 1.7.12`も成功しています。workflow変更は行っていません。
+- #936でrepository defaultをread-onlyへ強化したmain push (`6fd383ac`) のCI [run 33958332190](https://github.com/AutoDevJapan/FourBrosMahjong/actions/runs/33958332190)、gitleaks [run 33958332175](https://github.com/AutoDevJapan/FourBrosMahjong/actions/runs/33958332175)、CodeQL [run 33958331949](https://github.com/AutoDevJapan/FourBrosMahjong/actions/runs/33958331949) はすべて成功しています。今回確認した最新main (`cec3343e`) のpush runは監査時点でまだ一覧に現れていません。gitleaks version updaterの直近成功runは [run 33465805332](https://github.com/AutoDevJapan/FourBrosMahjong/actions/runs/33465805332) です。
 - `v*` tag、GitHub Release、Release workflow runは0件です。承認済みの実Releaseを作成してpolicy下の `release.yml` を実行することは、外部のRelease運用承認なしには行いません。
 
 この再監査では policy、allowlist、organization設定、tag、Release、workflow dispatch、repository file、外部環境を変更していません。repository側のSHA固定は完了済みですが、#663のorganization policyのscope/owner確定と実Releaseによる検証は、権限保持者・承認済みRelease運用待ちとしてOPENのまま引き継ぎます。
@@ -56,7 +56,7 @@ Issue #663 の受け入れ条件に基づき、外部 Action と reusable workfl
 - 読み取り確認できた設定の scope は repository `AutoDevJapan/FourBrosMahjong`、repository owner は organization `AutoDevJapan` です。
 - `GET /orgs/AutoDevJapan/actions/permissions` と `GET /orgs/AutoDevJapan/actions/permissions/workflow` は、どちらも HTTP 403 `You must be an org admin or have the actions policies fine-grained permission.` でした。
 - 現 credential は organization の active member であり owner/admin ではありません。そのため、organization policy の設定値、effective precedence、policy owner はこの監査では確定できません。organization policy owner または Actions policies 権限保持者による確認が必要です。
-- repository の default workflow permissions は `write`、`can_approve_pull_request_reviews=true` です。これは SHA 固定設定とは別の既存設定であり、本対応では変更していません。
+- repository の default workflow permissions は `read`、`can_approve_pull_request_reviews=false` です。これは SHA 固定設定とは別の#936で強化された設定であり、本PRでは変更していません。
 
 ## Workflow audit
 
