@@ -827,7 +827,16 @@ export function createOnlineServer(
   const httpServer = createServer((request, response) => {
     const path = requestPath(request.url);
     if (path === null) {
-      writeJson(response, 400, { ok: false, error: "bad_request" });
+      // The request target is invalid, so the body cannot be associated with
+      // a safe route. Drain it and close the transport instead of leaving a
+      // keep-alive request paused with an unread body.
+      request.resume();
+      writeJson(
+        response,
+        400,
+        { ok: false, error: "bad_request" },
+        { connection: "close" },
+      );
       return;
     }
     if (handleOpsHttpRequest(request, response, path, opsHttpDependencies)) {
