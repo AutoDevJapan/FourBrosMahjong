@@ -606,20 +606,20 @@ describe("online room manager", () => {
     );
   });
 
-  it("validates action tiles against the canonical red-five invariant", () => {
+  it("validates action tiles against sanma tile invariants", () => {
     expect(parseGameAction({ type: "kita" })).toEqual({ type: "kita" });
 
     const tileActionTypes = ["discard", "riichi", "ankan", "kakan"] as const;
     const suits = [
-      ["man", 9],
-      ["pin", 9],
-      ["sou", 9],
-      ["honor", 7],
+      ["man", [1, 9]],
+      ["pin", [1, 2, 3, 4, 5, 6, 7, 8, 9]],
+      ["sou", [1, 2, 3, 4, 5, 6, 7, 8, 9]],
+      ["honor", [1, 2, 3, 4, 5, 6, 7]],
     ] as const;
 
     for (const type of tileActionTypes) {
-      for (const [suit, maxRank] of suits) {
-        for (let rank = 1; rank <= maxRank; rank += 1) {
+      for (const [suit, ranks] of suits) {
+        for (const rank of ranks) {
           const isRed = (suit === "pin" || suit === "sou") && rank === 5;
           const canonicalTile = { suit, rank, isRed };
 
@@ -636,6 +636,12 @@ describe("online room manager", () => {
         }
       }
 
+      expect(
+        parseGameAction({
+          type,
+          tile: { suit: "man", rank: 2, isRed: false },
+        }),
+      ).toBeNull();
       expect(
         parseGameAction({
           type,

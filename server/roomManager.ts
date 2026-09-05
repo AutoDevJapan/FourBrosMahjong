@@ -16,6 +16,7 @@ import {
 } from "../src/domain/game/gamePersistence";
 import { selectView } from "../src/domain/game/gameView";
 import type { GameViewState } from "../src/domain/game/viewTypes";
+import { isValidTileKind } from "../src/domain/hand/tile-identity";
 import {
   ONLINE_RESUME_TOKEN_MAX_LENGTH,
   ONLINE_RESUME_TOKEN_MIN_LENGTH,
@@ -376,12 +377,11 @@ function isValidTile(value: unknown): value is {
   const suit = tile.suit as Suit;
   const rank = tile.rank;
   if (!Number.isInteger(rank)) return false;
-  if ((rank as number) < 1) return false;
-  if (suit === "honor" && (rank as number) > 7) return false;
-  if (suit !== "honor" && (rank as number) > 9) return false;
+  const numericRank = rank as number;
+  if (!isValidTileKind({ suit, rank: numericRank })) return false;
   return (
     typeof tile.isRed === "boolean" &&
-    tile.isRed === createTile(suit, rank as number).isRed
+    tile.isRed === createTile(suit, numericRank).isRed
   );
 }
 
