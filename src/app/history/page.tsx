@@ -47,7 +47,7 @@ export default function HistoryPage() {
     <DesignPageShell className={`history-page ${yujiSyuku.variable}`}>
       {/* ページヘッダーは <main> の内側に置く(スペック5 5.2.6)。外に出すと <header> が
           banner ランドマークになり、ルートごとにランドマーク構成が割れる(#431)。 */}
-      <main className="history-main">
+      <main className="history-main" aria-labelledby="history-page-title">
         <header className="history-header">
           <Link href="/" className="history-back-link">
             <span aria-hidden="true">←</span>
@@ -55,7 +55,9 @@ export default function HistoryPage() {
           </Link>
           <div className="history-heading-copy">
             <p className="history-kicker">対局の記録</p>
-            <h1 className="history-title">戦績</h1>
+            <h1 id="history-page-title" className="history-title">
+              戦績
+            </h1>
             <p className="history-introduction">
               半荘が終了するたびに、最終順位と
               {SOSHII_BREAKDOWN_HEADING}がこの端末に自動で保存されます。
