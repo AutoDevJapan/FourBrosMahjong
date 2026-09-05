@@ -7,6 +7,7 @@ import {
   isDragon,
   isGreenTile,
   isTerminalNumber,
+  isValidTileKind,
   isWind,
   isYakuhaiCandidate,
   isYaochu,
@@ -31,6 +32,16 @@ describe("notation.parseTiles", () => {
 });
 
 describe("tile-identity", () => {
+  it.each([
+    [{ suit: "man", rank: 1 }, true],
+    [{ suit: "man", rank: 2 }, false],
+    [{ suit: "honor", rank: 7 }, true],
+    [{ suit: "honor", rank: 8 }, false],
+    [{ suit: "pin", rank: 10 }, false],
+  ] as const)("実在する牌種だけを受け入れる: %o", (tile, expected) => {
+    expect(isValidTileKind(tile)).toBe(expected);
+  });
+
   it("么九/老頭/字牌の述語", () => {
     expect(isTerminalNumber(parseTile("1m"))).toBe(true);
     expect(isTerminalNumber(parseTile("5p"))).toBe(false);

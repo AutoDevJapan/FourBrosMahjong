@@ -52,6 +52,25 @@ export function sameKind(
   return a.suit === b.suit && a.rank === b.rank;
 }
 
+/**
+ * 牌種がこの変種の牌カタログに存在するか。
+ *
+ * `Tile` は実行時検証を持たない値オブジェクトなので、JSONやテストfixtureから
+ * 型アサーションを経由した値がここへ届くことがある。特に字牌は `suit` だけを
+ * 見ると存在しない rank まで「么九牌」として扱ってしまい、国士無双の形判定を
+ * すり抜ける。牌種に依存する述語はこの有限集合を境界として使う。
+ */
+export function isValidTileKind(tile: Pick<Tile, "suit" | "rank">): boolean {
+  if (!Number.isInteger(tile.rank)) return false;
+  if (tile.suit === "honor") return tile.rank >= 1 && tile.rank <= 7;
+  if (tile.suit === "man") return tile.rank === 1 || tile.rank === 9;
+  return (
+    (tile.suit === "pin" || tile.suit === "sou") &&
+    tile.rank >= 1 &&
+    tile.rank <= 9
+  );
+}
+
 /** 数牌か(man/pin/sou)。 */
 export function isNumberSuit(suit: Suit): boolean {
   return suit !== "honor";
@@ -64,12 +83,16 @@ export function isHonor(tile: Pick<Tile, "suit">): boolean {
 
 /** 老頭牌(数牌の 1・9)か。 */
 export function isTerminalNumber(tile: Pick<Tile, "suit" | "rank">): boolean {
-  return isNumberSuit(tile.suit) && (tile.rank === 1 || tile.rank === 9);
+  return (
+    isValidTileKind(tile) &&
+    isNumberSuit(tile.suit) &&
+    (tile.rank === 1 || tile.rank === 9)
+  );
 }
 
 /** 么九牌(老頭牌 + 字牌)か。 */
 export function isYaochu(tile: Pick<Tile, "suit" | "rank">): boolean {
-  return isHonor(tile) || isTerminalNumber(tile);
+  return isValidTileKind(tile) && (isHonor(tile) || isTerminalNumber(tile));
 }
 
 /** 三元牌か。 */
