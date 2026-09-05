@@ -71,6 +71,7 @@ afterEach(() => {
     Object.defineProperty(window, "sessionStorage", originalStorageDescriptor);
   }
   window.sessionStorage.clear();
+  window.history.replaceState(null, "", "/");
 });
 
 describe("GameProvider storage failure fallback (#244)", () => {
@@ -140,6 +141,10 @@ describe("GameProvider storage failure fallback (#244)", () => {
   });
 
   it("sessionStorageが復旧した次の操作でメモリ内の最新ジャーナルを再保存する", () => {
+    // 乱数局面で1回目の打牌後にhumanReactへ遷移すると、2回目のdiscardが
+    // no-opになり保存復旧ではなく局面差分を検証してしまうため、2回とも
+    // humanDiscardになるseedを固定する。
+    window.history.replaceState(null, "", "/game?seed=0");
     render(
       <GameProvider>
         <StorageFailureProbe />
