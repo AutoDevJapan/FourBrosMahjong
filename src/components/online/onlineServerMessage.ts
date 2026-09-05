@@ -1,6 +1,10 @@
 import { MAX_OMOTE_DORA_COUNT } from "@/domain/dora/dice";
 import { CHARACTER_PLAYER_IDS } from "@/domain/game/characters";
 import type { TileData } from "@/domain/game/viewTypes";
+import {
+  ONLINE_RESUME_TOKEN_MAX_LENGTH,
+  ONLINE_RESUME_TOKEN_MIN_LENGTH,
+} from "@/domain/online/types";
 import { ROUNDS_PER_WIND } from "@/domain/round/round";
 import { TOTAL_POINTS } from "@/domain/scoring/settlement";
 import { COPIES_PER_TILE, TOTAL_TILE_COUNT } from "@/domain/tiles/tileSet";
@@ -9,14 +13,14 @@ import {
   isValidPlayerName,
   isWellFormedPlayerName,
 } from "@/lib/playerName";
-import type {
-  OnlineErrorCode,
-  OnlineMaintenanceAcceptingNotice,
-  OnlineMaintenanceNotice,
-  OnlineMaintenancePhase,
-  OnlineRateLimitScope,
-  OnlineServerMessage,
-  OnlineSnapshot,
+import {
+  type OnlineErrorCode,
+  type OnlineMaintenanceAcceptingNotice,
+  type OnlineMaintenanceNotice,
+  type OnlineMaintenancePhase,
+  type OnlineRateLimitScope,
+  type OnlineServerMessage,
+  type OnlineSnapshot,
 } from "./types";
 
 export const MAX_MAINTENANCE_RETRY_AFTER_MS = 10 * 60 * 1_000;
@@ -846,8 +850,8 @@ export function parseOnlineServerMessage(
   if (value.type === "session") {
     const snapshot = normalizeSnapshot(value.snapshot);
     return typeof value.token === "string" &&
-      value.token.length >= 16 &&
-      value.token.length <= 512 &&
+      value.token.length >= ONLINE_RESUME_TOKEN_MIN_LENGTH &&
+      value.token.length <= ONLINE_RESUME_TOKEN_MAX_LENGTH &&
       snapshot
       ? { type: "session", token: value.token, snapshot }
       : null;

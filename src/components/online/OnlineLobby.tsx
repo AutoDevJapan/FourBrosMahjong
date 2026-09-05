@@ -17,6 +17,10 @@ import RankingTable from "@/components/result/RankingTable";
 import { SOSHII_BREAKDOWN_HEADING } from "@/components/result/resultLabels";
 import SoshiiBreakdown from "@/components/result/SoshiiBreakdown";
 import {
+  ONLINE_RESUME_TOKEN_MAX_LENGTH,
+  ONLINE_RESUME_TOKEN_MIN_LENGTH,
+} from "@/domain/online/types";
+import {
   boundPlayerNameInput,
   limitPlayerName,
   MAX_PLAYER_NAME_LENGTH,
@@ -154,7 +158,8 @@ function readCredentials(): OnlineCredentials | null {
     if (
       code === null ||
       typeof parsed.token !== "string" ||
-      parsed.token.length < 16
+      parsed.token.length < ONLINE_RESUME_TOKEN_MIN_LENGTH ||
+      parsed.token.length > ONLINE_RESUME_TOKEN_MAX_LENGTH
     ) {
       return null;
     }

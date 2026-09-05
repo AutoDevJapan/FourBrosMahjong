@@ -26,29 +26,18 @@ function blockSessionStorage() {
 /** localStorageとStorage prototypeを共有するjsdomでも、sessionStorageだけを失敗させる。 */
 function failSessionStorageWrites(): () => void {
   const storage = window.sessionStorage;
-  Object.defineProperty(window, "sessionStorage", {
-    configurable: true,
-    value: {
-      get length() {
-        return storage.length;
-      },
-      clear: () => storage.clear(),
-      getItem: (key: string) => storage.getItem(key),
-      key: (index: number) => storage.key(index),
-      removeItem: (key: string) => storage.removeItem(key),
-      setItem: () => {
+  const storagePrototype = Object.getPrototypeOf(storage) as Storage;
+  const originalSetItem = storagePrototype.setItem;
+  const setItem = vi
+    .spyOn(storagePrototype, "setItem")
+    .mockImplementation(function (this: Storage, key, value) {
+      if (this === storage) {
         throw new DOMException("Storage quota exceeded", "QuotaExceededError");
-      },
-    } satisfies Storage,
-  });
+      }
+      return originalSetItem.call(this, key, value);
+    });
   return () => {
-    if (originalStorageDescriptor) {
-      Object.defineProperty(
-        window,
-        "sessionStorage",
-        originalStorageDescriptor,
-      );
-    }
+    setItem.mockRestore();
   };
 }
 
