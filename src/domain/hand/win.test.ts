@@ -48,6 +48,25 @@ describe("和了形の判定", () => {
       }),
     ).toBeNull();
   });
+
+  it("牌枚数が足りない副露を含む入力は和了として受理しない", () => {
+    // 2枚の「ポン」を1面子として数えると、実牌13枚の入力が
+    // 一気通貫・役牌・混一色の和了として誤受理される。
+    const malformedPon: Meld = {
+      type: "pon",
+      tiles: parseTiles("55z"),
+      concealed: false,
+    };
+
+    expect(
+      analyzeWin({
+        concealedTiles: parseTiles("123p 456p 789p 99p"),
+        melds: [malformedPon],
+        winningTile: parseTile("9p"),
+        winType: "ron",
+      }),
+    ).toBeNull();
+  });
 });
 
 describe("通常役の判定", () => {

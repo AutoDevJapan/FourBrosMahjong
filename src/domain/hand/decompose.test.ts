@@ -41,6 +41,21 @@ describe("decomposeStandard", () => {
     expect(forms[0].melds).toHaveLength(4);
   });
 
+  it("ポン/カンの牌枚数・牌種が不正なら和了形として受理しない", () => {
+    // 2枚しかない「ポン」を面子として数えると、実牌13枚の入力でも
+    // 4面子1雀頭に見えてしまう。外部入力/型アサーション経由でも
+    // この不正な面子をゲームドメインへ通さない。
+    const malformedPon: MeldInput = {
+      tiles: parseTiles("55z"),
+      isKan: false,
+      concealed: false,
+    };
+    const concealed = parseTiles("123p 456p 789p 99p");
+
+    expect(decomposeStandard(concealed, [malformedPon])).toEqual([]);
+    expect(isCompleteHand(concealed, [malformedPon])).toBe(false);
+  });
+
   it("萬子は順子を作れない(サンマ牌構成)", () => {
     // 1m9m は順子にならないため、この形は和了形にならない。
     expect(isCompleteHand(parseTiles("19m 123p 456p 789p 99s"), [])).toBe(
