@@ -21,4 +21,11 @@ describe("requestPath", () => {
       expect(requestPath(raw)).toBeNull();
     },
   );
+
+  it.each(["/\\evil.example/ws", "/foo\\..\\ws", "http:\\\\evil.example\\ws"])(
+    "backslash request-targetをlocal routeのaliasにしない: %s",
+    (raw) => {
+      expect(requestPath(raw)).toBeNull();
+    },
+  );
 });
