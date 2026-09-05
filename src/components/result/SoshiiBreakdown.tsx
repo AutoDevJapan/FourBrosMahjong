@@ -7,6 +7,7 @@
  * 増減は色に依存せず符号+テキストで伝える(スペック5 5.2.1)。
  */
 
+import { useId } from "react";
 import CharacterPortrait, {
   characterAccentStyle,
 } from "@/components/game/CharacterPortrait";
@@ -44,6 +45,12 @@ export default function SoshiiBreakdown({
   variant = "default",
 }: SoshiiBreakdownProps) {
   const { playerId, name, rank, rawScore, uma, bonus, soshiiTotal } = player;
+  // `aria-label` would flatten the user-controlled name and lose the same bidi
+  // isolation used by the visible name. Keep the suffix inside the name label
+  // so the two ID references preserve the Japanese phrase without an extra gap.
+  const labelId = useId();
+  const rankLabelId = `${labelId}-rank`;
+  const nameLabelId = `${labelId}-name`;
   const total = formatSignedSoshii(soshiiTotal);
   const presentation = variant === "default" ? null : variant;
   const presentationClass = (suffix: string) =>
@@ -51,7 +58,7 @@ export default function SoshiiBreakdown({
 
   return (
     <section
-      aria-label={`${rank}位 ${name}のソシー内訳`}
+      aria-labelledby={`${rankLabelId} ${nameLabelId}`}
       data-character-id={playerId}
       style={playerId ? characterAccentStyle(playerId) : undefined}
       className={
@@ -65,15 +72,20 @@ export default function SoshiiBreakdown({
       >
         {playerId ? <CharacterPortrait playerId={playerId} /> : null}
         <span
+          id={rankLabelId}
           className={`${presentationClass("breakdown-rank") ?? ""}${presentation ? " " : ""}text-foreground/70`}
         >
           {rank}位
         </span>
         <span
+          id={nameLabelId}
           dir="auto"
           className={`${presentationClass("breakdown-name") ?? ""}${presentation ? " " : ""}character-name player-name-bidi-isolate`}
         >
-          {name}
+          <span dir="auto" className="player-name-bidi-isolate">
+            {name}
+          </span>
+          <span className="player-name-accessible-suffix">のソシー内訳</span>
         </span>
         {presentation && rank === 1 ? (
           <span className={presentationClass("winner-label")}>優勝</span>
