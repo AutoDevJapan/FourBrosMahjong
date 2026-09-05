@@ -1,7 +1,7 @@
 import { MAX_OMOTE_DORA_COUNT } from "@/domain/dora/dice";
 import { CHARACTER_PLAYER_IDS } from "@/domain/game/characters";
 import type { TileData } from "@/domain/game/viewTypes";
-import { isValidTileKind } from "@/domain/hand/tile-identity";
+import { isValidTileKind, tileKey } from "@/domain/hand/tile-identity";
 import {
   ONLINE_RESUME_TOKEN_MAX_LENGTH,
   ONLINE_RESUME_TOKEN_MIN_LENGTH,
@@ -521,6 +521,47 @@ function isGameView(value: unknown, you: OnlineSnapshot["you"]): boolean {
 }
 
 /**
+ * 可視化された牌を横断して、山の牌種ごとの最大4枚制約を検証する。
+ *
+ * オンラインsnapshotはサーバーから届く非信頼入力なので、各配列が個別に
+ * 正しくても、手牌・副露・河・ドラ表示をまたいで同じ牌を重複させられる。
+ * 他家の伏せ手牌は `handCount` しか届かず、pending の牌配列は物理牌の集合
+ * ではなく候補集合なので、どちらもこの集計には含めない。抜き北は牌自体が
+ * snapshotに残らないため、公開された `kitaCount` を北の枚数として加える。
+ */
+function hasValidVisibleTileMultiplicity(
+  view: OnlineSnapshot["view"],
+): boolean {
+  const counts = new Map<string, number>();
+  const addKind = (tile: Pick<TileData, "suit" | "rank">): boolean => {
+    const key = tileKey(tile);
+    const next = (counts.get(key) ?? 0) + 1;
+    if (next > COPIES_PER_TILE) return false;
+    counts.set(key, next);
+    return true;
+  };
+  const addTiles = (tiles: readonly TileData[]): boolean =>
+    tiles.every(addKind);
+
+  for (const position of SLOT_POSITIONS) {
+    const slot = view.slots[position];
+    if (slot.kind !== "seated") continue;
+    const player = slot.player;
+    if (player.hand !== undefined && !addTiles(player.hand)) return false;
+    if (player.melds?.some((meld) => !addTiles(meld.tiles))) return false;
+    if (!addTiles(player.discards)) return false;
+    for (let count = 0; count < player.kitaCount; count++) {
+      if (!addKind({ suit: "honor", rank: 4 })) return false;
+    }
+  }
+
+  if (!addTiles(view.dora.indicators)) return false;
+  return (
+    view.dora.uraIndicators === undefined || addTiles(view.dora.uraIndicators)
+  );
+}
+
+/**
  * The roster and the view are two projections of the same current seat. Keep
  * their names aligned so an untrusted snapshot cannot make one player appear
  * under two identities in the lobby header and the table.
@@ -738,6 +779,7 @@ function isOnlineSnapshot(value: OnlineSnapshot): boolean {
       value.phase === "roundEnd" ||
       value.phase === "gameEnd") &&
     isGameView(value.view, value.you) &&
+    hasValidVisibleTileMultiplicity(value.view) &&
     hasConsistentRosterNames(value.view, players) &&
     isPending(value.pending, value.you) &&
     isRoundSummary(value.roundSummary) &&

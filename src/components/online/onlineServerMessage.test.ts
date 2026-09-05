@@ -113,10 +113,24 @@ type MutableNumericSnapshot = {
   roundSummary: Record<string, unknown> | null;
 };
 
+type MutableVisibleTileSnapshot = {
+  view: {
+    slots: Record<string, { player: Record<string, unknown> }>;
+    tableInfo: Record<string, unknown>;
+    dora: Record<string, unknown>;
+  };
+};
+
 function mutableNumericSnapshot(
   snapshot: OnlineSnapshot,
 ): MutableNumericSnapshot {
   return structuredClone(snapshot) as unknown as MutableNumericSnapshot;
+}
+
+function mutableVisibleTileSnapshot(
+  snapshot: OnlineSnapshot,
+): MutableVisibleTileSnapshot {
+  return structuredClone(snapshot) as unknown as MutableVisibleTileSnapshot;
 }
 
 describe("parseOnlineServerMessage", () => {
@@ -763,7 +777,7 @@ describe("parseOnlineServerMessage", () => {
 
   it("requires canonical tile counts and identities for visible melds (#864)", () => {
     const snapshot = snapshotFixture();
-    const tile = { suit: "pin" as const, rank: 5, isRed: true };
+    const tile = { suit: "pin" as const, rank: 1, isRed: false };
     const meldWith = (meld: unknown): OnlineSnapshot => {
       const candidate = structuredClone(snapshot) as unknown as {
         view: {
@@ -806,6 +820,67 @@ describe("parseOnlineServerMessage", () => {
           snapshot: meldWith(meld),
         }),
       ).not.toBeNull();
+    }
+  });
+
+  it("rejects visible tile kinds beyond four copies across snapshot fields", () => {
+    const tile = { suit: "pin" as const, rank: 1, isRed: false };
+    const north = { suit: "honor" as const, rank: 4, isRed: false };
+    const repeated = (value: typeof tile, count: number) =>
+      Array.from({ length: count }, () => ({ ...value }));
+    const base = (): MutableVisibleTileSnapshot => {
+      const candidate = mutableVisibleTileSnapshot(snapshotFixture());
+      const self = candidate.view.slots.self.player;
+      self.hand = [];
+      self.melds = [];
+      self.discards = [];
+      self.kitaCount = 0;
+      candidate.view.tableInfo.doraCount = 0;
+      candidate.view.dora.indicators = [];
+      candidate.view.dora.uraIndicatorCount = 0;
+      candidate.view.dora.uraIndicators = [];
+      return candidate;
+    };
+
+    const exactlyFour = base();
+    exactlyFour.view.slots.self.player.hand = repeated(tile, 4);
+    expect(
+      parseOnlineServerMessage({
+        type: "snapshot",
+        snapshot: exactlyFour as unknown as OnlineSnapshot,
+      }),
+    ).not.toBeNull();
+
+    const overHand = base();
+    overHand.view.slots.self.player.hand = repeated(tile, 5);
+
+    const acrossHandAndMeld = base();
+    acrossHandAndMeld.view.slots.self.player.hand = repeated(tile, 2);
+    acrossHandAndMeld.view.slots.self.player.melds = [
+      { type: "pon", tiles: repeated(tile, 3), concealed: false },
+    ];
+
+    const acrossKitaAndDiscard = base();
+    acrossKitaAndDiscard.view.slots.self.player.kitaCount = 4;
+    acrossKitaAndDiscard.view.slots.self.player.discards = [north];
+
+    const acrossDoraIndicators = base();
+    acrossDoraIndicators.view.dora.indicators = repeated(tile, 3);
+    acrossDoraIndicators.view.dora.uraIndicatorCount = 2;
+    acrossDoraIndicators.view.dora.uraIndicators = repeated(tile, 2);
+
+    for (const candidate of [
+      overHand,
+      acrossHandAndMeld,
+      acrossKitaAndDiscard,
+      acrossDoraIndicators,
+    ]) {
+      expect(
+        parseOnlineServerMessage({
+          type: "snapshot",
+          snapshot: candidate as unknown as OnlineSnapshot,
+        }),
+      ).toBeNull();
     }
   });
 
