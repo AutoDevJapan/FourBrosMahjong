@@ -155,4 +155,46 @@ describe("online abuse controls", () => {
     controls.cleanup();
     expect(controls.trackedSourceCount).toBe(0);
   });
+
+  it("does not let a wall-clock regression reset an active window", () => {
+    let now = 1_000;
+    const controls = new OnlineAbuseControls(() => now);
+    for (
+      let index = 0;
+      index < ABUSE_LIMITS.connectionAttempts.limit;
+      index += 1
+    ) {
+      expect(controls.admitConnection("source", 0, 0)).toBeNull();
+      controls.releasePendingUpgrade("source");
+    }
+    now = 0;
+
+    expect(controls.admitConnection("source", 0, 0)).toEqual({
+      code: "rate_limited",
+      scope: "connection",
+      retryAfterMs: ABUSE_LIMITS.connectionAttempts.windowMs,
+    });
+  });
+
+  it.each([Number.NaN, Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY, -1])(
+    "fails closed before consuming an invalid clock sample: %s",
+    (now) => {
+      const controls = new OnlineAbuseControls(() => now);
+
+      expect(() => controls.admitConnection("source", 0, 0)).toThrow(
+        "online abuse control clock must return a finite non-negative value",
+      );
+      expect(() =>
+        controls.consumeMessage("source", controls.createClientState()),
+      ).toThrow(RangeError);
+      expect(() =>
+        controls.consumeAction("source", controls.createClientState()),
+      ).toThrow(RangeError);
+      expect(() => controls.consumeRoomAttempt("source", "create")).toThrow(
+        RangeError,
+      );
+      expect(() => controls.cleanup()).toThrow(RangeError);
+      expect(controls.trackedSourceCount).toBe(0);
+    },
+  );
 });
