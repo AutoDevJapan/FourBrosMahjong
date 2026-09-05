@@ -777,10 +777,7 @@ export function createOnlineServer(
     response.end(body);
   }
 
-  function rejectUnexpectedPublicRequest(
-    request: IncomingMessage,
-    response: import("node:http").ServerResponse,
-  ): boolean {
+  function hasUnexpectedRequestFraming(request: IncomingMessage): boolean {
     const contentLength = request.headers["content-length"];
     const transferEncoding = request.headers["transfer-encoding"];
     const hasBodyOrAmbiguousFraming =
@@ -790,8 +787,14 @@ export function createOnlineServer(
       request.httpVersion === "1.0" &&
       contentLength === undefined &&
       transferEncoding === undefined;
-    const rejectsPayload =
-      hasBodyOrAmbiguousFraming || hasAmbiguousHttp10Framing;
+    return hasBodyOrAmbiguousFraming || hasAmbiguousHttp10Framing;
+  }
+
+  function rejectUnexpectedPublicRequest(
+    request: IncomingMessage,
+    response: import("node:http").ServerResponse,
+  ): boolean {
+    const rejectsPayload = hasUnexpectedRequestFraming(request);
     if (
       !rejectsPayload &&
       (request.method === "GET" ||
@@ -816,6 +819,25 @@ export function createOnlineServer(
         ...(rejectsPayload ? {} : { allow: "GET, HEAD, OPTIONS" }),
         connection: "close",
       },
+    );
+    return true;
+  }
+
+  function rejectUnknownPublicRequestBody(
+    request: IncomingMessage,
+    response: import("node:http").ServerResponse,
+  ): boolean {
+    if (!hasUnexpectedRequestFraming(request)) return false;
+
+    // Keep the not-found contract while draining a body that cannot be routed
+    // safely. Closing the transport prevents an incomplete unknown request
+    // from pinning an HTTP/1.1 keep-alive connection in the parser.
+    request.resume();
+    writeJson(
+      response,
+      404,
+      { ok: false, error: "not_found" },
+      { connection: "close" },
     );
     return true;
   }
@@ -862,9 +884,12 @@ export function createOnlineServer(
     if (handleOpsHttpRequest(request, response, path, opsHttpDependencies)) {
       return;
     }
+    const isPublicDiscoveryPath =
+      path === "/healthz" || path === "/readyz" || path === "/";
     if (
-      (path === "/healthz" || path === "/readyz" || path === "/") &&
-      rejectUnexpectedPublicRequest(request, response)
+      isPublicDiscoveryPath
+        ? rejectUnexpectedPublicRequest(request, response)
+        : rejectUnknownPublicRequestBody(request, response)
     ) {
       return;
     }
