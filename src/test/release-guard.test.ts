@@ -262,6 +262,22 @@ describe("release metadata guard (#507)", () => {
       "- See [upgrade guide][].\n\n[upgrade guide]: https://example.test/upgrade\n",
     );
   });
+
+  it("retains a trailing definition used by a shortcut reference", () => {
+    const changelog = `# Changelog
+
+## [1.2.3] - 2026-09-06
+
+- See [upgrade].
+
+[upgrade]: https://example.test/upgrade
+[1.2.3]: https://example.test/release
+`;
+
+    expect(releaseNotesFromChangelog({ version: "1.2.3", changelog })).toBe(
+      "- See [upgrade].\n\n[upgrade]: https://example.test/upgrade\n",
+    );
+  });
 });
 
 describe("release ancestry guard (#507)", () => {

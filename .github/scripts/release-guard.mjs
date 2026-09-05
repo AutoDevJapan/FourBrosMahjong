@@ -76,7 +76,7 @@ function removeTrailingReferenceDefinitions(section) {
   const referencedLabels = new Set();
   const referenceUse = /\[([^\]\r\n]+)\](?:\s*\[([^\]\r\n]*)\])?/g;
   for (const match of content.matchAll(referenceUse)) {
-    const label = match[2]?.trim() === "" ? match[1] : match[2];
+    const label = match[2]?.trim() ? match[2] : match[1];
     referencedLabels.add(normalizeReferenceLabel(label));
   }
   const retainedDefinitions = definitions
