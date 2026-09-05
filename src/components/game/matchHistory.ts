@@ -158,7 +158,14 @@ export function parseHistory(raw: string): readonly MatchHistoryEntry[] | null {
     ) {
       return null;
     }
-    return value.entries as readonly MatchHistoryEntry[];
+    const entries = value.entries as readonly MatchHistoryEntry[];
+    // `seed` is the persisted match identity and `persistHistory` refuses to
+    // append it twice. Treat a duplicate as corrupt rather than rendering the
+    // same logical match more than once from imported or manually edited data.
+    if (new Set(entries.map((entry) => entry.seed)).size !== entries.length) {
+      return null;
+    }
+    return entries;
   } catch {
     return null;
   }

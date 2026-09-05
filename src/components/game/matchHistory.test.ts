@@ -638,6 +638,20 @@ describe("match history persistence (#293)", () => {
       expect(parseHistory(JSON.stringify(sameNames))).not.toBeNull();
     });
 
+    it("同一seedの重複履歴を破損扱いにし、storageから削除する", () => {
+      const storage = new MemoryStorage();
+      const duplicateSeeds = {
+        version: 1,
+        entries: [entry(1, 200), entry(1, 100)],
+      };
+      const raw = JSON.stringify(duplicateSeeds);
+      storage.setItem(MATCH_HISTORY_KEY, raw);
+
+      expect(parseHistory(raw)).toBeNull();
+      expect(loadHistory(storage)).toEqual([]);
+      expect(storage.getItem(MATCH_HISTORY_KEY)).toBeNull();
+    });
+
     it("不可視/Bidi制御文字を含む改竄履歴を拒否し、storageから削除する", () => {
       const storage = new MemoryStorage();
       const poisoned = {
