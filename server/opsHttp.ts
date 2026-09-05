@@ -234,6 +234,10 @@ export function handleOpsHttpRequest(
         throw new RangeError("ops uptime must be a non-negative safe integer");
       }
       const transition = dependencies.startDrain();
+      if (!transition.changed && transition.status.phase === "terminating") {
+        writeOpsJson(response, 409, { ok: false, error: "terminating" });
+        return true;
+      }
       const broadcast = transition.changed
         ? dependencies.broadcastDrainStatus(transition.status)
         : null;

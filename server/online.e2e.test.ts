@@ -2151,6 +2151,17 @@ describe("online graceful process shutdown (#726)", () => {
           throw new Error("terminating notice did not include its deadline");
         }
         expect(terminating.deadline).toMatch(/Z$/);
+        const redundantDrain = await fetch(`${server.url}/ops/drain`, {
+          method: "POST",
+          headers: {
+            authorization: `Bearer ${shutdownEnvironment.ONLINE_OPS_TOKEN}`,
+          },
+        });
+        expect(redundantDrain.status).toBe(409);
+        await expect(redundantDrain.json()).resolves.toEqual({
+          ok: false,
+          error: "terminating",
+        });
         await expect(fetch(`${server.url}/healthz`)).resolves.toMatchObject({
           status: 200,
         });
