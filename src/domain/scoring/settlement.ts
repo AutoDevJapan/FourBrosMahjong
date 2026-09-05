@@ -118,7 +118,7 @@ export class SoshiiLedger {
    * 不正な持ち点がキャッシュへ残り、正しい持ち点での再試行が
    * 「final points changed between settlement stages」で落ちる。
    *
-   * 登録プレイヤー全員を重複なく含み、各値が有限で、**合計が
+   * 登録プレイヤー全員を重複なく含み、各値が有限な安全整数で、**合計が
    * `配給原点 × 人数`(= 140,000)** であること。合計が前提を外れると
    * 「素点(返し基準)+ ウマ + オカ の総和がゼロ」というゼロサム不変条件が
    * 例外を出さずに破れ、結果画面の精算表が合わなくなる。
@@ -154,8 +154,10 @@ export class SoshiiLedger {
       if (seen.has(playerId)) {
         throw new RangeError(`duplicate playerId: ${playerId}`);
       }
-      if (!Number.isFinite(points)) {
-        throw new RangeError(`points must be finite, received ${points}.`);
+      if (!Number.isSafeInteger(points)) {
+        throw new RangeError(
+          `points must be a finite safe integer, received ${points}.`,
+        );
       }
       seen.add(playerId);
     }
