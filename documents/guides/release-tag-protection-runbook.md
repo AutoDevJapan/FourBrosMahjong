@@ -106,6 +106,18 @@ gh api --method GET 'orgs/AutoDevJapan/teams?per_page=100' --paginate
 
 helper の出力と API 応答に含まれる `target=tag`、`source_type=Repository`、`enforcement=active`、include pattern、B の update/deletion/non-fast-forward、`bypass_actors=[]`、`current_user_can_bypass=never` を目視照合する。validator はこの契約を機械検証し、条件不一致なら exit 1 で停止する。監査対象を保存する場合は helper 実行とは別に、上記 list/detail の GET 応答をファイルへ保存する。専用 Team が登録された後は、A の creation + Team bypass も同じように全項目を監査する。
 
+### A の作成認可を機械監査する
+
+作成認可 ruleset A を `Active` にした後、承認済み Team ID を明示して、管理者が保存した詳細 GET 応答を repository 外のファイルから検証する。validator は API を呼ばず、ruleset の作成・変更・tag 操作も行わない。Team ID が未確定、0、safe integer外、または応答の bypass actor と一致しない場合は fail closed する。
+
+```bash
+RELEASE_OPERATORS_TEAM_ID=123456789 \
+  node .github/scripts/verify-release-tag-creation-ruleset.mjs \
+  < /path/outside/repository/authorize-release-tag-creation-detail.json
+```
+
+この検証が受け入れるのは、repository-owned、`target=tag`、`enforcement=active`、`refs/tags/v*` の除外なし、`creation` rule **だけ**、および承認済み Release Operators Team 1件の `bypass_mode=always` だけである。`123456789` は説明用の値であり、承認記録の numeric Team IDへ置き換える。validatorのpassはTeam membership、owner承認、通常writerの拒否、Operatorの正常作成、audit logを証明しないため、これらの外部証跡は別途保存する。Bの不変性validatorとは別のruleset責務として扱う。
+
 ### A の作成認可を追加する rollout
 
 1. Release Operators Team、break-glass Team、Approver 2名、通常 writer の検証者、誤許可時の復旧担当を決め、Team の numeric ID と issue #508 への承認記録を残す。
