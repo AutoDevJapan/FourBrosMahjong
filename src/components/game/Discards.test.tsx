@@ -31,6 +31,12 @@ describe("Discards", () => {
     expect(list.querySelectorAll("li")).toHaveLength(6);
   });
 
+  it("limit=0では捨て牌を表示しない", () => {
+    render(<Discards tiles={[tile(1), tile(2), tile(3)]} limit={0} />);
+    const list = screen.getByRole("list", { name: "捨て牌" });
+    expect(list.querySelectorAll("li")).toHaveLength(0);
+  });
+
   it("河のグリッドは .river-grid に一本化する(#258 / #387 回帰)", () => {
     // grid-cols-6(1fr)だと全幅スロットで牌が散らばり(#258)、6 列固定だと狭いスロットで
     // ページが横スクロールする(#387)。両方の不変条件は `.river-grid`(globals.css)が

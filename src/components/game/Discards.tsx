@@ -110,7 +110,9 @@ export function getRiverTileLayout(
 
 export default function Discards({ tiles, limit }: DiscardsProps) {
   const shown =
-    typeof limit === "number" && limit >= 0 ? tiles.slice(-limit) : tiles;
+    typeof limit === "number" && limit >= 0
+      ? tiles.slice(Math.max(tiles.length - limit, 0))
+      : tiles;
   const stateKey = riverStateKey(tiles);
   const listRef = useRef<HTMLUListElement>(null);
   const [columnCount, setColumnCount] = useState<number | null>(null);
