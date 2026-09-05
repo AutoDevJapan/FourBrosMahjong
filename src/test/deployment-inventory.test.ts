@@ -8,16 +8,16 @@ const DEPLOYMENT_DOC = readFileSync(
 );
 
 describe("deployment inventory evidence", () => {
-  it("keeps the post-#941 main, Vercel deployment, and service-worker evidence aligned", () => {
-    expect(DEPLOYMENT_DOC).toContain("#941 merge後、監査対象commit `5bb65d1`");
+  it("keeps the post-#944 main, Vercel deployment, and service-worker evidence aligned", () => {
+    expect(DEPLOYMENT_DOC).toContain("#944 merge後、監査対象commit `81c0313`");
     expect(DEPLOYMENT_DOC).toContain(
-      "`5bb65d1e914b7a100298efb096e6b36f11bf357d`（#941 merge 後）",
+      "`81c0313c15c816b013b3bd77f76480fc5910ebb3`（#944 merge 後）",
     );
-    expect(DEPLOYMENT_DOC).toContain("GitHub deployment `6280216047`");
+    expect(DEPLOYMENT_DOC).toContain("GitHub deployment `6280529940`");
     expect(DEPLOYMENT_DOC).toContain(
-      "https://four-bros-mahjong-mkywohfq3.vercel.app",
+      "https://four-bros-mahjong-mvk5ifyvo.vercel.app",
     );
-    expect(DEPLOYMENT_DOC).toContain("VERSION` は `5bb65d1e914b`");
+    expect(DEPLOYMENT_DOC).toContain("VERSION` は `81c0313c15c8`");
   });
 
   it("keeps the six-screen fallback smoke evidence visible", () => {
