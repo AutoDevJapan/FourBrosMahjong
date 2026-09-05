@@ -37,6 +37,8 @@ export interface PlayerAreaProps {
   confirmTouchSelectionMode?: HandProps["confirmTouchSelectionMode"];
   /** 自家手牌を閲覧専用の静的リストとして表示する。 */
   handReadOnly?: boolean;
+  /** 対話中の手牌が閲覧専用へ切り替わる際の論理的なフォーカス着地点。 */
+  readOnlyFocusRef?: HandProps["readOnlyFocusRef"];
   handTileStates?: readonly HandTileState[];
   onBlockedTile?: (message: string) => void;
 }
@@ -55,6 +57,7 @@ export default function PlayerArea({
   confirmTouchSelection = false,
   confirmTouchSelectionMode = "discard",
   handReadOnly = false,
+  readOnlyFocusRef,
   handTileStates,
   onBlockedTile,
 }: PlayerAreaProps) {
@@ -129,6 +132,7 @@ export default function PlayerArea({
             <Hand
               tiles={hand}
               readOnly={handReadOnly}
+              readOnlyFocusRef={readOnlyFocusRef}
               onSelect={onSelectTile}
               confirmTouchSelection={confirmTouchSelection}
               confirmTouchSelectionMode={confirmTouchSelectionMode}

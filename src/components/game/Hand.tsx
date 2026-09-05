@@ -9,7 +9,14 @@
  * タッチポインターでは誤タップを防ぐため、必要な画面だけ選択と打牌確定を分離する。
  * 各牌の名称は `option` 要素側の `aria-label` が担うため、内側の `Tile` は装飾扱いにする。
  */
-import { useCallback, useId, useLayoutEffect, useRef, useState } from "react";
+import {
+  type RefObject,
+  useCallback,
+  useId,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from "react";
 import Tile from "../common/Tile";
 import { tileLabel } from "../common/tileLabel";
 import HandTileAnimation from "./hand-animation/HandTileAnimation";
@@ -23,6 +30,8 @@ export interface HandProps {
   tiles: readonly TileData[];
   /** 閲覧専用表示。listbox操作・選択状態・フォーカスを公開しない。 */
   readOnly?: boolean;
+  /** 対話中の手牌が閲覧専用へ切り替わる際の論理的なフォーカス着地点(#966)。 */
+  readOnlyFocusRef?: RefObject<HTMLElement | null>;
   /** 牌が選択(打牌候補として決定)されたときに呼ぶ。UIイベントのみでドメイン計算は行わない。 */
   onSelect?: (index: number, tile: TileData) => void;
   /** タッチ操作では1回目を選択状態に留め、確定ボタンを要求する。 */
@@ -52,6 +61,7 @@ const DEAL_STAGGER_MS = 30;
 export default function Hand({
   tiles,
   readOnly = false,
+  readOnlyFocusRef,
   onSelect,
   confirmTouchSelection = false,
   confirmTouchSelectionMode = "discard",
@@ -76,6 +86,7 @@ export default function Hand({
   const confirmButtonRef = useRef<HTMLButtonElement | null>(null);
   const restoreFocusIndexRef = useRef<number | null>(null);
   const handHadFocus = useRef(false);
+  const lastCommittedReadOnly = useRef(readOnly);
   const pointerTypeRef = useRef<"touch" | "other" | null>(null);
   const touchSelectionStatusId = useId();
 
@@ -150,6 +161,21 @@ export default function Hand({
     if (!handHadFocus.current || tiles.length === 0) return;
     optionRefs.current[Math.min(activeIndex, tiles.length - 1)]?.focus();
   }, [tiles, activeIndex]);
+
+  useLayoutEffect(() => {
+    const switchedToReadOnly = !lastCommittedReadOnly.current && readOnly;
+    lastCommittedReadOnly.current = readOnly;
+    if (!switchedToReadOnly || !handHadFocus.current) return;
+
+    // The interactive option is removed by the read-only branch. Move focus to
+    // the caller's named board target so the user does not fall back to body (#966).
+    const fallback = readOnlyFocusRef?.current;
+    if (!fallback) return;
+    fallback.focus();
+    if (fallback.ownerDocument.activeElement === fallback) {
+      handHadFocus.current = false;
+    }
+  }, [readOnly, readOnlyFocusRef]);
 
   // タッチ選択で確認UIが追加された直後は、確認ボタンへフォーカスを移す。
   // `preventScroll` でフォーカス移動による予期せぬジャンプを抑えたあと、ボタン自身を
