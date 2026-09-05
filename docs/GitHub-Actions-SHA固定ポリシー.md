@@ -28,6 +28,51 @@ Issue #663 の受け入れ条件に基づき、外部 Action と reusable workfl
 }
 ```
 
+## Current read-only re-audit
+
+2026-09-06 JST に、`origin/main` と一致する `HEAD=97e2852666f4905656b7f8f6853488cf3bcfdfc8` で、repository policy と実行可能な workflow 参照を再監査しました。現在の repository 設定は次のとおりです。
+
+```json
+{
+  "actions_permissions": {
+    "enabled": true,
+    "allowed_actions": "all",
+    "sha_pinning_required": true
+  },
+  "workflow_permissions": {
+    "default_workflow_permissions": "read",
+    "can_approve_pull_request_reviews": false
+  }
+}
+```
+
+- `GET /repos/AutoDevJapan/FourBrosMahjong/actions/permissions` と `/workflow` で、repository の SHA 固定と既定 workflow 権限を再確認しました。設定変更は行っていません。
+- `GET /repos/AutoDevJapan/FourBrosMahjong/actions/permissions/selected-actions` は HTTP 409 `All actions and workflows are allowed on this repository` です。GitHub 側の allowlist mode は意図的に `all` のままです。
+- `GET /orgs/AutoDevJapan/actions/permissions` と `/workflow` は HTTP 403 `You must be an org admin or have the actions policies fine-grained permission.` です。現在の credential では organization policy の effective scope・precedence・ownerを確定できません。
+- 5つの repository workflow の実行可能な外部 `uses:` は20件で、20/20件が完全40桁 commit SHA 固定、未固定0件、local workflow/action参照0件です。Docker の workflow container image も SHA-256 digest 固定です。
+
+### Explicit source decision
+
+現在の GitHub 設定値 `allowed_actions=all` を selected-actions allowlist へ変更することは、この対応では行いません。allow-all の判断を暗黙に拡大したり、organization の設定を推測したりせず、repository内で実際に使用する source を次の inventory として明示します。
+
+| Action source | 実行参照数 |
+| --- | ---: |
+| `actions/checkout` | 7 |
+| `pnpm/action-setup` | 2 |
+| `actions/setup-node` | 2 |
+| `actions/cache/restore` | 3 |
+| `actions/cache/save` | 2 |
+| `actions/upload-artifact` | 2 |
+| `actions/download-artifact` | 1 |
+| `softprops/action-gh-release` | 1 |
+| **合計** | **20** |
+
+新しい外部 source を追加する場合は、この inventory と `src/test/actions-sha-pinning.test.ts` の監査結果を同じ変更で更新し、完全 SHA 固定と通常の required checks を確認します。selected-actions への縮小は、organization policy owner が effective scope と互換性を確認したうえで別途承認する設定変更です。
+
+policy 有効後の `origin/main` 同一 SHA に対する [CI run 33975755005](https://github.com/AutoDevJapan/FourBrosMahjong/actions/runs/33975755005)、[gitleaks run 33975755051](https://github.com/AutoDevJapan/FourBrosMahjong/actions/runs/33975755051)、[CodeQL run 33975754742](https://github.com/AutoDevJapan/FourBrosMahjong/actions/runs/33975754742) はすべて success です。gitleaks version updater の最新成功 run は [run 33465805332](https://github.com/AutoDevJapan/FourBrosMahjong/actions/runs/33465805332) です。
+
+`v*` tag、GitHub Release、Release workflow run は現在0件です。承認済みの実 Release を作成して `release.yml` を検証することは、外部の Release 運用承認なしには行いません。organization policy の effective scope・owner確認と実 Release の証跡が残るまで、#663 は OPEN のまま引き継ぎます。
+
 ## Previous read-only re-audit snapshot
 
 2026-09-05 JST に、専用worktreeの `HEAD=3d57255ec5e3835e571fff8f47dc9aec1c483089` と `origin/main` の一致を確認して再監査しました。repository policy の GET は次のとおりです。
@@ -58,7 +103,7 @@ Issue #663 の受け入れ条件に基づき、外部 Action と reusable workfl
 - 現 credential は organization の active member であり owner/admin ではありません。そのため、organization policy の設定値、effective precedence、policy owner はこの監査では確定できません。organization policy owner または Actions policies 権限保持者による確認が必要です。
 - repository の default workflow permissions は `write`、`can_approve_pull_request_reviews=true` です。これは SHA 固定設定とは別の既存設定であり、本対応では変更していません。
 
-## Current read-only re-audit
+## Earlier current read-only re-audit
 
 2026-09-05 JST に、専用worktreeの `HEAD=56de4a2df48f025e4d209d511e573c4f1f55567b` と `origin/main` の一致を確認して再監査しました。現在の repository policy と workflow permission の GET は次のとおりです。
 
@@ -85,7 +130,7 @@ Issue #663 の受け入れ条件に基づき、外部 Action と reusable workfl
 
 この再監査では policy、allowlist、organization設定、tag、Release、workflow dispatch、repository file、外部環境を変更していません。repository側のSHA固定は完了済みですが、#663のorganization policyのscope/owner確定と実Releaseによる検証は、権限保持者・承認済みRelease運用待ちとしてOPENのままです。
 
-## Workflow audit
+## Historical workflow audit
 
 2026-08-27 の `origin/main` (`df55a38465b6e7e80451d7e214b2a6b26b47c772`) では、4 workflow の外部 `uses:` 18 件がすべて 40 桁 commit SHA に固定されています。local Action / reusable workflow の参照は 0 件です。
 
