@@ -1437,6 +1437,7 @@ export default function OnlineLobby() {
               onResult={openOnlineResult}
               resultButtonRef={onlineResultButtonRef}
               interactionDisabled={status !== "connected"}
+              newGameDisabled={maintenance !== null}
               interactionDisabledReason={
                 status === "failed"
                   ? "failed"

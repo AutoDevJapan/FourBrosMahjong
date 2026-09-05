@@ -306,6 +306,47 @@ test.describe("オンラインメンテナンス client-first (#726)", () => {
     await expect(page.getByRole("group", { name: "対局盤面" })).toBeVisible();
   });
 
+  test("gameEndのhostはdraining中の新局ボタンを無効化し、操作案内と一致する", async ({
+    page,
+  }) => {
+    await page.goto("/online");
+    await installWebSocketStub(page);
+    await page.getByLabel("表示名").fill("たろう");
+    await page.getByRole("button", { name: "新しいルームを作る" }).click();
+
+    await page.evaluate((snapshot) => {
+      const socket = (window as unknown as OnlineTestWindow)
+        .__fourBrosOnlineSockets[0];
+      socket?.open();
+      socket?.message({ type: "session", token: "t".repeat(24), snapshot });
+      socket?.message({ type: "maintenance", phase: "draining" });
+    }, onlineFinishedSnapshotFixture());
+
+    await expect(page.locator('[data-phase="gameEnd"]')).toBeVisible();
+    await expect(page.locator("#online-maintenance-notice")).toBeVisible();
+    await expect(
+      page.getByRole("button", { name: "新しい半荘を開始" }),
+    ).toBeDisabled();
+    await expect(
+      page
+        .locator(".game-action-hint")
+        .filter({
+          hasText: "メンテナンス中のため、新しい半荘は開始できません。",
+        })
+        .first(),
+    ).toBeVisible();
+    expect(
+      await page.evaluate(() => {
+        const socket = (window as unknown as OnlineTestWindow)
+          .__fourBrosOnlineSockets[0];
+        return socket?.sent.map((value) => JSON.parse(value));
+      }),
+    ).not.toContainEqual({ type: "newGame" });
+    expect(
+      (await new AxeBuilder({ page }).include("main").analyze()).violations,
+    ).toEqual([]);
+  });
+
   test("accepting解除は320pxのlive案内後に現在局とcreate/joinを再許可する", async ({
     page,
   }) => {
