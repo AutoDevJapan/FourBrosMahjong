@@ -14,12 +14,23 @@ export function ThemeStorageSync() {
         syncThemeFromStorage();
       }
     };
+    const handlePageShow = (event: PageTransitionEvent) => {
+      if (!event.persisted) return;
+      // BFCacheからの復帰ではmountされず、復帰中のstorage eventを
+      // 取り逃がすことがあるため、現在値を再読してDOMをcatch-upする。
+      // lifecycle通知では揮発fallbackを外部変更とみなして破棄しない。
+      reconcileThemeFromStorage();
+    };
     // listenerを先に登録し、その直後に現在値へcatch-upする。
     // 変更がlistener登録より前ならcatch-up、後ならeventが拾うため、
     // hydrationと別タブ書き込みの順序にかかわらず現在値へ収束する。
     window.addEventListener("storage", handleStorage);
+    window.addEventListener("pageshow", handlePageShow);
     reconcileThemeFromStorage();
-    return () => window.removeEventListener("storage", handleStorage);
+    return () => {
+      window.removeEventListener("storage", handleStorage);
+      window.removeEventListener("pageshow", handlePageShow);
+    };
   }, []);
 
   return null;
