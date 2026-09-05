@@ -1,6 +1,7 @@
 import { MAX_OMOTE_DORA_COUNT } from "@/domain/dora/dice";
 import { CHARACTER_PLAYER_IDS } from "@/domain/game/characters";
 import type { TileData } from "@/domain/game/viewTypes";
+import { isValidTileKind } from "@/domain/hand/tile-identity";
 import {
   ONLINE_RESUME_TOKEN_MAX_LENGTH,
   ONLINE_RESUME_TOKEN_MIN_LENGTH,
@@ -290,10 +291,7 @@ function isTile(value: unknown): value is TileData {
   if (
     suit === null ||
     !isInteger(rank) ||
-    !(
-      (suit === "honor" && rank >= 1 && rank <= 7) ||
-      (suit !== "honor" && rank >= 1 && rank <= 9)
-    ) ||
+    !isValidTileKind({ suit, rank }) ||
     !isOptionalBoolean(value.isRed)
   ) {
     return false;

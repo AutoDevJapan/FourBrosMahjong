@@ -289,6 +289,41 @@ describe("parseOnlineServerMessage", () => {
     ).toBeNull();
   });
 
+  it("rejects sanma-inexistent manzu ranks in online tile snapshots", () => {
+    const snapshot = snapshotFixture();
+    const self = snapshot.view.slots.self;
+    if (self.kind !== "seated" || self.player.hand === undefined) {
+      throw new Error("tile-catalog fixture requires a visible self hand");
+    }
+
+    const candidate = structuredClone(snapshot) as unknown as {
+      view: {
+        slots: {
+          self: {
+            kind: string;
+            player: { hand?: Array<Record<string, unknown>> };
+          };
+        };
+      };
+    };
+    const candidateSelf = candidate.view.slots.self;
+    if (
+      candidateSelf.kind !== "seated" ||
+      candidateSelf.player.hand === undefined
+    ) {
+      throw new Error("tile-catalog copy requires a visible self hand");
+    }
+    candidateSelf.player.hand[0] = {
+      suit: "man",
+      rank: 2,
+      isRed: false,
+    };
+
+    expect(
+      parseOnlineServerMessage({ type: "snapshot", snapshot: candidate }),
+    ).toBeNull();
+  });
+
   it.each([
     ONLINE_RESUME_TOKEN_MIN_LENGTH - 1,
     ONLINE_RESUME_TOKEN_MAX_LENGTH + 1,
