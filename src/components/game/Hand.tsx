@@ -167,7 +167,7 @@ export default function Hand({
     lastCommittedReadOnly.current = readOnly;
     if (!switchedToReadOnly || !handHadFocus.current) return;
 
-    // The interactive option is removed by the read-only branch. Move focus to
+    // The interactive hand controls are removed by the read-only branch. Move focus to
     // the caller's named board target so the user does not fall back to body (#966).
     const fallback = readOnlyFocusRef?.current;
     if (!fallback) return;
@@ -442,7 +442,19 @@ export default function Hand({
   return (
     <div className="flex flex-col gap-2">
       {listbox}
-      <div className="rounded-md border border-control-border bg-background/70 p-2">
+      <div
+        className="rounded-md border border-control-border bg-background/70 p-2"
+        onFocusCapture={() => {
+          handHadFocus.current = true;
+        }}
+        onBlurCapture={(event) => {
+          if (
+            !event.currentTarget.contains(event.relatedTarget as Node | null)
+          ) {
+            handHadFocus.current = false;
+          }
+        }}
+      >
         <p
           id={touchSelectionStatusId}
           role="status"
