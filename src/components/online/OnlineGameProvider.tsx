@@ -8,7 +8,7 @@ import {
 import type { GameAction } from "@/components/game/gamePersistence";
 import type { TileData } from "@/components/game/types";
 import type { PlayerId } from "@/domain/game/engine";
-import { isRedDora } from "@/domain/tiles/tile";
+import { createTile, isRedDora } from "@/domain/tiles/tile";
 import { normalizeOnlineWebSocketUrl } from "@/lib/onlineWebSocket";
 import type { OnlineSnapshot } from "./types";
 
@@ -46,7 +46,12 @@ const SOCKET_SEND_ERROR_MESSAGE =
   "オンラインサーバーとの接続が切れています。再接続を待っています。";
 
 function wireTile(tile: TileData) {
-  return { suit: tile.suit, rank: tile.rank, isRed: isRedDora(tile) };
+  const canonicalTile = createTile(tile.suit, tile.rank);
+  return {
+    suit: canonicalTile.suit,
+    rank: canonicalTile.rank,
+    isRed: isRedDora(canonicalTile),
+  };
 }
 
 function sendSocketMessage(
