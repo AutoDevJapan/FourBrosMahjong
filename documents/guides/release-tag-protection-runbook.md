@@ -8,6 +8,8 @@ GitHub Release の公開識別子である `v*` tag を、公開後に付け替�
 
 監査の再現可能性のため、repository 内に read-only helper [`audit-release-tag-ruleset.mjs`](../../.github/scripts/audit-release-tag-ruleset.mjs) を置く。helper は `includes_parents=false` の ruleset 一覧から repository-owned の対象を **ちょうど 1 件**選び、詳細を取得して validator に渡す。各 API 呼び出しは `gh api --method GET` を argv に明示し、将来のオプション追加による method 上書きも拒否する。対象が無い・複数ある・詳細の一部が取得できない場合は fail closed する。`bypass_actors` は GitHub API の仕様上、ruleset への write access がない caller には返されないため、管理者または ruleset の write access を持つ operator の `gh` 認証で実行する。read-only token での欠落を「bypass なし」と解釈しない。
 
+作成認可 ruleset A は不変性 ruleset B と責務が異なるため、[`audit-release-tag-creation-ruleset.mjs`](../../.github/scripts/audit-release-tag-creation-ruleset.mjs) で別に監査する。A の監査は承認済み Release Operators Team の numeric ID を明示し、repository-owned の対象を **ちょうど 1 件**選んで詳細を取得した後、`creation` のみ・`Always allow` の Team 1件という契約を検証する。Team ID 未解決、対象の欠落・重複、継承 ruleset、詳細不一致は fail closed とし、ruleset・Team・tag は変更しない。
+
 同日の tag / Release inventory には `v*` tag と GitHub Release が存在しない。そのため既存公開物の SHA を変更しておらず、正常 Release の実作成と実 tag 操作による拒否テストは、次の承認済み release rehearsal まで未実施である。
 
 ### 2026-09-05 current-main 再監査
@@ -108,7 +110,17 @@ helper の出力と API 応答に含まれる `target=tag`、`source_type=Reposi
 
 ### A の作成認可を機械監査する
 
-作成認可 ruleset A を `Active` にした後、承認済み Team ID を明示して、管理者が保存した詳細 GET 応答を repository 外のファイルから検証する。validator は API を呼ばず、ruleset の作成・変更・tag 操作も行わない。Team ID が未確定、0、safe integer外、または応答の bypass actor と一致しない場合は fail closed する。
+作成認可 ruleset A を `Active` にした後、承認済み Team ID を明示して live 監査を実行する。helper は `includes_parents=false` の一覧から A を一意に選び、詳細 GET 応答を validator へ渡す。Team ID が未確定、0、safe integer外、または応答の bypass actor と一致しない場合は、APIの追加変更をせず fail closed する。
+
+```bash
+GITHUB_REPOSITORY=AutoDevJapan/FourBrosMahjong \
+RELEASE_OPERATORS_TEAM_ID=123456789 \
+  node .github/scripts/audit-release-tag-creation-ruleset.mjs
+```
+
+`123456789` は承認済み numeric Team ID に置き換える。helper は `gh api --method GET` のみを使い、A の作成・変更、Team membership、tag 操作を行わない。A が未適用、Team ID が未確定、または `bypass_actors` が権限不足で欠落する認証で実行した場合は成功扱いにせず、管理者または ruleset の write access を持つ operator で再監査する。
+
+live helper が利用できない場合や、管理者が保存した応答をオフラインで二者確認する場合は、次の validator を使う。validator は API を呼ばず、ruleset の作成・変更・tag 操作も行わない。
 
 ```bash
 RELEASE_OPERATORS_TEAM_ID=123456789 \
