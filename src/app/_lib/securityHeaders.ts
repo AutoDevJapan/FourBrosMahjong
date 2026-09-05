@@ -69,6 +69,11 @@ export function contentSecurityPolicy(
   onlineWebSocketUrl = process.env.NEXT_PUBLIC_ONLINE_WS_URL,
   upgradeInsecureRequests = !development,
 ) {
+  // `src/proxy.ts` supplies the loopback exception explicitly. Keep the
+  // production-only directive disabled for every development origin too;
+  // otherwise a LAN-accessible HTTP dev server upgrades its own assets to
+  // HTTPS and cannot hydrate when the caller is not a loopback hostname.
+  const shouldUpgradeInsecureRequests = !development && upgradeInsecureRequests;
   const onlineWebSocketSource = onlineWebSocketConnectSource(
     onlineWebSocketUrl,
     development,
@@ -96,7 +101,7 @@ export function contentSecurityPolicy(
     "base-uri 'self'",
     "form-action 'self'",
     "frame-ancestors 'none'",
-    ...(upgradeInsecureRequests ? ["upgrade-insecure-requests"] : []),
+    ...(shouldUpgradeInsecureRequests ? ["upgrade-insecure-requests"] : []),
   ];
 
   return directives.join("; ");
