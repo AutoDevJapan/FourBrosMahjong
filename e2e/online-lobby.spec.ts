@@ -255,6 +255,7 @@ test.describe("オンラインメンテナンス client-first (#726)", () => {
       socket?.message({
         type: "maintenance",
         phase: "draining",
+        retryAfterMs: 5_000,
         deadline: "2026-08-28T06:00:00.000Z",
       });
     }, onlineSnapshotFixture());
@@ -265,6 +266,9 @@ test.describe("オンラインメンテナンス client-first (#726)", () => {
     await expect(banner).toHaveAttribute("aria-live", "polite");
     await expect(banner).toHaveAttribute("aria-atomic", "true");
     await expect(banner).toContainText("現在の半荘はそのまま続けられます");
+    await expect(banner).toContainText("再試行まで約5秒");
+    await page.clock.fastForward(5_000);
+    await expect(banner).not.toContainText("再試行まで約");
     const firstTile = page.getByRole("option").first();
     await expect(firstTile).toBeEnabled();
     await firstTile.click();
