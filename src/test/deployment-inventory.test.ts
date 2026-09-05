@@ -16,7 +16,9 @@ const TOPOLOGY_EVIDENCE_DOC = readFileSync(
 
 describe("deployment inventory evidence", () => {
   it("keeps the current main, Vercel deployment, and service-worker evidence aligned", () => {
-    expect(DEPLOYMENT_DOC).toContain("#1025 merge後、監査対象commit `f3130316`");
+    expect(DEPLOYMENT_DOC).toContain(
+      "#1025 merge後、監査対象commit `f3130316`",
+    );
     expect(DEPLOYMENT_DOC).toContain(
       "`f3130316ea81f56fc46d302fe572a658d44abce7`（#1025 merge 後）",
     );
