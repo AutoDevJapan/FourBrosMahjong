@@ -481,13 +481,6 @@
   );
 }
 
-.result-main .result-action:focus-visible,
-.result-main .result-state-link:focus-visible,
-.result-main .result-back-link:focus-visible {
-  outline: 3px solid var(--focus-ring);
-  outline-offset: 3px;
-}
-
 .result-main .result-state-link,
 .result-main .result-back-link {
   border-color: var(--result-control-border);

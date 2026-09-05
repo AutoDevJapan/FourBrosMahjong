@@ -30,5 +30,8 @@ describe("Issue #712 Result route style scope", () => {
     expect(resultStyles).toContain("var(--font-yuji-syuku)");
     expect(resultStyles).toContain("font-synthesis: none");
     expect(resultStyles).toContain("@media (forced-colors: active)");
+    // フォーカスリングは globals.css の共通 :focus-visible と
+    // --color-focus-ring に委譲し、結果画面だけ太さ・offsetを上書きしない。
+    expect(resultStyles).not.toContain(":focus-visible");
   });
 });
