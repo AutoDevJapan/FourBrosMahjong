@@ -8,7 +8,7 @@ import {
 import type { GameAction } from "@/components/game/gamePersistence";
 import type { TileData } from "@/components/game/types";
 import type { PlayerId } from "@/domain/game/engine";
-import { createTile } from "@/domain/tiles/tile";
+import { createTile, isRedDora } from "@/domain/tiles/tile";
 import { normalizeOnlineWebSocketUrl } from "@/lib/onlineWebSocket";
 import type { OnlineSnapshot } from "./types";
 
@@ -50,7 +50,7 @@ function wireTile(tile: TileData) {
   return {
     suit: canonicalTile.suit,
     rank: canonicalTile.rank,
-    isRed: canonicalTile.isRed,
+    isRed: isRedDora(canonicalTile),
   };
 }
 
