@@ -210,6 +210,37 @@ describe("createOnlineServer lifecycle", () => {
     }
   });
 
+  it("rejects public route methods and bodies before serving them", async () => {
+    const server = createOnlineServer({ environment: environment(false) });
+    const port = await listen(server);
+    try {
+      for (const path of ["/healthz", "/readyz", "/"] as const) {
+        const response = await fetch(`http://127.0.0.1:${port}${path}`, {
+          method: "POST",
+        });
+        expect(response.status, path).toBe(405);
+        expect(response.headers.get("allow"), path).toBe("GET, HEAD, OPTIONS");
+        await expect(response.json()).resolves.toEqual({
+          ok: false,
+          error: "method_not_allowed",
+        });
+      }
+
+      const bodyResponse = await fetch(`http://127.0.0.1:${port}/healthz`, {
+        method: "POST",
+        body: "unexpected body",
+      });
+      expect(bodyResponse.status).toBe(400);
+      await expect(bodyResponse.json()).resolves.toEqual({
+        ok: false,
+        error: "body_not_allowed",
+      });
+      expect(bodyResponse.headers.get("connection")).toBe("close");
+    } finally {
+      await server.handleSignal("SIGTERM");
+    }
+  });
+
   it("uses the injected Railway marker for per-source ops rate limiting", async () => {
     const token = "P".repeat(32);
     const server = createOnlineServer({
