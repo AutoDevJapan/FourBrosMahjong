@@ -74,6 +74,15 @@ describe("computeScore — 4翻以下(符なし=一律30符)", () => {
       expect(() => computeScore(han(invalid), false)).toThrow(RangeError);
     },
   );
+
+  it.each([undefined, null, 0, 1, "false", {}])(
+    "親フラグが真偽値でなければ TypeError (%s)",
+    (invalid) => {
+      expect(() => computeScore(han(5), invalid as unknown as boolean)).toThrow(
+        TypeError,
+      );
+    },
+  );
 });
 
 describe("computeScore — ツモ配分(Q12 ツモ損なし・北家折半)", () => {

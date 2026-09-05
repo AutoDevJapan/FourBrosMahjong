@@ -88,6 +88,12 @@ function assertSafeScore(value: number, name: string): void {
   }
 }
 
+function assertBoolean(value: unknown, name: string): asserts value is boolean {
+  if (typeof value !== "boolean") {
+    throw new TypeError(`${name} must be a boolean.`);
+  }
+}
+
 /** 合計翻から区分と基本点 `a` を求める(構成役満は別扱い)。 */
 function categorize(han: number): {
   category: ScoreCategory;
@@ -139,6 +145,7 @@ export function computeScore(
   value: HandValueInput,
   isDealerWin: boolean,
 ): ScoreResult {
+  assertBoolean(isDealerWin, "isDealerWin");
   assertNonNegativeSafeInteger(value.yakumanMultiplier, "yakumanMultiplier");
   const isTrueYakuman = value.yakumanMultiplier > 0;
 
