@@ -18,6 +18,9 @@ import config from "../../vitest.config";
 /** 各プロジェクトが最低限収集すべきテストファイル数。本検査の目的は「0 件を失敗にする」こと。 */
 const MIN_TEST_FILES_PER_PROJECT = 1;
 
+/** Vitest の include が参照するテストツリー。新しいルートを追加したらここにも追加する。 */
+const TEST_ROOTS = ["src", "server"] as const;
+
 /** `package.json` の `scripts` のうち Vitest を起動するもの。 */
 const VITEST_SCRIPTS = [
   "test",
@@ -86,12 +89,14 @@ function includeToRegExp(include: string): RegExp {
   return new RegExp(`^${pattern}$`);
 }
 
-/** リポジトリ直下からの相対パスで全ファイルを列挙する(`src/` 配下のみ対象)。 */
+/** include が参照するテストツリーから、リポジトリ直下相対の全パスを列挙する。 */
 function repoFiles(): string[] {
-  return readdirSync(resolve(process.cwd(), "src"), {
-    recursive: true,
-    encoding: "utf8",
-  }).map((entry) => `src/${entry.replaceAll("\\", "/")}`);
+  return TEST_ROOTS.flatMap((root) =>
+    readdirSync(resolve(process.cwd(), root), {
+      recursive: true,
+      encoding: "utf8",
+    }).map((entry) => `${root}/${entry.replaceAll("\\", "/")}`),
+  );
 }
 
 describe("Vitest がテスト0件収集を成功として通さない (#381)", () => {
@@ -148,13 +153,13 @@ describe("Vitest がテスト0件収集を成功として通さない (#381)", (
       expect(include.length, `${name}: include が空`).toBeGreaterThanOrEqual(1);
 
       const patterns = include.map(includeToRegExp);
-      const matched = files.filter((file) =>
-        patterns.some((pattern) => pattern.test(file)),
-      );
-      expect(
-        matched.length,
-        `${name}: include ${JSON.stringify(include)} に一致するテストファイルが無い(このプロジェクトだけ 0 件でも run 全体は exit 0 になるため個別に検査する)`,
-      ).toBeGreaterThanOrEqual(MIN_TEST_FILES_PER_PROJECT);
+      for (const [index, pattern] of patterns.entries()) {
+        const matched = files.filter((file) => pattern.test(file));
+        expect(
+          matched.length,
+          `${name}: include ${include[index]} に一致するテストファイルが無い(別の include の一致でマスクされないよう、各パターンを個別に検査する)`,
+        ).toBeGreaterThanOrEqual(MIN_TEST_FILES_PER_PROJECT);
+      }
     }
   });
 });
