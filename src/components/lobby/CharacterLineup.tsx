@@ -1,4 +1,5 @@
 import Image from "next/image";
+import { useId } from "react";
 import { characterAccentStyle } from "@/components/game/CharacterPortrait";
 import {
   CHARACTER_PLAYER_IDS,
@@ -7,13 +8,17 @@ import {
 
 /** #711のID→名前→画像→色をSSOTから描画するロビー用lineup。 */
 export default function CharacterLineup() {
+  const nameIdPrefix = useId();
+
   return (
     <section aria-label="四兄弟" className="lobby-characters">
       {CHARACTER_PLAYER_IDS.map((playerId) => {
         const profile = characterProfile(playerId);
+        const nameId = `${nameIdPrefix}-${playerId}-name`;
         return (
           <article
             key={playerId}
+            aria-labelledby={nameId}
             data-character-id={playerId}
             style={characterAccentStyle(playerId)}
             className="lobby-character-card"
@@ -30,7 +35,9 @@ export default function CharacterLineup() {
                 loading={playerId === "p0" ? "eager" : "lazy"}
               />
             </div>
-            <h2 className="lobby-character-name">{profile.defaultName}</h2>
+            <h2 id={nameId} className="lobby-character-name">
+              {profile.defaultName}
+            </h2>
           </article>
         );
       })}
