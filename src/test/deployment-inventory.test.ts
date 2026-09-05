@@ -8,15 +8,30 @@ const DEPLOYMENT_DOC = readFileSync(
 );
 
 describe("deployment inventory evidence", () => {
-  it("keeps the post-#908 main, Vercel deployment, and service-worker evidence aligned", () => {
-    expect(DEPLOYMENT_DOC).toContain("#908 merge後、監査対象commit `278fdd2`");
+  it("keeps the post-#944 main, Vercel deployment, and service-worker evidence aligned", () => {
+    expect(DEPLOYMENT_DOC).toContain("#944 merge後、監査対象commit `81c0313`");
     expect(DEPLOYMENT_DOC).toContain(
-      "`278fdd28af40a03d906cc948b84668929290da29`（#908 merge 後）",
+      "`81c0313c15c816b013b3bd77f76480fc5910ebb3`（#944 merge 後）",
     );
-    expect(DEPLOYMENT_DOC).toContain("GitHub deployment `6277663054`");
+    expect(DEPLOYMENT_DOC).toContain("GitHub deployment `6280529940`");
     expect(DEPLOYMENT_DOC).toContain(
-      "https://four-bros-mahjong-31b5374kd.vercel.app",
+      "https://four-bros-mahjong-mvk5ifyvo.vercel.app",
     );
-    expect(DEPLOYMENT_DOC).toContain("VERSION` は `278fdd28af40`");
+    expect(DEPLOYMENT_DOC).toContain("VERSION` は `81c0313c15c8`");
+  });
+
+  it("keeps the six-screen fallback smoke evidence visible", () => {
+    expect(DEPLOYMENT_DOC).toContain("合計12/12 pass");
+    expect(DEPLOYMENT_DOC).toContain("local Playwright");
+    for (const path of [
+      "/",
+      "/rules",
+      "/settings",
+      "/history",
+      "/game?seed=0",
+      "/game/result",
+    ]) {
+      expect(DEPLOYMENT_DOC).toContain(`\`${path}\``);
+    }
   });
 });
