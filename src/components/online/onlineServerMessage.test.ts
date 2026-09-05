@@ -4,7 +4,7 @@ import { replayJournal } from "@/components/game/gamePersistence";
 import { selectView } from "@/components/game/gameView";
 import { MAX_OMOTE_DORA_COUNT } from "@/domain/dora/dice";
 import { createGame, type EngineState } from "@/domain/game/engine";
-import { COPIES_PER_TILE } from "@/domain/tiles/tileSet";
+import { COPIES_PER_TILE, TOTAL_TILE_COUNT } from "@/domain/tiles/tileSet";
 import {
   LEGACY_1C8CC9_PLAYING_SNAPSHOT,
   LEGACY_1C8CC9_TOP_LEVEL_KEYS,
@@ -12,6 +12,14 @@ import {
 import { RoomManager } from "../../../server/roomManager";
 import {
   MAX_MAINTENANCE_RETRY_AFTER_MS,
+  MAX_SNAPSHOT_HAN,
+  MAX_SNAPSHOT_HAND_NUMBER,
+  MAX_SNAPSHOT_HONBA,
+  MAX_SNAPSHOT_POINT_DELTA,
+  MAX_SNAPSHOT_POINTS,
+  MAX_SNAPSHOT_RESULT_VALUE,
+  MAX_SNAPSHOT_RIICHI_STICKS,
+  MAX_SNAPSHOT_YAKUMAN,
   MAX_VISIBLE_HAND_TILES,
   MAX_WIN_PAYMENT_ENTRIES,
   MAX_WIN_YAKU_ENTRIES,
@@ -89,6 +97,22 @@ function mutableSlotSnapshot(snapshot: OnlineSnapshot): {
       slots: Record<string, { kind: string; player: Record<string, unknown> }>;
     };
   };
+}
+
+type MutableNumericSnapshot = {
+  view: {
+    slots: Record<string, { player: Record<string, unknown> }>;
+    tableInfo: Record<string, unknown>;
+    dora: Record<string, unknown>;
+    result: { players: Array<Record<string, unknown>> } | null;
+  };
+  roundSummary: Record<string, unknown> | null;
+};
+
+function mutableNumericSnapshot(
+  snapshot: OnlineSnapshot,
+): MutableNumericSnapshot {
+  return structuredClone(snapshot) as unknown as MutableNumericSnapshot;
 }
 
 describe("parseOnlineServerMessage", () => {
@@ -328,6 +352,346 @@ describe("parseOnlineServerMessage", () => {
       expect(
         parseOnlineServerMessage({ type: "snapshot", snapshot: candidate }),
       ).toBeNull();
+    }
+  });
+
+  it("bounds untrusted snapshot numeric displays to safe game ranges (#885)", () => {
+    const playing = mutableNumericSnapshot(snapshotFixture());
+    playing.view.slots.self.player.points = MAX_SNAPSHOT_POINTS;
+    playing.view.slots.right.player.points = -MAX_SNAPSHOT_POINTS;
+    playing.view.slots.self.player.pointsDelta = MAX_SNAPSHOT_POINT_DELTA;
+    playing.view.slots.right.player.pointsDelta = -MAX_SNAPSHOT_POINT_DELTA;
+    playing.view.tableInfo.handNumber = MAX_SNAPSHOT_HAND_NUMBER;
+    playing.view.tableInfo.honba = MAX_SNAPSHOT_HONBA;
+    playing.view.tableInfo.riichiSticks = MAX_SNAPSHOT_RIICHI_STICKS;
+    playing.view.tableInfo.remainingLiveTiles = TOTAL_TILE_COUNT;
+    playing.view.tableInfo.doraCount = MAX_OMOTE_DORA_COUNT;
+    playing.view.dora.uraIndicatorCount = MAX_OMOTE_DORA_COUNT;
+    expect(
+      parseOnlineServerMessage({
+        type: "snapshot",
+        snapshot: playing,
+      }),
+    ).not.toBeNull();
+
+    const roundEnd = mutableNumericSnapshot(snapshotForState(firstRoundEnd(0)));
+    const roundSummary = roundEnd.roundSummary;
+    if (!roundSummary) throw new Error("round summary fixture expected");
+    (roundSummary.deltas as Record<string, unknown>).p0 =
+      MAX_SNAPSHOT_POINT_DELTA;
+    roundSummary.residualSticks = {
+      recipientId: "p0",
+      recipientName: "たろう",
+      sticks: MAX_SNAPSHOT_RIICHI_STICKS,
+      points: MAX_SNAPSHOT_POINT_DELTA,
+    };
+    const winDetails = roundSummary.winDetails as Record<string, unknown>;
+    if (!winDetails) throw new Error("win details fixture expected");
+    const yaku = winDetails.yaku as Array<Record<string, unknown>>;
+    if (yaku.length === 0) {
+      yaku.push({ name: "立直", han: 0, yakuman: 0 });
+    }
+    const firstYaku = yaku[0];
+    if (!firstYaku) throw new Error("yaku fixture expected");
+    firstYaku.han = MAX_SNAPSHOT_HAN;
+    firstYaku.yakuman = MAX_SNAPSHOT_YAKUMAN;
+    winDetails.yakuHan = MAX_SNAPSHOT_HAN;
+    winDetails.dora = {
+      omote: MAX_SNAPSHOT_HAN,
+      ura: MAX_SNAPSHOT_HAN,
+      aka: MAX_SNAPSHOT_HAN,
+      gari: MAX_SNAPSHOT_HAN,
+      total: MAX_SNAPSHOT_HAN,
+    };
+    winDetails.totalHan = MAX_SNAPSHOT_HAN;
+    winDetails.yakuman = MAX_SNAPSHOT_YAKUMAN;
+    winDetails.honba = MAX_SNAPSHOT_HONBA;
+    winDetails.riichiSticks = MAX_SNAPSHOT_RIICHI_STICKS;
+    winDetails.payments = [
+      { name: "支払者", amount: MAX_SNAPSHOT_POINT_DELTA },
+    ];
+    winDetails.stickPayout = MAX_SNAPSHOT_POINT_DELTA;
+    expect(
+      parseOnlineServerMessage({
+        type: "snapshot",
+        snapshot: roundEnd,
+      }),
+    ).not.toBeNull();
+
+    const gameEnd = mutableNumericSnapshot(
+      snapshotForState(walkToGameEnd(2024).state),
+    );
+    const result = gameEnd.view.result;
+    if (!result?.players[0]) throw new Error("result fixture expected");
+    result.players[0].rawScore = -MAX_SNAPSHOT_RESULT_VALUE;
+    result.players[0].uma = MAX_SNAPSHOT_RESULT_VALUE;
+    result.players[0].bonus = MAX_SNAPSHOT_RESULT_VALUE;
+    result.players[0].soshiiTotal = MAX_SNAPSHOT_RESULT_VALUE;
+    expect(
+      parseOnlineServerMessage({
+        type: "snapshot",
+        snapshot: gameEnd,
+      }),
+    ).not.toBeNull();
+  });
+
+  it("rejects non-finite, fractional, unsafe, and out-of-range snapshot numbers (#885)", () => {
+    const invalidValues = (maximum: number): number[] => [
+      Number.NaN,
+      Number.POSITIVE_INFINITY,
+      Number.NEGATIVE_INFINITY,
+      1.5,
+      maximum + 1,
+      -maximum - 1,
+      Number.MAX_SAFE_INTEGER + 1,
+    ];
+    type NumericMutation = (
+      snapshot: MutableNumericSnapshot,
+      value: number,
+    ) => void;
+    const expectRejected = (
+      label: string,
+      source: OnlineSnapshot,
+      maximum: number,
+      mutate: NumericMutation,
+    ) => {
+      for (const value of invalidValues(maximum)) {
+        const candidate = mutableNumericSnapshot(source);
+        mutate(candidate, value);
+        expect(
+          parseOnlineServerMessage({
+            type: "snapshot",
+            snapshot: candidate,
+          }),
+          `${label}: ${String(value)}`,
+        ).toBeNull();
+      }
+    };
+
+    const playing = snapshotFixture();
+    expectRejected(
+      "player points",
+      playing,
+      MAX_SNAPSHOT_POINTS,
+      (candidate, value) => {
+        candidate.view.slots.self.player.points = value;
+      },
+    );
+    expectRejected(
+      "points delta",
+      playing,
+      MAX_SNAPSHOT_POINT_DELTA,
+      (candidate, value) => {
+        candidate.view.slots.self.player.pointsDelta = value;
+      },
+    );
+    for (const [label, maximum, mutate] of [
+      [
+        "hand number",
+        MAX_SNAPSHOT_HAND_NUMBER,
+        (candidate: MutableNumericSnapshot, value: number) => {
+          candidate.view.tableInfo.handNumber = value;
+        },
+      ],
+      [
+        "honba",
+        MAX_SNAPSHOT_HONBA,
+        (candidate: MutableNumericSnapshot, value: number) => {
+          candidate.view.tableInfo.honba = value;
+        },
+      ],
+      [
+        "riichi sticks",
+        MAX_SNAPSHOT_RIICHI_STICKS,
+        (candidate: MutableNumericSnapshot, value: number) => {
+          candidate.view.tableInfo.riichiSticks = value;
+        },
+      ],
+      [
+        "remaining live tiles",
+        TOTAL_TILE_COUNT,
+        (candidate: MutableNumericSnapshot, value: number) => {
+          candidate.view.tableInfo.remainingLiveTiles = value;
+        },
+      ],
+      [
+        "dora count",
+        MAX_OMOTE_DORA_COUNT,
+        (candidate: MutableNumericSnapshot, value: number) => {
+          candidate.view.tableInfo.doraCount = value;
+        },
+      ],
+      [
+        "ura dora count",
+        MAX_OMOTE_DORA_COUNT,
+        (candidate: MutableNumericSnapshot, value: number) => {
+          candidate.view.dora.uraIndicatorCount = value;
+        },
+      ],
+    ] as const) {
+      expectRejected(label, playing, maximum, mutate);
+    }
+
+    const roundEnd = snapshotForState(firstRoundEnd(0));
+    expectRejected(
+      "round delta",
+      roundEnd,
+      MAX_SNAPSHOT_POINT_DELTA,
+      (candidate, value) => {
+        const summary = candidate.roundSummary;
+        if (!summary) throw new Error("round summary fixture expected");
+        (summary.deltas as Record<string, unknown>).p0 = value;
+      },
+    );
+    expectRejected(
+      "residual sticks",
+      roundEnd,
+      MAX_SNAPSHOT_RIICHI_STICKS,
+      (candidate, value) => {
+        const summary = candidate.roundSummary;
+        if (!summary) throw new Error("round summary fixture expected");
+        summary.residualSticks = {
+          recipientId: "p0",
+          recipientName: "たろう",
+          sticks: value,
+          points: 0,
+        };
+      },
+    );
+    expectRejected(
+      "residual points",
+      roundEnd,
+      MAX_SNAPSHOT_POINT_DELTA,
+      (candidate, value) => {
+        const summary = candidate.roundSummary;
+        if (!summary) throw new Error("round summary fixture expected");
+        summary.residualSticks = {
+          recipientId: "p0",
+          recipientName: "たろう",
+          sticks: 0,
+          points: value,
+        };
+      },
+    );
+
+    const winMutations: readonly [string, number, NumericMutation][] = [
+      [
+        "yaku han",
+        MAX_SNAPSHOT_HAN,
+        (candidate, value) => {
+          const summary = candidate.roundSummary;
+          if (!summary) throw new Error("round summary fixture expected");
+          const details = summary.winDetails as Record<string, unknown>;
+          details.yaku = [{ name: "立直", han: value, yakuman: 0 }];
+        },
+      ],
+      [
+        "yaku yakuman",
+        MAX_SNAPSHOT_YAKUMAN,
+        (candidate, value) => {
+          const summary = candidate.roundSummary;
+          if (!summary) throw new Error("round summary fixture expected");
+          const details = summary.winDetails as Record<string, unknown>;
+          details.yaku = [{ name: "立直", han: 0, yakuman: value }];
+        },
+      ],
+      [
+        "yaku total",
+        MAX_SNAPSHOT_HAN,
+        (candidate, value) => {
+          const summary = candidate.roundSummary;
+          if (!summary) throw new Error("round summary fixture expected");
+          (summary.winDetails as Record<string, unknown>).yakuHan = value;
+        },
+      ],
+      [
+        "dora breakdown",
+        MAX_SNAPSHOT_HAN,
+        (candidate, value) => {
+          const summary = candidate.roundSummary;
+          if (!summary) throw new Error("round summary fixture expected");
+          (summary.winDetails as Record<string, unknown>).dora = {
+            omote: value,
+            ura: 0,
+            aka: 0,
+            gari: 0,
+            total: 0,
+          };
+        },
+      ],
+      [
+        "total han",
+        MAX_SNAPSHOT_HAN,
+        (candidate, value) => {
+          const summary = candidate.roundSummary;
+          if (!summary) throw new Error("round summary fixture expected");
+          (summary.winDetails as Record<string, unknown>).totalHan = value;
+        },
+      ],
+      [
+        "win yakuman",
+        MAX_SNAPSHOT_YAKUMAN,
+        (candidate, value) => {
+          const summary = candidate.roundSummary;
+          if (!summary) throw new Error("round summary fixture expected");
+          (summary.winDetails as Record<string, unknown>).yakuman = value;
+        },
+      ],
+      [
+        "win honba",
+        MAX_SNAPSHOT_HONBA,
+        (candidate, value) => {
+          const summary = candidate.roundSummary;
+          if (!summary) throw new Error("round summary fixture expected");
+          (summary.winDetails as Record<string, unknown>).honba = value;
+        },
+      ],
+      [
+        "win riichi sticks",
+        MAX_SNAPSHOT_RIICHI_STICKS,
+        (candidate, value) => {
+          const summary = candidate.roundSummary;
+          if (!summary) throw new Error("round summary fixture expected");
+          (summary.winDetails as Record<string, unknown>).riichiSticks = value;
+        },
+      ],
+      [
+        "payment amount",
+        MAX_SNAPSHOT_POINT_DELTA,
+        (candidate, value) => {
+          const summary = candidate.roundSummary;
+          if (!summary) throw new Error("round summary fixture expected");
+          (summary.winDetails as Record<string, unknown>).payments = [
+            { name: "支払者", amount: value },
+          ];
+        },
+      ],
+      [
+        "stick payout",
+        MAX_SNAPSHOT_POINT_DELTA,
+        (candidate, value) => {
+          const summary = candidate.roundSummary;
+          if (!summary) throw new Error("round summary fixture expected");
+          (summary.winDetails as Record<string, unknown>).stickPayout = value;
+        },
+      ],
+    ];
+    for (const [label, maximum, mutate] of winMutations) {
+      expectRejected(label, roundEnd, maximum, mutate);
+    }
+
+    const gameEnd = snapshotForState(walkToGameEnd(2024).state);
+    for (const field of ["rawScore", "uma", "bonus", "soshiiTotal"] as const) {
+      expectRejected(
+        `result ${field}`,
+        gameEnd,
+        MAX_SNAPSHOT_RESULT_VALUE,
+        (candidate, value) => {
+          const result = candidate.view.result;
+          if (!result?.players[0]) throw new Error("result fixture expected");
+          result.players[0][field] = value;
+        },
+      );
     }
   });
 
