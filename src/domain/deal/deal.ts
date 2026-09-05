@@ -8,6 +8,7 @@
 
 import type { Tile } from "../tiles/tile";
 import type { Wall } from "../wall/wall";
+import { WallEmptyError } from "../wall/wall";
 
 /** 各家の初期手牌枚数(サンマ標準: 親も含め13枚。親の第1ツモは打牌フェーズで行う)。 */
 export const STARTING_HAND_SIZE = 13;
@@ -26,9 +27,15 @@ export const SEATED_PLAYER_COUNT = 3;
  * 返り値の各手牌を席へ割り当てる想定。
  *
  * @returns 長さ {@link SEATED_PLAYER_COUNT} の配列。各要素が1人分の手牌(13枚)。
- * @throws WallEmptyError ライブ壁の枚数が足りないとき(`Wall.draw` が送出)。
+ * @throws WallEmptyError ライブ壁の枚数が足りないとき。
  */
 export function dealStartingHands(wall: Wall): Tile[][] {
+  const requiredTiles = SEATED_PLAYER_COUNT * STARTING_HAND_SIZE;
+  // Draw only after confirming the complete deal fits, so failure is atomic.
+  if (wall.remainingLiveTiles < requiredTiles) {
+    throw new WallEmptyError("live");
+  }
+
   const hands: Tile[][] = Array.from({ length: SEATED_PLAYER_COUNT }, () => []);
   for (let round = 0; round < STARTING_HAND_SIZE; round++) {
     for (const hand of hands) {

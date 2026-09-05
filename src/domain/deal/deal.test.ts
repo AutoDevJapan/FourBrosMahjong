@@ -79,4 +79,15 @@ describe("dealStartingHands(配牌 / スペック2 2.1)", () => {
     expect(wall.remainingLiveTiles).toBe(38);
     expect(() => dealStartingHands(wall)).toThrow(WallEmptyError);
   });
+
+  it("配牌に失敗したときは壁を消費しない", () => {
+    const wall = new Wall(buildTileSet(), 70);
+    const liveBefore = [...wall.liveWall];
+    const deadBefore = [...wall.deadWall];
+
+    expect(() => dealStartingHands(wall)).toThrow(WallEmptyError);
+
+    expect(wall.liveWall).toEqual(liveBefore);
+    expect(wall.deadWall).toEqual(deadBefore);
+  });
 });
