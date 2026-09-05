@@ -42,7 +42,7 @@ const pon = (tile: Tile): Meld => ({
 });
 
 /** 和了形・鳴きと無縁の13枚(すべて種類がバラバラ)。 */
-const JUNK = "2m 4m 6m 8m 2s 4s 6s 8s 2p 4p 6p 8p 1s";
+const JUNK = "2p 4p 6p 8p 2s 4s 6s 8s 1p 3p 5p 7p 1s";
 
 function discardPending(overrides: Partial<Pending & object> = {}): Pending {
   return {
@@ -378,8 +378,8 @@ describe("engine: パオ(責任払い)の結線(#284 / スペック3 3.3)", () =
     hand.melds.east = [kan("5z 5z 5z 5z"), kan("6z 6z 6z 6z")];
     hand.melds.south = [];
     hand.melds.west = [];
-    // 中の暗槓後は 123m + 9m 単騎(四暗刻を併発しない形)。
-    hand.hands.east = parseTiles("7z 7z 7z 1m 2m 3m 9m");
+    // 中の暗槓後は 123p + 9m 単騎(四暗刻を併発しない形)。
+    hand.hands.east = parseTiles("7z 7z 7z 1p 2p 3p 9m");
     hand.hands.south = parseTiles(JUNK);
     hand.hands.west = parseTiles(JUNK);
     hand.drawn = { tile: parseTile("7z"), source: "live" };

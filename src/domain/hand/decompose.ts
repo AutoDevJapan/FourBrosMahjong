@@ -10,7 +10,13 @@
  */
 
 import type { Suit, Tile } from "../tiles/tile";
-import { isNumberSuit, isYaochu, sameKind, tileKey } from "./tile-identity";
+import {
+  isNumberSuit,
+  isValidTileKind,
+  isYaochu,
+  sameKind,
+  tileKey,
+} from "./tile-identity";
 
 /** 面子/対子の種別(分解結果の内部表現)。 */
 type MentsuKind = "sequence" | "triplet" | "pair" | "quad";
@@ -232,6 +238,27 @@ export interface MeldInput {
 }
 
 /**
+ * 手牌入力が牌カタログ上の牌種だけで構成されているかを検証する。
+ *
+ * `Tile` は実行時検証を持たないため、JSON や型アサーション経由で
+ * サンマに存在しない萬子 2〜8 や範囲外の字牌が届き得る。これを `toCounts`
+ * へ渡すと、標準形だけが不正牌を通常の牌として扱い、和了・役満を誤って
+ * 受理してしまう。構造チェックとカタログチェックを分解の入口で共通化する。
+ */
+function isValidTileInput(tile: Tile): boolean {
+  return (
+    tile !== null &&
+    typeof tile === "object" &&
+    typeof tile.suit === "string" &&
+    isValidTileKind(tile)
+  );
+}
+
+function hasValidTileInputs(tiles: readonly Tile[]): boolean {
+  return Array.isArray(tiles) && tiles.every(isValidTileInput);
+}
+
+/**
  * 副露入力が1組のポン/カンとして成立する形状かを検証する。
  *
  * `MeldInput` は公開された構造型なので、JSON や型アサーション経由で
@@ -255,12 +282,7 @@ function isValidMeldInput(meld: MeldInput): boolean {
   const expectedSize = meld.isKan ? 4 : 3;
   if (meld.tiles.length !== expectedSize) return false;
 
-  const isTileShape = (tile: Tile): boolean =>
-    tile !== null &&
-    typeof tile === "object" &&
-    typeof tile.suit === "string" &&
-    Number.isInteger(tile.rank);
-  if (!meld.tiles.every(isTileShape)) return false;
+  if (!meld.tiles.every(isValidTileInput)) return false;
 
   const first = meld.tiles[0];
   return (
@@ -280,7 +302,9 @@ export function decomposeStandard(
   concealedTiles: readonly Tile[],
   melds: readonly MeldInput[],
 ): StandardForm[] {
-  if (!hasValidMeldInputs(melds)) return [];
+  if (!hasValidTileInputs(concealedTiles) || !hasValidMeldInputs(melds)) {
+    return [];
+  }
   const neededMelds = 4 - melds.length;
   if (neededMelds < 0) return [];
   const meldMentsu = melds.map((m) =>
@@ -308,6 +332,7 @@ export function decomposeSevenPairs(
   melds: readonly MeldInput[],
 ): SevenPairsForm | null {
   if (
+    !hasValidTileInputs(concealedTiles) ||
     !hasValidMeldInputs(melds) ||
     melds.length > 0 ||
     concealedTiles.length !== 14
@@ -335,6 +360,7 @@ export function decomposeThirteenOrphans(
   melds: readonly MeldInput[],
 ): ThirteenOrphansForm | null {
   if (
+    !hasValidTileInputs(concealedTiles) ||
     !hasValidMeldInputs(melds) ||
     melds.length > 0 ||
     concealedTiles.length !== 14
@@ -371,7 +397,8 @@ export function decomposeAll(
   concealedTiles: readonly Tile[],
   melds: readonly MeldInput[],
 ): WinForm[] {
-  if (!hasValidMeldInputs(melds)) return [];
+  if (!hasValidTileInputs(concealedTiles) || !hasValidMeldInputs(melds))
+    return [];
   const forms: WinForm[] = [...decomposeStandard(concealedTiles, melds)];
   const seven = decomposeSevenPairs(concealedTiles, melds);
   if (seven) forms.push(seven);
