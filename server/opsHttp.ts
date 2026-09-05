@@ -87,6 +87,20 @@ function rejectUnexpectedBody(
   }
   const contentLength = request.headers["content-length"];
   const transferEncoding = request.headers["transfer-encoding"];
+  // HTTP/1.0 permits a request body to be delimited by connection close when
+  // neither framing header is present. The handler runs before that body has
+  // necessarily arrived, so accepting the request would let an uninspected
+  // body reach an at-most-once ops mutation. Reject this ambiguous framing
+  // instead of trying to buffer an unbounded close-delimited stream.
+  if (
+    request.httpVersion === "1.0" &&
+    contentLength === undefined &&
+    transferEncoding === undefined
+  ) {
+    request.resume();
+    writeOpsJson(response, 400, { ok: false, error: "body_not_allowed" });
+    return true;
+  }
   if (
     transferEncoding !== undefined ||
     (contentLength !== undefined && contentLength !== "0")

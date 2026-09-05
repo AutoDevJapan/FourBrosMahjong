@@ -50,6 +50,7 @@ function testRequest(
     readonly authorization?: string;
     readonly authorizationValues?: readonly string[];
     readonly headers?: Readonly<Record<string, string>>;
+    readonly httpVersion?: string;
   } = {},
 ): TestRequest {
   const resume = vi.fn();
@@ -57,6 +58,7 @@ function testRequest(
     resume,
     value: {
       method,
+      httpVersion: options.httpVersion ?? "1.1",
       headers: {
         ...(options.authorization === undefined
           ? {}
@@ -252,6 +254,18 @@ describe("handleOpsHttpRequest", () => {
       headers: { "transfer-encoding": "chunked" },
     });
     expect(chunked.response.state.status).toBe(400);
+    expect(deps.drainController.status().phase).toBe("accepting");
+
+    const closeDelimited = invoke(ONLINE_OPS_DRAIN_PATH, "POST", deps, {
+      authorization: `Bearer ${TOKEN}`,
+      authorizationValues: [`Bearer ${TOKEN}`],
+      httpVersion: "1.0",
+    });
+    expect(closeDelimited.response.state.status).toBe(400);
+    expect(closeDelimited.response.state.body).toBe(
+      JSON.stringify({ ok: false, error: "body_not_allowed" }),
+    );
+    expect(closeDelimited.request.resume).toHaveBeenCalledOnce();
     expect(deps.drainController.status().phase).toBe("accepting");
   });
 
