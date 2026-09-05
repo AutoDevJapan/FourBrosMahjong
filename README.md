@@ -167,7 +167,7 @@ pnpm test:e2e:ui    # Playwright UI モード(対話的にテストを選択・�
 ## 開発時の注意
 
 - 詳細な開発ガイドライン(ツール構成・コーディング規約など)は [`CLAUDE.md`](./CLAUDE.md) を参照してください。
-- フロントエンドは Vercel の Git Integration と連携済みで、PR Preview と `dev` / `stg` / `main`(`prd`)の昇格フローを運用しています。環境ごとの状態・URL・手順は [`docs/デプロイ環境運用.md`](./docs/デプロイ環境運用.md) を参照してください。オンライン対戦バックエンドは Railway の `server/index.ts` で動かし、Vercel の `NEXT_PUBLIC_ONLINE_WS_URL` から `/ws` に接続します。
+- フロントエンドは Vercel の Git Integration と連携済みで、PR Preview と `main`(`prd`) の自動デプロイを運用しています。`dev` / `stg` は owner による topology 決定と ref/deployment の確認後に実施する目標昇格フローとして定義しています。環境ごとの状態・URL・手順は [`docs/デプロイ環境運用.md`](./docs/デプロイ環境運用.md) を参照してください。オンライン対戦バックエンドは Railway の `server/index.ts` で動かし、Vercel の `NEXT_PUBLIC_ONLINE_WS_URL` から `/ws` に接続します。
 
 ### オンライン対戦の設定
 
