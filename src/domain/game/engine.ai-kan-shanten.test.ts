@@ -2,7 +2,8 @@ import { describe, expect, it } from "vitest";
 import { shanten } from "@/domain/game/ai";
 import { parseTile, parseTiles } from "@/domain/hand/notation";
 import { sameKind } from "@/domain/hand/tile-identity";
-import type { Tile } from "@/domain/tiles/tile";
+import { buildTileSet } from "@/domain/tiles/tileSet";
+import { Wall } from "@/domain/wall/wall";
 import { createGame, discard, type EngineState, type SeatKey } from "./engine";
 
 /**
@@ -48,22 +49,36 @@ function setSeat(state: EngineState, seat: SeatKey, hand: string): void {
  * 次に引かれる牌を固定する。ライブ壁から該当種別を先頭へ移動するだけなので、
  * 山の多重集合は変化しない(牌を増減させない)。
  *
- * `Wall` の内部実装に2点依存している(いずれも `src/domain/wall/wall.ts`):
- *  ① `liveWall` getter が内部配列を**コピーせずそのまま返す**(コピーを返す実装に
- *     変わると本関数は黙って no-op になり、テストが偽陽性で通る)。
- *  ② `draw()` が先頭(`shift`)から引く。
- * `readonly` 契約を型アサーションで破っているのはこのため。山の順序を注入できる
- * seam が `Wall` / `createGame` に入ったら、そちらへ移行すること。
+ * `Wall` の公開スナップショットと `draw()` が先頭(`shift`)から引く契約を使う。
+ * 壁の内部配列を直接変更せず、並べ替えた全108枚からテスト用の `Wall` を再構築する。
+ * `EngineState` の `wall` は実行時には差し替え可能だが型上は readonly のため、
+ * ここでは `Reflect.set` の結果を確認してテスト用fixtureを明示的に差し替える。
  */
 function stackNextDraw(state: EngineState, notation: string): void {
   const h = state.hand;
   if (h === null) throw new Error("no hand");
   const want = parseTile(notation);
-  const live = h.wall.liveWall as Tile[];
+  const live = [...h.wall.liveWall];
   const index = live.findIndex((t) => sameKind(t, want));
   if (index < 0) throw new Error(`live wall has no ${notation}`);
   const [tile] = live.splice(index, 1);
   live.unshift(tile);
+  const dead = h.wall.deadWall;
+  const remaining = buildTileSet();
+  for (const wallTile of [...live, ...dead]) {
+    const index = remaining.findIndex(
+      (candidate) =>
+        sameKind(candidate, wallTile) && candidate.isRed === wallTile.isRed,
+    );
+    if (index < 0) throw new Error("failed to account for consumed tiles");
+    remaining.splice(index, 1);
+  }
+  const rebuilt = new Wall([...live, ...remaining, ...dead], dead.length);
+  for (let index = 0; index < remaining.length; index += 1) {
+    rebuilt.draw();
+  }
+  const replaced = Reflect.set(h, "wall", rebuilt);
+  if (!replaced) throw new Error("failed to replace test wall");
 }
 
 /** 自家(東)の打牌待ち局面を作る。打牌すると南(AI)の手番になる。 */
