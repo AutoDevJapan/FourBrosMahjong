@@ -872,15 +872,23 @@ export function createOnlineServer(
       return;
     }
     if (path === "/readyz") {
-      const ready =
-        observeDrainStatus().phase === "accepting" &&
-        !opsConfiguration.readinessBlocked &&
-        // An empty allowlist rejects every WebSocket handshake. Do not report
-        // a traffic-serving instance as ready while its online boundary is
-        // unusable due to this fail-closed configuration. Invalid entries such
-        // as '*' or an origin with a path likewise cannot match a browser
-        // Origin header and must not make the instance appear ready.
-        configuredOriginsAreValid();
+      let ready = false;
+      try {
+        ready =
+          observeDrainStatus().phase === "accepting" &&
+          !opsConfiguration.readinessBlocked &&
+          // An empty allowlist rejects every WebSocket handshake. Do not report
+          // a traffic-serving instance as ready while its online boundary is
+          // unusable due to this fail-closed configuration. Invalid entries such
+          // as '*' or an origin with a path likewise cannot match a browser
+          // Origin header and must not make the instance appear ready.
+          configuredOriginsAreValid();
+      } catch {
+        // Readiness is a fail-closed signal. A transient failure in the
+        // internal drain/aggregate observation must return 503 rather than
+        // escape the HTTP handler and destabilize the process.
+        ready = false;
+      }
       writeJson(response, ready ? 200 : 503, { ok: ready });
       return;
     }
