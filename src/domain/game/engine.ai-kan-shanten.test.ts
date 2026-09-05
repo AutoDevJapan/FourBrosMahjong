@@ -73,7 +73,9 @@ function stackNextDraw(state: EngineState, notation: string): void {
     if (index < 0) throw new Error("failed to account for consumed tiles");
     remaining.splice(index, 1);
   }
-  const rebuilt = new Wall([...live, ...remaining, ...dead], dead.length);
+  // 消費済みplaceholderを先頭に置き、同じ枚数だけ引いてから現在のliveを
+  // そのまま次ツモ位置に残す。
+  const rebuilt = new Wall([...remaining, ...live, ...dead], dead.length);
   for (let index = 0; index < remaining.length; index += 1) {
     rebuilt.draw();
   }
