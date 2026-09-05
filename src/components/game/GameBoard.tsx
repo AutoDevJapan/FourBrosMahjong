@@ -112,6 +112,8 @@ export interface GameBoardProps {
   readonly interactionDisabled?: boolean;
   /** 操作停止の理由。failed では自動再接続待ちではなく再試行を案内する。 */
   readonly interactionDisabledReason?: "reconnecting" | "failed";
+  /** メンテナンス中など、終局後の新しい半荘開始だけを停止する。 */
+  readonly newGameDisabled?: boolean;
 }
 
 export default function GameBoard({
@@ -120,6 +122,7 @@ export default function GameBoard({
   resultButtonRef,
   interactionDisabled = false,
   interactionDisabledReason = "reconnecting",
+  newGameDisabled = false,
 }: GameBoardProps) {
   const {
     view,
@@ -356,6 +359,7 @@ export default function GameBoard({
           label: "新しい半荘を開始",
           icon: "新",
           onClick: controls.newGame,
+          disabled: newGameDisabled,
         },
       ];
     }
@@ -470,6 +474,7 @@ export default function GameBoard({
     router,
     resultHref,
     riichiArmed,
+    newGameDisabled,
   ]);
 
   const hint = useMemo(() => {
@@ -491,7 +496,9 @@ export default function GameBoard({
       // 残存供託の帰属(#282)も併記し、供託カウント0・持ち点・デルタの整合を検算可能にする。
       const label = roundSummary ? `${roundSummary.label}。` : "";
       const nextStep = isHost
-        ? "結果を確認するか、新しい半荘を開始できます。"
+        ? newGameDisabled
+          ? "結果を確認できます。メンテナンス中のため、新しい半荘は開始できません。"
+          : "結果を確認するか、新しい半荘を開始できます。"
         : `結果を確認できます。${HOST_CONTROL_WAITING_MESSAGE}`;
       return `${label}${residualSticksNote(roundSummary)}半荘終了。${nextStep}`;
     }
@@ -534,6 +541,7 @@ export default function GameBoard({
     pending,
     roundSummary,
     riichiArmed,
+    newGameDisabled,
   ]);
 
   const announcement = useMemo(() => {

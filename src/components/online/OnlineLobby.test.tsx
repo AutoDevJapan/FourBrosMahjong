@@ -24,11 +24,13 @@ vi.mock("@/components/game/GameBoard", () => ({
   default: ({
     interactionDisabled,
     interactionDisabledReason,
+    newGameDisabled,
     onResult,
     resultButtonRef,
   }: {
     interactionDisabled?: boolean;
     interactionDisabledReason?: "reconnecting" | "failed";
+    newGameDisabled?: boolean;
     onResult?: () => void;
     resultButtonRef?: RefObject<HTMLButtonElement | null>;
   }) => (
@@ -36,6 +38,7 @@ vi.mock("@/components/game/GameBoard", () => ({
       data-testid="game-board"
       data-interaction-disabled={String(interactionDisabled)}
       data-interaction-disabled-reason={String(interactionDisabledReason)}
+      data-new-game-disabled={String(newGameDisabled)}
     >
       対局盤
       {onResult ? (
@@ -1639,6 +1642,10 @@ describe("OnlineLobby maintenance client-first (#726)", () => {
     expect(screen.getByTestId("game-board")).toHaveAttribute(
       "data-interaction-disabled",
       "false",
+    );
+    expect(screen.getByTestId("game-board")).toHaveAttribute(
+      "data-new-game-disabled",
+      "true",
     );
 
     act(() => socket.serverClose(1012, "service restart"));

@@ -119,6 +119,7 @@ function renderOnlineBoard(
   state: EngineState,
   you: "p0" | "p1",
   hostId: "p0" | "p1" = "p0",
+  boardProps: Pick<GameBoardProps, "newGameDisabled"> = {},
 ) {
   const socket = { readyState: 1, send: vi.fn() } as unknown as WebSocket;
   return render(
@@ -126,7 +127,7 @@ function renderOnlineBoard(
       socket={socket}
       snapshot={onlineSnapshot(state, you, hostId)}
     >
-      <GameBoard />
+      <GameBoard {...boardProps} />
     </OnlineGameProvider>,
   );
 }
@@ -770,6 +771,21 @@ describe("GameBoard online host handoff controls(#681 / #678)", () => {
         .getAllByRole("button", { name: "新しい半荘を開始" })
         .some((button) => !button.hasAttribute("disabled")),
     ).toBe(true);
+  });
+
+  it("gameEnd のhostは新半荘停止中にボタンを無効化し、理由を案内する", () => {
+    renderOnlineBoard(finishedGame(), "p0", "p0", {
+      newGameDisabled: true,
+    });
+
+    expect(
+      screen
+        .getAllByRole("button", { name: "新しい半荘を開始" })
+        .every((button) => button.hasAttribute("disabled")),
+    ).toBe(true);
+    expect(
+      screen.getAllByText(/メンテナンス中のため、新しい半荘は開始できません。/),
+    ).toHaveLength(2);
   });
 });
 
