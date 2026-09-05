@@ -310,6 +310,26 @@ function isTileArray(
   return Array.isArray(value) && value.length <= maximum && value.every(isTile);
 }
 
+/** `selectView` が生成する表/裏ドラの枚数関係を表示境界でも維持する。 */
+function hasConsistentDoraCounts(
+  table: Record<string, unknown>,
+  dora: Record<string, unknown>,
+): boolean {
+  const indicators = dora.indicators;
+  const uraIndicatorCount = dora.uraIndicatorCount;
+  const uraIndicators = dora.uraIndicators;
+  return (
+    Array.isArray(indicators) &&
+    indicators.length === table.doraCount &&
+    (uraIndicatorCount === undefined ||
+      uraIndicatorCount === table.doraCount) &&
+    (uraIndicators === undefined ||
+      (typeof uraIndicatorCount === "number" &&
+        Array.isArray(uraIndicators) &&
+        uraIndicators.length === uraIndicatorCount))
+  );
+}
+
 function isPlayerStatus(value: unknown): boolean {
   return (
     isRecord(value) &&
@@ -516,6 +536,7 @@ function isGameView(value: unknown, you: OnlineSnapshot["you"]): boolean {
       )) &&
     (dora.uraIndicators === undefined ||
       isTileArray(dora.uraIndicators, MAX_DORA_INDICATOR_COUNT)) &&
+    hasConsistentDoraCounts(table, dora) &&
     (value.result === null || isGameResult(value.result))
   );
 }
