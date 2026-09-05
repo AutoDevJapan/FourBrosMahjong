@@ -86,7 +86,12 @@ type RedDoraCandidate = Pick<Tile, "suit" | "rank"> &
  * isRedDora({ suit: "man", rank: 1, isRed: true }); // false(赤5萬は存在しない)
  */
 export function isRedDora(tile: RedDoraCandidate): boolean {
-  return tile.isRed === true && isRedFiveKind(tile.suit, tile.rank);
+  return (
+    tile !== null &&
+    tile !== undefined &&
+    tile.isRed === true &&
+    isRedFiveKind(tile.suit, tile.rank)
+  );
 }
 
 /**
