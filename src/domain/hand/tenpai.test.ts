@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import type { Tile } from "../tiles/tile";
 import type { MeldInput } from "./decompose";
 import { parseTiles } from "./notation";
 import { isTenpai, waitingTiles } from "./tenpai";
@@ -46,5 +47,41 @@ describe("waitingTiles", () => {
   it("ノーテンは空配列/false", () => {
     expect(waitKeys("123p 456p 789p 147s 9s")).toEqual([]);
     expect(isTenpai(parseTiles("123p 456p 789p 147s 9s"))).toBe(false);
+  });
+
+  it("不正な門前牌要素は例外にせず空の待ちを返す", () => {
+    const malformedTiles = [null] as unknown as Tile[];
+
+    expect(waitingTiles(malformedTiles)).toEqual([]);
+    expect(isTenpai(malformedTiles)).toBe(false);
+  });
+
+  it("不正な副露牌コンテナ/要素は例外にせず空の待ちを返す", () => {
+    const malformedMelds = [
+      { tiles: null, isKan: false, concealed: false },
+    ] as unknown as MeldInput[];
+    const malformedMeldTile = [
+      { tiles: [null], isKan: false, concealed: false },
+    ] as unknown as MeldInput[];
+
+    expect(waitingTiles([], malformedMelds)).toEqual([]);
+    expect(isTenpai([], malformedMelds)).toBe(false);
+    expect(waitingTiles([], malformedMeldTile)).toEqual([]);
+    expect(isTenpai([], malformedMeldTile)).toBe(false);
+  });
+
+  it("疎配列の穴も不正な要素として例外にせず空の待ちを返す", () => {
+    const sparseTiles = new Array(1) as unknown as Tile[];
+    const sparseMelds = new Array(1) as unknown as MeldInput[];
+    const sparseMeldTile = [
+      { tiles: new Array(1), isKan: false, concealed: false },
+    ] as unknown as MeldInput[];
+
+    expect(waitingTiles(sparseTiles)).toEqual([]);
+    expect(isTenpai(sparseTiles)).toBe(false);
+    expect(waitingTiles([], sparseMelds)).toEqual([]);
+    expect(isTenpai([], sparseMelds)).toBe(false);
+    expect(waitingTiles([], sparseMeldTile)).toEqual([]);
+    expect(isTenpai([], sparseMeldTile)).toBe(false);
   });
 });
