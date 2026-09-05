@@ -436,7 +436,8 @@ describe("parseOnlineServerMessage", () => {
   });
 
   it("bounds untrusted snapshot numeric displays to safe game ranges (#885)", () => {
-    const playing = mutableNumericSnapshot(snapshotFixture());
+    const playingSource = snapshotFixture();
+    const playing = mutableNumericSnapshot(playingSource);
     playing.view.slots.self.player.points = MAX_SNAPSHOT_POINTS;
     playing.view.slots.right.player.points = -MAX_SNAPSHOT_POINTS;
     playing.view.slots.self.player.pointsDelta = MAX_SNAPSHOT_POINT_DELTA;
@@ -446,6 +447,12 @@ describe("parseOnlineServerMessage", () => {
     playing.view.tableInfo.riichiSticks = MAX_SNAPSHOT_RIICHI_STICKS;
     playing.view.tableInfo.remainingLiveTiles = TOTAL_TILE_COUNT;
     playing.view.tableInfo.doraCount = MAX_OMOTE_DORA_COUNT;
+    const doraIndicator = playingSource.view.dora.indicators[0];
+    if (!doraIndicator) throw new Error("dora indicator fixture expected");
+    playing.view.dora.indicators = Array.from(
+      { length: MAX_OMOTE_DORA_COUNT },
+      () => ({ ...doraIndicator }),
+    );
     playing.view.dora.uraIndicatorCount = MAX_OMOTE_DORA_COUNT;
     expect(
       parseOnlineServerMessage({
@@ -513,6 +520,37 @@ describe("parseOnlineServerMessage", () => {
         snapshot: gameEnd,
       }),
     ).not.toBeNull();
+  });
+
+  it("rejects snapshots with inconsistent dora metadata counts", () => {
+    const snapshot = snapshotFixture();
+    const doraIndicator = snapshot.view.dora.indicators[0];
+    if (!doraIndicator) throw new Error("dora indicator fixture expected");
+
+    const mismatchedOmoteCount = mutableNumericSnapshot(snapshot);
+    mismatchedOmoteCount.view.tableInfo.doraCount =
+      snapshot.view.tableInfo.doraCount === 0 ? 1 : 0;
+
+    const mismatchedUraCount = mutableNumericSnapshot(snapshot);
+    mismatchedUraCount.view.dora.uraIndicatorCount =
+      snapshot.view.tableInfo.doraCount === 0 ? 1 : 0;
+
+    const mismatchedRevealedUra = mutableNumericSnapshot(snapshot);
+    const uraCount = snapshot.view.dora.uraIndicatorCount ?? 0;
+    mismatchedRevealedUra.view.dora.uraIndicators = Array.from(
+      { length: uraCount === 0 ? 1 : 0 },
+      () => ({ ...doraIndicator }),
+    );
+
+    for (const candidate of [
+      mismatchedOmoteCount,
+      mismatchedUraCount,
+      mismatchedRevealedUra,
+    ]) {
+      expect(
+        parseOnlineServerMessage({ type: "snapshot", snapshot: candidate }),
+      ).toBeNull();
+    }
   });
 
   it("rejects non-finite, fractional, unsafe, and out-of-range snapshot numbers (#885)", () => {
