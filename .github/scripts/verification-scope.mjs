@@ -43,6 +43,8 @@ const DOCUMENTATION = [/^docs\//, /^documents\//, /\.md$/];
 export const TEST_INPUT_PATHS = [
   // src/app/rules/rules-doc.test.ts が内容を読み、/rules の記載と突き合わせる。
   "docs/四兄弟麻雀ルール.md",
+  // src/test/deployment-inventory.test.ts が公開 deployment の証跡を検証する。
+  "docs/デプロイ環境運用.md",
   // src/test/playwright-projects.test.ts が playwright install 手順を検証する。
   "README.md",
   // src/test/release-guard.test.ts が current package version の release section を検証する。
