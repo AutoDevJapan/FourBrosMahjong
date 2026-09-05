@@ -20,4 +20,10 @@ describe("not-found", () => {
     expect(metadata.title).toBe("ページが見つかりません");
     expect(metadata.robots).toEqual({ index: false, follow: false });
   });
+
+  it("404自身はcanonical・OGP・Twitter metadataを追加しない", () => {
+    expect(metadata.alternates).toBeUndefined();
+    expect(metadata.openGraph).toBeUndefined();
+    expect(metadata.twitter).toBeUndefined();
+  });
 });
