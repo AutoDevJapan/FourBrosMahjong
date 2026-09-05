@@ -79,6 +79,19 @@ describe("和了形の判定", () => {
       }),
     ).toBeNull();
   });
+
+  it("和了牌が門前手牌に含まれない入力を和了として受理しない", () => {
+    // 完成済みの手に無関係な牌を winningTile として渡しても、
+    // 門前ツモなどの文脈役だけで和了扱いになってはならない。
+    const ctx: WinContext = {
+      concealedTiles: parseTiles("234p 567p 234s 678s 99p"),
+      winningTile: parseTile("1z"),
+      winType: "tsumo",
+    };
+
+    expect(analyzeWin(ctx)).toBeNull();
+    expect(isWinningHand(ctx)).toBe(false);
+  });
 });
 
 describe("通常役の判定", () => {
