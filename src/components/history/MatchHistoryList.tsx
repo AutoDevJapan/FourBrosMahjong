@@ -362,7 +362,13 @@ export default function MatchHistoryList() {
     );
   }
 
-  const { entries } = historyView;
+  // 保存配列は書き込み完了順に先頭へ追加されるため、別タブの lock 待ちなどで
+  // 終了日時と順番が入れ替わり得る。画面の「新しい順」という契約は実際の終了日時で
+  // 決め、同時刻は保存順を保つ(安定ソート)ことで既存の並びも不必要に変えない。
+  const entries = [...historyView.entries].sort((a, b) => {
+    if (a.finishedAt === b.finishedAt) return 0;
+    return a.finishedAt > b.finishedAt ? -1 : 1;
+  });
 
   return (
     <div className="history-content flex flex-col gap-6">

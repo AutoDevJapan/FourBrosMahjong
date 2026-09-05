@@ -149,6 +149,25 @@ describe("MatchHistoryList (#293)", () => {
     expect(items[0].querySelector(".history-breakdown-card")).not.toBeNull();
   });
 
+  it("保存完了順と終了日時が異なっても終了日時の新しい順に表示する", async () => {
+    // lock待ちなどで古い対局が新しい対局より後に保存されると、保存配列の先頭は
+    // 終了日時の順にならない。このケースでも画面上の「新しい順」を維持する。
+    appendHistory(window.localStorage, entry(1, 1_753_100_000_000, "三郎"));
+    appendHistory(window.localStorage, entry(2, 1_753_000_000_000, "四郎"));
+
+    render(<MatchHistoryList />);
+
+    const list = await screen.findByRole("list", {
+      name: "保存された半荘結果",
+    });
+    const items = Array.from(list.querySelectorAll(":scope > li"));
+    expect(items).toHaveLength(2);
+    expect(items[0]).toHaveTextContent(formatted(1_753_100_000_000));
+    expect(items[0]).toHaveTextContent("1位 三郎");
+    expect(items[1]).toHaveTextContent(formatted(1_753_000_000_000));
+    expect(items[1]).toHaveTextContent("1位 四郎");
+  });
+
   it("2段階確認つきで全件削除でき、キャンセルもできる", async () => {
     appendHistory(window.localStorage, entry(1, 1_753_000_000_000));
     window.sessionStorage.setItem(PENDING_HISTORY_KEY, "pending");
