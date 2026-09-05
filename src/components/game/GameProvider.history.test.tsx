@@ -32,10 +32,6 @@ const originalLocalStorageDescriptor = Object.getOwnPropertyDescriptor(
   window,
   "localStorage",
 );
-const originalSessionStorageDescriptor = Object.getOwnPropertyDescriptor(
-  window,
-  "sessionStorage",
-);
 
 const originalLocksDescriptor = Object.getOwnPropertyDescriptor(
   navigator,
@@ -54,29 +50,18 @@ function blockLocalStorage() {
 /** localStorageとStorage prototypeを共有するjsdomでも、sessionStorageだけを失敗させる。 */
 function failSessionStorageWrites(): () => void {
   const storage = window.sessionStorage;
-  Object.defineProperty(window, "sessionStorage", {
-    configurable: true,
-    value: {
-      get length() {
-        return storage.length;
-      },
-      clear: () => storage.clear(),
-      getItem: (key: string) => storage.getItem(key),
-      key: (index: number) => storage.key(index),
-      removeItem: (key: string) => storage.removeItem(key),
-      setItem: () => {
+  const storagePrototype = Object.getPrototypeOf(storage) as Storage;
+  const originalSetItem = storagePrototype.setItem;
+  const setItem = vi
+    .spyOn(storagePrototype, "setItem")
+    .mockImplementation(function (this: Storage, key, value) {
+      if (this === storage) {
         throw new DOMException("Storage quota exceeded", "QuotaExceededError");
-      },
-    } satisfies Storage,
-  });
+      }
+      return originalSetItem.call(this, key, value);
+    });
   return () => {
-    if (originalSessionStorageDescriptor) {
-      Object.defineProperty(
-        window,
-        "sessionStorage",
-        originalSessionStorageDescriptor,
-      );
-    }
+    setItem.mockRestore();
   };
 }
 
@@ -187,13 +172,6 @@ afterEach(() => {
       window,
       "localStorage",
       originalLocalStorageDescriptor,
-    );
-  }
-  if (originalSessionStorageDescriptor) {
-    Object.defineProperty(
-      window,
-      "sessionStorage",
-      originalSessionStorageDescriptor,
     );
   }
   window.sessionStorage.clear();
@@ -472,9 +450,23 @@ describe("GameProvider match history recording (#293)", () => {
         <LastActionProbe action={lastAction} />
       </GameProvider>,
     );
-    failSessionStorageWrites();
+    const sessionStorageDescriptor = Object.getOwnPropertyDescriptor(
+      window,
+      "sessionStorage",
+    );
+    const restoreStorage = failSessionStorageWrites();
+    // 失敗注入はjsdomのStorage instance prototypeだけを差し替え、windowのdescriptorを
+    // 変更しない。descriptorを置換すると別テストの復旧経路へ古いStorageが漏れる(#884)。
+    expect(Object.getOwnPropertyDescriptor(window, "sessionStorage")).toEqual(
+      sessionStorageDescriptor,
+    );
 
     fireEvent.click(screen.getByRole("button", { name: "最終操作" }));
+
+    restoreStorage();
+    expect(Object.getOwnPropertyDescriptor(window, "sessionStorage")).toEqual(
+      sessionStorageDescriptor,
+    );
 
     expect(screen.getByTestId("phase")).toHaveTextContent("gameEnd");
     expect(screen.getByTestId("session-save-status")).toHaveTextContent(
