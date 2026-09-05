@@ -8,7 +8,36 @@
 
 import { createTile, type Tile } from "../tiles/tile";
 import { isCompleteHand, type MeldInput } from "./decompose";
-import { SANMA_TILE_KINDS, tileKey } from "./tile-identity";
+import { isValidTileKind, SANMA_TILE_KINDS, tileKey } from "./tile-identity";
+
+/**
+ * `Tile`/`MeldInput` は公開された構造型なので、JSON や型アサーション経由の
+ * 値が実行時に届き得る。`usedCounts` は分解器の検証より先に走るため、ここでは
+ * 牌キーを読む前に、少なくともその処理が安全に扱える形状を確認する。
+ * 詳細な面子形状・枚数・牌種重複の検証は `isCompleteHand` 側へ委譲する。
+ */
+function isValidTileInput(value: unknown): value is Tile {
+  if (value === null || typeof value !== "object") return false;
+  const tile = value as Pick<Tile, "suit" | "rank">;
+  return typeof tile.suit === "string" && isValidTileKind(tile);
+}
+
+function hasValidTileInputs(value: unknown): value is readonly Tile[] {
+  if (!Array.isArray(value)) return false;
+  for (const tile of value) {
+    if (!isValidTileInput(tile)) return false;
+  }
+  return true;
+}
+
+function hasSafeMeldTileInputs(value: unknown): value is readonly MeldInput[] {
+  if (!Array.isArray(value)) return false;
+  for (const meld of value) {
+    if (meld === null || typeof meld !== "object") return false;
+    if (!hasValidTileInputs((meld as Partial<MeldInput>).tiles)) return false;
+  }
+  return true;
+}
 
 /** 牌種ごとの現在枚数(手牌+副露)。1牌種は最大4枚まで。 */
 function usedCounts(
@@ -33,6 +62,9 @@ export function waitingTiles(
   concealedTiles: readonly Tile[],
   melds: readonly MeldInput[] = [],
 ): Tile[] {
+  if (!hasValidTileInputs(concealedTiles) || !hasSafeMeldTileInputs(melds)) {
+    return [];
+  }
   const used = usedCounts(concealedTiles, melds);
   const waits: Tile[] = [];
   for (const kind of SANMA_TILE_KINDS) {
