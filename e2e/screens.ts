@@ -176,7 +176,7 @@ export const FULL_A11Y_SCREENS: readonly NonTextContrastScreen[] = [
  * ルート網羅の検査(`src/test/a11y-landmark-screens.test.ts`)にも現れないため、
  * `FULL_A11Y_SCREENS` の番兵をそのまま共有する。
  */
-export const LANDMARK_SCREENS: readonly Screen[] = FULL_A11Y_SCREENS;
+export const LANDMARK_SCREENS: readonly Screen[] = [...FULL_A11Y_SCREENS];
 
 /**
  * ランドマーク構造を固定する axe ルール(spec 5.2.6 / axe-core 4.12.1 で実測)。

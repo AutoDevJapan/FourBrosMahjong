@@ -81,7 +81,7 @@ describe("ランドマーク監査の画面一覧(spec 5.2.6 / #409)", () => {
   });
 
   it("404(not-found.tsx)も全体 a11y 監査に含まれる", () => {
-    expect(FULL_A11Y_SCREENS).toBe(LANDMARK_SCREENS);
+    expect(FULL_A11Y_SCREENS).toEqual(LANDMARK_SCREENS);
     expect(
       FULL_A11Y_SCREENS.some((screen) => screen.name === NOT_FOUND_SCREEN_NAME),
     ).toBe(true);
