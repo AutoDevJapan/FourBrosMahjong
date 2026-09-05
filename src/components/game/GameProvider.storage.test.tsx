@@ -25,6 +25,7 @@ function blockSessionStorage() {
 
 /** localStorageとStorage prototypeを共有するjsdomでも、sessionStorageだけを失敗させる。 */
 function failSessionStorageWrites(): () => void {
+  vi.restoreAllMocks();
   const storage = window.sessionStorage;
   const storagePrototype = Object.getPrototypeOf(storage) as Storage;
   const originalSetItem = storagePrototype.setItem;
