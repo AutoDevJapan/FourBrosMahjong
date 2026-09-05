@@ -348,7 +348,7 @@ describe("buildServiceWorkerScript", () => {
     expect(sw.cacheStorage.caches.has("fbm-precache-v1")).toBe(false);
   });
 
-  it("App shellが2xx HTMLでなければinstallを失敗させ部分cacheを削除する", async () => {
+  it("App shellが200 HTMLでなければinstallを失敗させ部分cacheを削除する", async () => {
     const sw = bootServiceWorker();
     sw.setFetchImpl(
       vi.fn(async (input) => {
@@ -370,6 +370,32 @@ describe("buildServiceWorkerScript", () => {
     );
     expect(sw.cacheStorage.caches.has("fbm-precache-v1")).toBe(false);
   });
+
+  it.each([204, 206] as const)(
+    "App shellが非200ステータス(%d) HTMLでもinstallを失敗させ部分cacheを削除する(#942)",
+    async (status) => {
+      const sw = bootServiceWorker();
+      sw.setFetchImpl(
+        vi.fn(async (input) => {
+          const url = new URL(String(input), ORIGIN);
+          if (url.pathname === "/game") {
+            return new Response(status === 204 ? null : "partial", {
+              status,
+              headers: { "Content-Type": "text/html" },
+            });
+          }
+          return PRECACHE_ROUTES.includes(url.pathname)
+            ? htmlResponse("shell")
+            : staticAssetResponse(url.pathname);
+        }),
+      );
+
+      await expect(sw.dispatchLifecycle("install")).rejects.toThrow(
+        "Invalid precached App shell response: /game",
+      );
+      expect(sw.cacheStorage.caches.has("fbm-precache-v1")).toBe(false);
+    },
+  );
 
   it("build assetの拡張子とContent-Typeが一致しなければinstallを失敗させる", async () => {
     const sw = bootServiceWorker();
@@ -394,7 +420,7 @@ describe("buildServiceWorkerScript", () => {
     expect(sw.cacheStorage.caches.has("fbm-precache-v1")).toBe(false);
   });
 
-  it("固定素材が2xxでもMIME不一致ならinstallを失敗させ部分cacheを削除する", async () => {
+  it("固定素材が200でもMIME不一致ならinstallを失敗させ部分cacheを削除する", async () => {
     const sw = bootServiceWorker();
     sw.setFetchImpl(
       vi.fn(async (input) => {
@@ -609,6 +635,31 @@ describe("buildServiceWorkerScript", () => {
     expect(sw.cacheStorage.caches.has("fbm-runtime-v1")).toBe(false);
   });
 
+  it.each([204, 206] as const)(
+    "navigationの非200ステータス(%d) HTMLは返すがcanonical route keyへ保存しない(#942)",
+    async (status) => {
+      const sw = bootServiceWorker();
+      sw.setFetchImpl(
+        vi.fn(
+          async () =>
+            new Response(status === 204 ? null : "partial", {
+              status,
+              headers: { "Content-Type": "text/html" },
+            }),
+        ),
+      );
+
+      const event = await sw.dispatchFetch(
+        request("/game", { mode: "navigate" }),
+      );
+      const response: Response = await event.respondWith.mock.calls[0][0];
+
+      expect(response.status).toBe(status);
+      const runtime = sw.cacheStorage.caches.get("fbm-runtime-v1");
+      expect(runtime?.store.has(`${ORIGIN}/game`) ?? false).toBe(false);
+    },
+  );
+
   it("オフラインのナビゲーションはプリキャッシュ済みHTMLで応答する(#292回帰防止)", async () => {
     const sw = bootServiceWorker();
     sw.setFetchImpl(
@@ -700,6 +751,33 @@ describe("buildServiceWorkerScript", () => {
     await sw.dispatchFetch(request("/_next/static/chunks/app.js"));
     expect(fetchSpy).toHaveBeenCalledTimes(2);
   });
+
+  it.each([204, 206] as const)(
+    "不変JSの非200ステータス(%d) responseを返すがcache-firstへ保存しない(#942)",
+    async (status) => {
+      const sw = bootServiceWorker();
+      sw.setFetchImpl(
+        vi.fn(
+          async () =>
+            new Response(status === 204 ? null : "partial", {
+              status,
+              headers: { "Content-Type": "application/javascript" },
+            }),
+        ),
+      );
+
+      const event = await sw.dispatchFetch(
+        request("/_next/static/chunks/partial.js"),
+      );
+      const response: Response = await event.respondWith.mock.calls[0][0];
+
+      expect(response.status).toBe(status);
+      const runtime = sw.cacheStorage.caches.get("fbm-runtime-v1");
+      expect(
+        runtime?.store.has(`${ORIGIN}/_next/static/chunks/partial.js`) ?? false,
+      ).toBe(false);
+    },
+  );
 
   it("cross-origin redirectされたruntime responseを保存しない", async () => {
     const sw = bootServiceWorker();
