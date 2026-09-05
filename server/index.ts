@@ -338,13 +338,26 @@ export function createOnlineServer(
     revokeClientBeforeClose(client, RATE_LIMIT_CLOSE_CODE, "rate limited");
   }
 
-  /** Revoke message authority before a close frame can race buffered input. */
+  /** Revoke message authority before a transport close can race buffered input. */
+  function revokeClientBeforeTransportClose(
+    client: Client,
+    close: () => void,
+  ): void {
+    supersedeConnection(client, close);
+  }
+
+  function terminateClient(client: Client): void {
+    revokeClientBeforeTransportClose(client, () => client.socket.terminate());
+  }
+
   function revokeClientBeforeClose(
     client: Client,
     code: number,
     reason: string,
   ): void {
-    supersedeConnection(client, () => client.socket.close(code, reason));
+    revokeClientBeforeTransportClose(client, () =>
+      client.socket.close(code, reason),
+    );
   }
 
   function consumeRoomAttempt(
@@ -578,9 +591,9 @@ export function createOnlineServer(
         }
         const room = client.room;
         manager.leave(room, client.player);
+        revokeClientBeforeClose(client, 1000, "left");
         broadcast(room);
         afterRoomMutation();
-        client.socket.close(1000, "left");
         return;
       }
       case "newGame": {
@@ -661,7 +674,7 @@ export function createOnlineServer(
       // There is no room seat to preserve yet. Terminate instead of waiting for
       // a close handshake from an unauthenticated peer so the connection slot is
       // released even when the peer is deliberately uncooperative.
-      socket.terminate();
+      terminateClient(client);
     });
     const finishHandshake = () => {
       handshakeTimeout.clear();
@@ -1122,7 +1135,7 @@ export function createOnlineServer(
     );
     sweepTimer.unref();
     heartbeatTimer = setInterval(
-      () => runHeartbeat(clients),
+      () => runHeartbeat(clients, terminateClient),
       ONLINE_HEARTBEAT_INTERVAL_MS,
     );
     heartbeatTimer.unref();
@@ -1165,14 +1178,16 @@ export function createOnlineServer(
   function requestSocketClose(): void {
     for (const client of clients) {
       if (!isAuthoritativeConnection(client)) continue;
-      closeSocketForMaintenance(client.socket);
+      revokeClientBeforeTransportClose(client, () => {
+        closeSocketForMaintenance(client.socket);
+      });
     }
   }
 
   function terminateSockets(): void {
     for (const client of clients) {
       try {
-        client.socket.terminate();
+        terminateClient(client);
       } catch {
         // Continue terminating the remaining transports.
       }

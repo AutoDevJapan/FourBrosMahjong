@@ -1,12 +1,16 @@
 import { once } from "node:events";
 import { createConnection } from "node:net";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { WebSocket } from "ws";
 import type { OnlineSnapshot } from "../src/domain/online/types";
 import { ABUSE_LIMITS, OnlineAbuseControls } from "./abuseControl";
 import { createOnlineServer } from "./index";
 
 const ORIGIN = "http://shutdown.local";
+
+afterEach(() => {
+  vi.useRealTimers();
+});
 
 function environment(notices: boolean): NodeJS.ProcessEnv {
   return {
@@ -500,6 +504,134 @@ describe("createOnlineServer lifecycle", () => {
     } finally {
       for (const socket of [host, guest]) {
         if (socket.readyState !== WebSocket.CLOSED) socket.terminate();
+      }
+      await server.handleSignal("SIGTERM");
+    }
+  });
+
+  it("revokes an idle handshake before termination can process buffered messages", async () => {
+    vi.useFakeTimers();
+    const server = createOnlineServer({ environment: environment(false) });
+    let socket: WebSocket | undefined;
+    let injected = false;
+    const originalTerminate = WebSocket.prototype.terminate;
+    const terminate = vi
+      .spyOn(WebSocket.prototype, "terminate")
+      .mockImplementation(function (this: WebSocket) {
+        if (!injected) {
+          injected = true;
+          this.emit(
+            "message",
+            Buffer.from(JSON.stringify({ type: "create", name: "late" })),
+            false,
+          );
+        }
+        return originalTerminate.call(this);
+      });
+    const send = vi.spyOn(WebSocket.prototype, "send");
+    try {
+      const port = await listen(server);
+      socket = await openWebSocket(port);
+      const closed = once(socket, "close");
+
+      vi.advanceTimersByTime(10_000);
+      await closed;
+
+      expect(injected).toBe(true);
+      expect(send).not.toHaveBeenCalled();
+    } finally {
+      terminate.mockRestore();
+      send.mockRestore();
+      if (socket !== undefined && socket.readyState !== WebSocket.CLOSED) {
+        socket.terminate();
+      }
+      await server.handleSignal("SIGTERM");
+    }
+  });
+
+  it("revokes established authority before graceful shutdown close", async () => {
+    const server = createOnlineServer({ environment: environment(false) });
+    let socket: WebSocket | undefined;
+    let injected = false;
+    const originalClose = WebSocket.prototype.close;
+    const close = vi
+      .spyOn(WebSocket.prototype, "close")
+      .mockImplementation(function (
+        this: WebSocket,
+        code?: number,
+        reason?: string | Buffer,
+      ) {
+        if (!injected && code === 1012) {
+          injected = true;
+          this.emit(
+            "message",
+            Buffer.from(JSON.stringify({ type: "create", name: "late" })),
+            false,
+          );
+        }
+        return originalClose.call(this, code, reason);
+      });
+    const send = vi.spyOn(WebSocket.prototype, "send");
+    try {
+      const port = await listen(server);
+      socket = await openWebSocket(port);
+
+      await server.handleSignal("SIGTERM");
+
+      expect(injected).toBe(true);
+      expect(send).not.toHaveBeenCalled();
+    } finally {
+      close.mockRestore();
+      send.mockRestore();
+      if (socket !== undefined && socket.readyState !== WebSocket.CLOSED) {
+        socket.terminate();
+      }
+      await server.handleSignal("SIGTERM");
+    }
+  });
+
+  it("revokes established authority before forced termination", async () => {
+    const server = createOnlineServer({ environment: environment(false) });
+    let socket: WebSocket | undefined;
+    let injected = false;
+    const originalTerminate = WebSocket.prototype.terminate;
+    const terminate = vi
+      .spyOn(WebSocket.prototype, "terminate")
+      .mockImplementation(function (this: WebSocket) {
+        if (!injected) {
+          injected = true;
+          this.emit(
+            "message",
+            Buffer.from(JSON.stringify({ type: "create", name: "late" })),
+            false,
+          );
+        }
+        return originalTerminate.call(this);
+      });
+    const send = vi.spyOn(WebSocket.prototype, "send");
+    try {
+      const port = await listen(server);
+      socket = await openWebSocket(port);
+      const session = waitForMessage(
+        socket,
+        (value) => value.type === "session",
+      );
+      socket.send(JSON.stringify({ type: "create", name: "force-test" }));
+      await session;
+      send.mockClear();
+
+      const shutdown = server.handleSignal("SIGTERM");
+      expect(server.shutdownController.state().closing).toBe(false);
+      expect(server.handleSignal("SIGINT")).toBe(shutdown);
+      await shutdown;
+
+      expect(injected).toBe(true);
+      expect(send).not.toHaveBeenCalled();
+    } finally {
+      terminate.mockRestore();
+      send.mockRestore();
+      if (socket !== undefined && socket.readyState !== WebSocket.CLOSED) {
+        socket.terminate();
       }
       await server.handleSignal("SIGTERM");
     }
