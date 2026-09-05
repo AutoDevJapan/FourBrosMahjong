@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  FULL_A11Y_SCREENS,
   LANDMARK_SCREENS,
   NOT_FOUND_SCREEN_NAME,
   nonTextContrastScreens,
@@ -77,5 +78,12 @@ describe("ランドマーク監査の画面一覧(spec 5.2.6 / #409)", () => {
       new Set(appRoutes()).has(notFound[0].path),
       `${notFound[0].path} は 404 を踏むための実在しないパスである必要がある`,
     ).toBe(false);
+  });
+
+  it("404(not-found.tsx)も全体 a11y 監査に含まれる", () => {
+    expect(FULL_A11Y_SCREENS).toBe(LANDMARK_SCREENS);
+    expect(
+      FULL_A11Y_SCREENS.some((screen) => screen.name === NOT_FOUND_SCREEN_NAME),
+    ).toBe(true);
   });
 });

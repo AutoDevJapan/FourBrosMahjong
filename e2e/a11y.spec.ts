@@ -2,6 +2,7 @@ import AxeBuilder from "@axe-core/playwright";
 import { expect, type Locator, type Page, test } from "@playwright/test";
 import { advanceUntil, declareRiichi } from "./helpers/gameDriver";
 import {
+  FULL_A11Y_SCREENS,
   LANDMARK_RULES,
   LANDMARK_SCREENS,
   SCREENS,
@@ -14,8 +15,9 @@ import {
  * spec 5 5.5 は `@axe-core/playwright` による自動 a11y 監査を「主要画面の
  * アクセシビリティ違反を自動検知するシナリオ」として必須化している。本ファイルは
  * 実装済みの全画面(`/`・`/rules`・`/settings`・`/history`・`/game`・`/game/result`)に
- * 対して axe-core を実行し、WCAG 2.1 A/AA の重大違反ゼロを検証する。
- * ランドマーク監査(#409)だけは 404 を加えた 7 画面で回す(`LANDMARK_SCREENS`)。
+ * 対して axe-core を実行し、WCAG 2.1 A/AA の重大違反ゼロを検証する。404 は独立した
+ * `not-found.tsx` のため、実在ルート一覧とは別の `FULL_A11Y_SCREENS` で明示的に含める。
+ * ランドマーク監査(#409)も同じ全体一覧(`LANDMARK_SCREENS`)で回す。
  *
  * ダークモード(スペック5 5.4 / 5.5「ダークモードシナリオ」):
  * 各画面をライト・OS ダーク(`prefers-color-scheme: dark`)・手動ダーク
@@ -120,7 +122,7 @@ async function openScreen(
 }
 
 test.describe("自動 a11y 監査(axe-core)", () => {
-  for (const screen of SCREENS) {
+  for (const screen of FULL_A11Y_SCREENS) {
     for (const theme of THEMES) {
       test(`${screen.name}(${screen.path})は WCAG 2.1 A/AA 違反ゼロ [${theme}]`, async ({
         page,
