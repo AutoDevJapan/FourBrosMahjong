@@ -358,6 +358,12 @@ describe("handleOpsHttpRequest", () => {
     const terminalController = controller();
     terminalController.beginTermination();
     const terminal = dependencies({ drainController: terminalController });
+    const terminalStart = invoke(ONLINE_OPS_DRAIN_PATH, "POST", terminal);
+    expect(terminalStart.response.state.status).toBe(409);
+    expect(terminalStart.response.state.body).toBe(
+      JSON.stringify({ ok: false, error: "terminating" }),
+    );
+    expect(terminal.broadcastDrainStatus).not.toHaveBeenCalled();
     expect(
       invoke(ONLINE_OPS_DRAIN_PATH, "DELETE", terminal).response.state.status,
     ).toBe(409);
