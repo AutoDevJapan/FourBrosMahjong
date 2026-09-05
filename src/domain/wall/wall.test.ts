@@ -51,6 +51,17 @@ describe("Wall(スペック4 4.1)", () => {
       expect(() => new Wall(invalid)).toThrow(RangeError);
     });
 
+    it.each([
+      ["rank が文字列", (tile: Tile) => ({ ...tile, rank: "1" })],
+      ["isRed が真偽値でない", (tile: Tile) => ({ ...tile, isRed: "" })],
+      ["未知のフィールドがある", (tile: Tile) => ({ ...tile, metadata: true })],
+    ])("構造不正な牌(%s)を正準キーへ混入させない", (_, mutate) => {
+      const invalid = buildTileSet();
+      invalid[0] = mutate(invalid[0]!) as never;
+
+      expect(() => new Wall(invalid)).toThrow(RangeError);
+    });
+
     it("deadWallSize が範囲外なら RangeError", () => {
       expect(() => new Wall(buildTileSet(), -1)).toThrow(RangeError);
       expect(() => new Wall(buildTileSet(), 109)).toThrow(RangeError);
