@@ -11,7 +11,7 @@
  * 純ロジック・副作用なし。React/DOM 非依存。
  */
 
-import type { Tile } from "../tiles/tile";
+import { createTile, type Tile } from "../tiles/tile";
 import type { DiceRoll, DoraCount } from "./dice";
 import { omoteDoraCount } from "./dice";
 import { nextTile } from "./indicator";
@@ -32,6 +32,11 @@ export interface DoraSet {
   readonly uraIndicators: readonly Tile[];
 }
 
+/** ドラ確定時の牌を、入力側と共有しない実行時不変の値へ写像する。 */
+function freezeTile(tile: Tile): Tile {
+  return Object.freeze(createTile(tile.suit, tile.rank));
+}
+
 /**
  * 王牌からドラ表示牌を選定して `DoraSet` を構築する(スペック2 2.2)。
  *
@@ -43,6 +48,8 @@ export interface DoraSet {
  * 構築時に牌をスナップショットすることに加えて、**表示牌の実体そのものが嶺上牌として
  * 配られない**ことまで保証される。本関数は任意の `Tile[]` を受け取れるため、この保証が
  * 効くのは `Wall` 由来の王牌を渡した場合に限られる。
+ * 表示牌は `createTile` で値コピーしたうえで牌・配列・`DoraSet` 自体を実行時にも凍結し、
+ * `readonly` の型消去後もスナップショットを保護する。
  * 以前は嶺上供給(王牌末尾から `pop`)と補填(先頭へ `unshift`)が表示牌を末尾へ
  * 押し出す構造で、9回目の補充で表示牌が手に配られ得た。
  *
@@ -62,10 +69,12 @@ export function createDoraSet(
     );
   }
 
-  const indicators = deadWall.slice(0, count);
-  const uraIndicators = deadWall.slice(count, required);
+  const indicators = Object.freeze(deadWall.slice(0, count).map(freezeTile));
+  const uraIndicators = Object.freeze(
+    deadWall.slice(count, required).map(freezeTile),
+  );
 
-  return { count, indicators, uraIndicators };
+  return Object.freeze({ count, indicators, uraIndicators });
 }
 
 /**

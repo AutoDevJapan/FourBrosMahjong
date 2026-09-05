@@ -83,6 +83,28 @@ describe("createDoraSet", () => {
     wall.drawReplacement();
     expect([...set.indicators, ...set.uraIndicators]).toEqual(before);
   });
+
+  it("スナップショット: 実行時にもDoraSet・配列・牌を変更できない", () => {
+    const source = t("pin", 1);
+    const set = createDoraSet(
+      [source, t("sou", 2), t("man", 9), t("pin", 4)],
+      [3, 5],
+    );
+
+    expect(Object.isFrozen(set)).toBe(true);
+    expect(Object.isFrozen(set.indicators)).toBe(true);
+    expect(Object.isFrozen(set.uraIndicators)).toBe(true);
+    expect(Object.isFrozen(set.indicators[0])).toBe(true);
+    expect(set.indicators[0]).not.toBe(source);
+    (source as { rank: number }).rank = 9;
+    expect(set.indicators[0]).toEqual(t("pin", 1));
+    expect(() => {
+      (set.indicators as Tile[]).push(t("pin", 1));
+    }).toThrow(TypeError);
+    expect(() => {
+      (set.indicators[0] as { rank: number }).rank = 9;
+    }).toThrow(TypeError);
+  });
 });
 
 describe("resolveDora", () => {
