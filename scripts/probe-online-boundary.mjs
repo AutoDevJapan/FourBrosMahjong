@@ -929,6 +929,17 @@ export async function runBoundaryProbe({
   lookupFunction = lookup,
 }) {
   const normalizedBaseUrl = parseBaseUrl(baseUrl, allowLocalTarget);
+  const normalizedAllowedOrigin = parseOrigin(
+    allowedOrigin,
+    "--allowed-origin",
+  );
+  const normalizedDisallowedOrigin = parseOrigin(
+    disallowedOrigin,
+    "--disallowed-origin",
+  );
+  if (normalizedAllowedOrigin === normalizedDisallowedOrigin) {
+    throw new Error("allowed and disallowed origins must be different");
+  }
   const startedAt = new Date().toISOString();
   let probeTarget;
   try {
@@ -949,14 +960,14 @@ export async function runBoundaryProbe({
   );
   const allowed = await probeUpgrade(
     normalizedBaseUrl,
-    allowedOrigin,
+    normalizedAllowedOrigin,
     timeoutMs,
     createUpgradeRequest,
     probeTarget,
   );
   const disallowed = await probeUpgrade(
     normalizedBaseUrl,
-    disallowedOrigin,
+    normalizedDisallowedOrigin,
     timeoutMs,
     createUpgradeRequest,
     probeTarget,
@@ -972,12 +983,12 @@ export async function runBoundaryProbe({
     health: { expectedStatus: EXPECTED.health, ...health },
     readiness: { expectedStatus: EXPECTED.readiness, ...readiness },
     allowedOrigin: {
-      origin: allowedOrigin,
+      origin: normalizedAllowedOrigin,
       expectedStatus: EXPECTED.allowedOrigin,
       ...allowed,
     },
     disallowedOrigin: {
-      origin: disallowedOrigin,
+      origin: normalizedDisallowedOrigin,
       expectedStatus: EXPECTED.disallowedOrigin,
       ...disallowed,
     },

@@ -455,6 +455,24 @@ describe("online boundary response body cleanup", () => {
 });
 
 describe("online boundary probe", () => {
+  it("applies exact Origin validation to programmatic probes", async () => {
+    await expect(
+      runBoundaryProbe({
+        baseUrl: "https://online.example.com",
+        allowedOrigin: "https://app.example.com/path",
+        disallowedOrigin: DISALLOWED_ORIGIN,
+      }),
+    ).rejects.toThrow("--allowed-origin must be an exact HTTP(S) origin");
+
+    await expect(
+      runBoundaryProbe({
+        baseUrl: "https://online.example.com",
+        allowedOrigin: ALLOWED_ORIGIN,
+        disallowedOrigin: ALLOWED_ORIGIN,
+      }),
+    ).rejects.toThrow("allowed and disallowed origins must be different");
+  });
+
   it("checks liveness, readiness, and the exact 101/403/403 boundary without sending a frame", async () => {
     const fixture = await startBoundaryFixture();
     openFixtures.push(fixture);
