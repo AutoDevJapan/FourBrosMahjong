@@ -368,6 +368,33 @@ describe("入力検証: spec 3.3 の前提(#394)", () => {
       expect(() => new SoshiiLedger(IDS).applyUma(broken)).toThrow(RangeError);
     });
 
+    it("有限でもsafe integerでない持ち点は加算前に拒否する", () => {
+      const unsafe = Number.MAX_SAFE_INTEGER + 2;
+      const invalid: PlayerPoints[] = [
+        { playerId: "A", points: unsafe },
+        { playerId: "B", points: -unsafe },
+        { playerId: "C", points: 70000 },
+        { playerId: "D", points: 70000 },
+      ];
+      expect(
+        sum(Object.fromEntries(invalid.map((p) => [p.playerId, p.points]))),
+      ).toBe(STARTING_POINTS * IDS.length);
+
+      const rawLedger = new SoshiiLedger(IDS);
+      expect(() => rawLedger.applyRawScore(invalid)).toThrow(
+        "points must be a finite safe integer",
+      );
+      expect(rawLedger.balances()).toEqual({ A: 0, B: 0, C: 0, D: 0 });
+      expect(() => rawLedger.applyRawScore(validPoints)).not.toThrow();
+
+      const umaLedger = new SoshiiLedger(IDS);
+      expect(() => umaLedger.applyUma(invalid)).toThrow(
+        "points must be a finite safe integer",
+      );
+      expect(umaLedger.balances()).toEqual({ A: 0, B: 0, C: 0, D: 0 });
+      expect(() => umaLedger.applyUma(validPoints)).not.toThrow();
+    });
+
     it("合計違反で落ちても台帳は再利用できる(_finalPoints を汚さない)", () => {
       // 合計チェックは `_finalPoints` への書き込みより前になければならない。
       // 後ろだと棄却した持ち点がキャッシュへ残り、正しい持ち点での再試行が
