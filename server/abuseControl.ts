@@ -141,6 +141,7 @@ function rateRejection(
 
 export class OnlineAbuseControls {
   private readonly sources = new Map<string, SourceAbuseState>();
+  private lastNow = Number.NEGATIVE_INFINITY;
 
   constructor(private readonly clock: () => number = Date.now) {}
 
@@ -153,7 +154,7 @@ export class OnlineAbuseControls {
     activeConnections: number,
     activeSourceConnections: number,
   ): AbuseRejection | null {
-    const now = this.clock();
+    const now = this.sampleNow();
     if (activeConnections >= ABUSE_LIMITS.maxConnections) {
       return {
         code: "connection_limit",
@@ -161,7 +162,7 @@ export class OnlineAbuseControls {
       };
     }
 
-    const state = this.getOrCreateSource(source);
+    const state = this.getOrCreateSource(source, now);
     if (state === null) {
       return {
         code: "connection_limit",
@@ -212,11 +213,11 @@ export class OnlineAbuseControls {
     source: string,
     state: ClientAbuseState,
   ): AbuseRejection | null {
-    const now = this.clock();
+    const now = this.sampleNow();
     const clientRetryAfterMs = state.messages.consume(now);
     if (clientRetryAfterMs !== null)
       return rateRejection("message", clientRetryAfterMs);
-    const sourceState = this.getOrCreateSource(source);
+    const sourceState = this.getOrCreateSource(source, now);
     if (sourceState === null)
       return rateRejection("message", ABUSE_LIMITS.connectionRetryAfterMs);
     const sourceRetryAfterMs = sourceState.messages.consume(now);
@@ -229,11 +230,11 @@ export class OnlineAbuseControls {
     source: string,
     state: ClientAbuseState,
   ): AbuseRejection | null {
-    const now = this.clock();
+    const now = this.sampleNow();
     const clientRetryAfterMs = state.actions.consume(now);
     if (clientRetryAfterMs !== null)
       return rateRejection("action", clientRetryAfterMs);
-    const sourceState = this.getOrCreateSource(source);
+    const sourceState = this.getOrCreateSource(source, now);
     if (sourceState === null)
       return rateRejection("action", ABUSE_LIMITS.connectionRetryAfterMs);
     const sourceRetryAfterMs = sourceState.actions.consume(now);
@@ -246,16 +247,20 @@ export class OnlineAbuseControls {
     source: string,
     scope: RoomAttemptScope,
   ): AbuseRejection | null {
-    const state = this.getOrCreateSource(source);
+    const now = this.sampleNow();
+    const state = this.getOrCreateSource(source, now);
     if (state === null)
       return rateRejection(scope, ABUSE_LIMITS.connectionRetryAfterMs);
-    const retryAfterMs = state.roomAttempts[scope].consume(this.clock());
+    const retryAfterMs = state.roomAttempts[scope].consume(now);
     return retryAfterMs === null ? null : rateRejection(scope, retryAfterMs);
   }
 
   /** Remove expired source buckets while retaining state for active sockets. */
   cleanup(): void {
-    const now = this.clock();
+    this.cleanupAt(this.sampleNow());
+  }
+
+  private cleanupAt(now: number): void {
     for (const [source, state] of this.sources) {
       if (
         state.pendingUpgradeReservations === 0 &&
@@ -275,13 +280,27 @@ export class OnlineAbuseControls {
     return this.sources.size;
   }
 
-  private getOrCreateSource(source: string): SourceAbuseState | null {
+  private getOrCreateSource(
+    source: string,
+    now: number,
+  ): SourceAbuseState | null {
     const existing = this.sources.get(source);
     if (existing !== undefined) return existing;
-    this.cleanup();
+    this.cleanupAt(now);
     if (this.sources.size >= ABUSE_LIMITS.maxTrackedSources) return null;
     const state = sourceStateFor();
     this.sources.set(source, state);
     return state;
+  }
+
+  private sampleNow(): number {
+    const sampled = this.clock();
+    if (!Number.isFinite(sampled) || sampled < 0) {
+      throw new RangeError(
+        "online abuse control clock must return a finite non-negative value",
+      );
+    }
+    this.lastNow = Math.max(this.lastNow, sampled);
+    return this.lastNow;
   }
 }
