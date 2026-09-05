@@ -67,6 +67,18 @@ describe("和了形の判定", () => {
       }),
     ).toBeNull();
   });
+
+  it("サンマに存在しない牌種を含む手を和了として受理しない", () => {
+    // 萬子2〜8は牌集合に含まれない。標準形の分解がこれらを
+    // 通常の刻子として扱うと、存在しない四暗刻を誤って成立させる。
+    expect(
+      analyzeWin({
+        concealedTiles: parseTiles("222m 333m 444m 555m 66m"),
+        winningTile: parseTile("6m"),
+        winType: "ron",
+      }),
+    ).toBeNull();
+  });
 });
 
 describe("通常役の判定", () => {

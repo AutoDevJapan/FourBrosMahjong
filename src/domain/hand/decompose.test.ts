@@ -56,6 +56,27 @@ describe("decomposeStandard", () => {
     expect(isCompleteHand(concealed, [malformedPon])).toBe(false);
   });
 
+  it("サンマに存在しない牌種を標準形へ分解しない", () => {
+    // Tile は実行時検証を持たないため、型アサーションや記法経由で
+    // 萬子2〜8が届いても、牌カタログ外の手として拒否する。
+    const impossible = parseTiles("222m 333m 444m 555m 66m");
+
+    expect(decomposeStandard(impossible, [])).toEqual([]);
+    expect(isCompleteHand(impossible, [])).toBe(false);
+  });
+
+  it("サンマに存在しない副露牌も標準形へ合成しない", () => {
+    const impossiblePon: MeldInput = {
+      tiles: parseTiles("222m"),
+      isKan: false,
+      concealed: false,
+    };
+
+    expect(
+      decomposeStandard(parseTiles("123p 456p 789p 99s"), [impossiblePon]),
+    ).toEqual([]);
+  });
+
   it("萬子は順子を作れない(サンマ牌構成)", () => {
     // 1m9m は順子にならないため、この形は和了形にならない。
     expect(isCompleteHand(parseTiles("19m 123p 456p 789p 99s"), [])).toBe(

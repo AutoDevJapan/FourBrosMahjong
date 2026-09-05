@@ -32,13 +32,13 @@ import {
  */
 
 /** 3p のカンチャン待ち(門前・断么九)。喰いタン無しのため門前で組む。 */
-const WAIT_3P_A = "2p 4p 234m 678m 234s 66s";
+const WAIT_3P_A = "2p 4p 234p 678p 234s 66s";
 /** 同じく 3p 待ち(断么九)。A と別形にして席ごとの手牌を区別する。 */
-const WAIT_3P_B = "2p 4p 234m 678m 678s 88s";
+const WAIT_3P_B = "2p 4p 234p 678p 678s 88s";
 /** 3p では和了できない手牌(9s/5s のシャンポン待ち)。 */
 const NO_WAIT_3P = "1p 1p 1p 9p 9p 9p 1s 1s 1s 9s 9s 5s 5s";
 /** 放銃者が抱える、3p を含まない手牌。 */
-const DISCARDER_HAND = "1p 1p 9p 9p 1m 1m 9m 9m 1s 1s 9s 9s 5m";
+const DISCARDER_HAND = "1p 1p 9p 9p 1m 1m 9m 9m 1s 1s 9s 9s 5p";
 
 const RON_TILE = "3p";
 
@@ -386,7 +386,7 @@ describe("engine: 通常打牌に対する頭ハネ(上家取り / spec 2.4・#3
     }
     hand.hands.east = expectConcealed13(DISCARDER_HAND);
     // 自家(南)は 5z を2枚持ちでポン可能。3p 待ちではないのでロンは提示されない。
-    hand.hands.south = expectConcealed13("5z 5z 234m 678m 234s 66s");
+    hand.hands.south = expectConcealed13("5z 5z 234p 678p 234s 66s");
     hand.hands.west = expectConcealed13(NO_WAIT_3P);
     hand.discards.east = [ponTile];
     hand.pendingDiscard = { seat: "east", tile: ponTile, haitei: false };
