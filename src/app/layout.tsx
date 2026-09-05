@@ -1,12 +1,7 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono, Noto_Sans_JP } from "next/font/google";
 import { headers } from "next/headers";
-import {
-  DEFAULT_DESCRIPTION,
-  DEFAULT_TITLE,
-  SITE_URL,
-  socialMetadata,
-} from "@/app/_lib/metadata";
+import { ROOT_METADATA } from "@/app/_lib/metadata";
 import { ThemeStorageSync } from "@/components/layout/ThemeStorageSync";
 import { ServiceWorkerRegister } from "@/components/pwa/ServiceWorkerRegister";
 import "./globals.css";
@@ -35,19 +30,7 @@ const notoSansJP = Noto_Sans_JP({
   preload: false,
 });
 
-export const metadata: Metadata = {
-  metadataBase: SITE_URL,
-  title: {
-    default: DEFAULT_TITLE,
-    template: "%s | 四兄弟麻雀",
-  },
-  description: DEFAULT_DESCRIPTION,
-  ...socialMetadata({
-    title: DEFAULT_TITLE,
-    description: DEFAULT_DESCRIPTION,
-    path: "/",
-  }),
-};
+export const metadata: Metadata = ROOT_METADATA;
 
 /**
  * 初期テーマ適用スクリプト(スペック5 5.4.1)。
