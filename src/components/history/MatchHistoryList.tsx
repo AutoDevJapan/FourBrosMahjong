@@ -372,13 +372,11 @@ export default function MatchHistoryList() {
           // 削除直後にフォーカスを受け取るため、プログラム的にのみフォーカス可能にする。
           tabIndex={-1}
           role="region"
-          aria-labelledby="history-empty-heading"
+          // 説明文全体を名前にせず、フォーカス後の文脈を固定した短い名称で知らせる。
+          aria-label="保存された戦績はまだありません"
           className="history-state-card history-empty flex flex-col gap-4 rounded-lg border border-foreground/15 p-6"
         >
-          <p
-            id="history-empty-heading"
-            className="history-empty-copy text-sm text-foreground/70"
-          >
+          <p className="history-empty-copy text-sm text-foreground/70">
             保存された戦績はまだありません。半荘終了時にこの端末のストレージが利用できる場合、最終順位とソシー内訳が自動で記録されます。記録されない場合は、ブラウザのストレージ設定や空き容量を確認してください。
           </p>
           <div
