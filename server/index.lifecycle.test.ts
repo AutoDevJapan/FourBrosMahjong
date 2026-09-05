@@ -35,6 +35,33 @@ async function listen(server: ReturnType<typeof createOnlineServer>) {
   return address.port;
 }
 
+async function waitForNoHttpConnections(
+  server: ReturnType<typeof createOnlineServer>,
+): Promise<void> {
+  await new Promise<void>((resolve, reject) => {
+    const timer = setTimeout(
+      () => reject(new Error("HTTP connection was not released")),
+      1_000,
+    );
+    const check = () => {
+      server.httpServer.getConnections((error, count) => {
+        if (error) {
+          clearTimeout(timer);
+          reject(error);
+          return;
+        }
+        if (count === 0) {
+          clearTimeout(timer);
+          resolve();
+          return;
+        }
+        setImmediate(check);
+      });
+    };
+    check();
+  });
+}
+
 async function openWebSocket(
   port: number,
   headers: Record<string, string> = {},
@@ -363,6 +390,46 @@ describe("createOnlineServer lifecycle", () => {
       // keep-alive request to make progress.
       socket.end("abcde");
       await closed;
+    } finally {
+      if (!socket.destroyed) socket.destroy();
+      await server.handleSignal("SIGTERM");
+    }
+  });
+
+  it("drains and closes body-bearing unknown routes while preserving 404", async () => {
+    const server = createOnlineServer({ environment: environment(false) });
+    const port = await listen(server);
+    const socket = createConnection({
+      host: "127.0.0.1",
+      port,
+      allowHalfOpen: true,
+    });
+    const responseChunks: Buffer[] = [];
+    try {
+      const response = new Promise<string>((resolve, reject) => {
+        const timer = setTimeout(
+          () => reject(new Error("unknown route was not answered")),
+          1_000,
+        );
+        socket.once("error", reject);
+        socket.once("data", (chunk: Buffer) => {
+          clearTimeout(timer);
+          responseChunks.push(chunk);
+          resolve(Buffer.concat(responseChunks).toString("utf8"));
+        });
+      });
+      socket.write(
+        `POST /unknown HTTP/1.1\r\nHost: 127.0.0.1:${port}\r\n` +
+          "Content-Length: 5\r\nConnection: keep-alive\r\n\r\n",
+      );
+      const answered = await response;
+      expect(answered).toMatch(/^HTTP\/1\.1 404 Not Found\r\n/);
+      expect(answered).toMatch(/\r\nconnection: close\r\n/i);
+      expect(answered).toContain('"error":"not_found"');
+
+      // Leave the body incomplete. The server must have resumed the stream
+      // and released the transport instead of leaving it in the parser.
+      await waitForNoHttpConnections(server);
     } finally {
       if (!socket.destroyed) socket.destroy();
       await server.handleSignal("SIGTERM");
