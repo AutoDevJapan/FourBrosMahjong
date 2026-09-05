@@ -56,4 +56,15 @@ describe("online WebSocket heartbeat", () => {
 
     expect(broken.socket.terminate).toHaveBeenCalledOnce();
   });
+
+  it("uses the caller's authority-aware terminator", () => {
+    const stale = peer({ isAlive: false });
+    const terminate = vi.fn();
+
+    runHeartbeat([stale], terminate);
+
+    expect(terminate).toHaveBeenCalledOnce();
+    expect(terminate).toHaveBeenCalledWith(stale);
+    expect(stale.socket.terminate).not.toHaveBeenCalled();
+  });
 });
