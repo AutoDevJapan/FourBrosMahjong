@@ -154,6 +154,32 @@ describe("PlayerNamesForm", () => {
     expect(otherInput.value).toHaveLength(MAX_PLAYER_NAME_LENGTH);
   });
 
+  it.each(["compositionend", "blur"])(
+    "別欄から遅れて届いた%sで新しいIMEの上限を解除しない",
+    (eventType) => {
+      render(<PlayerNamesForm />);
+      const oldInput = inputFor("竜二");
+      const currentInput = inputFor("マサキ");
+      const tooLong = "あ".repeat(MAX_PLAYER_NAME_LENGTH + 3);
+
+      fireEvent.compositionStart(oldInput);
+      fireEvent.change(oldInput, { target: { value: tooLong } });
+      fireEvent.compositionStart(currentInput);
+      fireEvent.change(currentInput, { target: { value: tooLong } });
+
+      // フォーカス移動に伴う古い欄の終了イベントが、新しい欄の変換中に届くケース。
+      if (eventType === "compositionend") {
+        fireEvent.compositionEnd(oldInput, { target: { value: tooLong } });
+      } else {
+        fireEvent.blur(oldInput);
+      }
+      fireEvent.change(currentInput, { target: { value: tooLong } });
+
+      expect(oldInput.value).toHaveLength(MAX_PLAYER_NAME_LENGTH);
+      expect(currentInput).toHaveValue(tooLong);
+    },
+  );
+
   it("compositionEndが来なくてもフォーカスアウトで上限が復帰する(#484)", () => {
     render(<PlayerNamesForm />);
     const input = inputFor("竜二");
