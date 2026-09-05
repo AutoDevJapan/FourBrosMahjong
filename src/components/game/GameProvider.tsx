@@ -6,7 +6,10 @@
  * React stateに実対局エンジン状態を保持し、同一タブの`sessionStorage`には
  * **seed + 検証済み操作履歴**を保存する。リロード時は通常のengine APIで履歴を再生するため、
  * Wall/RNG/台帳などのclassを不完全なJSONへ変換せず安全に復元できる。Storageの一時的な
- * 書き込み失敗ではジャーナルをメモリに保持し、復旧後の次の操作で再保存する。
+ * 書き込み失敗ではジャーナルをメモリに保持し、復旧後の次の操作で再保存する。終局結果の
+ * `localStorage` 保存が失敗した場合も、結果スナップショットを件数制限付きで
+ * `sessionStorage` (使えない場合はプロバイダのメモリ)へ退避するため、「もう一半荘」で
+ * 進行中ジャーナルへ置き換えても履歴を失わない(issue #892)。
  * `/game`(対局画面)と `/game/result`(結果画面)の間で同一インスタンスを共有する。`/game` 配下の
  * 共有レイアウト(`app/game/layout.tsx`)に配置することで、ページ遷移してもプロバイダは再生成されず
  * 半荘の状態(進行・精算・結果)が保たれる(スペック6 6.5 / 6.9)。
@@ -19,6 +22,7 @@
  */
 import {
   createContext,
+  useCallback,
   useContext,
   useEffect,
   useLayoutEffect,
@@ -48,7 +52,16 @@ import {
   saveJournal,
 } from "./gamePersistence";
 import { selectView, toTile } from "./gameView";
-import { notifyHistoryChanged, persistHistoryAcrossTabs } from "./matchHistory";
+import {
+  type MatchHistoryEntry,
+  notifyHistoryChanged,
+  persistHistoryAcrossTabs,
+} from "./matchHistory";
+import {
+  forgetPendingHistory,
+  loadPendingHistory,
+  rememberPendingHistory,
+} from "./pendingHistory";
 import type { GameViewState, TileData } from "./types";
 
 /** UI から呼べる対局操作。判定は engine 側が行う。 */
@@ -180,26 +193,17 @@ export function freshSeed(): number {
 }
 
 /**
- * 終局(gameEnd)した半荘の確定結果を戦績(`localStorage`)へ追記する(issue #293)。
+ * 終局(gameEnd)した半荘の表示値を戦績レコードへ変換する(issue #293)。
  *
- * seed はジャーナルの seed をそのまま半荘の識別子に使い、`appendHistory` 側の
- * 重複排除で「終局済みジャーナルのリロード再生」による二重保存を防ぐ。逆に、
- * 終局の瞬間に保存へ失敗していても、リロード復元時に同じ seed で再追記されるため
- * 保存漏れを補完できる。ジャーナルが無い対局(テスト用の初期エンジン注入など)は
- * seed を持たないため保存対象外とする。
- *
- * 実際に追記できたときは購読者へ通知する(issue #310)。永続化と通知は
- * `matchHistory.ts` 側で分離されているため、書き換えた側が明示的に知らせる。
- * **描画フェーズから呼んではならない**(通知が他コンポーネントの再描画を要求するため)。
+ * `finishedAt` は最初に終局を観測した時点で固定する。保存が遅延しても、リロードや
+ * `「もう一半荘」`後の再試行で同じ結果レコードを使い、履歴の時刻が書き換わらないようにする。
  */
-async function recordFinishedGame(
+function finishedHistoryEntry(
   engine: EngineState,
   seed: number,
-): Promise<"saved" | "failed"> {
-  if (engine.phase !== "gameEnd" || engine.result === null) return "failed";
-  const storage = localStorageOrNull();
-  if (storage === null) return "failed";
-  const persisted = await persistHistoryAcrossTabs(storage, {
+): MatchHistoryEntry | null {
+  if (engine.phase !== "gameEnd" || engine.result === null) return null;
+  return {
     seed,
     finishedAt: Date.now(),
     players: engine.result.map((r) => ({
@@ -210,7 +214,24 @@ async function recordFinishedGame(
       bonus: r.bonus,
       soshiiTotal: r.soshiiTotal,
     })),
-  });
+  };
+}
+
+/**
+ * 終局した半荘の確定結果を戦績(`localStorage`)へ追記する(issue #293)。
+ *
+ * `entry.seed` はジャーナルの seed をそのまま半荘の識別子に使い、`persistHistory` 側の
+ * 重複排除で「終局済みジャーナルのリロード再生」や退避結果の再試行による二重保存を防ぐ。
+ * 実際に追記できたときは購読者へ通知する(issue #310)。永続化と通知は
+ * `matchHistory.ts` 側で分離されているため、書き換えた側が明示的に知らせる。
+ * **描画フェーズから呼んではならない**(通知が他コンポーネントの再描画を要求するため)。
+ */
+async function recordFinishedGame(
+  entry: MatchHistoryEntry,
+): Promise<"saved" | "failed"> {
+  const storage = localStorageOrNull();
+  if (storage === null) return "failed";
+  const persisted = await persistHistoryAcrossTabs(storage, entry);
   if (persisted === "appended") notifyHistoryChanged();
   return persisted === "failed" ? "failed" : "saved";
 }
@@ -313,6 +334,59 @@ export function GameProvider({ children, initialGame }: GameProviderProps) {
   // 次の遷移を計算する。engine は Wall/RNG を含め入力を可変更新するため、レンダー時点の
   // session をクロージャから再利用するとライブ状態だけが二重に進み、journal と分岐する。
   const sessionRef = useRef(session);
+  // `localStorage` の保存完了前に「もう一半荘」へ進んでも、結果を現行ジャーナルから
+  // 切り離して保持する。sessionStorage にも書くが、Storage が使えない環境では同一
+  // プロバイダの存続中だけでも回復できるようメモリを正とする(issue #892)。
+  const [pendingHistory] = useState(
+    () =>
+      new Map(
+        loadPendingHistory(sessionStorageOrNull()).map((entry) => [
+          entry.seed,
+          entry,
+        ]),
+      ),
+  );
+  const pendingHistoryAttemptsRef = useRef(new Set<number>());
+  const persistPendingHistoryEntry = useCallback(
+    (entry: MatchHistoryEntry, expectedJournal?: GameJournal) => {
+      if (pendingHistoryAttemptsRef.current.has(entry.seed)) return;
+      pendingHistoryAttemptsRef.current.add(entry.seed);
+      void recordFinishedGame(entry).then((historySaveStatus) => {
+        pendingHistoryAttemptsRef.current.delete(entry.seed);
+        if (historySaveStatus === "saved") {
+          forgetPendingHistory(
+            pendingHistory,
+            entry.seed,
+            sessionStorageOrNull(),
+          );
+        }
+        // 背景再試行は履歴だけを更新し、現在の新規対局の表示状態を変更しない。
+        if (
+          expectedJournal === undefined ||
+          sessionRef.current.journal !== expectedJournal
+        ) {
+          return;
+        }
+        const nextSession = {
+          ...sessionRef.current,
+          historySaveStatus,
+        };
+        sessionRef.current = nextSession;
+        setSession(nextSession);
+      });
+    },
+    [pendingHistory],
+  );
+  const retryPendingHistory = useCallback(
+    (excludeSeed?: number) => {
+      for (const entry of pendingHistory.values()) {
+        if (entry.seed !== excludeSeed) {
+          persistPendingHistoryEntry(entry);
+        }
+      }
+    },
+    [pendingHistory, persistPendingHistoryEntry],
+  );
   // 1回の描画で公開したUIから受け付ける遷移は1つだけにする。engine の1操作は
   // AI進行を含めて次の自家入力まで同期的に進み得るため、同じDOMへのダブルクリック等を
   // React commitまで直列化する。
@@ -337,19 +411,22 @@ export function GameProvider({ children, initialGame }: GameProviderProps) {
     // Wall/RNG が残らず、Strict Mode の効果2回実行でも2回目は早期 return になる
     // (重複追記は `appendHistory` の seed 重複排除でも防がれるため二重保存はしない)。
     initialSessionRef.current = null;
-    if (initial === null || initial.journal === null) return;
-    // 新規半荘は phase が gameEnd でないため `recordFinishedGame` 側で no-op になる。
-    if (initial.engine.phase !== "gameEnd") return;
-    void recordFinishedGame(initial.engine, initial.journal.seed).then(
-      (historySaveStatus) => {
-        // 効果の完了前に「もう一半荘」へ進んだ場合、新しい session を旧結果で汚さない。
-        if (sessionRef.current.journal !== initial.journal) return;
-        const nextSession = { ...sessionRef.current, historySaveStatus };
-        sessionRef.current = nextSession;
-        setSession(nextSession);
-      },
-    );
-  }, []);
+    if (initial !== null && initial.journal !== null) {
+      const entry = finishedHistoryEntry(initial.engine, initial.journal.seed);
+      if (entry !== null) {
+        const pendingEntry = rememberPendingHistory(
+          pendingHistory,
+          entry,
+          sessionStorageOrNull(),
+        );
+        persistPendingHistoryEntry(pendingEntry, initial.journal);
+        retryPendingHistory(pendingEntry.seed);
+        return;
+      }
+    }
+    // 現在のジャーナルが新規対局でも、前回「もう一半荘」へ進んだ後に残った結果を再試行する。
+    retryPendingHistory();
+  }, [pendingHistory, persistPendingHistoryEntry, retryPendingHistory]);
 
   // engine の遷移は内部で `Wall` 等を可変更新するため、React Strict Mode で再実行され得る
   // 関数型 updater の中では実行しない。同期 ref 上で1度だけ遷移し、その確定値を state へ渡す。
@@ -369,10 +446,14 @@ export function GameProvider({ children, initialGame }: GameProviderProps) {
       // 再生不能なイベントを journal に残さない。
       if (nextEngine === engine) return;
       markAccepted();
-      // この操作で半荘が終局したら、確定結果を戦績へ追記する(issue #293)。
+      // この操作で半荘が終局したら、確定結果を退避してから戦績へ追記する(issue #293 / #892)。
+      const historyEntry =
+        journal === null
+          ? null
+          : finishedHistoryEntry(nextEngine, journal.seed);
       const historySaveStatus =
         nextEngine.phase === "gameEnd"
-          ? journal === null
+          ? historyEntry === null
             ? "failed"
             : "pending"
           : sessionRef.current.historySaveStatus;
@@ -402,18 +483,13 @@ export function GameProvider({ children, initialGame }: GameProviderProps) {
       // storage / React state より先に同期 ref を進め、同一 tick の次イベントを直列化する。
       sessionRef.current = nextSession;
       setSession(nextSession);
-      if (nextEngine.phase === "gameEnd" && journal !== null) {
-        void recordFinishedGame(nextEngine, journal.seed).then(
-          (completedStatus) => {
-            if (sessionRef.current.journal !== nextJournal) return;
-            const completed = {
-              ...sessionRef.current,
-              historySaveStatus: completedStatus,
-            };
-            sessionRef.current = completed;
-            setSession(completed);
-          },
+      if (historyEntry !== null) {
+        const pendingEntry = rememberPendingHistory(
+          pendingHistory,
+          historyEntry,
+          sessionStorageOrNull(),
         );
+        persistPendingHistoryEntry(pendingEntry, nextJournal);
       }
     };
     const tileAction = (
@@ -435,6 +511,23 @@ export function GameProvider({ children, initialGame }: GameProviderProps) {
       nextRound: () => commit({ type: "nextRound" }),
       newGame: () => {
         if (!canAccept()) return;
+        const previous = sessionRef.current;
+        if (
+          previous.historySaveStatus !== "saved" &&
+          previous.journal !== null
+        ) {
+          const entry = finishedHistoryEntry(
+            previous.engine,
+            previous.journal.seed,
+          );
+          if (entry !== null) {
+            rememberPendingHistory(
+              pendingHistory,
+              entry,
+              sessionStorageOrNull(),
+            );
+          }
+        }
         const seed = freshSeed();
         const storage = sessionStorageOrNull();
         // 「もう一半荘」は新しい半荘の開始なので、設定で変更された名前をここで取り込む。
@@ -449,9 +542,15 @@ export function GameProvider({ children, initialGame }: GameProviderProps) {
         markAccepted();
         sessionRef.current = nextSession;
         setSession(nextSession);
+        retryPendingHistory();
       },
     };
-  }, [session]);
+  }, [
+    pendingHistory,
+    persistPendingHistoryEntry,
+    retryPendingHistory,
+    session,
+  ]);
 
   const value = useMemo<GameContextValue>(
     () => ({
