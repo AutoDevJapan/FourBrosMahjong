@@ -728,7 +728,7 @@ describe("parseOnlineServerMessage", () => {
 
   it("requires canonical tile counts and identities for visible melds (#864)", () => {
     const snapshot = snapshotFixture();
-    const tile = { suit: "pin" as const, rank: 5, isRed: false };
+    const tile = { suit: "pin" as const, rank: 5, isRed: true };
     const meldWith = (meld: unknown): OnlineSnapshot => {
       const candidate = structuredClone(snapshot) as unknown as {
         view: {
@@ -771,6 +771,27 @@ describe("parseOnlineServerMessage", () => {
           snapshot: meldWith(meld),
         }),
       ).not.toBeNull();
+    }
+  });
+
+  it("rejects tile views whose optional isRed flag contradicts the tile kind", () => {
+    const malformedTiles = [
+      { suit: "pin" as const, rank: 5, isRed: false },
+      { suit: "sou" as const, rank: 5, isRed: false },
+      { suit: "man" as const, rank: 1, isRed: true },
+      { suit: "honor" as const, rank: 7, isRed: true },
+    ];
+
+    for (const tile of malformedTiles) {
+      const candidate = mutableSlotSnapshot(snapshotFixture());
+      candidate.view.slots.self.player.hand = [tile];
+      expect(
+        parseOnlineServerMessage({
+          type: "snapshot",
+          snapshot: candidate as unknown as OnlineSnapshot,
+        }),
+        JSON.stringify(tile),
+      ).toBeNull();
     }
   });
 
