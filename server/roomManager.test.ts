@@ -377,6 +377,29 @@ describe("online room manager", () => {
     expect(manager.join(host.room.code, "満席")).toBeNull();
   });
 
+  it("keeps a released seat recoverable when replacement token generation fails", () => {
+    const manager = new RoomManager();
+    const host = manager.create("ホスト");
+    manager.leave(host.room, host.player);
+
+    const playersBefore = new Map(host.room.players);
+    const reusableSeatIdsBefore = new Set(host.room.reusableSeatIds);
+    const stateBefore = host.room.state;
+    const lastActivityBefore = host.room.lastActivityAt;
+    vi.mocked(randomBytes).mockImplementationOnce(() => {
+      throw new Error("random source unavailable");
+    });
+
+    expect(() => manager.join(host.room.code, "再参加")).toThrow(
+      "random source unavailable",
+    );
+    expect(host.room.players).toEqual(playersBefore);
+    expect(host.room.reusableSeatIds).toEqual(reusableSeatIdsBefore);
+    expect(host.room.state).toBe(stateBefore);
+    expect(host.room.lastActivityAt).toBe(lastActivityBefore);
+    expect(manager.join(host.room.code, "再参加")?.player.id).toBe("p0");
+  });
+
   it.each([
     ["roundEnd", reachRoundEnd],
     ["gameEnd", reachGameEnd],
