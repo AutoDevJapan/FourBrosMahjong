@@ -14,4 +14,11 @@ describe("requestPath", () => {
     expect(() => requestPath("http://[")).not.toThrow();
     expect(requestPath("http://[")).toBeNull();
   });
+
+  it.each(["//evil.example/ws", "//evil.example/ops/status"])(
+    "network-path request-targetをlocal routeのaliasにしない: %s",
+    (raw) => {
+      expect(requestPath(raw)).toBeNull();
+    },
+  );
 });
