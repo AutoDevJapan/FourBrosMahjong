@@ -758,6 +758,19 @@ describe("OnlineLobby の参加条件", () => {
     );
   });
 
+  it("貼り付けたルームコードの前後空白を上限前に取り除く", async () => {
+    const user = userEvent.setup();
+    render(<OnlineLobby />);
+
+    await user.type(screen.getByLabelText("表示名"), "たろう");
+    const roomCodeInput = screen.getByLabelText("ルームコード");
+    await user.click(roomCodeInput);
+    await user.paste(" ABC234 ");
+
+    expect(roomCodeInput).toHaveValue("ABC234");
+    expect(screen.getByRole("button", { name: "参加する" })).toBeEnabled();
+  });
+
   it("不可視の表示名は入力条件・参加条件・送信状態を一貫して無効にする", () => {
     render(<OnlineLobby />);
 

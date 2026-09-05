@@ -1598,7 +1598,12 @@ export default function OnlineLobby() {
                   type="text"
                   value={roomCode}
                   onChange={(event) =>
-                    setRoomCode(event.target.value.toUpperCase().slice(0, 6))
+                    setRoomCode(
+                      event.target.value
+                        .trim()
+                        .toUpperCase()
+                        .slice(0, ROOM_CODE_LENGTH),
+                    )
                   }
                   onKeyDown={(event) => {
                     if (event.key !== "Enter") return;
@@ -1610,7 +1615,9 @@ export default function OnlineLobby() {
                     event.preventDefault();
                     joinRoom();
                   }}
-                  maxLength={6}
+                  // Do not use native maxLength here: it truncates a pasted
+                  // ` ABC234 ` before the surrounding whitespace can be
+                  // trimmed, leaving the valid code one character short.
                   inputMode="text"
                   autoCapitalize="characters"
                   placeholder="ABC234"
