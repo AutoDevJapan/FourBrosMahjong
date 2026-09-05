@@ -57,6 +57,7 @@ const FILESYSTEM: RailwayIacFilesystemEvidence = {
   currentRepositoryFilePresent: true,
   currentRepositoryFileSha256: CURRENT_REPOSITORY_SHA,
   currentRepositoryFileContent: CURRENT_REPOSITORY_SOURCE,
+  legacyTomlFilePresent: false,
   legacyFixturePresent: true,
   legacyFixtureSha256: RAILWAY_LEGACY_FIXTURE_SHA256,
   legacyFixtureContent: LEGACY_FIXTURE_SOURCE,
@@ -265,6 +266,7 @@ describe("Railway IaC parity snapshot contract (#742)", () => {
       currentRepositoryFilePresent: FILESYSTEM.currentRepositoryFilePresent,
       currentRepositoryFileSha256: FILESYSTEM.currentRepositoryFileSha256,
       currentRepositoryFileContent: FILESYSTEM.currentRepositoryFileContent,
+      legacyTomlFilePresent: FILESYSTEM.legacyTomlFilePresent,
       legacyFixturePresent: FILESYSTEM.legacyFixturePresent,
       legacyFixtureSha256: FILESYSTEM.legacyFixtureSha256,
       legacyFixtureContent: FILESYSTEM.legacyFixtureContent,
@@ -433,7 +435,40 @@ describe("Railway IaC parity snapshot contract (#742)", () => {
       currentRepositoryFileSha256: createHash("sha256")
         .update(expected)
         .digest("hex"),
+      legacyTomlFilePresent: false,
     });
+  });
+
+  it.each([
+    [
+      "present",
+      (rootDirectory: string) => {
+        writeFileSync(join(rootDirectory, "railway.toml"), "[deploy]\n");
+      },
+    ],
+    [
+      "unreadable symlink",
+      (rootDirectory: string) => {
+        symlinkSync(
+          join(rootDirectory, "missing-railway.toml"),
+          join(rootDirectory, "railway.toml"),
+        );
+      },
+    ],
+  ])("holds when an alternate root railway.toml is %s", (_label, prepare) => {
+    const filesystem = withTemporaryRepository((rootDirectory) => {
+      prepare(rootDirectory);
+      return localFilesystemEvidence(rootDirectory);
+    });
+
+    expect(filesystem.legacyTomlFilePresent).toBe(true);
+    expect(
+      validateRailwayIacMigrationEvidence(
+        validEvidence(),
+        { ...FILESYSTEM, legacyTomlFilePresent: true },
+        NOW,
+      ).reasons,
+    ).toContain("alternate-legacy-config-present");
   });
 
   it("reads an ordinary file consistently across the bounded read passes", () => {
@@ -1278,10 +1313,12 @@ describe("Railway IaC parity snapshot contract (#742)", () => {
       currentRepositoryFilePresent: FILESYSTEM.currentRepositoryFilePresent,
       currentRepositoryFileSha256: FILESYSTEM.currentRepositoryFileSha256,
       currentRepositoryFileContent: FILESYSTEM.currentRepositoryFileContent,
+      legacyTomlFilePresent: FILESYSTEM.legacyTomlFilePresent,
       legacyFixturePresent: false,
       legacyFixtureSha256: null,
       legacyFixtureContent: null,
     });
+    collect(validEvidence(), { ...FILESYSTEM, legacyTomlFilePresent: true });
     const invalid = validEvidence();
     invalid.capturedAt = new Date(NOW - 300_001).toISOString();
     invalid.cliEvidence.planSupported = false;

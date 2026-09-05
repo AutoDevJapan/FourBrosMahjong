@@ -38,6 +38,7 @@ const RAILWAY_CURRENT_KNOWN_CONFIG = Object.freeze({
 });
 
 export const RAILWAY_IAC_MIGRATION_REASONS = [
+  "alternate-legacy-config-present",
   "cli-capability-unverified",
   "clock-invalid",
   "effective-readback-invalid",
@@ -77,6 +78,7 @@ export interface RailwayIacFilesystemEvidence {
   currentRepositoryFilePresent: boolean;
   currentRepositoryFileSha256: string | null;
   currentRepositoryFileContent: string | null;
+  legacyTomlFilePresent: boolean;
   legacyFixturePresent: boolean;
   legacyFixtureSha256: string | null;
   legacyFixtureContent: string | null;
@@ -1470,6 +1472,8 @@ export function validateRailwayIacMigrationEvidence(
   const legacyFixtureValid =
     legacyFixtureHashValid &&
     legacyFixtureContentIsKnown(filesystem.legacyFixtureContent);
+  if (filesystem.legacyTomlFilePresent !== false)
+    reasons.push("alternate-legacy-config-present");
   if (!currentRepositoryFileValid || !legacyFixtureValid)
     reasons.push("legacy-config-missing");
 

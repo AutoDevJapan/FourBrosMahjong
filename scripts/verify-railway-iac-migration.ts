@@ -23,6 +23,23 @@ export const MAX_GENERATED_IAC_BYTES = 64 * 1_024;
 export const MAX_LEGACY_CONFIG_BYTES = 64 * 1_024;
 const repositoryRoot = process.cwd();
 
+function legacyTomlFileIsPresent(rootDirectory: string): boolean {
+  try {
+    lstatSync(resolve(rootDirectory, "railway.toml"));
+    return true;
+  } catch (error) {
+    // A root railway.toml is an alternate Config as Code source. Treat every
+    // outcome except a definitive ENOENT as present so permission/read races
+    // cannot make the migration evidence fail open.
+    return !(
+      typeof error === "object" &&
+      error !== null &&
+      "code" in error &&
+      error.code === "ENOENT"
+    );
+  }
+}
+
 function isBoundedRegularFile(
   fileStats: ReturnType<typeof fstatSync>,
   maxBytes: number,
@@ -254,6 +271,7 @@ export function localFilesystemEvidence(
         ? null
         : createHash("sha256").update(currentRepositorySource).digest("hex"),
     currentRepositoryFileContent: currentRepositorySource,
+    legacyTomlFilePresent: legacyTomlFileIsPresent(rootDirectory),
     legacyFixturePresent: legacyFixtureSource !== null,
     legacyFixtureSha256:
       legacyFixtureSource === null
