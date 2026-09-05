@@ -7,8 +7,8 @@
  */
 
 import type { Tile } from "../tiles/tile";
-import { WallEmptyError } from "../wall/wall";
 import type { Wall } from "../wall/wall";
+import { WallEmptyError } from "../wall/wall";
 
 /** 各家の初期手牌枚数(サンマ標準: 親も含め13枚。親の第1ツモは打牌フェーズで行う)。 */
 export const STARTING_HAND_SIZE = 13;
