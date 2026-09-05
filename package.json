@@ -15,6 +15,7 @@
     "verify:server:rollout-preflight": "tsx scripts/verify-online-rollout-preflight.ts",
     "verify:railway:iac-migration": "tsx scripts/verify-railway-iac-migration.ts",
     "verify:railway:production-readback": "tsx scripts/verify-railway-production-readback.ts",
+    "stage:railway:iac": "tsx scripts/stage-railway-iac.ts",
     "validate:server:ops-token": "tsx scripts/validate-online-ops-token.ts",
     "build": "next build",
     "start": "next start",
