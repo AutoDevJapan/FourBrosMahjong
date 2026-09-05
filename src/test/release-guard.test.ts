@@ -225,6 +225,59 @@ describe("release metadata guard (#507)", () => {
       }),
     ).toThrow(/duplicate/);
   });
+
+  it("keeps release content that follows a reference-style link definition", () => {
+    const changelog = `# Changelog
+
+## [1.2.3] - 2026-09-06
+
+- See [upgrade guide][upgrade].
+
+[upgrade]: https://example.test/upgrade
+
+- This security note must also be published.
+
+## [1.2.2] - 2026-08-01
+
+- Older release.
+`;
+
+    expect(releaseNotesFromChangelog({ version: "1.2.3", changelog })).toBe(
+      "- See [upgrade guide][upgrade].\n\n[upgrade]: https://example.test/upgrade\n\n- This security note must also be published.\n",
+    );
+  });
+
+  it("removes only unreferenced repository link definitions at section end", () => {
+    const changelog = `# Changelog
+
+## [1.2.3] - 2026-09-06
+
+- See [upgrade guide][].
+
+[upgrade guide]: https://example.test/upgrade
+[1.2.3]: https://example.test/release
+`;
+
+    expect(releaseNotesFromChangelog({ version: "1.2.3", changelog })).toBe(
+      "- See [upgrade guide][].\n\n[upgrade guide]: https://example.test/upgrade\n",
+    );
+  });
+
+  it("retains a trailing definition used by a shortcut reference", () => {
+    const changelog = `# Changelog
+
+## [1.2.3] - 2026-09-06
+
+- See [upgrade].
+
+[upgrade]: https://example.test/upgrade
+[1.2.3]: https://example.test/release
+`;
+
+    expect(releaseNotesFromChangelog({ version: "1.2.3", changelog })).toBe(
+      "- See [upgrade].\n\n[upgrade]: https://example.test/upgrade\n",
+    );
+  });
 });
 
 describe("release ancestry guard (#507)", () => {
