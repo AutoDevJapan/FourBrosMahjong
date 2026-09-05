@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import type { Tile } from "../tiles/tile";
 import {
   decomposeSevenPairs,
   decomposeStandard,
@@ -106,6 +107,30 @@ describe("decomposeStandard", () => {
     expect(
       decomposeStandard(parseTiles("123p 456p 789p 135s 99s"), []),
     ).toHaveLength(0);
+  });
+
+  it("疎配列の手牌・副露コンテナ・副露牌を例外なく拒否する", () => {
+    const sparseTiles = new Array(14) as unknown as Tile[];
+    const sparseMelds = new Array(1) as unknown as MeldInput[];
+    const sparseMeldTiles = new Array(3) as unknown as Tile[];
+    const oneSou = parseTiles("1s")[0];
+    sparseMeldTiles[0] = oneSou;
+    sparseMeldTiles[2] = oneSou;
+    const sparseMeldTileContainer = [
+      { tiles: sparseMeldTiles, isKan: false, concealed: false },
+    ];
+    const validConcealed = parseTiles("123p 456p 789p 99s");
+
+    expect(decomposeStandard(sparseTiles, [])).toEqual([]);
+    expect(decomposeSevenPairs(sparseTiles, [])).toBeNull();
+    expect(decomposeThirteenOrphans(sparseTiles, [])).toBeNull();
+    expect(isCompleteHand(sparseTiles, [])).toBe(false);
+
+    expect(decomposeStandard(validConcealed, sparseMelds)).toEqual([]);
+    expect(isCompleteHand(validConcealed, sparseMelds)).toBe(false);
+    expect(decomposeStandard(validConcealed, sparseMeldTileContainer)).toEqual(
+      [],
+    );
   });
 });
 
