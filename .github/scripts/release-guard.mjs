@@ -37,6 +37,56 @@ export function versionFromTag(tag) {
   return tag.slice(1);
 }
 
+const CHANGELOG_REFERENCE_DEFINITION = /^[ \t]{0,3}\[([^\]\r\n]+)\]:[^\r\n]*$/;
+
+/** @param {string} label */
+function normalizeReferenceLabel(label) {
+  return label.trim().replace(/\s+/g, " ").toLowerCase();
+}
+
+/**
+ * Remove only repository-level reference definitions left at the end of a
+ * changelog section. A definition followed by more release prose is content
+ * and must remain in the published body. Definitions referenced by the body
+ * are retained even when they are in the trailing block.
+ *
+ * @param {string} section
+ */
+function removeTrailingReferenceDefinitions(section) {
+  const newline = section.includes("\r\n") ? "\r\n" : "\n";
+  const lines = section.split(/\r?\n/);
+  let end = lines.length;
+  while (end > 0 && lines[end - 1].trim() === "") end -= 1;
+
+  /** @type {{line: string, label: string}[]} */
+  const definitions = [];
+  while (end > 0) {
+    const match = CHANGELOG_REFERENCE_DEFINITION.exec(lines[end - 1]);
+    if (!match) break;
+    definitions.unshift({
+      line: lines[end - 1],
+      label: normalizeReferenceLabel(match[1]),
+    });
+    end -= 1;
+    while (end > 0 && lines[end - 1].trim() === "") end -= 1;
+  }
+  if (definitions.length === 0) return section;
+
+  const content = lines.slice(0, end).join(newline);
+  const referencedLabels = new Set();
+  const referenceUse = /\[([^\]\r\n]+)\](?:\s*\[([^\]\r\n]*)\])?/g;
+  for (const match of content.matchAll(referenceUse)) {
+    const label = match[2]?.trim() === "" ? match[1] : match[2];
+    referencedLabels.add(normalizeReferenceLabel(label));
+  }
+  const retainedDefinitions = definitions
+    .filter(({ label }) => referencedLabels.has(label))
+    .map(({ line }) => line);
+  return retainedDefinitions.length === 0
+    ? lines.slice(0, end).join(newline)
+    : [...lines.slice(0, end), "", ...retainedDefinitions].join(newline);
+}
+
 /**
  * Keep a tag update from reaching the release publisher even if the external
  * immutable-tag ruleset is misconfigured or temporarily bypassed. Re-running
@@ -82,8 +132,9 @@ export function releaseNotesFromChangelog({ version, changelog }) {
   }
   const bodyStart = (match.index ?? 0) + match[0].length;
   const remainder = changelog.slice(bodyStart);
-  const terminator = remainder.search(/^(?:## \[|\[.+\]:)/m);
-  const body = remainder.slice(0, terminator < 0 ? undefined : terminator);
+  const nextHeading = remainder.search(/^## \[/m);
+  const section = remainder.slice(0, nextHeading < 0 ? undefined : nextHeading);
+  const body = removeTrailingReferenceDefinitions(section);
   if (!body.trim())
     throw new Error(`CHANGELOG section for ${version} is empty`);
   return body.trim() + "\n";
