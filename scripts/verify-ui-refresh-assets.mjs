@@ -9,24 +9,132 @@ const DEFAULT_MANIFEST = resolve(
   "../documents/assets/ui-refresh/manifest.json",
 );
 const PNG_SIGNATURE = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]);
+const PNG_CHUNK_OVERHEAD = 12;
+const PNG_MAX_CHUNK_LENGTH = 0x7fffffff;
 const STABLE_FILENAME = /^[a-z0-9-]+\.png$/;
 const SHA_256 = /^[0-9a-f]{64}$/;
+
+const PNG_CRC32_TABLE = (() => {
+  const table = new Uint32Array(256);
+  for (let index = 0; index < table.length; index += 1) {
+    let value = index;
+    for (let bit = 0; bit < 8; bit += 1) {
+      value = (value & 1) === 0 ? value >>> 1 : (value >>> 1) ^ 0xedb88320;
+    }
+    table[index] = value >>> 0;
+  }
+  return table;
+})();
 
 function isRecord(value) {
   return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
+function invalidPng() {
+  throw new Error("asset is not a structurally valid PNG");
+}
+
+function isPngChunkTypeByte(value) {
+  return (value >= 0x41 && value <= 0x5a) || (value >= 0x61 && value <= 0x7a);
+}
+
+function crc32(buffer, start, end) {
+  let value = 0xffffffff;
+  for (let index = start; index < end; index += 1) {
+    value = PNG_CRC32_TABLE[(value ^ buffer[index]) & 0xff] ^ (value >>> 8);
+  }
+  return (value ^ 0xffffffff) >>> 0;
+}
+
 function readPngDimensions(buffer) {
   if (
-    buffer.length < 24 ||
-    !buffer.subarray(0, PNG_SIGNATURE.length).equals(PNG_SIGNATURE) ||
-    buffer.subarray(12, 16).toString("ascii") !== "IHDR"
+    buffer.length < PNG_SIGNATURE.length ||
+    !buffer.subarray(0, PNG_SIGNATURE.length).equals(PNG_SIGNATURE)
   ) {
-    throw new Error("asset is not a valid PNG with an IHDR header");
+    return invalidPng();
   }
+
+  let cursor = PNG_SIGNATURE.length;
+  let width;
+  let height;
+  let sawIhdr = false;
+  let sawIdat = false;
+  let sawIend = false;
+
+  while (cursor < buffer.length) {
+    if (buffer.length - cursor < PNG_CHUNK_OVERHEAD) return invalidPng();
+
+    const chunkLength = buffer.readUInt32BE(cursor);
+    if (
+      chunkLength > PNG_MAX_CHUNK_LENGTH ||
+      chunkLength > buffer.length - cursor - PNG_CHUNK_OVERHEAD
+    ) {
+      return invalidPng();
+    }
+
+    const typeStart = cursor + 4;
+    const dataStart = cursor + 8;
+    const dataEnd = dataStart + chunkLength;
+    const crcStart = dataEnd;
+    if (
+      !isPngChunkTypeByte(buffer[typeStart]) ||
+      !isPngChunkTypeByte(buffer[typeStart + 1]) ||
+      !isPngChunkTypeByte(buffer[typeStart + 2]) ||
+      !isPngChunkTypeByte(buffer[typeStart + 3]) ||
+      // The reserved third chunk-type bit must be uppercase in PNG.
+      (buffer[typeStart + 2] & 0x20) !== 0 ||
+      crc32(buffer, typeStart, dataEnd) !== buffer.readUInt32BE(crcStart)
+    ) {
+      return invalidPng();
+    }
+
+    const chunkType = buffer.toString("ascii", typeStart, typeStart + 4);
+    if (!sawIhdr) {
+      if (chunkType !== "IHDR" || chunkLength !== 13) return invalidPng();
+      width = buffer.readUInt32BE(dataStart);
+      height = buffer.readUInt32BE(dataStart + 4);
+      const bitDepth = buffer[dataStart + 8];
+      const colorType = buffer[dataStart + 9];
+      const validBitDepthAndColorType =
+        (colorType === 0 && [1, 2, 4, 8, 16].includes(bitDepth)) ||
+        (colorType === 2 && [8, 16].includes(bitDepth)) ||
+        (colorType === 3 && [1, 2, 4, 8].includes(bitDepth)) ||
+        (colorType === 4 && [8, 16].includes(bitDepth)) ||
+        (colorType === 6 && [8, 16].includes(bitDepth));
+      if (
+        width === 0 ||
+        height === 0 ||
+        width > PNG_MAX_CHUNK_LENGTH ||
+        height > PNG_MAX_CHUNK_LENGTH ||
+        !validBitDepthAndColorType ||
+        buffer[dataStart + 10] !== 0 ||
+        buffer[dataStart + 11] !== 0 ||
+        (buffer[dataStart + 12] !== 0 && buffer[dataStart + 12] !== 1)
+      ) {
+        return invalidPng();
+      }
+      sawIhdr = true;
+    } else if (chunkType === "IHDR") {
+      return invalidPng();
+    }
+
+    if (chunkType === "IDAT") sawIdat = true;
+    if (chunkType === "IEND") {
+      if (chunkLength !== 0) return invalidPng();
+      sawIend = true;
+      cursor = crcStart + 4;
+      break;
+    }
+    cursor = crcStart + 4;
+  }
+
+  if (!sawIhdr || !sawIdat || !sawIend || cursor !== buffer.length) {
+    return invalidPng();
+  }
+
   return {
-    width: buffer.readUInt32BE(16),
-    height: buffer.readUInt32BE(20),
+    width,
+    height,
   };
 }
 
