@@ -45,6 +45,17 @@ describe("shuffle(Fisher–Yates, seed 注入)", () => {
     expect(calls).toBe(3);
   });
 
+  it.each([
+    ["負数", -0.1],
+    ["1", 1],
+    ["NaN", Number.NaN],
+    ["正の無限大", Number.POSITIVE_INFINITY],
+  ] as const)("範囲外のRng値(%s)はRangeErrorで拒否する", (_, sample) => {
+    expect(() => shuffle([1, 2, 3], { next: () => sample })).toThrow(
+      RangeError,
+    );
+  });
+
   it("空配列・単一要素はそのまま返す", () => {
     expect(shuffle([], createSeededRng(1))).toEqual([]);
     expect(shuffle([42], createSeededRng(1))).toEqual([42]);

@@ -13,11 +13,20 @@ import type { Rng } from "./rng";
  *
  * @param items シャッフル対象(読み取り専用)。
  * @param rng   乱数源。同じ入力・同じ `Rng` の状態からは常に同じ並びを返す。
+ * @throws RangeError `rng.next()` が有限な `[0, 1)` の値を返さないとき。
  */
 export function shuffle<T>(items: readonly T[], rng: Rng): T[] {
   const result = [...items];
   for (let i = result.length - 1; i > 0; i--) {
-    const j = Math.floor(rng.next() * (i + 1));
+    const sample = rng.next();
+    if (!Number.isFinite(sample) || sample < 0 || sample >= 1) {
+      // A malformed injected RNG must not turn into a sparse/corrupt result
+      // through an out-of-range array index. Failing before the swap keeps the
+      // wall-construction boundary explicit and preserves Fisher–Yates' range
+      // invariant.
+      throw new RangeError("rng.next() must return a finite number in [0, 1).");
+    }
+    const j = Math.floor(sample * (i + 1));
     const tmp = result[i];
     result[i] = result[j];
     result[j] = tmp;
