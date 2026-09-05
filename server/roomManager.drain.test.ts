@@ -394,6 +394,27 @@ describe("RoomManager drain aggregates", () => {
     expect(observer.snapshot().retainedRooms).toBe(1);
   });
 
+  it("retains a quiet room while a seat is still connected", () => {
+    const clock = fakeClock();
+    const manager = new RoomManager({ monotonicNow: clock.now });
+    const host = manager.create("接続中のホスト");
+
+    clock.advance(60 * 60 * 1_000 + 1);
+    manager.sweep();
+
+    expect(manager.aggregateSnapshot()).toMatchObject({
+      retainedRooms: 1,
+      connectedRooms: 1,
+      uniqueConnectedSeats: 1,
+    });
+
+    manager.disconnect(host.room, host.player);
+    clock.advance(60 * 60 * 1_000 + 1);
+    manager.sweep();
+
+    expect(manager.aggregateSnapshot().retainedRooms).toBe(0);
+  });
+
   it("counts each room abandoned during one drain epoch at most once", () => {
     const clock = fakeClock();
     const manager = new RoomManager({ monotonicNow: clock.now });

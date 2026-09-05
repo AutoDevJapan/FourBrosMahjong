@@ -971,6 +971,12 @@ export class RoomManager {
   sweep(): void {
     const cutoff = this.now() - ROOM_TTL_MS;
     for (const [code, room] of this.rooms) {
+      // A connected seat is an active-room signal even when the game is
+      // temporarily quiet. Do not let the retention TTL erase a live game
+      // before its socket close path can update the drain aggregate.
+      if ([...room.players.values()].some((player) => player.connected)) {
+        continue;
+      }
       if (room.lastActivityAt < cutoff) this.rooms.delete(code);
     }
   }
