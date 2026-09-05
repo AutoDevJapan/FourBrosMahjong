@@ -81,6 +81,13 @@ describe("decomposeSevenPairs", () => {
 });
 
 describe("decomposeThirteenOrphans", () => {
+  it("実在しない字牌 rank を国士無双として受け入れない", () => {
+    const impossible = parseTiles("19m 19p 19s 1234568z 1m");
+
+    expect(decomposeThirteenOrphans(impossible, [])).toBeNull();
+    expect(isCompleteHand(impossible, [])).toBe(false);
+  });
+
   it("13種の么九+1雀頭を国士無双と判定する", () => {
     const form = decomposeThirteenOrphans(
       parseTiles("19m 19p 19s 11234567z"),
