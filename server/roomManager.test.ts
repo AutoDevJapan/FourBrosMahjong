@@ -3,6 +3,10 @@ import { describe, expect, it, vi } from "vitest";
 import { walkToGameEnd } from "../src/components/game/finishedGameFixture";
 import { createGame, discard, seatOfPlayer } from "../src/domain/game/engine";
 import {
+  ONLINE_RESUME_TOKEN_MAX_LENGTH,
+  ONLINE_RESUME_TOKEN_MIN_LENGTH,
+} from "../src/domain/online/types";
+import {
   MAX_PLAYER_NAME_CODE_UNITS,
   MAX_PLAYER_NAME_LENGTH,
 } from "../src/lib/playerName";
@@ -446,6 +450,18 @@ describe("online room manager", () => {
       "p0",
     );
     expect(manager.resume(host.room.code, "not-a-token")).toBeNull();
+    expect(
+      manager.resume(
+        host.room.code,
+        "x".repeat(ONLINE_RESUME_TOKEN_MIN_LENGTH - 1),
+      ),
+    ).toBeNull();
+    expect(
+      manager.resume(
+        host.room.code,
+        "x".repeat(ONLINE_RESUME_TOKEN_MAX_LENGTH + 1),
+      ),
+    ).toBeNull();
   });
 
   it("does not let the host reset an active room", () => {

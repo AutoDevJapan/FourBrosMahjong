@@ -16,10 +16,12 @@ import {
 } from "../src/domain/game/gamePersistence";
 import { selectView } from "../src/domain/game/gameView";
 import type { GameViewState } from "../src/domain/game/viewTypes";
-import type {
-  OnlineDepartureNotice,
-  OnlineHostNotice,
-  OnlineHostTransitionReason,
+import {
+  ONLINE_RESUME_TOKEN_MAX_LENGTH,
+  ONLINE_RESUME_TOKEN_MIN_LENGTH,
+  type OnlineDepartureNotice,
+  type OnlineHostNotice,
+  type OnlineHostTransitionReason,
 } from "../src/domain/online/types";
 import { createTile, type Suit } from "../src/domain/tiles/tile";
 import { isValidPlayerName, sanitizePlayerName } from "../src/lib/playerName";
@@ -576,7 +578,14 @@ export class RoomManager {
     token: unknown,
   ): RoomSession | null {
     const code = normalizeRoomCode(codeValue);
-    if (code === null || typeof token !== "string") return null;
+    if (
+      code === null ||
+      typeof token !== "string" ||
+      token.length < ONLINE_RESUME_TOKEN_MIN_LENGTH ||
+      token.length > ONLINE_RESUME_TOKEN_MAX_LENGTH
+    ) {
+      return null;
+    }
     const room = this.rooms.get(code);
     if (!room) return null;
     const player = [...room.players.values()].find(
