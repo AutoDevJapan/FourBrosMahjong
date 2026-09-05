@@ -76,9 +76,12 @@ describe("SoshiiBreakdown (spec 6.7 / 6.8)", () => {
   it("labels the section by the player name for assistive tech", () => {
     render(<SoshiiBreakdown player={player} />);
     expect(screen.getByText("あなた")).toHaveAttribute("dir", "auto");
-    expect(
-      screen.getByRole("region", { name: "1位 あなたのソシー内訳" }),
-    ).toBeInTheDocument();
+    const region = screen.getByRole("region", {
+      name: "1位 あなたのソシー内訳",
+    });
+    expect(region).toBeInTheDocument();
+    expect(region).not.toHaveAttribute("aria-label");
+    expect(region).toHaveAttribute("aria-labelledby");
   });
 
   it("重複名でも順位を含む一意なlandmark名を持つ", () => {
@@ -91,5 +94,19 @@ describe("SoshiiBreakdown (spec 6.7 / 6.8)", () => {
     expect(
       screen.getByRole("region", { name: "2位 あなたのソシー内訳" }),
     ).toBeInTheDocument();
+  });
+
+  it("RTL名のlandmark名も表示名の隔離されたDOMから組み立てる", () => {
+    render(
+      <SoshiiBreakdown player={{ ...player, name: "אבג" }} variant="result" />,
+    );
+
+    const region = screen.getByRole("region", {
+      name: "1位 אבגのソシー内訳",
+    });
+    const name = screen.getByText("אבג");
+    expect(name).toHaveAttribute("dir", "auto");
+    expect(name).toHaveClass("player-name-bidi-isolate");
+    expect(region).not.toHaveAttribute("aria-label");
   });
 });
