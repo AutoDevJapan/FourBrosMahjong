@@ -655,6 +655,16 @@ body {
   unicode-bidi: isolate;
 }
 
+/*
+ * Keep a fixed suffix in the same inline accessible-name node. Using the
+ * absolute-positioned `sr-only` utility here makes Chromium insert a space
+ * before the suffix when it computes `aria-labelledby`.
+ */
+.player-name-accessible-suffix {
+  font-size: 0;
+  line-height: 0;
+}
+
 .character-portrait {
   border: 2px solid var(--character-accent, var(--control-border));
   background: #f4f4f4;

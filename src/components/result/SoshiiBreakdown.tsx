@@ -85,7 +85,7 @@ export default function SoshiiBreakdown({
           <span dir="auto" className="player-name-bidi-isolate">
             {name}
           </span>
-          <span className="sr-only">のソシー内訳</span>
+          <span className="player-name-accessible-suffix">のソシー内訳</span>
         </span>
         {presentation && rank === 1 ? (
           <span className={presentationClass("winner-label")}>優勝</span>
