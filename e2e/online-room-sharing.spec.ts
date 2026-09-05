@@ -36,4 +36,18 @@ test.describe("オンラインルーム共有リンク (#605)", () => {
     await expect(roomCodeInput).toHaveValue("");
     await expect(page.getByRole("button", { name: "参加する" })).toBeDisabled();
   });
+
+  test("貼り付けたコードの前後空白を6文字制限前に正規化する", async ({
+    page,
+  }) => {
+    await page.goto("/online");
+
+    await page.getByLabel("表示名").fill("テスト参加者");
+    const roomCodeInput = page.getByLabel("ルームコード");
+    await roomCodeInput.focus();
+    await page.keyboard.insertText(" ABC234 ");
+
+    await expect(roomCodeInput).toHaveValue("ABC234");
+    await expect(page.getByRole("button", { name: "参加する" })).toBeEnabled();
+  });
 });
