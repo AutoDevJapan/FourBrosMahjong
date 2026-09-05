@@ -141,37 +141,42 @@ export const SCREENS: readonly NonTextContrastScreen[] = [
   },
 ];
 
-/** 非テキストコントラスト監査の対象。実在ルートの共通一覧をそのまま返す(#445)。 */
+/** 非テキストコントラスト監査の実在ルート対象。共通一覧をそのまま返す(#445)。 */
 export function nonTextContrastScreens(): readonly NonTextContrastScreen[] {
   return SCREENS;
 }
 
 /**
- * `LANDMARK_SCREENS` 内で 404 エントリを識別する名前。
+ * 全体 a11y 監査の画面一覧内で 404 エントリを識別する名前。
  * このエントリの `path` は実在ルートではない番兵なので、ルート網羅の検査
  * (`src/test/a11y-landmark-screens.test.ts`)はこの名前で除外する。
  */
 export const NOT_FOUND_SCREEN_NAME = "404";
 
 /**
- * ランドマーク監査(#409)の対象。実在ルートに加えて 404 も見る。
- * 404 は `not-found.tsx` という独立した実装で、`src/app/**\/page.*` を走査する
- * ルート網羅の検査(`src/test/a11y-landmark-screens.test.ts`)にも現れないため、
- * 他のルートの規約が波及しない。明示的に足さないと監査から丸ごと落ちる。
- *
- * 404 を `SCREENS` 側(WCAG A/AA 監査・3 テーマ)へは**意図的に入れていない**。#409 の
- * 範囲はランドマーク構造であり、404 の A/AA 違反まで同時に必須化すると切り分けが濁る。
- * 404 を全 a11y ゲートへ広げるかは別途判断する(現状 `non-text-contrast.spec.ts` も未対象)。
+ * 実在ルートに加えて 404 も全体 a11y 監査へ含める共通一覧。
+ * `not-found.tsx` は独立した実装なので、実在ルートだけを列挙した `SCREENS` から漏れると
+ * WCAG A/AA と非テキストコントラストの回帰がともに無音で通る。404 用の正の hydration
+ * アンカーと測定件数フロアもここで固定し、監査が空振りして pass する経路を防ぐ。
  */
-export const LANDMARK_SCREENS: readonly Screen[] = [
+export const FULL_A11Y_SCREENS: readonly NonTextContrastScreen[] = [
   ...SCREENS,
   {
-    // 実在しない番兵パス(どのルートにも一致しないので 404 が描画される)。
     path: "/no-such-page-409",
     name: NOT_FOUND_SCREEN_NAME,
     heading: "ページが見つかりません",
+    clientReady: (page) => page.getByRole("link", { name: "ロビーへ戻る" }),
+    nonTextContrastMinMeasured: 1,
   },
 ];
+
+/**
+ * ランドマーク監査(#409)の対象。全体 a11y 監査と同じく、実在ルートに 404 を加えて見る。
+ * 404 は `not-found.tsx` という独立した実装で、`src/app/**\/page.*` を走査する
+ * ルート網羅の検査(`src/test/a11y-landmark-screens.test.ts`)にも現れないため、
+ * `FULL_A11Y_SCREENS` の番兵をそのまま共有する。
+ */
+export const LANDMARK_SCREENS: readonly Screen[] = [...FULL_A11Y_SCREENS];
 
 /**
  * ランドマーク構造を固定する axe ルール(spec 5.2.6 / axe-core 4.12.1 で実測)。

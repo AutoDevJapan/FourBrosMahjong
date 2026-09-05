@@ -1,8 +1,8 @@
 import { expect, type Page, test } from "@playwright/test";
 import { advanceUntil } from "./helpers/gameDriver";
-import { type NonTextContrastScreen, nonTextContrastScreens } from "./screens";
+import { FULL_A11Y_SCREENS, type NonTextContrastScreen } from "./screens";
 
-const SCREENS = nonTextContrastScreens();
+const SCREENS = FULL_A11Y_SCREENS;
 
 /**
  * 非テキストコントラスト(WCAG 1.4.11)の実描画監査(#388 / スペック5 5.2.4)。
