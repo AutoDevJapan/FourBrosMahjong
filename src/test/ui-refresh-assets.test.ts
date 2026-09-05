@@ -1,8 +1,10 @@
+import { createHash } from "node:crypto";
 import {
   copyFileSync,
   cpSync,
   mkdirSync,
   mkdtempSync,
+  readFileSync,
   rmSync,
   symlinkSync,
   unlinkSync,
@@ -53,6 +55,24 @@ function withFixture(
   } finally {
     rmSync(fixture.fixtureDirectory, { force: true, recursive: true });
   }
+}
+
+function rewriteManifestAsset(
+  manifestPath: string,
+  id: string,
+  contents: Buffer,
+  dimensions?: { width: number; height: number },
+) {
+  const tamperedManifest = structuredClone(manifest);
+  const asset = tamperedManifest.assets.find((entry) => entry.id === id);
+  if (asset === undefined) throw new Error(`missing fixture asset: ${id}`);
+  asset.bytes = contents.length;
+  asset.sha256 = createHash("sha256").update(contents).digest("hex");
+  if (dimensions !== undefined) {
+    asset.width = dimensions.width;
+    asset.height = dimensions.height;
+  }
+  writeFileSync(manifestPath, JSON.stringify(tamperedManifest));
 }
 
 const EXPECTED_ASSETS = [
@@ -213,6 +233,52 @@ describe("Issue #712 design-reference originals", () => {
       symlinkSync(join(originalsPath, "missing.png"), lobbyPath);
       expect(() => verifyUiRefreshAssets(manifestPath)).toThrow(
         "originals/ inventory must exactly match the regular files in the manifest",
+      );
+    });
+  });
+
+  it("rejects a truncated PNG even when its manifest metadata is updated", () => {
+    withFixture(({ manifestPath, originalsPath }) => {
+      const truncated = Buffer.alloc(24);
+      Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]).copy(truncated);
+      truncated.writeUInt32BE(13, 8);
+      truncated.write("IHDR", 12, "ascii");
+      truncated.writeUInt32BE(1, 16);
+      truncated.writeUInt32BE(1, 20);
+      writeFileSync(join(originalsPath, "lobby.png"), truncated);
+      rewriteManifestAsset(manifestPath, "lobby", truncated, {
+        width: 1,
+        height: 1,
+      });
+
+      expect(() => verifyUiRefreshAssets(manifestPath)).toThrow(
+        "asset is not a structurally valid PNG",
+      );
+    });
+  });
+
+  it("rejects a manifest-matched asset without a terminal IEND chunk", () => {
+    withFixture(({ manifestPath, originalsPath }) => {
+      const original = readFileSync(join(originalsPath, "lobby.png"));
+      const truncated = original.subarray(0, original.length - 12);
+      writeFileSync(join(originalsPath, "lobby.png"), truncated);
+      rewriteManifestAsset(manifestPath, "lobby", truncated);
+
+      expect(() => verifyUiRefreshAssets(manifestPath)).toThrow(
+        "asset is not a structurally valid PNG",
+      );
+    });
+  });
+
+  it("rejects a manifest-matched asset with a corrupt PNG chunk CRC", () => {
+    withFixture(({ manifestPath, originalsPath }) => {
+      const corrupted = readFileSync(join(originalsPath, "lobby.png"));
+      corrupted[corrupted.length - 1] ^= 0xff;
+      writeFileSync(join(originalsPath, "lobby.png"), corrupted);
+      rewriteManifestAsset(manifestPath, "lobby", corrupted);
+
+      expect(() => verifyUiRefreshAssets(manifestPath)).toThrow(
+        "asset is not a structurally valid PNG",
       );
     });
   });
