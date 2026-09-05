@@ -15,6 +15,8 @@ Railway公式ではConfig as Codeは2026-12-01にhard cutoffとなる。IaCはbe
 
 このrepositoryには意図的に`.railway/railway.ts`を置かず、current targetとしてroot `railway.json`を保持する。ownership cutoverのlegacy根拠はcurrent targetから分離した、checked-in immutable fixture [`documents/fixtures/railway-pre-cutover.json`](../fixtures/railway-pre-cutover.json)（pre-cutoverの`/healthz`）だけである。exact production project/environment/service identity、全project resource inventory、effective settingsをauthorized read-backしていないため、現時点の次のcommandは`hold`となる。
 
+Railwayはrootの`railway.json`だけでなく`railway.toml`もConfig as Codeとして検出する。local verifierはroot `railway.toml`の不在を確認し、存在する場合や不在を確定できない場合は`alternate-legacy-config-present`でfail closedにする。`railway.json`が正しくても、alternateなlegacy fileを残したままparity evidenceをpassさせてはならない。custom Config File pathの有無は、authorized operatorがtarget serviceのread-backで別途確認する。
+
 実施ownerはRailway Production Operatorだが現在未割当であり、未割当の間はHOLDする。移行目標日はhard cutoffよりreview/rollback余裕を確保した2026-10-31とし、完了証拠が揃うまでIssue #742はOPENを維持する。
 
 ```sh
