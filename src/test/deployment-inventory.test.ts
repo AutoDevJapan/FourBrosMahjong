@@ -16,29 +16,29 @@ const TOPOLOGY_EVIDENCE_DOC = readFileSync(
 
 describe("deployment inventory evidence", () => {
   it("keeps the current main, Vercel deployment, and service-worker evidence aligned", () => {
-    expect(DEPLOYMENT_DOC).toContain("#1014 merge後、監査対象commit `d66c4e2`");
+    expect(DEPLOYMENT_DOC).toContain("#1025 merge後、監査対象commit `f3130316`");
     expect(DEPLOYMENT_DOC).toContain(
-      "`d66c4e2e4f5a5401e31db7914d71ec658bc4b20b`（#1014 merge 後）",
+      "`f3130316ea81f56fc46d302fe572a658d44abce7`（#1025 merge 後）",
     );
-    expect(DEPLOYMENT_DOC).toContain("GitHub deployment `6286726323`");
+    expect(DEPLOYMENT_DOC).toContain("GitHub deployment `6286927273`");
     expect(DEPLOYMENT_DOC).toContain(
-      "https://four-bros-mahjong-62fotmja2.vercel.app",
+      "https://four-bros-mahjong-8vjmtdf19.vercel.app",
     );
-    expect(DEPLOYMENT_DOC).toContain("VERSION` は `d66c4e2e4f5a`");
+    expect(DEPLOYMENT_DOC).toContain("VERSION` は `f3130316ea81`");
     expect(DEPLOYMENT_DOC).toContain(
-      "CI `33997102382`、gitleaks `33997102453`、CodeQL `33997102462` がすべて `success`",
+      "CI `33998271577`、gitleaks `33998271575`、CodeQL `33998271380` がすべて `success`",
     );
   });
 
   it("keeps the #725 current-head evidence aligned with the same deployment", () => {
     expect(TOPOLOGY_EVIDENCE_DOC).toContain(
-      "`d66c4e2e4f5a5401e31db7914d71ec658bc4b20b`（#1014 merge 後",
+      "`f3130316ea81f56fc46d302fe572a658d44abce7`（#1025 merge 後",
     );
-    expect(TOPOLOGY_EVIDENCE_DOC).toContain("deployment `6286726323`");
+    expect(TOPOLOGY_EVIDENCE_DOC).toContain("deployment `6286927273`");
     expect(TOPOLOGY_EVIDENCE_DOC).toContain(
-      "https://four-bros-mahjong-62fotmja2.vercel.app",
+      "https://four-bros-mahjong-8vjmtdf19.vercel.app",
     );
-    expect(TOPOLOGY_EVIDENCE_DOC).toContain('VERSION = "d66c4e2e4f5a"');
+    expect(TOPOLOGY_EVIDENCE_DOC).toContain('VERSION = "f3130316ea81"');
     expect(TOPOLOGY_EVIDENCE_DOC).toContain("6 route × 3 viewport");
   });
 
@@ -53,7 +53,7 @@ describe("deployment inventory evidence", () => {
   });
 
   it("keeps the six-screen fallback smoke evidence visible", () => {
-    expect(DEPLOYMENT_DOC).toContain("合計12/12 pass");
+    expect(DEPLOYMENT_DOC).toContain("合計18/18 pass");
     expect(DEPLOYMENT_DOC).toContain("local Playwright");
     for (const path of [
       "/",
