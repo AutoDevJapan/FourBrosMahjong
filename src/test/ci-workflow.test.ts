@@ -126,6 +126,17 @@ function readWorkflowFile(filename: string): Workflow {
   ) as Workflow;
 }
 
+const ALLOWED_WRITE_PERMISSION_JOBS = {
+  "gitleaks-version-bump.yml/open-bump-pr": {
+    contents: "write",
+    "pull-requests": "write",
+    actions: "write",
+  },
+  "release.yml/release": {
+    contents: "write",
+  },
+} as const;
+
 /** Playwright のブラウザバイナリを置く共有キャッシュパス。 */
 const PLAYWRIGHT_CACHE_PATH = "~/.cache/ms-playwright";
 /** `playwright install` に名前で渡せるターゲット。増やしたらここへ追加する。 */
@@ -772,6 +783,62 @@ describe("GITHUB_TOKEN 生成PRのrequired checks", () => {
     expect(openJob?.steps?.map((step) => step.run).join("\n")).not.toContain(
       "steps.compare.outputs",
     );
+  });
+});
+
+describe("GITHUB_TOKEN の既定権限境界 (#934)", () => {
+  it("全workflowをread-onlyにし、write権限を許可済みjobだけに限定する", () => {
+    const observedWriteJobs: Record<string, Record<string, string>> = {};
+    const filenames = workflowFilenames().sort();
+
+    expect(filenames, "workflowが1つも見つからない").not.toEqual([]);
+
+    for (const filename of filenames) {
+      const workflow = readWorkflowFile(filename);
+      const workflowPermissions = workflow.permissions ?? {};
+
+      expect(
+        workflow.permissions,
+        `${filename}: workflow-level permissions が無い(write-allの既定値に戻る可能性がある)`,
+      ).toBeDefined();
+      for (const [scope, level] of Object.entries(workflowPermissions)) {
+        expect(
+          ["read", "none"],
+          `${filename}: workflow-level ${scope} はread/noneに限定する`,
+        ).toContain(level);
+      }
+
+      for (const [jobName, job] of Object.entries(workflow.jobs ?? {})) {
+        const permissions = job.permissions ?? {};
+        for (const [scope, level] of Object.entries(permissions)) {
+          expect(
+            ["read", "write", "none"],
+            `${filename}/${jobName}: ${scope} のpermission値が不正`,
+          ).toContain(level);
+        }
+
+        const writePermissions = Object.fromEntries(
+          Object.entries(permissions).filter(([, level]) => level === "write"),
+        );
+        if (Object.keys(writePermissions).length === 0) continue;
+
+        const key = `${filename}/${jobName}`;
+        const expected =
+          ALLOWED_WRITE_PERMISSION_JOBS[
+            key as keyof typeof ALLOWED_WRITE_PERMISSION_JOBS
+          ];
+        expect(
+          expected,
+          `${key}: write権限は明示的にレビュー済みのjobだけが持てる`,
+        ).toBeDefined();
+        expect(permissions, `${key}: write権限はjob単位で最小化する`).toEqual(
+          expected,
+        );
+        observedWriteJobs[key] = writePermissions;
+      }
+    }
+
+    expect(observedWriteJobs).toEqual(ALLOWED_WRITE_PERMISSION_JOBS);
   });
 });
 
