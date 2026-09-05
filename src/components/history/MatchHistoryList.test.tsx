@@ -455,6 +455,8 @@ describe("MatchHistoryList (#293)", () => {
     const emptyState = (
       await screen.findByText(/保存された戦績はまだありません/)
     ).closest("div");
+    expect(emptyState).toHaveAttribute("role", "region");
+    expect(emptyState).toHaveAccessibleName(/保存された戦績はまだありません/);
     expect(emptyState).toHaveFocus();
     expect(document.body).not.toHaveFocus();
   });
