@@ -136,6 +136,15 @@ describe("isRedDora(赤扱い判定の唯一の述語 / issue #485)", () => {
     );
   });
 
+  it.each([null, undefined])(
+    "不正な外部値 %s は例外にせず赤扱いしない",
+    (value) => {
+      expect(
+        isRedDora(value as unknown as Parameters<typeof isRedDora>[0]),
+      ).toBe(false);
+    },
+  );
+
   // このループは赤5ルールを独立に検証するものではない(両者は同じ内部式を共有する)。
   // 目的は「生成と判定が将来切り離されたら落ちる」ことの固定。
   it("createTile の不変条件と一致する(判定と生成が同じ規則を共有する)", () => {
