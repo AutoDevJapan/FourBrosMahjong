@@ -20,7 +20,7 @@
 import { MAX_OMOTE_DORA_COUNT } from "../dora/dice";
 import type { Rng } from "../random/rng";
 import { shuffle } from "../random/shuffle";
-import type { Tile } from "../tiles/tile";
+import { createTile, isRedDora, type Suit, type Tile } from "../tiles/tile";
 import {
   buildTileSet,
   COPIES_PER_TILE,
@@ -86,6 +86,55 @@ function tileKey(tile: Tile): string {
   return `${tile.suit}-${tile.rank}-${tile.isRed ? "r" : "n"}`;
 }
 
+function isSuit(value: unknown): value is Suit {
+  return (
+    value === "man" || value === "pin" || value === "sou" || value === "honor"
+  );
+}
+
+/**
+ * Wall の実行時境界で受け入れられる牌の形と不変条件を検証する。
+ *
+ * `Tile` は TypeScript の構造型なので、JSON や型アサーションを経由した値が
+ * `Wall` へ届くと、文字列化を使った多重集合キーだけでは `rank: "1"` のような
+ * 値を数値 rank と同一視してしまう。正準牌のキーを作る前に、プリミティブ型・
+ * カタログ上の牌種・ファクトリが決める赤フラグを確認する。
+ */
+function isCanonicalTile(value: unknown): value is Tile {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) {
+    return false;
+  }
+
+  const tile = value as Record<string, unknown>;
+  const ownKeys = Reflect.ownKeys(tile);
+  if (
+    ownKeys.length !== 3 ||
+    !["suit", "rank", "isRed"].every((key) =>
+      Object.prototype.hasOwnProperty.call(tile, key),
+    )
+  ) {
+    return false;
+  }
+
+  const suit = tile.suit;
+  const rank = tile.rank;
+  const isRed = tile.isRed;
+  if (!isSuit(suit) || typeof rank !== "number" || !Number.isInteger(rank)) {
+    return false;
+  }
+
+  const validKind =
+    (suit === "honor" && rank >= 1 && rank <= 7) ||
+    (suit === "man" && (rank === 1 || rank === 9)) ||
+    ((suit === "pin" || suit === "sou") && rank >= 1 && rank <= 9);
+
+  return (
+    validKind &&
+    typeof isRed === "boolean" &&
+    isRed === isRedDora(createTile(suit, rank))
+  );
+}
+
 function hasCanonicalTileMultiset(tiles: readonly Tile[]): boolean {
   const expected = new Map<string, number>();
   for (const tile of buildTileSet()) {
@@ -95,6 +144,7 @@ function hasCanonicalTileMultiset(tiles: readonly Tile[]): boolean {
 
   const actual = new Map<string, number>();
   for (const tile of tiles) {
+    if (!isCanonicalTile(tile)) return false;
     const key = tileKey(tile);
     actual.set(key, (actual.get(key) ?? 0) + 1);
   }
