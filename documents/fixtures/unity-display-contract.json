@@ -4,6 +4,13 @@
   "source": {
     "messageTypes": ["session", "snapshot"],
     "snapshotVersion": 42,
+    "snapshotVersionSequence": [
+      { "version": 41, "expected": "apply" },
+      { "version": 42, "expected": "apply" },
+      { "version": 41, "expected": "ignore" },
+      { "version": 42, "expected": "ignore" },
+      { "version": 43, "expected": "apply" }
+    ],
     "ruleAuthority": "server-and-domain",
     "displayAuthority": "unity-client"
   },

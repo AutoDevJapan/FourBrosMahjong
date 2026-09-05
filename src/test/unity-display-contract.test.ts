@@ -45,12 +45,18 @@ interface RoundPosition {
   readonly honba: number;
 }
 
+interface SnapshotVersionStep {
+  readonly version: number;
+  readonly expected: "apply" | "ignore";
+}
+
 interface ContractFixture {
   readonly schema: string;
   readonly schemaVersion: number;
   readonly source: {
     readonly messageTypes: readonly string[];
     readonly snapshotVersion: number;
+    readonly snapshotVersionSequence: readonly SnapshotVersionStep[];
     readonly ruleAuthority: string;
     readonly displayAuthority: string;
   };
@@ -164,6 +170,33 @@ describe("Unity display contract fixture", () => {
     expect(fixture.source.snapshotVersion).toBe(42);
     expect(fixture.source.ruleAuthority).toBe("server-and-domain");
     expect(fixture.source.displayAuthority).toBe("unity-client");
+  });
+
+  it("rejects snapshot versions that do not advance the applied view", () => {
+    expect(fixture.source.snapshotVersionSequence).toEqual([
+      { version: 41, expected: "apply" },
+      { version: 42, expected: "apply" },
+      { version: 41, expected: "ignore" },
+      { version: 42, expected: "ignore" },
+      { version: 43, expected: "apply" },
+    ]);
+
+    let lastAppliedVersion: number | null = null;
+    const appliedVersions: number[] = [];
+
+    for (const step of fixture.source.snapshotVersionSequence) {
+      const shouldApply =
+        lastAppliedVersion === null || step.version > lastAppliedVersion;
+      expect(shouldApply ? "apply" : "ignore").toBe(step.expected);
+
+      if (shouldApply) {
+        lastAppliedVersion = step.version;
+        appliedVersions.push(step.version);
+      }
+    }
+
+    expect(appliedVersions).toEqual([41, 42, 43]);
+    expect(lastAppliedVersion).toBe(43);
   });
 
   it("keeps all four parent-flow rotations as three-seated/one-bench maps", () => {
