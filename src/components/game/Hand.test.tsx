@@ -418,6 +418,52 @@ describe("Hand (roving tabindex listbox, spec 5.2.2)", () => {
     expect(fallbackRef.current).toHaveFocus();
   });
 
+  it("タッチ確認ボタンにフォーカス中でも閲覧専用化の着地点へ移す", () => {
+    const fallbackRef = createRef<HTMLDivElement>();
+    const { rerender } = render(
+      <>
+        <div
+          ref={fallbackRef}
+          role="group"
+          aria-label="対局盤面"
+          tabIndex={-1}
+        />
+        <Hand
+          tiles={tiles}
+          confirmTouchSelection
+          readOnlyFocusRef={fallbackRef}
+        />
+      </>,
+    );
+
+    const first = screen.getAllByRole("option")[0];
+    fireEvent.touchStart(first);
+    fireEvent.touchEnd(first);
+    fireEvent.click(first);
+    expect(
+      screen.getByRole("button", { name: "一萬で打牌を確定" }),
+    ).toHaveFocus();
+
+    rerender(
+      <>
+        <div
+          ref={fallbackRef}
+          role="group"
+          aria-label="対局盤面"
+          tabIndex={-1}
+        />
+        <Hand
+          tiles={tiles}
+          confirmTouchSelection
+          readOnly
+          readOnlyFocusRef={fallbackRef}
+        />
+      </>,
+    );
+
+    expect(fallbackRef.current).toHaveFocus();
+  });
+
   it("打牌で手牌が更新されたら、旧indexの選択状態を別の牌へ引き継がない(#214)", async () => {
     const user = userEvent.setup();
     const { rerender } = render(<Hand tiles={tiles} />);
