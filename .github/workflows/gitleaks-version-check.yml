@@ -29,9 +29,11 @@ on:
     - cron: "0 3 1 * *"
   workflow_dispatch:
 
-# 手動再実行の多重起動を防ぐ (schedule は基本1本しか走らないが workflow_dispatch は多重起動しうる)。
+# このworkflowはdispatchのrefに関係なくmainを検査するため、scheduleとmanual dispatchを
+# 同じグループへ束ねる。ref単位にすると、別refからのdispatchが同じmain検査を並行実行し、
+# 外部API照会と後続のbump workflowを重複させる。
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  group: ${{ github.workflow }}
   cancel-in-progress: true
 
 permissions:

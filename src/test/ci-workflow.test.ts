@@ -601,7 +601,7 @@ describe("GITHUB_TOKEN 生成PRのrequired checks", () => {
     expect(check.on).toHaveProperty("workflow_dispatch");
     expect(check.on).toHaveProperty("schedule");
     expect(check.concurrency).toEqual({
-      group: "${{ github.workflow }}-${{ github.ref }}",
+      group: "${{ github.workflow }}",
       "cancel-in-progress": true,
     });
     expect(check.permissions).toEqual({ contents: "read" });
