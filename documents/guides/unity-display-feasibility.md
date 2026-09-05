@@ -27,7 +27,7 @@
 
 入力はオンラインの `session` / `snapshot` メッセージに含まれる `OnlineSnapshot` を基礎とする。表示の中心は `snapshot.view: GameViewState` で、`snapshot.version` は同一ルーム内の適用順序を判定するための値として扱う。Unity側は最後に適用した値以下のsnapshotで画面を巻き戻さない。この資料で #818 に含めるのは、この表示契約上のversion適用順序と表示/ルールの責務境界を記録することまでである。
 
-現fixtureの `source.snapshotVersion` は `42` というメタデータ1値だけで、`41 → 42` や `42 → 41` のような具体的なversion sequenceは収録していない。したがって、古いsnapshotを適用しない規則は契約上の制約であり、fixtureがversion sequenceを機械検証した結果ではない。
+`documents/fixtures/unity-display-contract.json` の `source.snapshotVersionSequence` は、`41 → 42 → 41 → 42 → 43` の順序と、各値を `apply` または `ignore` する期待値を収録する。`src/test/unity-display-contract.test.ts` は最後に適用したversionより新しい値だけを適用し、同値を含む古いsnapshotが表示を巻き戻さないことを機械検証する。
 
 | Webの値 | Unity表示 | Unityに渡さない責務 |
 |---|---|---|
@@ -74,7 +74,7 @@ OSSの対象コードはMIT表記でも、画像・音声・フォント・Prefa
 4. 入力遅延、フレーム時間、メモリ、ビルドサイズ、実装工数を記録する。
 5. ViewModelの外側でルール計算が発生していないことをコードレビューする。
 
-手順上の制約として、「リロード相当の再適用」はUnity Editor導入後に行う手動検証であり、現行Vitestのfixture構造検証には含まれない。現fixtureは `version=42` のメタデータだけを持ち、具体的なversion sequenceを検証していないため、versionの適用順序や古いsnapshotの再適用抑止を確認済みとは扱わない。
+手順上の制約として、「リロード相当の再適用」はUnity Editor導入後に行う手動検証であり、現行Vitestのfixture構造検証には含まれない。Vitestでは表示契約上のversion適用順序と古いsnapshotの再適用抑止を、固定sequenceに対してのみ検証する。Unity Editorでの実画面再適用、スクリーンショット/録画、実機負荷、入力遅延は別途未実施である。
 
 今回の実行ではUnity Editorが存在しないため、Unityのスクリーンショット/録画、実機負荷、入力遅延の測定は **未実施** とする。Web側の既存画面ベースラインは `artifacts/ui-screenshots/current-2026-08-25/` にあり、Unity成果物と混同しない。
 
