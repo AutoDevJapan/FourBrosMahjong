@@ -3,8 +3,8 @@ import { fileURLToPath } from "node:url";
 
 export const EXPECTED_CREATION_RULESET_NAME = "authorize-release-tag-creation";
 export const EXPECTED_CREATION_TAG_PATTERN = "refs/tags/v*";
-export const EXPECTED_CREATION_RULE_TYPE = "creation";
-export const EXPECTED_CREATION_BYPASS_MODE = "always";
+const EXPECTED_CREATION_RULE_TYPE = "creation";
+const EXPECTED_CREATION_BYPASS_MODE = "always";
 
 /** @param {unknown} value */
 function isPositiveSafeInteger(value) {
