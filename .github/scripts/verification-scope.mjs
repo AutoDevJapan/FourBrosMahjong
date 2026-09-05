@@ -45,6 +45,8 @@ export const TEST_INPUT_PATHS = [
   "docs/四兄弟麻雀ルール.md",
   // src/test/deployment-inventory.test.ts が公開 deployment の証跡を検証する。
   "docs/デプロイ環境運用.md",
+  // src/test/deployment-inventory.test.ts が #725 の現行head証跡を検証する。
+  "docs/ops/2026-09-06-725-environment-topology-evidence.md",
   // src/test/playwright-projects.test.ts が playwright install 手順を検証する。
   "README.md",
   // src/test/release-guard.test.ts が current package version の release section を検証する。

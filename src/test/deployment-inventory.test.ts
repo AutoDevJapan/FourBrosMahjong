@@ -6,21 +6,42 @@ const DEPLOYMENT_DOC = readFileSync(
   resolve(process.cwd(), "docs/デプロイ環境運用.md"),
   "utf8",
 );
+const TOPOLOGY_EVIDENCE_DOC = readFileSync(
+  resolve(
+    process.cwd(),
+    "docs/ops/2026-09-06-725-environment-topology-evidence.md",
+  ),
+  "utf8",
+);
 
 describe("deployment inventory evidence", () => {
-  it("keeps the post-#976 main, Vercel deployment, and service-worker evidence aligned", () => {
-    expect(DEPLOYMENT_DOC).toContain("#976 merge後、監査対象commit `7ae2a21`");
+  it("keeps the current main, Vercel deployment, and service-worker evidence aligned", () => {
     expect(DEPLOYMENT_DOC).toContain(
-      "`7ae2a2112de034d00d9ff1513808f7ddc54f1863`（#976 merge 後）",
+      "#1025 merge後、監査対象commit `f3130316`",
     );
-    expect(DEPLOYMENT_DOC).toContain("GitHub deployment `6282910098`");
     expect(DEPLOYMENT_DOC).toContain(
-      "https://four-bros-mahjong-pmvjgec84.vercel.app",
+      "`f3130316ea81f56fc46d302fe572a658d44abce7`（#1025 merge 後）",
     );
-    expect(DEPLOYMENT_DOC).toContain("VERSION` は `7ae2a2112de0`");
+    expect(DEPLOYMENT_DOC).toContain("GitHub deployment `6286927273`");
     expect(DEPLOYMENT_DOC).toContain(
-      "CI `33976346362`、gitleaks `33976346351`、CodeQL `33976346415` がすべて `success`",
+      "https://four-bros-mahjong-8vjmtdf19.vercel.app",
     );
+    expect(DEPLOYMENT_DOC).toContain("VERSION` は `f3130316ea81`");
+    expect(DEPLOYMENT_DOC).toContain(
+      "CI `33998271577`、gitleaks `33998271575`、CodeQL `33998271380` がすべて `success`",
+    );
+  });
+
+  it("keeps the #725 current-head evidence aligned with the same deployment", () => {
+    expect(TOPOLOGY_EVIDENCE_DOC).toContain(
+      "`f3130316ea81f56fc46d302fe572a658d44abce7`（#1025 merge 後",
+    );
+    expect(TOPOLOGY_EVIDENCE_DOC).toContain("deployment `6286927273`");
+    expect(TOPOLOGY_EVIDENCE_DOC).toContain(
+      "https://four-bros-mahjong-8vjmtdf19.vercel.app",
+    );
+    expect(TOPOLOGY_EVIDENCE_DOC).toContain('VERSION = "f3130316ea81"');
+    expect(TOPOLOGY_EVIDENCE_DOC).toContain("6 route × 3 viewport");
   });
 
   it("keeps the unresolved #653 Railway gate explicit", () => {
@@ -34,7 +55,7 @@ describe("deployment inventory evidence", () => {
   });
 
   it("keeps the six-screen fallback smoke evidence visible", () => {
-    expect(DEPLOYMENT_DOC).toContain("合計12/12 pass");
+    expect(DEPLOYMENT_DOC).toContain("合計18/18 pass");
     expect(DEPLOYMENT_DOC).toContain("local Playwright");
     for (const path of [
       "/",
