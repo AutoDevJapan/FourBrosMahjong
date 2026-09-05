@@ -154,8 +154,7 @@ function isSameOriginResponse(response) {
 
 function isSuccessfulHtml(response) {
   return (
-    response.status >= 200 &&
-    response.status < 300 &&
+    response.status === 200 &&
     normalizedContentType(response) === "text/html"
   );
 }
@@ -189,8 +188,7 @@ function expectedAssetTypes(pathname) {
 function isSuccessfulAssetResponse(response, assetUrl) {
   const expected = expectedAssetTypes(new URL(assetUrl, self.location).pathname);
   return (
-    response.status >= 200 &&
-    response.status < 300 &&
+    response.status === 200 &&
     expected.includes(normalizedContentType(response))
   );
 }
@@ -334,8 +332,7 @@ async function networkFirst(
 
 /** canonical route key へ保存できるのはHTML documentだけ。 */
 function isHtmlDocument(response) {
-  const contentType = response.headers.get("Content-Type");
-  return contentType?.split(";", 1)[0].trim().toLowerCase() === "text/html";
+  return isSuccessfulHtml(response);
 }
 
 /** cache-first: 不変アセット用。キャッシュ済みなら network に一切出ない。 */
