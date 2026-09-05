@@ -9,6 +9,7 @@ import {
   dockerignoreViolations,
   FORBIDDEN_NESTED_LOCKFILES,
   knipWorkspaceViolations,
+  MAX_DEPENDABOT_OPEN_PULL_REQUESTS,
   nestedLockfileViolations,
   ONLINE_RUNTIME_PACKAGE_NAME,
   type PackageManifest,
@@ -549,16 +550,19 @@ CMD ["node", "--import", "tsx", "server/start.ts"]`;
       "package-ecosystem": "docker",
       directory: "/",
       schedule: { interval: "weekly" },
+      "open-pull-requests-limit": MAX_DEPENDABOT_OPEN_PULL_REQUESTS,
     };
     const npmUpdate = {
       "package-ecosystem": "npm",
       directory: "/",
       schedule: { interval: "daily" },
+      "open-pull-requests-limit": MAX_DEPENDABOT_OPEN_PULL_REQUESTS,
     };
     const githubActionsUpdate = {
       "package-ecosystem": "github-actions",
       directory: "/",
       schedule: { interval: "weekly" },
+      "open-pull-requests-limit": MAX_DEPENDABOT_OPEN_PULL_REQUESTS,
     };
     expect(
       dependabotViolations({
@@ -709,6 +713,33 @@ CMD ["node", "--import", "tsx", "server/start.ts"]`;
       }),
     ).toContain(
       "Dependabot GitHub Actions entry must have a supported periodic schedule",
+    );
+    expect(
+      dependabotViolations({
+        version: 2,
+        updates: [
+          {
+            ...npmUpdate,
+            "open-pull-requests-limit": MAX_DEPENDABOT_OPEN_PULL_REQUESTS + 1,
+          },
+          dockerUpdate,
+          githubActionsUpdate,
+        ],
+      }),
+    ).toContain(
+      `Dependabot npm open-pull-requests-limit must be an integer from 1 to ${MAX_DEPENDABOT_OPEN_PULL_REQUESTS}`,
+    );
+    expect(
+      dependabotViolations({
+        version: 2,
+        updates: [
+          { ...npmUpdate, "open-pull-requests-limit": undefined },
+          dockerUpdate,
+          githubActionsUpdate,
+        ],
+      }),
+    ).toContain(
+      `Dependabot npm open-pull-requests-limit must be an integer from 1 to ${MAX_DEPENDABOT_OPEN_PULL_REQUESTS}`,
     );
   });
 });

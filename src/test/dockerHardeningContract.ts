@@ -25,6 +25,11 @@ export const FORBIDDEN_NESTED_LOCKFILES = [
   "yarn.lock",
   "npm-shrinkwrap.json",
 ] as const;
+/**
+ * Dependabot update PRs each trigger the repository's required checks. Keep
+ * the per-ecosystem fan-out bounded while allowing a small backlog.
+ */
+export const MAX_DEPENDABOT_OPEN_PULL_REQUESTS = 5;
 
 interface DockerInstruction {
   readonly name: string;
@@ -53,6 +58,7 @@ interface DependabotUpdate {
   readonly "package-ecosystem"?: unknown;
   readonly directory?: unknown;
   readonly directories?: unknown;
+  readonly "open-pull-requests-limit"?: unknown;
   readonly schedule?: { readonly interval?: unknown };
 }
 
@@ -818,6 +824,23 @@ export function dependabotViolations(value: unknown): readonly string[] {
     violations.push(
       "Dependabot GitHub Actions entry must have a supported periodic schedule",
     );
+  }
+  for (const [label, update] of [
+    ["Docker", dockerUpdate],
+    ["npm", npmUpdate],
+    ["GitHub Actions", githubActionsUpdate],
+  ] as const) {
+    const limit = update?.["open-pull-requests-limit"];
+    if (
+      typeof limit !== "number" ||
+      !Number.isInteger(limit) ||
+      limit < 1 ||
+      limit > MAX_DEPENDABOT_OPEN_PULL_REQUESTS
+    ) {
+      violations.push(
+        `Dependabot ${label} open-pull-requests-limit must be an integer from 1 to ${MAX_DEPENDABOT_OPEN_PULL_REQUESTS}`,
+      );
+    }
   }
   return violations;
 }
