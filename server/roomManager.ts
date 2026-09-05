@@ -490,7 +490,6 @@ export class RoomManager {
       PLAYER_IDS.find((candidate) => !room.players.has(candidate));
     if (!id) return null;
     const observedAt = this.now();
-    if (room.reusableSeatIds.delete(id)) room.players.delete(id);
     const player: RoomPlayer = {
       id,
       token: randomToken(),
@@ -500,6 +499,9 @@ export class RoomManager {
       explicitKita,
       lastSeenAt: observedAt,
     };
+    // Generate the replacement before consuming a released seat. If the
+    // entropy source fails, keep the previous seat/token state recoverable.
+    if (room.reusableSeatIds.delete(id)) room.players.delete(id);
     room.players.set(id, player);
     room.state = playerNameChanged(room.state, id, player.name);
     room.departureNotice = null;
