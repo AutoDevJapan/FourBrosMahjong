@@ -1,4 +1,5 @@
 import { createOnlineServer } from "./index";
+import { parseOnlineServerPort } from "./port";
 import type { ShutdownSignal } from "./shutdownController";
 
 const server = createOnlineServer({
@@ -34,7 +35,7 @@ async function main(): Promise<void> {
   process.on("SIGINT", handleSignal);
 
   try {
-    await server.listen();
+    await server.listen(parseOnlineServerPort(process.env.PORT));
     if (
       shutdownPromise === null &&
       !server.shutdownController.state().started
