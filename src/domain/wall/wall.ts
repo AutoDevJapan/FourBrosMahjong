@@ -227,9 +227,12 @@ export class Wall {
     this._rinshan = dead.slice(reserve);
   }
 
-  /** ライブ壁の現在の内容(読み取り専用ビュー)。 */
+  /** ライブ壁の現在の内容を切り離した読み取り専用スナップショット。 */
   get liveWall(): readonly Tile[] {
-    return this._live;
+    // `readonly` は実行時には消えるため、内部配列をそのまま返すと
+    // `as Tile[]` 等を経由した呼び出し側の shift/splice/pop が壁を壊す。
+    // deadWall と同じく配列を切り離し、ツモ状態の所有権を Wall に閉じ込める。
+    return [...this._live];
   }
 
   /**

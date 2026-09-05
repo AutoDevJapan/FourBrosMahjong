@@ -92,6 +92,20 @@ describe("Wall(スペック4 4.1)", () => {
       expect(wall.liveWall.map(key)).toEqual(tiles.slice(0, 94).map(key));
       expect(wall.deadWall.map(key)).toEqual(tiles.slice(94).map(key));
     });
+
+    it("liveWall の配列を実行時に変更しても内部の壁を壊さない", () => {
+      const wall = new Wall(buildTileSet());
+      const snapshot = wall.liveWall as Tile[];
+      const nextDraw = snapshot[0];
+
+      snapshot.splice(0, 1);
+      snapshot.pop();
+
+      expect(snapshot).toHaveLength(92);
+      expect(wall.liveWall).toHaveLength(94);
+      expect(wall.remainingLiveTiles).toBe(94);
+      expect(wall.draw()).toBe(nextDraw);
+    });
   });
 
   describe("draw()(通常ツモ)", () => {
