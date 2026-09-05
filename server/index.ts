@@ -742,14 +742,52 @@ export function createOnlineServer(
     response: import("node:http").ServerResponse,
     status: number,
     value: unknown,
+    headers: Readonly<Record<string, string>> = {},
   ): void {
     const body = JSON.stringify(value);
     response.writeHead(status, {
       "content-type": "application/json; charset=utf-8",
       "cache-control": "no-store",
       "access-control-allow-origin": "*",
+      ...headers,
     });
     response.end(body);
+  }
+
+  function rejectUnexpectedPublicRequest(
+    request: IncomingMessage,
+    response: import("node:http").ServerResponse,
+  ): boolean {
+    const contentLength = request.headers["content-length"];
+    const hasBody =
+      request.headers["transfer-encoding"] !== undefined ||
+      (contentLength !== undefined && contentLength !== "0");
+    if (
+      !hasBody &&
+      (request.method === "GET" ||
+        request.method === "HEAD" ||
+        request.method === "OPTIONS")
+    ) {
+      return false;
+    }
+
+    // Public status/discovery routes have no request payload. Drain the stream
+    // while closing the connection so an ignored Content-Length or chunked
+    // body cannot pin an HTTP keep-alive slot indefinitely.
+    request.resume();
+    writeJson(
+      response,
+      hasBody ? 400 : 405,
+      {
+        ok: false,
+        error: hasBody ? "body_not_allowed" : "method_not_allowed",
+      },
+      {
+        ...(hasBody ? {} : { allow: "GET, HEAD, OPTIONS" }),
+        connection: "close",
+      },
+    );
+    return true;
   }
 
   const opsHttpDependencies = {
@@ -785,10 +823,16 @@ export function createOnlineServer(
     if (handleOpsHttpRequest(request, response, path, opsHttpDependencies)) {
       return;
     }
+    if (
+      (path === "/healthz" || path === "/readyz" || path === "/") &&
+      rejectUnexpectedPublicRequest(request, response)
+    ) {
+      return;
+    }
     if (request.method === "OPTIONS") {
       response.writeHead(204, {
         "access-control-allow-origin": "*",
-        "access-control-allow-methods": "GET, OPTIONS",
+        "access-control-allow-methods": "GET, HEAD, OPTIONS",
         "access-control-allow-headers": "content-type",
       });
       response.end();
