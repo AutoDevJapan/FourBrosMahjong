@@ -889,4 +889,31 @@ describe("online boundary probe", () => {
     expect(transport.destroy).toHaveBeenCalledOnce();
     expect(transport.destroy).toHaveBeenCalledWith(expect.any(Error));
   });
+
+  it("does not expose arbitrary upgrade error messages in evidence", async () => {
+    const transport = new EventEmitter() as ClientRequest;
+    const secret = "Authorization: Bearer probe-secret";
+    transport.end = vi.fn(() => {
+      transport.emit("error", new Error(secret));
+      return transport;
+    });
+
+    const evidence = await probeUpgrade(
+      "https://online.example.com",
+      ALLOWED_ORIGIN,
+      100,
+      () => transport,
+      {
+        address: "198.51.100.10",
+        family: 4,
+        hostname: "online.example.com",
+      },
+    );
+
+    expect(evidence).toMatchObject({
+      statusCode: null,
+      error: "request_failed",
+    });
+    expect(JSON.stringify(evidence)).not.toContain(secret);
+  });
 });
