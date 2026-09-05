@@ -77,6 +77,10 @@ export default function RulesPage({
                   <details
                     id={section.id}
                     key={section.id}
+                    // Native fragment navigation moves focus only when the
+                    // target is focusable. Keep keyboard users at the
+                    // destination without requiring client-side scripting.
+                    tabIndex={-1}
                     open={section.defaultOpen}
                     // A fragment targeting a descendant can make the browser
                     // expand this disclosure before React hydrates it.
@@ -94,7 +98,12 @@ export default function RulesPage({
                     </summary>
                     <ul className="rules-item-list">
                       {section.items.map((item) => (
-                        <li id={item.id} key={item.id} className="rules-item">
+                        <li
+                          id={item.id}
+                          key={item.id}
+                          tabIndex={-1}
+                          className="rules-item"
+                        >
                           <span aria-hidden="true" className="rules-item-mark">
                             ◆
                           </span>
