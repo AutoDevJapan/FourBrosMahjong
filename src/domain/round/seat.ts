@@ -60,11 +60,17 @@ export interface Seating<TPlayer> {
  *
  * @param order       4人の固定円環。
  * @param dealerIndex 親の円環位置(内部で `mod 4` される)。
+ * @throws RangeError `dealerIndex` が整数でないとき。
  */
 export function deriveSeating<TPlayer>(
   order: PlayerRing<TPlayer>,
   dealerIndex: number,
 ): Seating<TPlayer> {
+  if (!Number.isInteger(dealerIndex)) {
+    throw new RangeError(
+      `dealerIndex must be an integer, received ${dealerIndex}.`,
+    );
+  }
   const base = ((dealerIndex % RING_SIZE) + RING_SIZE) % RING_SIZE;
   return {
     east: order[base],

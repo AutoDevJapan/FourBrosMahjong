@@ -57,6 +57,15 @@ describe("deriveSeating", () => {
     expect(deriveSeating(ORDER, -1)).toEqual(deriveSeating(ORDER, 3));
     expect(deriveSeating(ORDER, 7)).toEqual(deriveSeating(ORDER, 3));
   });
+
+  it.each([
+    Number.NaN,
+    Number.POSITIVE_INFINITY,
+    Number.NEGATIVE_INFINITY,
+    1.5,
+  ])("非整数の dealerIndex=%s は RangeError", (dealerIndex) => {
+    expect(() => deriveSeating(ORDER, dealerIndex)).toThrow(RangeError);
+  });
 });
 
 describe("seatedPlayers", () => {
