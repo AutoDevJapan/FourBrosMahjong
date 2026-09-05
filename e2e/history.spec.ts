@@ -475,6 +475,10 @@ test.describe("戦績のローカル保存・閲覧(#293)", () => {
     await expect(
       page.getByText("保存された戦績はまだありません", { exact: false }),
     ).toBeVisible();
+    // 削除で消えた確認UIから、名前付きの空状態へフォーカスを引き継ぐ。
+    await expect(
+      page.getByRole("region", { name: "保存された戦績はまだありません" }),
+    ).toBeFocused();
     expect(
       await page.evaluate((key) => localStorage.getItem(key), HISTORY_KEY),
     ).toBeNull();

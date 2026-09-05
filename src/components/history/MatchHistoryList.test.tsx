@@ -452,11 +452,11 @@ describe("MatchHistoryList (#293)", () => {
     // 押した「削除する」ボタンごとセクションが消えるため、フォーカスの行き先が要る。
     fireEvent.click(screen.getByRole("button", { name: "削除する" }));
 
-    const emptyState = (
-      await screen.findByText(/保存された戦績はまだありません/)
-    ).closest("div");
+    const emptyState = await screen.findByRole("region", {
+      name: "保存された戦績はまだありません",
+    });
     expect(emptyState).toHaveAttribute("role", "region");
-    expect(emptyState).toHaveAccessibleName(/保存された戦績はまだありません/);
+    expect(emptyState).toHaveAccessibleName("保存された戦績はまだありません");
     expect(emptyState).toHaveFocus();
     expect(document.body).not.toHaveFocus();
   });
