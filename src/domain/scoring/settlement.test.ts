@@ -395,6 +395,32 @@ describe("入力検証: spec 3.3 の前提(#394)", () => {
       expect(() => umaLedger.applyUma(validPoints)).not.toThrow();
     });
 
+    it("safe integer同士の浮動小数点の桁落ちで不正な合計を通さない", () => {
+      const max = Number.MAX_SAFE_INTEGER;
+      const invalid: PlayerPoints[] = [
+        { playerId: "A", points: max },
+        { playerId: "B", points: 2 },
+        { playerId: "C", points: -max },
+        { playerId: "D", points: 139999 },
+      ];
+      // Number の加算では A+B−A が 1 になり、合計が誤って140,000になる。
+      expect(invalid.reduce((sum, p) => sum + p.points, 0)).toBe(140000);
+      // 任意精度では実際の合計は140,001なので、精算前に拒否する。
+      expect(
+        invalid.reduce((sum, p) => sum + BigInt(p.points), BigInt(0)),
+      ).toBe(BigInt(140001));
+
+      const rawLedger = new SoshiiLedger(IDS);
+      expect(() => rawLedger.applyRawScore(invalid)).toThrow(RangeError);
+      expect(rawLedger.balances()).toEqual({ A: 0, B: 0, C: 0, D: 0 });
+      expect(() => rawLedger.applyRawScore(validPoints)).not.toThrow();
+
+      const umaLedger = new SoshiiLedger(IDS);
+      expect(() => umaLedger.applyUma(invalid)).toThrow(RangeError);
+      expect(umaLedger.balances()).toEqual({ A: 0, B: 0, C: 0, D: 0 });
+      expect(() => umaLedger.applyUma(validPoints)).not.toThrow();
+    });
+
     it("合計違反で落ちても台帳は再利用できる(_finalPoints を汚さない)", () => {
       // 合計チェックは `_finalPoints` への書き込みより前になければならない。
       // 後ろだと棄却した持ち点がキャッシュへ残り、正しい持ち点での再試行が
