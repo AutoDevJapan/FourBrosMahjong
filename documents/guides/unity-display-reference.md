@@ -25,4 +25,4 @@ pnpm exec playwright test e2e/unity-display-reference.spec.ts
 
 これはUnity Runtimeの検証ではない。Unity C#・Prefab・Animator・Unity WebGLビルド、iOS/Android実機性能、入力遅延、ビルドサイズ、第三者アセットの権利確認は後続Issueの対象とする。
 
-現fixtureの `source.snapshotVersion` は `42` というメタデータ値のみで、`41 → 42 → 41` の具体的なsequenceテストを含まない。このページでもversion sequence検証済みとは扱わない。
+現fixtureの `source.snapshotVersion` は `42` を基準値とし、`source.snapshotVersionSequence` に `41 → 42 → 41 → 42 → 43` の適用/無視期待値を収録している。`src/test/unity-display-contract.test.ts` がこのsequenceを検証するが、このページ自体はWebリファレンスであり、Unity Runtimeのversion適用検証済みとは扱わない。
