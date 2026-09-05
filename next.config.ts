@@ -5,6 +5,8 @@ import {
 } from "./src/app/_lib/securityHeaders";
 
 const nextConfig: NextConfig = {
+  // `AGENTS.md` is shared across projects and must remain read-only here.
+  agentRules: false,
   async headers() {
     return [
       {
