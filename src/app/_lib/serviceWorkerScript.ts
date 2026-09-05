@@ -253,6 +253,7 @@ async function precacheAppShell() {
 function isImmutableAsset(pathname) {
   return (
     pathname.startsWith("/_next/static/") ||
+    pathname === "/manifest.webmanifest" ||
     pathname.startsWith("/tiles/") ||
     pathname.startsWith("/characters/") ||
     pathname.startsWith("/icons/") ||

@@ -723,6 +723,33 @@ describe("buildServiceWorkerScript", () => {
     expect(await response.text()).toBe("chunk");
   });
 
+  it("manifestの200 HTML fallbackをruntime cacheへ保存せず正常応答へ回復する(#957)", async () => {
+    const sw = bootServiceWorker();
+    const fetchSpy = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(htmlResponse("fallback"))
+      .mockResolvedValueOnce(
+        staticAssetResponse("/manifest.webmanifest", "valid manifest"),
+      );
+    sw.setFetchImpl(fetchSpy);
+
+    const first = await sw.dispatchFetch(request("/manifest.webmanifest"));
+    const firstResponse: Response = await first.respondWith.mock.calls[0][0];
+    expect(await firstResponse.text()).toBe("fallback");
+    const runtime = sw.cacheStorage.caches.get("fbm-runtime-v1");
+    expect(runtime?.store.has(`${ORIGIN}/manifest.webmanifest`) ?? false).toBe(
+      false,
+    );
+
+    const second = await sw.dispatchFetch(request("/manifest.webmanifest"));
+    const secondResponse: Response = await second.respondWith.mock.calls[0][0];
+    expect(await secondResponse.text()).toBe("valid manifest");
+    expect(fetchSpy).toHaveBeenCalledTimes(2);
+
+    await sw.dispatchFetch(request("/manifest.webmanifest"));
+    expect(fetchSpy).toHaveBeenCalledTimes(2);
+  });
+
   it("不変JSへの200 HTML fallbackをキャッシュせず正常応答へ回復する", async () => {
     const sw = bootServiceWorker();
     const fetchSpy = vi
