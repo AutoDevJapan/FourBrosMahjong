@@ -92,6 +92,21 @@ describe("Wall(スペック4 4.1)", () => {
       expect(wall.liveWall.map(key)).toEqual(tiles.slice(0, 94).map(key));
       expect(wall.deadWall.map(key)).toEqual(tiles.slice(94).map(key));
     });
+
+    it("ライブ壁の読み取りスナップショットを変更しても内部の順序と枚数を保つ", () => {
+      const tiles = buildTileSet();
+      const wall = new Wall(tiles);
+      const view = wall.liveWall as Tile[];
+      const first = view[0]!;
+
+      // readonly は実行時の配列変更を防がない。外部の変更で次のツモを
+      // 失ったり、山の総数を壊したりしないことを確認する。
+      view.shift();
+
+      expect(wall.remainingLiveTiles).toBe(TOTAL_TILE_COUNT - DEAD_WALL_SIZE);
+      expect(wall.draw()).toBe(first);
+      expect(tilesInWall(wall) + 1).toBe(TOTAL_TILE_COUNT);
+    });
   });
 
   describe("draw()(通常ツモ)", () => {

@@ -227,9 +227,9 @@ export class Wall {
     this._rinshan = dead.slice(reserve);
   }
 
-  /** ライブ壁の現在の内容(読み取り専用ビュー)。 */
+  /** ライブ壁の現在の内容(読み取り専用スナップショット)。 */
   get liveWall(): readonly Tile[] {
-    return this._live;
+    return [...this._live];
   }
 
   /**
