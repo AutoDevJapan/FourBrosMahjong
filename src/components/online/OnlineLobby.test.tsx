@@ -1183,6 +1183,28 @@ describe("OnlineLobby connection recovery", () => {
     );
   });
 
+  it("exposes the participant roster as a named group", () => {
+    render(<OnlineLobby />);
+
+    fireEvent.change(screen.getByLabelText("表示名"), {
+      target: { value: "たろう" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "新しいルームを作る" }));
+
+    act(() => {
+      sockets[0]?.open();
+      sockets[0]?.message({
+        type: "session",
+        token: "t".repeat(24),
+        snapshot: snapshotFixture(),
+      });
+    });
+
+    expect(screen.getByRole("group", { name: "参加者" })).toHaveTextContent(
+      "たろう（ホスト）",
+    );
+  });
+
   it("shows the released guest seat and the next operation after an explicit leave", () => {
     render(<OnlineLobby />);
 
