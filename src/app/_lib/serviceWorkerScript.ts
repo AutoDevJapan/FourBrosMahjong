@@ -138,6 +138,20 @@ function normalizedContentType(response) {
     .toLowerCase();
 }
 
+/** キャッシュへ保存してよいのは最終応答も同一 origin のものだけ。 */
+function isSameOriginResponse(response) {
+  // new Response() などの合成レスポンスは url が空になる。url が無い場合は
+  // 実際の redirect を表すこともできないため、redirected でないものだけ許可する。
+  if (!response.url) {
+    return !response.redirected;
+  }
+  try {
+    return new URL(response.url).origin === self.location.origin;
+  } catch {
+    return false;
+  }
+}
+
 function isSuccessfulHtml(response) {
   return (
     response.status >= 200 &&
@@ -189,7 +203,10 @@ async function precacheAppShell() {
     const staticAssets = await Promise.all(
       PRECACHE_ASSET_URLS.map(async (asset) => {
         const response = await self.fetch(asset);
-        if (!isSuccessfulAssetResponse(response, asset)) {
+        if (
+          !isSameOriginResponse(response) ||
+          !isSuccessfulAssetResponse(response, asset)
+        ) {
           throw new TypeError(
             "Invalid precached static asset response: " + asset,
           );
@@ -203,7 +220,7 @@ async function precacheAppShell() {
     const buildAssets = new Set();
     for (const route of CACHEABLE_ROUTE_PATHS) {
       const response = await self.fetch(route);
-      if (!isSuccessfulHtml(response)) {
+      if (!isSameOriginResponse(response) || !isSuccessfulHtml(response)) {
         throw new TypeError("Invalid precached App shell response: " + route);
       }
       await cache.put(route, response.clone());
@@ -218,7 +235,10 @@ async function precacheAppShell() {
     // (HTML fallback等)も install 成功扱いにしない。
     for (const asset of buildAssets) {
       const response = await self.fetch(asset);
-      if (!isSuccessfulAssetResponse(response, asset)) {
+      if (
+        !isSameOriginResponse(response) ||
+        !isSuccessfulAssetResponse(response, asset)
+      ) {
         throw new TypeError("Invalid precached build asset response: " + asset);
       }
       await cache.put(asset, response);
@@ -286,7 +306,12 @@ async function networkFirst(
 ) {
   try {
     const response = await self.fetch(request);
-    if (response.ok && cacheKey && isCacheableResponse(response)) {
+    if (
+      response.ok &&
+      cacheKey &&
+      isSameOriginResponse(response) &&
+      isCacheableResponse(response)
+    ) {
       // Cache Storage は progressive enhancement。quota/権限エラーでも、既に取得できた
       // オンラインレスポンスは必ず利用者へ返す。
       await putRuntimeCache(cacheKey, response.clone()).catch(() => {});
@@ -323,7 +348,10 @@ async function cacheFirst(request, cacheKey) {
   // Next の欠落 chunk に対してホスティング層が 200 HTML fallback を返すことがある。
   // それを cache-first へ保存すると、次の正常応答を取りに行けず同 URL が恒久的に壊れる。
   // install 時と同じ拡張子 + MIME 検証を runtime 経路にも適用する。
-  if (isSuccessfulAssetResponse(response, cacheKey)) {
+  if (
+    isSameOriginResponse(response) &&
+    isSuccessfulAssetResponse(response, cacheKey)
+  ) {
     await putRuntimeCache(cacheKey, response.clone()).catch(() => {});
   }
   return response;
