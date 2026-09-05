@@ -769,11 +769,18 @@ export function createOnlineServer(
     response: import("node:http").ServerResponse,
   ): boolean {
     const contentLength = request.headers["content-length"];
-    const hasBody =
-      request.headers["transfer-encoding"] !== undefined ||
+    const transferEncoding = request.headers["transfer-encoding"];
+    const hasBodyOrAmbiguousFraming =
+      transferEncoding !== undefined ||
       (contentLength !== undefined && contentLength !== "0");
+    const hasAmbiguousHttp10Framing =
+      request.httpVersion === "1.0" &&
+      contentLength === undefined &&
+      transferEncoding === undefined;
+    const rejectsPayload =
+      hasBodyOrAmbiguousFraming || hasAmbiguousHttp10Framing;
     if (
-      !hasBody &&
+      !rejectsPayload &&
       (request.method === "GET" ||
         request.method === "HEAD" ||
         request.method === "OPTIONS")
@@ -781,19 +788,19 @@ export function createOnlineServer(
       return false;
     }
 
-    // Public status/discovery routes have no request payload. Drain the stream
-    // while closing the connection so an ignored Content-Length or chunked
-    // body cannot pin an HTTP keep-alive slot indefinitely.
+    // Public status/discovery routes have no request payload. HTTP/1.0 can use
+    // connection close to delimit a body, so reject that ambiguous framing and
+    // drain the stream while closing the connection.
     request.resume();
     writeJson(
       response,
-      hasBody ? 400 : 405,
+      rejectsPayload ? 400 : 405,
       {
         ok: false,
-        error: hasBody ? "body_not_allowed" : "method_not_allowed",
+        error: rejectsPayload ? "body_not_allowed" : "method_not_allowed",
       },
       {
-        ...(hasBody ? {} : { allow: "GET, HEAD, OPTIONS" }),
+        ...(rejectsPayload ? {} : { allow: "GET, HEAD, OPTIONS" }),
         connection: "close",
       },
     );

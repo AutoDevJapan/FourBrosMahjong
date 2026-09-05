@@ -242,6 +242,52 @@ describe("createOnlineServer lifecycle", () => {
     }
   });
 
+  it("rejects unframed HTTP/1.0 public requests before serving them", async () => {
+    const server = createOnlineServer({ environment: environment(false) });
+    const port = await listen(server);
+    const socket = createConnection({ host: "127.0.0.1", port });
+    const responseChunks: Buffer[] = [];
+    try {
+      const response = new Promise<string>((resolve, reject) => {
+        const timer = setTimeout(
+          () => reject(new Error("unframed HTTP/1.0 request was not answered")),
+          1_000,
+        );
+        socket.once("error", reject);
+        socket.once("data", (chunk: Buffer) => {
+          clearTimeout(timer);
+          responseChunks.push(chunk);
+          resolve(Buffer.concat(responseChunks).toString("utf8"));
+        });
+      });
+      const closed = new Promise<void>((resolve, reject) => {
+        const timer = setTimeout(
+          () => reject(new Error("unframed HTTP/1.0 socket stayed open")),
+          1_000,
+        );
+        socket.once("close", () => {
+          clearTimeout(timer);
+          resolve();
+        });
+        socket.once("error", reject);
+      });
+
+      socket.write(
+        `GET /healthz HTTP/1.0\r\nHost: 127.0.0.1:${port}\r\n` +
+          "Connection: keep-alive\r\n\r\nunframed-body",
+      );
+      const answered = await response;
+      expect(answered).toMatch(/^HTTP\/1\.1 400 Bad Request\r\n/);
+      expect(answered).toMatch(/\r\nconnection: close\r\n/i);
+      expect(answered).toContain('"error":"body_not_allowed"');
+
+      await closed;
+    } finally {
+      if (!socket.destroyed) socket.destroy();
+      await server.handleSignal("SIGTERM");
+    }
+  });
+
   it("drains and closes malformed request-targets with a body", async () => {
     const server = createOnlineServer({ environment: environment(false) });
     const port = await listen(server);
