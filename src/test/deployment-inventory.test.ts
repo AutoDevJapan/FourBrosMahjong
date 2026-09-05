@@ -8,16 +8,19 @@ const DEPLOYMENT_DOC = readFileSync(
 );
 
 describe("deployment inventory evidence", () => {
-  it("keeps the post-#944 main, Vercel deployment, and service-worker evidence aligned", () => {
-    expect(DEPLOYMENT_DOC).toContain("#944 merge後、監査対象commit `81c0313`");
+  it("keeps the post-#948 main, Vercel deployment, and service-worker evidence aligned", () => {
+    expect(DEPLOYMENT_DOC).toContain("#948 merge後、監査対象commit `6e66787`");
     expect(DEPLOYMENT_DOC).toContain(
-      "`81c0313c15c816b013b3bd77f76480fc5910ebb3`（#944 merge 後）",
+      "`6e667870afeedf94b9ec57c0e7484ed275b76581`（#948 merge 後）",
     );
-    expect(DEPLOYMENT_DOC).toContain("GitHub deployment `6280529940`");
+    expect(DEPLOYMENT_DOC).toContain("GitHub deployment `6281044309`");
     expect(DEPLOYMENT_DOC).toContain(
-      "https://four-bros-mahjong-mvk5ifyvo.vercel.app",
+      "https://four-bros-mahjong-d495x81yp.vercel.app",
     );
-    expect(DEPLOYMENT_DOC).toContain("VERSION` は `81c0313c15c8`");
+    expect(DEPLOYMENT_DOC).toContain("VERSION` は `6e667870afee`");
+    expect(DEPLOYMENT_DOC).toContain(
+      "CI `33966542466`、gitleaks `33966542493`、CodeQL `33966542510` がすべて `success`",
+    );
   });
 
   it("keeps the six-screen fallback smoke evidence visible", () => {
