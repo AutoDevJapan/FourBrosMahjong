@@ -20,6 +20,12 @@ function ActionProbe() {
       >
         打牌
       </button>
+      <button
+        type="button"
+        onClick={() => controls.discard({ suit: "pin", rank: 5 })}
+      >
+        旧snapshotの赤五を打牌
+      </button>
       <button type="button" onClick={controls.kita}>
         北抜
       </button>
@@ -202,6 +208,28 @@ describe("OnlineGameProvider", () => {
       type: "action",
       version: 3,
       action: { type: "discard" },
+    });
+  });
+
+  it("canonicalizes a red five omitted by a legacy snapshot before sending it", async () => {
+    const send = vi.fn();
+    const socket = { readyState: WebSocket.OPEN, send } as unknown as WebSocket;
+    render(
+      <OnlineGameProvider socket={socket} snapshot={snapshotFixture()}>
+        <ActionProbe />
+      </OnlineGameProvider>,
+    );
+
+    await userEvent.click(
+      screen.getByRole("button", { name: "旧snapshotの赤五を打牌" }),
+    );
+
+    expect(JSON.parse(send.mock.calls[0][0] as string)).toMatchObject({
+      type: "action",
+      action: {
+        type: "discard",
+        tile: { suit: "pin", rank: 5, isRed: true },
+      },
     });
   });
 
