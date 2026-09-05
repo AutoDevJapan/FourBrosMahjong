@@ -598,6 +598,30 @@ describe("online room manager", () => {
     );
   });
 
+  it("keeps newGame atomic when next-state construction fails", () => {
+    const manager = new RoomManager();
+    const host = manager.create("ホスト");
+    const guest = manager.join(host.room.code, "ゲスト");
+    if (!guest) throw new Error("guest should join");
+    reachGameEnd(manager, host);
+
+    const stateBefore = host.room.state;
+    const versionBefore = host.room.version;
+    const humanPlayerIdsBefore = [...host.room.humanPlayerIds];
+    const lastActivityBefore = host.room.lastActivityAt;
+    vi.mocked(randomBytes).mockImplementationOnce(() => {
+      throw new Error("random source unavailable");
+    });
+
+    expect(() => manager.newGame(host.room, host.player)).toThrow(
+      "random source unavailable",
+    );
+    expect(host.room.state).toBe(stateBefore);
+    expect(host.room.version).toBe(versionBefore);
+    expect([...host.room.humanPlayerIds]).toEqual(humanPlayerIdsBefore);
+    expect(host.room.lastActivityAt).toBe(lastActivityBefore);
+  });
+
   it("does not reintroduce a disconnected seat when another player joins after newGame", () => {
     const manager = new RoomManager();
     const host = manager.create("ホスト");

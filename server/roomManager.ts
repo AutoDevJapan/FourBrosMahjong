@@ -778,11 +778,10 @@ export class RoomManager {
     const explicitKitaPlayerIds = [...room.players.values()]
       .filter((roomPlayer) => roomPlayer.connected && roomPlayer.explicitKita)
       .map((roomPlayer) => roomPlayer.id);
-    room.humanPlayerIds.clear();
-    for (const playerId of connectedPlayerIds) {
-      room.humanPlayerIds.add(playerId);
-    }
-    room.state = createGame({
+    // Construct the next state before mutating any room-owned roster. If the
+    // entropy source or game construction fails, the current half-game must
+    // remain fully resumable and internally consistent for a retry.
+    const nextState = createGame({
       seed: randomSeed(),
       names: namesOf(room),
       // Preserve the current-hand reconnect guard, but do not carry a seat
@@ -791,6 +790,11 @@ export class RoomManager {
       humanPlayerIds: connectedPlayerIds,
       explicitKitaPlayerIds,
     });
+    room.humanPlayerIds.clear();
+    for (const playerId of connectedPlayerIds) {
+      room.humanPlayerIds.add(playerId);
+    }
+    room.state = nextState;
     room.departureNotice = null;
     room.version += 1;
     room.lastActivityAt = observedAt;
