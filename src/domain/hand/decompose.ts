@@ -256,7 +256,11 @@ function isValidTileInput(tile: Tile): boolean {
 }
 
 function hasValidTileInputs(tiles: readonly Tile[]): boolean {
-  return Array.isArray(tiles) && tiles.every(isValidTileInput);
+  if (!Array.isArray(tiles)) return false;
+  for (const tile of tiles) {
+    if (!isValidTileInput(tile)) return false;
+  }
+  return true;
 }
 
 /**
@@ -283,16 +287,24 @@ function isValidMeldInput(meld: MeldInput): boolean {
   const expectedSize = meld.isKan ? 4 : 3;
   if (meld.tiles.length !== expectedSize) return false;
 
-  if (!meld.tiles.every(isValidTileInput)) return false;
+  for (const tile of meld.tiles) {
+    if (!isValidTileInput(tile)) return false;
+  }
 
   const first = meld.tiles[0];
-  return (
-    first !== undefined && meld.tiles.every((tile) => sameKind(tile, first))
-  );
+  if (first === undefined) return false;
+  for (const tile of meld.tiles) {
+    if (!sameKind(tile, first)) return false;
+  }
+  return true;
 }
 
 function hasValidMeldInputs(melds: readonly MeldInput[]): boolean {
-  return Array.isArray(melds) && melds.every(isValidMeldInput);
+  if (!Array.isArray(melds)) return false;
+  for (const meld of melds) {
+    if (!isValidMeldInput(meld)) return false;
+  }
+  return true;
 }
 
 /**
@@ -316,10 +328,15 @@ function hasValidTileMultiplicity(
     return true;
   };
 
-  return (
-    concealedTiles.every(countTile) &&
-    melds.every((meld) => meld.tiles.every(countTile))
-  );
+  for (const tile of concealedTiles) {
+    if (!countTile(tile)) return false;
+  }
+  for (const meld of melds) {
+    for (const tile of meld.tiles) {
+      if (!countTile(tile)) return false;
+    }
+  }
+  return true;
 }
 
 /**
@@ -400,7 +417,9 @@ export function decomposeThirteenOrphans(
     concealedTiles.length !== 14
   )
     return null;
-  if (!concealedTiles.every((t) => isYaochu(t))) return null;
+  for (const tile of concealedTiles) {
+    if (!isYaochu(tile)) return null;
+  }
 
   const byKind = new Map<string, Tile>();
   const countByKind = new Map<string, number>();
