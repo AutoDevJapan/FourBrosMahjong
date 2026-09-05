@@ -25,9 +25,15 @@ export function registerServiceWorker(
   if (!nav || !("serviceWorker" in nav)) {
     return false;
   }
-  nav.serviceWorker.register(SERVICE_WORKER_URL).catch(() => {
-    // 登録失敗(プライベートブラウジング等)はオンライン動作へ影響しないため黙って続行する。
-    // オフライン強化は progressive enhancement であり、失敗をユーザーへ通知する必要はない。
-  });
+  try {
+    nav.serviceWorker.register(SERVICE_WORKER_URL).catch(() => {
+      // 登録失敗(プライベートブラウジング等)はオンライン動作へ影響しないため黙って続行する。
+      // オフライン強化は progressive enhancement であり、失敗をユーザーへ通知する必要はない。
+    });
+  } catch {
+    // Trusted Types などのポリシー検査は Promise を返す前に同期例外を投げることがある。
+    // オフライン強化の失敗でオンライン動作を壊さない。
+    return false;
+  }
   return true;
 }

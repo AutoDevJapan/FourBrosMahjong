@@ -44,4 +44,13 @@ describe("registerServiceWorker", () => {
     // reject が未処理例外として伝播しないことを確認する。
     await vi.waitFor(() => expect(register).toHaveBeenCalled());
   });
+
+  it("登録 API が同期例外を投げてもオンライン動作へ例外を漏らさない", () => {
+    const register = vi.fn(() => {
+      throw new Error("SecurityError");
+    });
+    const { nav } = navigatorWithServiceWorker(register);
+
+    expect(registerServiceWorker("production", nav)).toBe(false);
+  });
 });
