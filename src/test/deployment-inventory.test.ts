@@ -8,18 +8,18 @@ const DEPLOYMENT_DOC = readFileSync(
 );
 
 describe("deployment inventory evidence", () => {
-  it("keeps the post-#948 main, Vercel deployment, and service-worker evidence aligned", () => {
-    expect(DEPLOYMENT_DOC).toContain("#948 merge後、監査対象commit `6e66787`");
+  it("keeps the post-#959 main, Vercel deployment, and service-worker evidence aligned", () => {
+    expect(DEPLOYMENT_DOC).toContain("#959 merge後、監査対象commit `98cb3de`");
     expect(DEPLOYMENT_DOC).toContain(
-      "`6e667870afeedf94b9ec57c0e7484ed275b76581`（#948 merge 後）",
+      "`98cb3de8b6e41dc27b1352d8708596f2d842fc02`（#959 merge 後）",
     );
-    expect(DEPLOYMENT_DOC).toContain("GitHub deployment `6281044309`");
+    expect(DEPLOYMENT_DOC).toContain("GitHub deployment `6282070040`");
     expect(DEPLOYMENT_DOC).toContain(
-      "https://four-bros-mahjong-d495x81yp.vercel.app",
+      "https://four-bros-mahjong-avyd2ye8o.vercel.app",
     );
-    expect(DEPLOYMENT_DOC).toContain("VERSION` は `6e667870afee`");
+    expect(DEPLOYMENT_DOC).toContain("VERSION` は `98cb3de8b6e4`");
     expect(DEPLOYMENT_DOC).toContain(
-      "CI `33966542466`、gitleaks `33966542493`、CodeQL `33966542510` がすべて `success`",
+      "CI `33971927142`、gitleaks `33971927047`、CodeQL `33971926519` がすべて `success`",
     );
   });
 
