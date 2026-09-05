@@ -28,4 +28,25 @@ describe("requestPath", () => {
       expect(requestPath(raw)).toBeNull();
     },
   );
+
+  it.each([
+    "/prefix/../ops/status",
+    "/ops/./status",
+    "/prefix/%2e%2e/ops/status",
+    "/ops/%2E/status",
+    "foo/../ops/status",
+    "http://localhost/prefix/../ops/status",
+    "http://localhost/%2e%2e/ops/status",
+  ])(
+    "dot-segment request-targetをlocal exact routeのaliasにしない: %s",
+    (raw) => {
+      expect(requestPath(raw)).toBeNull();
+    },
+  );
+
+  it("does not inspect query or fragment text as pathname segments", () => {
+    expect(requestPath("/ops/status?next=../healthz#ignored")).toBe(
+      "/ops/status",
+    );
+  });
 });
