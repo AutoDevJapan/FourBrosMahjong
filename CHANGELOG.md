@@ -27,6 +27,7 @@
 
 ### Changed
 
+- `v*` tag作成認可 ruleset A を、承認済み Release Operators Team IDと完全一致する creation-only契約として、既存の不変性ruleset Bから分離してfail-closed監査できるvalidatorを追加 (#508)。
 - GitHub Release guard が新規 `v*` tag push のイベントだけを受け付け、既存 tag の再 push/付け替えイベントを公開処理へ進めないよう fail-closed にした。外部の immutable-tag ruleset (#508) を補完する防御層であり、ruleset の代替や設定変更は行わない。
 - `v*` Release tag 保護の担当ロール、ruleset 設定、正常/拒否検証、break-glass、tag を改変しない新 version rollback の runbook を追加。不変性 ruleset `protect-existing-release-tags` (ID `20858931`) は適用済みだが、担当 Team と作成認可 ruleset は未決定・未適用であることも明記 (#508)。
 - `v*` Release tag の repository ruleset を、GET のみで対象選択から詳細 validator まで再現監査する helper と fail-closed 回帰テストを追加。作成認可 ruleset や担当 Team の外部設定は変更していない (#508)。
