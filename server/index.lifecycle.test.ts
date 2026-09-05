@@ -2,6 +2,7 @@ import { once } from "node:events";
 import { createConnection } from "node:net";
 import { describe, expect, it, vi } from "vitest";
 import { WebSocket } from "ws";
+import type { OnlineSnapshot } from "../src/domain/online/types";
 import { ABUSE_LIMITS, OnlineAbuseControls } from "./abuseControl";
 import { createOnlineServer } from "./index";
 
@@ -309,6 +310,73 @@ describe("createOnlineServer lifecycle", () => {
         const closed = once(socket, "close");
         socket.terminate();
         await closed;
+      }
+      await server.handleSignal("SIGTERM");
+    }
+  });
+
+  it("ignores buffered actions after a binary protocol violation", async () => {
+    const server = createOnlineServer({ environment: environment(false) });
+    const port = await listen(server);
+    const host = await openWebSocket(port);
+    const guest = await openWebSocket(port);
+    try {
+      const sessionPromise = waitForMessage(
+        host,
+        (value) => value.type === "session",
+      );
+      host.send(JSON.stringify({ type: "create", name: "buffer-test-host" }));
+      const session = await sessionPromise;
+      const snapshot = session.snapshot as OnlineSnapshot;
+      const self = snapshot.view.slots.self;
+      if (self.kind !== "seated" || self.player.hand === undefined) {
+        throw new Error("test host hand is missing");
+      }
+      const tile = self.player.hand[0];
+
+      const initialSnapshotPromise = waitForMessage(
+        guest,
+        (value) => value.type === "snapshot",
+      );
+      guest.send(
+        JSON.stringify({
+          type: "join",
+          code: snapshot.code,
+          name: "buffer-test-guest",
+        }),
+      );
+      await initialSnapshotPromise;
+
+      const closed = once(host, "close");
+      const nextSnapshot = waitForMessage(
+        guest,
+        (value) =>
+          value.type === "snapshot" &&
+          (value.snapshot as OnlineSnapshot).version === snapshot.version + 1,
+      );
+      // ws can deliver both frames from one receive buffer before the close
+      // callback runs. The second frame must not mutate the room after the
+      // binary protocol violation has revoked this peer's authority.
+      host.send(
+        Buffer.from(JSON.stringify({ type: "create", name: "binary" })),
+      );
+      host.send(
+        JSON.stringify({
+          type: "action",
+          version: snapshot.version,
+          action: { type: "discard", tile },
+        }),
+      );
+
+      await closed;
+      expect((await nextSnapshot).snapshot as OnlineSnapshot).toMatchObject({
+        players: expect.arrayContaining([
+          expect.objectContaining({ id: "p0", connected: false }),
+        ]),
+      });
+    } finally {
+      for (const socket of [host, guest]) {
+        if (socket.readyState !== WebSocket.CLOSED) socket.terminate();
       }
       await server.handleSignal("SIGTERM");
     }

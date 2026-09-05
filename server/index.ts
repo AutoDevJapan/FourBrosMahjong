@@ -335,7 +335,16 @@ export function createOnlineServer(
       },
       false,
     );
-    client.socket.close(RATE_LIMIT_CLOSE_CODE, "rate limited");
+    revokeClientBeforeClose(client, RATE_LIMIT_CLOSE_CODE, "rate limited");
+  }
+
+  /** Revoke message authority before a close frame can race buffered input. */
+  function revokeClientBeforeClose(
+    client: Client,
+    code: number,
+    reason: string,
+  ): void {
+    supersedeConnection(client, () => client.socket.close(code, reason));
   }
 
   function consumeRoomAttempt(
@@ -676,7 +685,8 @@ export function createOnlineServer(
       // Closing with the standard unsupported-data code also avoids spending
       // parser or rate-limit work on a protocol violation.
       if (isBinary) {
-        socket.close(
+        revokeClientBeforeClose(
+          client,
           UNSUPPORTED_DATA_CLOSE_CODE,
           UNSUPPORTED_DATA_CLOSE_REASON,
         );
@@ -689,7 +699,7 @@ export function createOnlineServer(
           { code: "message_too_large" },
           false,
         );
-        socket.close(1009, "message too large");
+        revokeClientBeforeClose(client, 1009, "message too large");
         return;
       }
       const messageRejection = abuseControls.consumeMessage(
