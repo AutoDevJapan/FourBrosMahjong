@@ -8,19 +8,29 @@ const DEPLOYMENT_DOC = readFileSync(
 );
 
 describe("deployment inventory evidence", () => {
-  it("keeps the post-#959 main, Vercel deployment, and service-worker evidence aligned", () => {
-    expect(DEPLOYMENT_DOC).toContain("#959 merge後、監査対象commit `98cb3de`");
+  it("keeps the post-#976 main, Vercel deployment, and service-worker evidence aligned", () => {
+    expect(DEPLOYMENT_DOC).toContain("#976 merge後、監査対象commit `7ae2a21`");
     expect(DEPLOYMENT_DOC).toContain(
-      "`98cb3de8b6e41dc27b1352d8708596f2d842fc02`（#959 merge 後）",
+      "`7ae2a2112de034d00d9ff1513808f7ddc54f1863`（#976 merge 後）",
     );
-    expect(DEPLOYMENT_DOC).toContain("GitHub deployment `6282070040`");
+    expect(DEPLOYMENT_DOC).toContain("GitHub deployment `6282910098`");
     expect(DEPLOYMENT_DOC).toContain(
-      "https://four-bros-mahjong-avyd2ye8o.vercel.app",
+      "https://four-bros-mahjong-pmvjgec84.vercel.app",
     );
-    expect(DEPLOYMENT_DOC).toContain("VERSION` は `98cb3de8b6e4`");
+    expect(DEPLOYMENT_DOC).toContain("VERSION` は `7ae2a2112de0`");
     expect(DEPLOYMENT_DOC).toContain(
-      "CI `33971927142`、gitleaks `33971927047`、CodeQL `33971926519` がすべて `success`",
+      "CI `33976346362`、gitleaks `33976346351`、CodeQL `33976346415` がすべて `success`",
     );
+  });
+
+  it("keeps the unresolved #653 Railway gate explicit", () => {
+    expect(DEPLOYMENT_DOC).toContain("`GET /readyz` は `404`（`not_found`）");
+    expect(DEPLOYMENT_DOC).toContain("Origin なしは `101`（期待値 `403`）");
+    expect(DEPLOYMENT_DOC).toContain(
+      "Railway production deployment / config read-back",
+    );
+    expect(DEPLOYMENT_DOC).toContain("#653 の外部前提");
+    expect(DEPLOYMENT_DOC).toContain("**HOLD** とする");
   });
 
   it("keeps the six-screen fallback smoke evidence visible", () => {
