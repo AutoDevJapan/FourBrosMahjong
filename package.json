@@ -14,6 +14,7 @@
     "verify:server:container": "node scripts/verify-online-container-signal.mjs",
     "verify:server:rollout-preflight": "tsx scripts/verify-online-rollout-preflight.ts",
     "verify:railway:iac-migration": "tsx scripts/verify-railway-iac-migration.ts",
+    "verify:railway:production-readback": "tsx scripts/verify-railway-production-readback.ts",
     "validate:server:ops-token": "tsx scripts/validate-online-ops-token.ts",
     "build": "next build",
     "start": "next start",
