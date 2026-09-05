@@ -325,6 +325,17 @@ describe("game persistence journal", () => {
       actions: [
         {
           type: "discard",
+          tile: { suit: "man", rank: 2, isRed: false },
+        },
+      ],
+    },
+    {
+      version: 2,
+      seed: 1,
+      names: DEFAULT_NAMES,
+      actions: [
+        {
+          type: "discard",
           tile: { suit: "honor", rank: 5, isRed: true },
         },
       ],
@@ -602,7 +613,7 @@ describe("game persistence journal", () => {
         actions: [
           {
             type: "discard",
-            tile: { suit: "man", rank: 5, isRed: false },
+            tile: { suit: "man", rank: 1, isRed: false },
           },
         ],
       }),

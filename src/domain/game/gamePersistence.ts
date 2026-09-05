@@ -88,7 +88,8 @@ function isTile(value: unknown): value is Tile {
   }
   const validRank =
     (suit === "honor" && rank >= 1 && rank <= 7) ||
-    (suit !== "honor" && rank >= 1 && rank <= 9);
+    (suit === "man" && (rank === 1 || rank === 9)) ||
+    ((suit === "pin" || suit === "sou") && rank >= 1 && rank <= 9);
   return (
     validRank &&
     typeof tile.isRed === "boolean" &&
