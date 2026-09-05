@@ -1,5 +1,6 @@
 import { spawnSync } from "node:child_process";
 import { describe, expect, it } from "vitest";
+import { createOnlineServer } from "./index";
 import { ONLINE_DRAIN_RECONNECT_GRACE_MS } from "./maintenanceLimits";
 import {
   ONLINE_DRAIN_RECONNECT_GRACE_DEFAULT_MS,
@@ -231,6 +232,30 @@ describe("online ops configuration", () => {
         "socket-close-grace-not-less-than-shutdown",
       );
     }
+  });
+
+  it("keeps invalid lifecycle settings reportable without crashing server startup", async () => {
+    const environment: NodeJS.ProcessEnv = {
+      NODE_ENV: "test",
+      ONLINE_SHUTDOWN_GRACE_MS: String(ONLINE_SHUTDOWN_GRACE_MIN_MS),
+    };
+    const status = readOnlineOpsConfiguration(environment);
+
+    expect(status.valid).toBe(false);
+    expect(status.readinessBlocked).toBe(false);
+    expect(status.errors).toContain(
+      "socket-close-grace-not-less-than-shutdown",
+    );
+    expect(status.config.shutdownGraceMs).toBe(
+      ONLINE_SHUTDOWN_GRACE_DEFAULT_MS,
+    );
+    expect(status.config.socketCloseGraceMs).toBe(
+      ONLINE_SOCKET_CLOSE_GRACE_DEFAULT_MS,
+    );
+
+    const server = createOnlineServer({ environment });
+    await expect(server.handleSignal("SIGTERM")).resolves.toBeUndefined();
+    expect(server.shutdownController.state().completed).toBe(true);
   });
 
   it("does not retain or serialize the raw token", () => {

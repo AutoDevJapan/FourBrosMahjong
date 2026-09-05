@@ -160,7 +160,7 @@ export function readOnlineOpsConfiguration(
     "invalid-reconnect-grace",
     errors,
   );
-  const shutdownGraceMs = integerSetting(
+  let shutdownGraceMs = integerSetting(
     environment.ONLINE_SHUTDOWN_GRACE_MS,
     ONLINE_SHUTDOWN_GRACE_DEFAULT_MS,
     ONLINE_SHUTDOWN_GRACE_MIN_MS,
@@ -168,7 +168,7 @@ export function readOnlineOpsConfiguration(
     "invalid-shutdown-grace",
     errors,
   );
-  const socketCloseGraceMs = integerSetting(
+  let socketCloseGraceMs = integerSetting(
     environment.ONLINE_SOCKET_CLOSE_GRACE_MS,
     ONLINE_SOCKET_CLOSE_GRACE_DEFAULT_MS,
     ONLINE_SOCKET_CLOSE_GRACE_MIN_MS,
@@ -178,6 +178,11 @@ export function readOnlineOpsConfiguration(
   );
   if (socketCloseGraceMs >= shutdownGraceMs) {
     errors.push("socket-close-grace-not-less-than-shutdown");
+    // Keep the lifecycle controller constructible so `/healthz` and `/readyz`
+    // can report the invalid configuration instead of crashing at startup.
+    // `valid`/`readinessBlocked` still preserve the fail-closed contract.
+    shutdownGraceMs = ONLINE_SHUTDOWN_GRACE_DEFAULT_MS;
+    socketCloseGraceMs = ONLINE_SOCKET_CLOSE_GRACE_DEFAULT_MS;
   }
 
   const authenticator = authenticatorSetting(
