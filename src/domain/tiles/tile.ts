@@ -19,7 +19,7 @@
 export type Suit = "man" | "pin" | "sou" | "honor";
 
 /**
- * 牌1枚。値オブジェクト(不変)。
+ * 牌1枚。値オブジェクト(実行時にも不変)。
  *
  * - `suit` … スート。
  * - `rank` … 数牌は 1〜9、字牌は下記 {@link HONOR} の 1〜7。
@@ -107,11 +107,11 @@ export function isRedDora(tile: RedDoraCandidate): boolean {
  * 山の構成は {@link "./tileSet".buildTileSet} の責務。
  */
 export function createTile(suit: Suit, rank: number): Tile {
-  return {
+  return Object.freeze({
     suit,
     rank,
     isRed: isRedFiveKind(suit, rank),
-  };
+  });
 }
 
 /**

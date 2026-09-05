@@ -80,6 +80,19 @@ describe("createTile(牌種 → Tile の唯一のファクトリ / issue #375)",
     expect(createTile("pin", 5)).not.toBe(createTile("pin", 5));
   });
 
+  it("生成した牌は実行時にも凍結され、牌の同一性を変更できない", () => {
+    const tile = createTile("pin", 5) as unknown as {
+      suit: Suit;
+      rank: number;
+      isRed: boolean;
+    };
+
+    expect(Object.isFrozen(tile)).toBe(true);
+    expect(Reflect.set(tile, "rank", 1)).toBe(false);
+    expect(Reflect.set(tile, "isRed", false)).toBe(false);
+    expect(tile).toEqual({ suit: "pin", rank: 5, isRed: true });
+  });
+
   it("牌種の実在性は検証しない(範囲外 rank もそのまま返す)", () => {
     // 実在牌種の母集合は SANMA_TILE_KINDS、山の構成は buildTileSet の責務。
     // ファクトリを検証責務で膨らませないことを固定する。

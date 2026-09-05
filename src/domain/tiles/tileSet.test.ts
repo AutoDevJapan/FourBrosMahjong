@@ -106,6 +106,10 @@ describe("buildTileSet(スペック1 1.2)", () => {
     expect(a).toEqual(b);
   });
 
+  it("山に含まれる各牌は実行時にも凍結されている", () => {
+    expect(tiles.every((tile) => Object.isFrozen(tile))).toBe(true);
+  });
+
   it("種別ごとの合計が 8 + 36 + 36 + 28 = 108 になる", () => {
     const bySuit = { man: 0, pin: 0, sou: 0, honor: 0 } as Record<
       Tile["suit"],
