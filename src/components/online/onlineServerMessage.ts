@@ -7,6 +7,7 @@ import {
 } from "@/domain/online/types";
 import { ROUNDS_PER_WIND } from "@/domain/round/round";
 import { TOTAL_POINTS } from "@/domain/scoring/settlement";
+import { createTile } from "@/domain/tiles/tile";
 import { COPIES_PER_TILE, TOTAL_TILE_COUNT } from "@/domain/tiles/tileSet";
 import {
   hasDisallowedPlayerNameControls,
@@ -278,17 +279,29 @@ function isOptionalPointDelta(value: unknown): boolean {
 
 function isTile(value: unknown): value is TileData {
   if (!isRecord(value)) return false;
-  const validSuit =
+  const suit =
     value.suit === "man" ||
     value.suit === "pin" ||
     value.suit === "sou" ||
-    value.suit === "honor";
+    value.suit === "honor"
+      ? value.suit
+      : null;
+  const rank = value.rank;
+  if (
+    suit === null ||
+    !isInteger(rank) ||
+    !(
+      (suit === "honor" && rank >= 1 && rank <= 7) ||
+      (suit !== "honor" && rank >= 1 && rank <= 9)
+    ) ||
+    !isOptionalBoolean(value.isRed)
+  ) {
+    return false;
+  }
+  // Legacy snapshots omit `isRed`; when present, it must remain the domain
+  // tile invariant so UI candidate matching cannot trust a contradictory flag.
   return (
-    validSuit &&
-    isInteger(value.rank) &&
-    ((value.suit === "honor" && value.rank >= 1 && value.rank <= 7) ||
-      (value.suit !== "honor" && value.rank >= 1 && value.rank <= 9)) &&
-    isOptionalBoolean(value.isRed)
+    value.isRed === undefined || value.isRed === createTile(suit, rank).isRed
   );
 }
 

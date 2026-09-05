@@ -166,8 +166,11 @@ const ALLOWED_RAW_IS_RED_READS: readonly string[] = [
   "domain/game/gameView.ts: return { suit: tile.suit, rank: tile.rank, isRed: tile.isRed };",
   "domain/game/gameView.ts: Number(a.isRed) - Number(b.isRed),",
   "domain/game/gameView.ts: Number(a.isRed) - Number(b.isRed),",
-  // WebSocket由来TileDataの赤フラグ型検証。赤ドラの意味づけには使わない。
-  "components/online/onlineServerMessage.ts: isOptionalBoolean(value.isRed)",
+  // WebSocket由来TileDataの赤フラグ検証。赤ドラの意味づけには使わない。
+  "components/online/onlineServerMessage.ts: !isOptionalBoolean(value.isRed)",
+  "components/online/onlineServerMessage.ts: value.isRed === undefined || value.isRed === createTile(suit, rank).isRed",
+  "components/online/onlineServerMessage.ts: value.isRed === undefined || value.isRed === createTile(suit, rank).isRed",
+  "components/online/onlineServerMessage.ts: value.isRed === undefined || value.isRed === createTile(suit, rank).isRed",
 ];
 
 /**
