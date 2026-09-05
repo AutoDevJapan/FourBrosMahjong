@@ -211,6 +211,34 @@ describe("createOnlineServer lifecycle", () => {
     }
   });
 
+  it("fails readiness closed when drain observation throws", async () => {
+    let clockCalls = 0;
+    const server = createOnlineServer({
+      environment: environment(false),
+      monotonicNow: () => {
+        clockCalls += 1;
+        if (clockCalls > 1) throw new Error("clock unavailable");
+        return 1_000;
+      },
+    });
+    const port = await listen(server);
+    try {
+      const readiness = await fetch(`http://127.0.0.1:${port}/readyz`);
+      expect(readiness.status).toBe(503);
+      await expect(readiness.json()).resolves.toEqual({ ok: false });
+
+      // A failed readiness observation must not take the liveness endpoint or
+      // the server itself down.
+      await expect(
+        fetch(`http://127.0.0.1:${port}/healthz`),
+      ).resolves.toMatchObject({
+        status: 200,
+      });
+    } finally {
+      await server.handleSignal("SIGTERM");
+    }
+  });
+
   it("rejects public route methods and bodies before serving them", async () => {
     const server = createOnlineServer({ environment: environment(false) });
     const port = await listen(server);
