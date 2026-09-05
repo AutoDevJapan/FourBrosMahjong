@@ -25,6 +25,8 @@ export interface PlayerSlotProps {
   confirmTouchSelectionMode?: HandProps["confirmTouchSelectionMode"];
   /** 全体盤面モーダル等で、自家手牌を閲覧専用にする。 */
   handReadOnly?: boolean;
+  /** 対話中の手牌が閲覧専用へ切り替わる際の論理的なフォーカス着地点。 */
+  readOnlyFocusRef?: HandProps["readOnlyFocusRef"];
   handTileStates?: readonly HandTileState[];
   onBlockedTile?: (message: string) => void;
 }
@@ -37,6 +39,7 @@ export default function PlayerSlot({
   confirmTouchSelection = false,
   confirmTouchSelectionMode = "discard",
   handReadOnly = false,
+  readOnlyFocusRef,
   handTileStates,
   onBlockedTile,
 }: PlayerSlotProps) {
@@ -55,6 +58,7 @@ export default function PlayerSlot({
       confirmTouchSelection={isSelf ? confirmTouchSelection : undefined}
       confirmTouchSelectionMode={isSelf ? confirmTouchSelectionMode : undefined}
       handReadOnly={isSelf ? handReadOnly : undefined}
+      readOnlyFocusRef={isSelf ? readOnlyFocusRef : undefined}
       handTileStates={isSelf ? handTileStates : undefined}
       onBlockedTile={isSelf ? onBlockedTile : undefined}
     />

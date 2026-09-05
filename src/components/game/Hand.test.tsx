@@ -1,5 +1,6 @@
 import { fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { createRef } from "react";
 import { describe, expect, it, vi } from "vitest";
 import Hand from "./Hand";
 import type { TileData } from "./types";
@@ -385,6 +386,36 @@ describe("Hand (roving tabindex listbox, spec 5.2.2)", () => {
     );
 
     expect(outside).toHaveFocus();
+  });
+
+  it("対話中の手牌が閲覧専用へ切り替わると盤面の着地点へフォーカスを移す(#966)", () => {
+    const fallbackRef = createRef<HTMLDivElement>();
+    const { rerender } = render(
+      <>
+        <div
+          ref={fallbackRef}
+          role="group"
+          aria-label="対局盤面"
+          tabIndex={-1}
+        />
+        <Hand tiles={tiles} readOnlyFocusRef={fallbackRef} />
+      </>,
+    );
+
+    screen.getAllByRole("option")[1].focus();
+    rerender(
+      <>
+        <div
+          ref={fallbackRef}
+          role="group"
+          aria-label="対局盤面"
+          tabIndex={-1}
+        />
+        <Hand tiles={tiles} readOnly readOnlyFocusRef={fallbackRef} />
+      </>,
+    );
+
+    expect(fallbackRef.current).toHaveFocus();
   });
 
   it("打牌で手牌が更新されたら、旧indexの選択状態を別の牌へ引き継がない(#214)", async () => {

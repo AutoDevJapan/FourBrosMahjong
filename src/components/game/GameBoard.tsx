@@ -587,6 +587,7 @@ export default function GameBoard({
         confirmTouchSelection={confirmTouchSelection}
         confirmTouchSelectionMode={confirmTouchSelectionMode}
         handReadOnly={handReadOnly}
+        readOnlyFocusRef={position === "self" ? boardRootRef : undefined}
         handTileStates={handTileStates}
         onBlockedTile={announceBlockedTile}
       />
