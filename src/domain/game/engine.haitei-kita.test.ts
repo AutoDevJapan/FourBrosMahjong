@@ -204,7 +204,9 @@ describe("engine: 北抜きの嶺上ツモと海底摸月(#396)", () => {
       hand.discardHistory[seat] = [];
       hand.hands[seat] = parseTiles(seat === "west" ? JUNK_13_ALT : JUNK_13);
     }
-    hand.melds.south = [whitePon()];
+    // 白ポン+白ツモだと同じ牌が5枚になるため、海底摸月だけで和了できる
+    // 役なしポンを使う。このfixtureも実在する牌構成に保つ。
+    hand.melds.south = [plainPon()];
     hand.hands.south = tenpaiOn(winTile);
     hand.callsMade = true;
     const discardTile = parseTile(EAST_DISCARD);

@@ -77,6 +77,24 @@ describe("decomposeStandard", () => {
     ).toEqual([]);
   });
 
+  it("同一牌種が5枚以上ある入力を和了形として受理しない", () => {
+    // 実在しない5枚の1筒を刻子+雀頭へ分けると、形だけは完成してしまう。
+    const impossible = parseTiles("11111p 222s 333s 555z");
+
+    expect(decomposeStandard(impossible, [])).toEqual([]);
+    expect(isCompleteHand(impossible, [])).toBe(false);
+
+    // 手牌と副露をまたぐ重複も同じ山の不変条件で拒否する。
+    const duplicatedPon: MeldInput = {
+      tiles: parseTiles("111p"),
+      isKan: false,
+      concealed: false,
+    };
+    expect(
+      decomposeStandard(parseTiles("111p 222s 333s 55z"), [duplicatedPon]),
+    ).toEqual([]);
+  });
+
   it("萬子は順子を作れない(サンマ牌構成)", () => {
     // 1m9m は順子にならないため、この形は和了形にならない。
     expect(isCompleteHand(parseTiles("19m 123p 456p 789p 99s"), [])).toBe(

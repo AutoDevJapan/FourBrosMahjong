@@ -10,6 +10,7 @@
  */
 
 import type { Suit, Tile } from "../tiles/tile";
+import { COPIES_PER_TILE } from "../tiles/tileSet";
 import {
   isNumberSuit,
   isValidTileKind,
@@ -295,6 +296,33 @@ function hasValidMeldInputs(melds: readonly MeldInput[]): boolean {
 }
 
 /**
+ * 牌種ごとの最大4枚制約を、門前手牌と副露をまたいで検証する。
+ *
+ * 牌種・面子の形が個別に正しくても、同じ牌を手牌と副露へ重複して置けば
+ * 実在しない5枚以上の牌を「刻子+雀頭」として分解できてしまう。公開された
+ * 構造型の入力は実行時にこの山の不変条件を保証しないため、分解前に全領域を
+ * 同じ牌種キーで集計して拒否する。
+ */
+function hasValidTileMultiplicity(
+  concealedTiles: readonly Tile[],
+  melds: readonly MeldInput[],
+): boolean {
+  const counts = new Map<string, number>();
+  const countTile = (tile: Tile): boolean => {
+    const key = tileKey(tile);
+    const next = (counts.get(key) ?? 0) + 1;
+    if (next > COPIES_PER_TILE) return false;
+    counts.set(key, next);
+    return true;
+  };
+
+  return (
+    concealedTiles.every(countTile) &&
+    melds.every((meld) => meld.tiles.every(countTile))
+  );
+}
+
+/**
  * 標準形(4面子1雀頭)の分解を全通り返す。副露を面子に含めた完成形。
  * 分解不能(和了形でない)なら空配列。
  */
@@ -302,7 +330,11 @@ export function decomposeStandard(
   concealedTiles: readonly Tile[],
   melds: readonly MeldInput[],
 ): StandardForm[] {
-  if (!hasValidTileInputs(concealedTiles) || !hasValidMeldInputs(melds)) {
+  if (
+    !hasValidTileInputs(concealedTiles) ||
+    !hasValidMeldInputs(melds) ||
+    !hasValidTileMultiplicity(concealedTiles, melds)
+  ) {
     return [];
   }
   const neededMelds = 4 - melds.length;
@@ -334,6 +366,7 @@ export function decomposeSevenPairs(
   if (
     !hasValidTileInputs(concealedTiles) ||
     !hasValidMeldInputs(melds) ||
+    !hasValidTileMultiplicity(concealedTiles, melds) ||
     melds.length > 0 ||
     concealedTiles.length !== 14
   )
@@ -362,6 +395,7 @@ export function decomposeThirteenOrphans(
   if (
     !hasValidTileInputs(concealedTiles) ||
     !hasValidMeldInputs(melds) ||
+    !hasValidTileMultiplicity(concealedTiles, melds) ||
     melds.length > 0 ||
     concealedTiles.length !== 14
   )
