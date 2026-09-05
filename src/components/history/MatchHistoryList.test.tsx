@@ -15,6 +15,7 @@ import {
   type MatchHistoryEntry,
   retryHistoryViewSnapshot,
 } from "@/components/game/matchHistory";
+import { PENDING_HISTORY_KEY } from "@/components/game/pendingHistory";
 import { restoreWebLocks, stubWebLocks } from "@/test/webLocksStub";
 import MatchHistoryList from "./MatchHistoryList";
 
@@ -63,6 +64,7 @@ afterEach(() => {
   // スパイの復元をテスト本体末尾に置くと、手前の expect が落ちた際に次のテストへ漏れる。
   vi.restoreAllMocks();
   window.localStorage.clear();
+  window.sessionStorage.clear();
   retryHistoryViewSnapshot();
   restoreWebLocks(originalLocksDescriptor);
 });
@@ -149,6 +151,7 @@ describe("MatchHistoryList (#293)", () => {
 
   it("2段階確認つきで全件削除でき、キャンセルもできる", async () => {
     appendHistory(window.localStorage, entry(1, 1_753_000_000_000));
+    window.sessionStorage.setItem(PENDING_HISTORY_KEY, "pending");
 
     render(<MatchHistoryList />);
     const clearButton = await screen.findByRole("button", {
@@ -181,6 +184,7 @@ describe("MatchHistoryList (#293)", () => {
     await waitFor(() =>
       expect(window.localStorage.getItem(MATCH_HISTORY_KEY)).toBeNull(),
     );
+    expect(window.sessionStorage.getItem(PENDING_HISTORY_KEY)).toBeNull();
     expect(
       await screen.findByText(/保存された戦績はまだありません/),
     ).toBeInTheDocument();

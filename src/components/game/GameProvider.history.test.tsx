@@ -24,6 +24,7 @@ import {
   type MatchHistoryEntry,
   subscribeHistory,
 } from "./matchHistory";
+import { PENDING_HISTORY_KEY } from "./pendingHistory";
 
 const GAME_SESSION_KEY = "four-bros-mahjong.game.v3";
 
@@ -119,6 +120,15 @@ function LastActionProbe({ action }: { action: GameAction }) {
       <output data-testid="history-save-status">{historySaveStatus}</output>
       <output data-testid="session-save-status">{sessionSaveStatus}</output>
     </>
+  );
+}
+
+function NewGameProbe() {
+  const { controls } = useGame();
+  return (
+    <button type="button" onClick={controls.newGame}>
+      もう一半荘
+    </button>
   );
 }
 
@@ -391,6 +401,59 @@ describe("GameProvider match history recording (#293)", () => {
         "failed",
       ),
     );
+  });
+
+  it("保存失敗後にもう一半荘へ進んでも結果を退避し、復旧後に再試行する(issue #892)", async () => {
+    const lastAction = fixture.journal.actions.at(-1);
+    if (!lastAction) throw new Error("ジャーナルが空");
+    window.sessionStorage.setItem(
+      GAME_SESSION_KEY,
+      JSON.stringify({
+        ...fixture.journal,
+        actions: fixture.journal.actions.slice(0, -1),
+      }),
+    );
+    blockLocalStorage();
+
+    const first = render(
+      <GameProvider>
+        <LastActionProbe action={lastAction} />
+        <NewGameProbe />
+      </GameProvider>,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "最終操作" }));
+    await waitFor(() =>
+      expect(screen.getByTestId("history-save-status")).toHaveTextContent(
+        "failed",
+      ),
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "もう一半荘" }));
+    expect(screen.getByTestId("phase")).toHaveTextContent("playing");
+    expect(screen.getByTestId("history-save-status")).toHaveTextContent("idle");
+    expect(
+      JSON.parse(window.sessionStorage.getItem(PENDING_HISTORY_KEY) ?? "null")
+        .entries[0].seed,
+    ).toBe(fixture.journal.seed);
+
+    if (originalLocalStorageDescriptor) {
+      Object.defineProperty(
+        window,
+        "localStorage",
+        originalLocalStorageDescriptor,
+      );
+    }
+    first.unmount();
+    render(
+      <GameProvider>
+        <HistorySaveStatusProbe />
+      </GameProvider>,
+    );
+    await waitFor(() =>
+      expect(loadHistory(window.localStorage)).toHaveLength(1),
+    );
+    expect(loadHistory(window.localStorage)[0].seed).toBe(fixture.journal.seed);
+    expect(window.sessionStorage.getItem(PENDING_HISTORY_KEY)).toBeNull();
   });
 
   it("終局直前のsessionStorage書き込み失敗でも結果を保ち、復元不可を公開する", async () => {

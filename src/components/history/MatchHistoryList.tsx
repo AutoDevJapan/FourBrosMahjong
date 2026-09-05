@@ -34,6 +34,7 @@ import {
   retryHistoryViewSnapshot,
   subscribeHistory,
 } from "@/components/game/matchHistory";
+import { clearPendingHistory } from "@/components/game/pendingHistory";
 import RankingTable from "@/components/result/RankingTable";
 import { SOSHII_BREAKDOWN_HEADING } from "@/components/result/resultLabels";
 import SoshiiBreakdown from "@/components/result/SoshiiBreakdown";
@@ -265,10 +266,15 @@ export default function MatchHistoryList() {
     try {
       const storage = localStorageOrNull();
       // Storage の getter 自体が例外を投げる環境も「ストレージを操作できない」に含める。
-      const result: HistoryClearResult =
+      let result: HistoryClearResult =
         storage === null
           ? "storage-failed"
           : await clearHistoryAcrossTabs(storage);
+      if (result === "cleared" && !clearPendingHistory()) {
+        // 保存済み履歴は消えているが、退避値の削除を確認できない場合は成功を案内しない。
+        // 次回の操作で退避結果が復活するのを防ぐため、利用者へ再試行を促す。
+        result = "storage-failed";
+      }
       if (result === "cleared") {
         // 購読通知は同期的に再描画を起こし得るため、通知より先に着地点を予約する。
         // 先に通知すると、その再描画で effect が走った時点ではフラグがまだ falseで、
