@@ -6,7 +6,8 @@ updates:
     schedule:
       interval: "daily"
     versioning-strategy: "increase"
-    open-pull-requests-limit: 99
+    # Each update PR fans out into the repository's CI and security checks.
+    open-pull-requests-limit: 5
     labels:
       - "dependencies"
     groups:
@@ -26,7 +27,7 @@ updates:
     schedule:
       interval: "weekly"
       day: "monday"
-    open-pull-requests-limit: 99
+    open-pull-requests-limit: 5
     labels:
       - "dependencies"
 
@@ -36,6 +37,6 @@ updates:
     schedule:
       interval: "weekly"
       day: "monday"
-    open-pull-requests-limit: 99
+    open-pull-requests-limit: 5
     labels:
       - "dependencies"
