@@ -242,6 +242,55 @@ describe("createOnlineServer lifecycle", () => {
     }
   });
 
+  it("drains and closes malformed request-targets with a body", async () => {
+    const server = createOnlineServer({ environment: environment(false) });
+    const port = await listen(server);
+    const socket = createConnection({ host: "127.0.0.1", port });
+    const responseChunks: Buffer[] = [];
+    try {
+      const response = new Promise<string>((resolve, reject) => {
+        const timer = setTimeout(
+          () => reject(new Error("malformed request was not answered")),
+          1_000,
+        );
+        socket.once("error", reject);
+        socket.once("data", (chunk: Buffer) => {
+          clearTimeout(timer);
+          responseChunks.push(chunk);
+          resolve(Buffer.concat(responseChunks).toString("utf8"));
+        });
+      });
+      const closed = new Promise<void>((resolve, reject) => {
+        const timer = setTimeout(
+          () => reject(new Error("malformed request socket stayed open")),
+          1_000,
+        );
+        socket.once("close", () => {
+          clearTimeout(timer);
+          resolve();
+        });
+        socket.once("error", reject);
+      });
+
+      socket.write(
+        `GET http://[ HTTP/1.1\r\nHost: 127.0.0.1:${port}\r\n` +
+          "Content-Length: 5\r\nConnection: keep-alive\r\n\r\n",
+      );
+      const answered = await response;
+      expect(answered).toMatch(/^HTTP\/1\.1 400 Bad Request\r\n/);
+      expect(answered).toMatch(/\r\nconnection: close\r\n/i);
+
+      // Complete the rejected request body. The server must have resumed the
+      // stream, then close the connection rather than waiting for a next
+      // keep-alive request to make progress.
+      socket.end("abcde");
+      await closed;
+    } finally {
+      if (!socket.destroyed) socket.destroy();
+      await server.handleSignal("SIGTERM");
+    }
+  });
+
   it("uses the injected Railway marker for per-source ops rate limiting", async () => {
     const token = "P".repeat(32);
     const server = createOnlineServer({
