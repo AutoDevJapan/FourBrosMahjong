@@ -1356,7 +1356,11 @@ export default function OnlineLobby() {
           </header>
 
           <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg bg-foreground/5 px-4 py-3 text-sm">
-            <div className="flex flex-wrap gap-x-4 gap-y-1" aria-label="参加者">
+            <div
+              className="flex flex-wrap gap-x-4 gap-y-1"
+              role="group"
+              aria-label="参加者"
+            >
               {snapshot.players.map((player) => (
                 <span
                   key={player.id}
