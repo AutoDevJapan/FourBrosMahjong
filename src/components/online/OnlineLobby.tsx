@@ -714,6 +714,7 @@ export default function OnlineLobby() {
   const manualCloseRef = useRef(false);
   const restoreTimerRef = useRef<number | null>(null);
   const restoreCanceledRef = useRef(false);
+  const restoreGenerationRef = useRef(0);
   const [activeRequest, setActiveRequest] = useState<JoinRequest | null>(null);
   const pendingSessionSocketRef = useRef<WebSocket | null>(null);
   const feedbackRef = useRef<HTMLDivElement>(null);
@@ -1379,10 +1380,17 @@ export default function OnlineLobby() {
   }, [connect]);
 
   useEffect(() => {
+    const restoreGeneration = restoreGenerationRef.current + 1;
+    restoreGenerationRef.current = restoreGeneration;
     restoreCanceledRef.current = false;
     const timer = trySetTimeout(() => {
       restoreTimerRef.current = null;
-      if (restoreCanceledRef.current) return;
+      if (
+        restoreCanceledRef.current ||
+        restoreGenerationRef.current !== restoreGeneration
+      ) {
+        return;
+      }
       const sharedCode = readSharedRoomCode();
       const stored = readCredentials();
       // A deliberate room link takes precedence over an unrelated session left
@@ -1413,6 +1421,10 @@ export default function OnlineLobby() {
     }
     restoreTimerRef.current = timer;
     return () => {
+      restoreCanceledRef.current = true;
+      if (restoreGenerationRef.current === restoreGeneration) {
+        restoreGenerationRef.current += 1;
+      }
       if (restoreTimerRef.current === timer) restoreTimerRef.current = null;
       clearTimeoutSafely(timer);
     };

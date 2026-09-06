@@ -510,6 +510,29 @@ describe("OnlineLobby (#605)", () => {
     }
   });
 
+  it("does not restore a saved session after timer cleanup throws on unmount", () => {
+    vi.useFakeTimers();
+    window.sessionStorage.setItem(
+      "four-bros-mahjong.online.session.v1",
+      JSON.stringify({ code: "ABC234", token: "t".repeat(24) }),
+    );
+    const clearTimeout = vi
+      .spyOn(window, "clearTimeout")
+      .mockImplementationOnce(() => {
+        throw new Error("timer cleanup is unavailable");
+      });
+
+    try {
+      const { unmount } = render(<OnlineLobby />);
+      unmount();
+      act(() => vi.runAllTimers());
+
+      expect(sockets).toHaveLength(0);
+    } finally {
+      clearTimeout.mockRestore();
+    }
+  });
+
   it("does not fail unmount when an OnlineLobby interval cleanup throws", () => {
     vi.useFakeTimers();
     const { unmount } = render(<OnlineLobby />);
