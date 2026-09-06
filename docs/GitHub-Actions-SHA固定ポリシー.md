@@ -2,6 +2,34 @@
 
 Issue #663 の受け入れ条件に基づき、外部 Action と reusable workflow は immutable な完全 commit SHA で固定します。リポジトリ内の local reusable workflow (`./...`) は caller commit の内容を使用します。一方、local Action (`./...`) は checkout 済み workspace を実行するため、同じ job で先行する完全 SHA 固定の `actions/checkout` があり、`ref` 未指定または `${{ github.sha }}` の場合だけ許可します。Docker Action を追加する場合は tag ではなく `sha256` digest で固定します。
 
+## Latest read-only re-audit
+
+2026-09-06 10:48 JST に、`origin/main` の `HEAD=6121101f8bd01cc3472c1a5d2cb578dc53621da5` を対象として、repository/org の設定と実行可能な workflow 参照を再監査しました。設定、allowlist、workflow、tag、release、dispatch、rerun は変更していません。
+
+repository の再読結果:
+
+```json
+{
+  "actions_permissions": {
+    "enabled": true,
+    "allowed_actions": "all",
+    "sha_pinning_required": true
+  },
+  "workflow_permissions": {
+    "default_workflow_permissions": "read",
+    "can_approve_pull_request_reviews": false
+  }
+}
+```
+
+- `GET /repos/AutoDevJapan/FourBrosMahjong/actions/permissions/selected-actions` は HTTP 409 (`All actions and workflows are allowed on this repository`)。既存の `allowed_actions=all` を維持しており、selected-actions allowlistへの暗黙の変更はありません。
+- `GET /orgs/AutoDevJapan/actions/permissions` と `/workflow` は HTTP 403 (`admin:org` または Actions policies fine-grained permission が必要)。現在のcredentialではorganization policyのeffective scope、precedence、ownerを確定できません。
+- 5つのrepository workflowの実行可能な外部 `uses:` は20件で、20/20件が完全40桁commit SHA固定、未固定0件、local workflow/action参照0件です。Playwrightのworkflow container imageもSHA-256 digest固定です。
+- 現行mainの同一SHAに対する [CI run 34004639319](https://github.com/AutoDevJapan/FourBrosMahjong/actions/runs/34004639319)、[gitleaks run 34004639348](https://github.com/AutoDevJapan/FourBrosMahjong/actions/runs/34004639348)、[CodeQL run 34004638819](https://github.com/AutoDevJapan/FourBrosMahjong/actions/runs/34004638819) はすべてsuccessです。gitleaks version-checkの直近successは [run 33465805332](https://github.com/AutoDevJapan/FourBrosMahjong/actions/runs/33465805332) です。
+- `v*` tag、GitHub Release、`release.yml`、`gitleaks-version-bump.yml` の実行は0件です。承認なしにsynthetic tag/releaseやworkflow dispatchを作成していません。
+
+repository-levelのSHA固定は有効で、workflow参照と通常のCI/CodeQL/gitleaksは検証済みです。#663の残りは、organization policy ownerによるeffective scope/allowlistの確認と、承認済み実Releaseでのrelease workflow証跡です。これらは現在のcredentialと通常PRの範囲では完了扱いにせず、IssueをOPEN/HOLDとして引き継ぎます。
+
 ## Repository policy
 
 2026-08-27 21:09 JST に、`Dev-AK28` (repository `admin=true`、organization membership `active/member`) で `GET /repos/AutoDevJapan/FourBrosMahjong/actions/permissions` を読み取り監査しました。desired state は既に有効だったため、設定の PUT は行っていません。allowlist の選択も変更せず、既存の `allowed_actions: "all"` を維持しています。
