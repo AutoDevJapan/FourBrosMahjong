@@ -162,8 +162,14 @@ export class SoshiiLedger {
       seen.add(playerId);
     }
     const expectedTotal = STARTING_POINTS * this._balances.size;
-    const actualTotal = finalPoints.reduce((sum, p) => sum + p.points, 0);
-    if (actualTotal !== expectedTotal) {
+    // `Number.isSafeInteger` only protects each value. Summing large safe
+    // integers as numbers can still round away a small difference before
+    // cancellation, allowing an invalid total to pass this invariant.
+    const actualTotal = finalPoints.reduce(
+      (sum, { points }) => sum + BigInt(points),
+      BigInt(0),
+    );
+    if (actualTotal !== BigInt(expectedTotal)) {
       throw new RangeError(
         `final points must total ${expectedTotal} (${STARTING_POINTS} x ${this._balances.size}), received ${actualTotal} (any pot left on the table, e.g. outstanding riichi sticks, must be folded into the final points before settlement).`,
       );
