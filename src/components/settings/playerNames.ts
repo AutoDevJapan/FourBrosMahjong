@@ -159,8 +159,8 @@ export function subscribePlayerNames(callback: () => void): () => void {
       window.removeEventListener("storage", handleStorage);
       storageListenerAttached = false;
     } catch {
-      // Keep the attached state when cleanup is rejected; retrying an add
-      // is still necessary because the host may have rejected before attach.
+      // Treat attachment as unknown when cleanup is rejected so a later
+      // subscription can retry if the host rejected before attaching.
       storageListenerAttached = false;
     }
   };

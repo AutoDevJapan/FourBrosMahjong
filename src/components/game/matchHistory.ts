@@ -669,8 +669,8 @@ export function subscribeHistory(callback: () => void): () => void {
       window.removeEventListener("storage", onStorageEvent);
       storageListenerAttached = false;
     } catch {
-      // Keep the attached state when cleanup is rejected; another add could
-      // still be needed when the host rejected before attaching the listener.
+      // Treat attachment as unknown when cleanup is rejected so a later
+      // subscription can retry if the host rejected before attaching.
       storageListenerAttached = false;
     }
     // 破損通知は通常unmountで消さない。React Strict Modeのsetup→cleanup→setupで
