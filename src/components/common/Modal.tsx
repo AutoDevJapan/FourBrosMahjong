@@ -129,6 +129,40 @@ function tryRemoveAttribute(element: HTMLElement, name: string): void {
   }
 }
 
+type ModalIsolationSnapshot = {
+  element: HTMLElement;
+  inert: boolean;
+  inertAttribute: boolean;
+  ariaHidden: string | null;
+};
+
+/**
+ * Background isolation starts by observing the body children. Restricted DOM
+ * hosts can expose that collection but reject the read, so it must not abort
+ * the rest of the modal lifecycle (#1123).
+ */
+function snapshotModalIsolation(
+  overlay: HTMLDivElement,
+): ModalIsolationSnapshot[] {
+  try {
+    return Array.from(document.body.children)
+      .filter(
+        (element): element is HTMLElement =>
+          element instanceof HTMLElement && element !== overlay,
+      )
+      .map((element) => ({
+        element,
+        inert: element.inert,
+        inertAttribute: element.hasAttribute("inert"),
+        ariaHidden: element.getAttribute("aria-hidden"),
+      }));
+  } catch {
+    // Background isolation is best effort; keep focus, listeners, and cleanup
+    // reachable when body inspection is unavailable.
+    return [];
+  }
+}
+
 /**
  * ダイアログ内のフォーカス可能要素を DOM 順で列挙する。
  * 実ブラウザでは CSS の `display: none` / `visibility: hidden` もフォーカス不能なので、
@@ -236,17 +270,7 @@ export default function Modal({
     const dialog = dialogRef.current;
     if (!overlay || !dialog) return;
 
-    const isolated = Array.from(document.body.children)
-      .filter(
-        (element): element is HTMLElement =>
-          element instanceof HTMLElement && element !== overlay,
-      )
-      .map((element) => ({
-        element,
-        inert: element.inert,
-        inertAttribute: element.hasAttribute("inert"),
-        ariaHidden: element.getAttribute("aria-hidden"),
-      }));
+    const isolated = snapshotModalIsolation(overlay);
     for (const { element } of isolated) {
       trySetInert(element, true);
       trySetAttribute(element, "inert", "");

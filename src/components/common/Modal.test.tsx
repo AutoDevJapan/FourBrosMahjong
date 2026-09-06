@@ -55,6 +55,54 @@ describe("Modal (spec 5.2.2 dialog / focus trap / Escape)", () => {
     }
   });
 
+  it("背景要素のchildren読み取りがthrowしてもeffectとcleanupを継続する(#1123)", () => {
+    const originalDescriptor = Object.getOwnPropertyDescriptor(
+      Element.prototype,
+      "children",
+    );
+    const originalGetter = originalDescriptor?.get;
+    if (!originalDescriptor || !originalGetter) {
+      throw new Error("Element.prototype.children getter is unavailable");
+    }
+
+    Object.defineProperty(Element.prototype, "children", {
+      configurable: originalDescriptor.configurable,
+      enumerable: originalDescriptor.enumerable,
+      get() {
+        if (this === document.body) {
+          throw new Error("body children are unavailable");
+        }
+        return originalGetter.call(this);
+      },
+    });
+
+    const onClose = vi.fn();
+    let modal: ReturnType<typeof render> | undefined;
+    try {
+      expect(() => {
+        modal = render(
+          <Modal title="全体盤面" onClose={onClose}>
+            <button type="button">中身</button>
+          </Modal>,
+        );
+      }).not.toThrow();
+    } finally {
+      Object.defineProperty(Element.prototype, "children", originalDescriptor);
+    }
+
+    expect(modal).toBeDefined();
+    expect(
+      screen.getByRole("dialog", { name: "全体盤面" }),
+    ).toBeInTheDocument();
+    expect(document.body.style.position).toBe("fixed");
+    expect(() =>
+      fireEvent.click(screen.getByRole("button", { name: "閉じる" })),
+    ).not.toThrow();
+    expect(onClose).toHaveBeenCalledTimes(1);
+    expect(() => modal?.unmount()).not.toThrow();
+    expect(document.body.style.position).toBe("");
+  });
+
   it("公開: role=dialog + aria-modal + 見出しでラベル付けされる", () => {
     render(
       <Modal title="全体盤面" onClose={vi.fn()}>
