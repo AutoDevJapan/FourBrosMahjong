@@ -328,6 +328,56 @@ describe("buildServiceWorkerScript", () => {
     ).toHaveLength(1);
   });
 
+  it("CSSのurl参照もinstall時にfont cacheへ収録する", async () => {
+    const sw = bootServiceWorker();
+    const stylesheet = "/_next/static/css/app.abc.css";
+    const font = "/_next/static/media/route-font.woff2";
+    const fetchSpy = vi.fn(async (input: RequestInfo | URL) => {
+      const url = new URL(String(input), ORIGIN);
+      if (PRECACHE_ROUTES.includes(url.pathname)) {
+        return htmlResponse(`<link rel="stylesheet" href="${stylesheet}">`);
+      }
+      if (PRECACHE_ASSETS.includes(url.pathname)) {
+        return staticAssetResponse(url.pathname, `asset:${url.pathname}`);
+      }
+      if (url.pathname === stylesheet) {
+        return buildAssetResponse(
+          stylesheet,
+          '@font-face{font-family:Route;src:url("../media/route-font.woff2?build=1#font")}@import url("./nested.css")',
+        );
+      }
+      if (url.pathname === "/_next/static/css/nested.css") {
+        return buildAssetResponse(
+          "/_next/static/css/nested.css",
+          "body{background-image:url('../media/route-bg.svg?build=1')}",
+        );
+      }
+      return url.pathname === font
+        ? buildAssetResponse(font, "font-data")
+        : url.pathname.endsWith(".svg")
+          ? staticAssetResponse(url.pathname, `asset:${url.pathname}`)
+          : buildAssetResponse(url.pathname, `asset:${url.pathname}`);
+    });
+    sw.setFetchImpl(fetchSpy as typeof fetch);
+
+    await sw.dispatchLifecycle("install");
+
+    const precache = sw.cacheStorage.caches.get("fbm-precache-v1");
+    expect(precache?.store.has(`${ORIGIN}${stylesheet}`)).toBe(true);
+    expect(precache?.store.has(`${ORIGIN}${font}`)).toBe(true);
+    expect(precache?.store.has(`${ORIGIN}/_next/static/css/nested.css`)).toBe(
+      true,
+    );
+    expect(
+      precache?.store.has(`${ORIGIN}/_next/static/media/route-bg.svg`),
+    ).toBe(true);
+
+    sw.setFetchImpl(OFFLINE);
+    const offline = await sw.dispatchFetch(request(`${font}?runtime=1`));
+    const response: Response = await offline.respondWith.mock.calls[0][0];
+    expect(await response.text()).toBe("font-data");
+  });
+
   it("必要build assetの取得失敗時はinstall自体を失敗させる(#506)", async () => {
     const sw = bootServiceWorker();
     sw.setFetchImpl(
