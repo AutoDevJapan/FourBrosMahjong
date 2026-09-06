@@ -176,6 +176,88 @@ describe("Modal (spec 5.2.2 dialog / focus trap / Escape)", () => {
     expect(backgroundContainer).not.toHaveAttribute("aria-hidden");
   });
 
+  it("inert setterがthrowしても隔離の残りとイベントcleanupを継続する(#1083)", () => {
+    const backgroundRoot = document.createElement("div");
+    backgroundRoot.dataset.testid = "restricted-background";
+    document.body.append(backgroundRoot);
+    Object.defineProperty(backgroundRoot, "inert", {
+      configurable: true,
+      get: () => false,
+      set: () => {
+        throw new Error("inert is unavailable");
+      },
+    });
+    const onClose = vi.fn();
+
+    const { unmount } = render(
+      <Modal title="全体盤面" onClose={onClose}>
+        <button type="button">中身</button>
+      </Modal>,
+    );
+
+    expect(
+      screen.getByRole("dialog", { name: "全体盤面" }),
+    ).toBeInTheDocument();
+    expect(backgroundRoot).toHaveAttribute("inert");
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(onClose).toHaveBeenCalledTimes(1);
+    expect(() => unmount()).not.toThrow();
+    expect(backgroundRoot).not.toHaveAttribute("inert");
+    expect(backgroundRoot).not.toHaveAttribute("aria-hidden");
+    backgroundRoot.remove();
+  });
+
+  it("属性writeがthrowしてもモーダルのeffectとcleanupを中断しない(#1083)", () => {
+    const backgroundRoot = document.createElement("div");
+    document.body.append(backgroundRoot);
+    const originalSetAttribute = backgroundRoot.setAttribute;
+    vi.spyOn(backgroundRoot, "setAttribute").mockImplementation(
+      (name, value) => {
+        if (name === "aria-hidden") {
+          throw new Error("aria-hidden is unavailable");
+        }
+        originalSetAttribute.call(backgroundRoot, name, value);
+      },
+    );
+    const onClose = vi.fn();
+    const { unmount } = render(
+      <Modal title="全体盤面" onClose={onClose}>
+        <button type="button">中身</button>
+      </Modal>,
+    );
+
+    expect(
+      screen.getByRole("dialog", { name: "全体盤面" }),
+    ).toBeInTheDocument();
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(onClose).toHaveBeenCalledTimes(1);
+    expect(() => unmount()).not.toThrow();
+    backgroundRoot.remove();
+  });
+
+  it("cleanupのremoveAttributeがthrowしても残りの復元を継続する(#1083)", () => {
+    const backgroundRoot = document.createElement("div");
+    document.body.append(backgroundRoot);
+    const { unmount } = render(
+      <Modal title="全体盤面" onClose={vi.fn()}>
+        <p>本文</p>
+      </Modal>,
+    );
+    const originalRemoveAttribute = backgroundRoot.removeAttribute;
+    vi.spyOn(backgroundRoot, "removeAttribute").mockImplementation((name) => {
+      if (name === "aria-hidden") {
+        throw new Error("aria-hidden cleanup is unavailable");
+      }
+      originalRemoveAttribute.call(backgroundRoot, name);
+    });
+    expect(backgroundRoot).toHaveAttribute("inert");
+    expect(backgroundRoot).toHaveAttribute("aria-hidden", "true");
+
+    expect(() => unmount()).not.toThrow();
+    expect(backgroundRoot).not.toHaveAttribute("inert");
+    backgroundRoot.remove();
+  });
+
   it("フォーカストラップと復帰先のfocusがthrowしても操作を中断しない(#1061)", () => {
     const opener = document.createElement("button");
     opener.type = "button";
