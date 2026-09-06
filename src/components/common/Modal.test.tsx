@@ -55,6 +55,49 @@ describe("Modal (spec 5.2.2 dialog / focus trap / Escape)", () => {
     }
   });
 
+  it("body.childrenの読み取りがthrowしても描画・操作・cleanupを継続する(#1123)", () => {
+    const originalDescriptor = Object.getOwnPropertyDescriptor(
+      document.body,
+      "children",
+    );
+    Object.defineProperty(document.body, "children", {
+      configurable: true,
+      get() {
+        throw new Error("body children are unavailable");
+      },
+    });
+
+    let unmount: (() => void) | undefined;
+    try {
+      const onClose = vi.fn();
+      const rendered = render(
+        <Modal title="全体盤面" onClose={onClose}>
+          <button type="button">中身</button>
+        </Modal>,
+      );
+      unmount = rendered.unmount;
+
+      const dialog = screen.getByRole("dialog", { name: "全体盤面" });
+      const closeButton = screen.getByRole("button", { name: "閉じる" });
+      expect(dialog).toBeInTheDocument();
+      expect(dialog).toHaveFocus();
+
+      fireEvent.keyDown(document, { key: "Escape" });
+      expect(onClose).toHaveBeenCalledTimes(1);
+      fireEvent.click(closeButton);
+      expect(onClose).toHaveBeenCalledTimes(2);
+      expect(() => unmount?.()).not.toThrow();
+      unmount = undefined;
+    } finally {
+      unmount?.();
+      if (originalDescriptor) {
+        Object.defineProperty(document.body, "children", originalDescriptor);
+      } else {
+        Reflect.deleteProperty(document.body, "children");
+      }
+    }
+  });
+
   it("公開: role=dialog + aria-modal + 見出しでラベル付けされる", () => {
     render(
       <Modal title="全体盤面" onClose={vi.fn()}>
