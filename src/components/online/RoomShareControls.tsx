@@ -29,6 +29,27 @@ function isAbortError(error: unknown): boolean {
   );
 }
 
+type ShareCapability = {
+  readonly navigator: Navigator;
+  readonly share: Navigator["share"];
+};
+
+/**
+ * Optional browser capabilities can be exposed through throwing accessors in
+ * privacy-restricted or embedded runtimes. Discover Web Share inside the same
+ * failure boundary as the call so the manual URL fallback remains reachable.
+ */
+function readShareCapability(): ShareCapability | null {
+  if (typeof navigator === "undefined") return null;
+  try {
+    const nav = navigator;
+    const share = nav.share;
+    return typeof share === "function" ? { navigator: nav, share } : null;
+  } catch {
+    return null;
+  }
+}
+
 export default function RoomShareControls({
   code,
   shareUrl,
@@ -69,12 +90,11 @@ export default function RoomShareControls({
   };
 
   const shareRoom = async () => {
-    const share =
-      typeof navigator !== "undefined" ? navigator.share : undefined;
+    const capability = readShareCapability();
 
-    if (typeof share === "function") {
+    if (capability !== null) {
       try {
-        await share.call(navigator, {
+        await capability.share.call(capability.navigator, {
           title: "四兄弟麻雀のルーム",
           text: `ルームコード: ${code}`,
           url: shareUrl,
@@ -94,9 +114,9 @@ export default function RoomShareControls({
     }
 
     setFeedback({
-      kind: share === undefined ? "info" : "error",
+      kind: capability === null ? "info" : "error",
       message:
-        share === undefined
+        capability === null
           ? "このブラウザでは共有機能を利用できません。下の共有URLを選択して共有してください。"
           : "共有できませんでした。下の共有URLを選択して共有してください。",
     });

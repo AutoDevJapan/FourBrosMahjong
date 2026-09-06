@@ -29,6 +29,15 @@ function setNavigatorProperty(
   });
 }
 
+function setThrowingShareGetter(): void {
+  Object.defineProperty(navigator, "share", {
+    configurable: true,
+    get() {
+      throw new Error("Web Share capability is unreadable");
+    },
+  });
+}
+
 function restoreNavigatorProperty(
   name: "clipboard" | "share",
   descriptor: PropertyDescriptor | undefined,
@@ -146,6 +155,20 @@ describe("RoomShareControls (#605)", () => {
   it("shows a manual URL when Web Share API is unavailable", async () => {
     const user = userEvent.setup();
     setNavigatorProperty("share", undefined);
+    renderControls();
+
+    await user.click(screen.getByRole("button", { name: "共有" }));
+
+    const status = await screen.findByRole("status");
+    expect(status).toHaveTextContent("共有機能を利用できません");
+    expect(screen.getByLabelText("共有URL")).toHaveValue(
+      "https://mahjong.example/online?room=ABC234",
+    );
+  });
+
+  it("shows a manual URL when Web Share capability discovery throws", async () => {
+    const user = userEvent.setup();
+    setThrowingShareGetter();
     renderControls();
 
     await user.click(screen.getByRole("button", { name: "共有" }));
