@@ -773,6 +773,66 @@ describe("buildServiceWorkerScript", () => {
     expect(await response.text()).toBe("network-chunk");
   });
 
+  it("Cache Storageのmatch capabilityが欠けても不変アセットをネットワークから返す", async () => {
+    const sw = bootServiceWorker();
+    const fetchSpy = vi.fn(
+      async () =>
+        new Response("network-chunk", {
+          headers: { "Content-Type": "application/javascript" },
+        }),
+    );
+    sw.setFetchImpl(fetchSpy);
+    Object.defineProperty(sw.cacheStorage, "match", { value: undefined });
+
+    const event = await sw.dispatchFetch(
+      request("/_next/static/chunks/app.js"),
+    );
+    const response: Response = await event.respondWith.mock.calls[0][0];
+
+    expect(fetchSpy).toHaveBeenCalledOnce();
+    expect(await response.text()).toBe("network-chunk");
+  });
+
+  it("不変アセットはオフライン時に既存のCache Storage responseを返す", async () => {
+    const sw = bootServiceWorker();
+    const onlineFetch = vi.fn(
+      async () =>
+        new Response("cached-chunk", {
+          headers: { "Content-Type": "application/javascript" },
+        }),
+    );
+    sw.setFetchImpl(onlineFetch);
+
+    await sw.dispatchFetch(request("/_next/static/chunks/app.js"));
+    sw.setFetchImpl(OFFLINE);
+
+    const event = await sw.dispatchFetch(
+      request("/_next/static/chunks/app.js"),
+    );
+    const response: Response = await event.respondWith.mock.calls[0][0];
+
+    expect(onlineFetch).toHaveBeenCalledOnce();
+    expect(await response.text()).toBe("cached-chunk");
+  });
+
+  it("Cache Storageとnetworkがともに失敗した場合は元のnetwork errorを再送出する", async () => {
+    const sw = bootServiceWorker();
+    const networkError = new TypeError("net::ERR_INTERNET_DISCONNECTED");
+    sw.setFetchImpl(
+      vi.fn(async () => {
+        throw networkError;
+      }),
+    );
+    sw.cacheStorage.matchError = new DOMException(
+      "Cache Storage unavailable",
+      "SecurityError",
+    );
+
+    await expect(
+      sw.dispatchFetch(request("/unknown-path", { mode: "navigate" })),
+    ).rejects.toBe(networkError);
+  });
+
   it("manifestの200 HTML fallbackをruntime cacheへ保存せず正常応答へ回復する(#957)", async () => {
     const sw = bootServiceWorker();
     const fetchSpy = vi
