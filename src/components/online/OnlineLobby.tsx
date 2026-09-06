@@ -488,6 +488,23 @@ function focusElement(
   return activeElementOrNull() === element;
 }
 
+/**
+ * Form submitter metadata is an optional DOM capability. Embedded or
+ * privacy-restricted hosts can expose getAttribute but reject the read, so
+ * leave intent selection to the active-element fallback when it is unavailable
+ * (#1126).
+ */
+function submitIntentFromEvent(
+  event: FormEvent<HTMLFormElement>,
+): string | null {
+  try {
+    const submitter = (event.nativeEvent as SubmitEvent).submitter;
+    return submitter?.getAttribute("data-intent") ?? null;
+  } catch {
+    return null;
+  }
+}
+
 function ConnectionFeedback({
   status,
   error,
@@ -1622,12 +1639,11 @@ export default function OnlineLobby() {
   };
   const submitLobby = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    const submitter = (event.nativeEvent as SubmitEvent).submitter;
     const activeElement = activeElementOrNull(
       event.currentTarget.ownerDocument,
     );
     const intent =
-      submitter?.getAttribute("data-intent") ??
+      submitIntentFromEvent(event) ??
       (activeElement?.id === ROOM_CODE_INPUT_ID ? "join" : "create");
     if (intent === "join") {
       joinRoom();
