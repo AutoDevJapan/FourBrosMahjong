@@ -325,9 +325,10 @@ afterEach(() => {
 
 describe("GitHub Actions SHA pinning policy (#663)", () => {
   it("CI・gitleaks・release・version updaterの全外部参照を完全SHAで固定する", () => {
-    expect(workflowFilenames(REPOSITORY_ROOT)).toEqual(
-      expect.arrayContaining([...EXPECTED_WORKFLOWS]),
-    );
+    // Keep the inventory explicit so a newly added workflow cannot silently
+    // bypass the reviewed #663 coverage. Adding a workflow must update this
+    // list and its expected reference count in the same change.
+    expect(workflowFilenames(REPOSITORY_ROOT)).toEqual([...EXPECTED_WORKFLOWS]);
     expect(auditActionReferences(REPOSITORY_ROOT)).toEqual({
       externalReferenceCount: 20,
       localReferenceCount: 0,
