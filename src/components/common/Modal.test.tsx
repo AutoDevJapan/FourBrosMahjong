@@ -238,6 +238,39 @@ describe("Modal (spec 5.2.2 dialog / focus trap / Escape)", () => {
     }
   });
 
+  it("祖先のinert getterがthrowしてもフォーカストラップを継続する", () => {
+    const onClose = vi.fn();
+    const { unmount } = render(
+      <Modal title="全体盤面" onClose={onClose}>
+        <button type="button">中身</button>
+      </Modal>,
+    );
+    const dialog = screen.getByRole("dialog", { name: "全体盤面" });
+    const closeButton = screen.getByRole("button", { name: "閉じる" });
+    const contentButton = screen.getByRole("button", { name: "中身" });
+    const originalDescriptor = Object.getOwnPropertyDescriptor(dialog, "inert");
+
+    Object.defineProperty(dialog, "inert", {
+      configurable: true,
+      get() {
+        throw new Error("inert state is unavailable");
+      },
+    });
+
+    try {
+      contentButton.focus();
+      expect(() => fireEvent.keyDown(dialog, { key: "Tab" })).not.toThrow();
+      expect(closeButton).toHaveFocus();
+    } finally {
+      if (originalDescriptor) {
+        Object.defineProperty(dialog, "inert", originalDescriptor);
+      } else {
+        Reflect.deleteProperty(dialog, "inert");
+      }
+      unmount();
+    }
+  });
+
   it("初期フォーカスがthrowしても背景の隔離とcleanupを中断しない(#1061)", () => {
     vi.spyOn(HTMLElement.prototype, "focus").mockImplementation(() => {
       throw new Error("focus is unavailable");
