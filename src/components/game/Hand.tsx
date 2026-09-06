@@ -106,6 +106,25 @@ function isAriaDisabled(element: HTMLElement | null | undefined): boolean {
 }
 
 /**
+ * FocusEvent.relatedTarget is an EventTarget, not necessarily a DOM Node.
+ * Browsing-context focus changes can provide a Window-like target, which must
+ * be treated as leaving the Hand without passing it to Node.contains().
+ */
+function focusLeftContainer(
+  container: HTMLElement,
+  relatedTarget: EventTarget | null,
+): boolean {
+  if (relatedTarget === null) return true;
+  try {
+    return !(
+      relatedTarget instanceof Node && container.contains(relatedTarget)
+    );
+  } catch {
+    return true;
+  }
+}
+
+/**
  * Scrolling the touch-confirmation control is an accessibility enhancement,
  * not a prerequisite for confirming a discard. Some embedded DOM hosts expose
  * `scrollIntoView` but reject the call, so keep that optional capability behind
@@ -393,7 +412,7 @@ export default function Hand({
         handHadFocus.current = true;
       }}
       onBlurCapture={(event) => {
-        if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
+        if (focusLeftContainer(event.currentTarget, event.relatedTarget)) {
           handHadFocus.current = false;
         }
       }}
@@ -508,9 +527,7 @@ export default function Hand({
           handHadFocus.current = true;
         }}
         onBlurCapture={(event) => {
-          if (
-            !event.currentTarget.contains(event.relatedTarget as Node | null)
-          ) {
+          if (focusLeftContainer(event.currentTarget, event.relatedTarget)) {
             handHadFocus.current = false;
           }
         }}
