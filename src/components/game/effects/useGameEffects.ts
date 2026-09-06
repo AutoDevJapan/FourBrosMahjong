@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { GamePhase, RoundSummary } from "@/domain/game/engine";
+import { clearTimeoutSafely, trySetTimeout } from "../../common/browserTimer";
 import type { GameViewState } from "../types";
 import {
   createGameEffectSnapshot,
@@ -58,11 +59,16 @@ export function useGameEffects(
 
   useEffect(() => {
     if (activeEffect === null) return;
-    const timer = window.setTimeout(
+    const timer = trySetTimeout(
       () => setActiveEffect(null),
       GAME_EFFECT_DURATION_MS,
     );
-    return () => window.clearTimeout(timer);
+    if (timer === null) {
+      // Registration failed after this render committed. Clear the optional
+      // cue in the next microtask so the failed capability never leaves it up.
+      void Promise.resolve().then(() => setActiveEffect(null));
+    }
+    return () => clearTimeoutSafely(timer);
   }, [activeEffect]);
 
   // The effect state update runs after the new table has rendered. Scope the

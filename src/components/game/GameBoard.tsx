@@ -31,6 +31,7 @@ import {
   useSyncExternalStore,
 } from "react";
 import type { RoundSummary } from "@/domain/game/engine";
+import { clearTimeoutSafely, trySetTimeout } from "../common/browserTimer";
 import Modal from "../common/Modal";
 import { tileLabel } from "../common/tileLabel";
 import ActionPanel, { type ActionItem } from "./ActionPanel";
@@ -249,8 +250,13 @@ export default function GameBoard({
   // 同じ文言の次回イベントでも live region に DOM 変更を発生させられるよう、一時通知は消去する。
   useEffect(() => {
     if (!kitaAnnouncement) return;
-    const timer = window.setTimeout(() => setKitaAnnouncement(""), 1500);
-    return () => window.clearTimeout(timer);
+    const timer = trySetTimeout(() => setKitaAnnouncement(""), 1500);
+    if (timer === null) {
+      // Registration failed after this render committed. Clear the optional
+      // announcement in the next microtask so the live region does not linger.
+      void Promise.resolve().then(() => setKitaAnnouncement(""));
+    }
+    return () => clearTimeoutSafely(timer);
   }, [kitaAnnouncement]);
   // リーチ宣言モード: オンのとき、次に選んだ手牌が「リーチ宣言牌」として切られる。
   const [riichiArmed, setRiichiArmed] = useState(false);

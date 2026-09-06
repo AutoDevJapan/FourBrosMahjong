@@ -100,4 +100,56 @@ describe("HandTileAnimation", () => {
       vi.useRealTimers();
     }
   });
+
+  it("timer登録がthrowしても牌を即時に確定する", () => {
+    const setTimeout = vi.spyOn(window, "setTimeout").mockImplementation(() => {
+      throw new Error("timer registration is unavailable");
+    });
+
+    try {
+      render(
+        <HandTileAnimation
+          animationKey="deal-1-4"
+          animationKind="deal"
+          animationDelayMs={60}
+        >
+          牌
+        </HandTileAnimation>,
+      );
+      const item = screen.getByText("牌").closest("li");
+
+      expect(item).not.toBeNull();
+      expect(item).toHaveClass("opacity-100");
+      expect(item).not.toHaveClass("opacity-0", "translate-y-1");
+      expect(item).not.toHaveStyle({ transitionDelay: "60ms" });
+    } finally {
+      setTimeout.mockRestore();
+    }
+  });
+
+  it("timer cleanupがthrowしてもunmountを中断しない", () => {
+    vi.useFakeTimers();
+    const clearTimeout = vi
+      .spyOn(window, "clearTimeout")
+      .mockImplementation(() => {
+        throw new Error("timer cleanup is unavailable");
+      });
+
+    try {
+      const { unmount } = render(
+        <HandTileAnimation
+          animationKey="deal-1-5"
+          animationKind="deal"
+          animationDelayMs={60}
+        >
+          牌
+        </HandTileAnimation>,
+      );
+
+      expect(() => unmount()).not.toThrow();
+    } finally {
+      clearTimeout.mockRestore();
+      vi.useRealTimers();
+    }
+  });
 });
