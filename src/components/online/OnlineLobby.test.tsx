@@ -134,14 +134,45 @@ class TestWebSocket {
 
 class ThrowingSocketCapabilityWebSocket extends TestWebSocket {
   override addEventListener(
-    _type: string,
-    _listener: EventListenerOrEventListenerObject,
+    type: string,
+    listener: EventListenerOrEventListenerObject,
   ): void {
+    void type;
+    void listener;
     throw new DOMException("event wiring is unavailable", "SecurityError");
   }
 
   override close(): void {
     throw new DOMException("socket close is unavailable", "SecurityError");
+  }
+}
+
+class ThrowingCloseWebSocket extends TestWebSocket {
+  override close(): void {
+    throw new DOMException("socket close is unavailable", "SecurityError");
+  }
+}
+
+class PartiallyWiredWebSocket extends ThrowingCloseWebSocket {
+  readonly removedListenerTypes: string[] = [];
+
+  override addEventListener(
+    type: string,
+    listener: EventListenerOrEventListenerObject,
+  ): void {
+    if (type === "open") {
+      super.addEventListener(type, listener);
+      return;
+    }
+    throw new DOMException("event wiring is unavailable", "SecurityError");
+  }
+
+  override removeEventListener(
+    type: string,
+    listener: EventListenerOrEventListenerObject,
+  ): void {
+    this.removedListenerTypes.push(type);
+    super.removeEventListener(type, listener);
   }
 }
 
@@ -235,6 +266,80 @@ describe("OnlineLobby (#605)", () => {
       document.querySelector('[data-connection-status="failed"]'),
     ).not.toBeNull();
     expect(screen.getByRole("button", { name: "再試行" })).toBeEnabled();
+  });
+
+  it("keeps transport recovery usable when failed-socket close throws", () => {
+    vi.stubGlobal("WebSocket", ThrowingCloseWebSocket);
+    render(<OnlineLobby />);
+
+    fireEvent.change(screen.getByLabelText("表示名"), {
+      target: { value: "たろう" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "新しいルームを作る" }));
+
+    const socket = sockets[0];
+    if (!socket)
+      throw new Error("transport close capability test socket expected");
+    expect(() => {
+      act(() => socket.fail());
+    }).not.toThrow();
+
+    expect(
+      document.querySelector('[data-connection-status="failed"]'),
+    ).not.toBeNull();
+    expect(screen.getByRole("button", { name: "再試行" })).toBeEnabled();
+  });
+
+  it("rolls back partial listener wiring before recovering from a close failure", () => {
+    vi.stubGlobal("WebSocket", PartiallyWiredWebSocket);
+    render(<OnlineLobby />);
+
+    fireEvent.change(screen.getByLabelText("表示名"), {
+      target: { value: "たろう" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "新しいルームを作る" }));
+
+    const socket = sockets[0];
+    if (!socket)
+      throw new Error("partial listener wiring test socket expected");
+    expect((socket as PartiallyWiredWebSocket).removedListenerTypes).toEqual([
+      "open",
+    ]);
+    expect(
+      document.querySelector('[data-connection-status="failed"]'),
+    ).not.toBeNull();
+    expect(screen.getByRole("button", { name: "再試行" })).toBeEnabled();
+  });
+
+  it("returns to the lobby when deliberate leave close throws", () => {
+    vi.stubGlobal("WebSocket", ThrowingCloseWebSocket);
+    render(<OnlineLobby />);
+
+    fireEvent.change(screen.getByLabelText("表示名"), {
+      target: { value: "たろう" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "新しいルームを作る" }));
+
+    const socket = sockets[0];
+    if (!socket) throw new Error("leave close capability test socket expected");
+    act(() => {
+      socket.open();
+      socket.message({
+        type: "session",
+        token: "t".repeat(24),
+        snapshot: snapshotFixture(),
+      });
+    });
+
+    expect(() => {
+      fireEvent.click(screen.getByRole("button", { name: "退出" }));
+    }).not.toThrow();
+    expect(
+      document.querySelector('[data-connection-status="idle"]'),
+    ).not.toBeNull();
+    expect(
+      screen.getByRole("button", { name: "新しいルームを作る" }),
+    ).toBeInTheDocument();
   });
 
   it("drops oversized server text frames before JSON.parse", () => {
