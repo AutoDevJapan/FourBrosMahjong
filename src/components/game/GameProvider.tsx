@@ -169,14 +169,24 @@ function seedQueryFromLocation(): SeedQuery {
   }
   if (typeof window === "undefined") return { present: false, value: null };
 
-  const params = new URLSearchParams(window.location.search);
-  if (!params.has("seed")) return { present: false, value: null };
-  const raw = params.get("seed");
-  if (raw === null || raw.trim() === "") return { present: true, value: null };
-  const seed = Number(raw);
-  return Number.isSafeInteger(seed) && seed >= 0 && seed <= MAX_SEED
-    ? { present: true, value: seed }
-    : { present: true, value: null };
+  try {
+    // Sandboxed or privacy-restricted hosts can expose `location` or the URL
+    // parser while throwing when either is read or invoked. An explicit seed
+    // is only an optional deterministic-test capability, so an unreadable URL
+    // must behave like an absent query and leave the secure-random path intact.
+    const params = new URLSearchParams(window.location.search);
+    if (!params.has("seed")) return { present: false, value: null };
+    const raw = params.get("seed");
+    if (raw === null || raw.trim() === "") {
+      return { present: true, value: null };
+    }
+    const seed = Number(raw);
+    return Number.isSafeInteger(seed) && seed >= 0 && seed <= MAX_SEED
+      ? { present: true, value: seed }
+      : { present: true, value: null };
+  } catch {
+    return { present: false, value: null };
+  }
 }
 
 export function seedFromLocation(): number | null {

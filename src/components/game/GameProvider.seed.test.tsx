@@ -165,6 +165,37 @@ describe("seedFromLocation", () => {
     expect(seedFromLocation()).toBe(0xffffffff);
   });
 
+  it("locationのsearch getterが読めない場合は例外を漏らさずseedなしへ戻す", () => {
+    const location = {};
+    Object.defineProperty(location, "search", {
+      get: () => {
+        throw new Error("location search is unavailable");
+      },
+    });
+    try {
+      vi.stubGlobal("window", { location });
+      expect(seedFromLocation()).toBeNull();
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("URL parser capabilityが失敗しても例外を漏らさずseedなしへ戻す", () => {
+    try {
+      vi.stubGlobal(
+        "URLSearchParams",
+        class {
+          constructor() {
+            throw new Error("URL parser is unavailable");
+          }
+        },
+      );
+      expect(seedFromLocation()).toBeNull();
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
   it.each(["-1", "4294967296", "1.5", "9007199254740991"])(
     "uint32範囲外のURL seed %s は既定の乱数へフォールバックする",
     (raw) => {
@@ -201,5 +232,28 @@ describe("seedFromLocation", () => {
         window.sessionStorage.getItem("four-bros-mahjong.game.v3") ?? "null",
       ),
     ).toMatchObject({ seed: 42, actions: [] });
+  });
+
+  it("URL parser capabilityが失敗してもGameProviderはsecure randomへフォールバックする", () => {
+    const getRandomValues = vi
+      .spyOn(globalThis.crypto, "getRandomValues")
+      .mockImplementation((array) => {
+        (array as Uint32Array)[0] = 42;
+        return array;
+      });
+    try {
+      vi.stubGlobal(
+        "URLSearchParams",
+        class {
+          constructor() {
+            throw new Error("URL parser is unavailable");
+          }
+        },
+      );
+      expect(() => render(<GameProvider>{null}</GameProvider>)).not.toThrow();
+      expect(getRandomValues).toHaveBeenCalledOnce();
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 });
