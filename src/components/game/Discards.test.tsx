@@ -110,6 +110,51 @@ describe("Discards", () => {
     expect(disconnect).toHaveBeenCalledTimes(1);
   });
 
+  it("windowのresize listener登録がthrowしても河の描画を中断しない", () => {
+    const addEventListener = vi
+      .spyOn(window, "addEventListener")
+      .mockImplementation((type, listener, options) => {
+        if (type === "resize") throw new Error("resize listener unavailable");
+        return EventTarget.prototype.addEventListener.call(
+          window,
+          type,
+          listener,
+          options,
+        );
+      });
+
+    expect(() => render(<Discards tiles={[tile(1)]} />)).not.toThrow();
+    expect(document.querySelector("[data-river-state-key]")).not.toBeNull();
+    expect(addEventListener).toHaveBeenCalledWith(
+      "resize",
+      expect.any(Function),
+    );
+    addEventListener.mockRestore();
+  });
+
+  it("windowのresize listener解除がthrowしてもunmountを中断しない", () => {
+    const removeEventListener = vi
+      .spyOn(window, "removeEventListener")
+      .mockImplementation((type, listener, options) => {
+        if (type === "resize") {
+          throw new Error("resize listener cleanup unavailable");
+        }
+        return EventTarget.prototype.removeEventListener.call(
+          window,
+          type,
+          listener,
+          options,
+        );
+      });
+
+    const { unmount } = render(<Discards tiles={[tile(1)]} />);
+    expect(() => unmount()).not.toThrow();
+    expect(removeEventListener).toHaveBeenCalledWith(
+      "resize",
+      expect.any(Function),
+    );
+  });
+
   it("捨て牌を捨て順どおりにすべて表示する", () => {
     render(<Discards tiles={[tile(1), tile(2), tile(3)]} />);
     const list = screen.getByRole("list", { name: "捨て牌" });

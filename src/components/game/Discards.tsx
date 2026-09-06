@@ -147,6 +147,27 @@ function observeRiverResize(
   };
 }
 
+/**
+ * The window resize listener is only a layout fallback. Some embedded hosts
+ * expose the event methods but reject registration or cleanup, so contain
+ * those failures without affecting the river itself.
+ */
+function subscribeToWindowResize(callback: () => void): () => void {
+  try {
+    window.addEventListener("resize", callback);
+  } catch {
+    return () => {};
+  }
+
+  return () => {
+    try {
+      window.removeEventListener("resize", callback);
+    } catch {
+      // Listener cleanup is optional and must not interrupt unmount.
+    }
+  };
+}
+
 export default function Discards({ tiles, limit }: DiscardsProps) {
   const shown =
     typeof limit === "number" && limit >= 0
@@ -199,10 +220,10 @@ export default function Discards({ tiles, limit }: DiscardsProps) {
     const disconnectRiverResize = observeRiverResize(list, () =>
       updateColumnCount(),
     );
-    window.addEventListener("resize", updateColumnCount);
+    const unsubscribeWindowResize = subscribeToWindowResize(updateColumnCount);
     return () => {
       disconnectRiverResize();
-      window.removeEventListener("resize", updateColumnCount);
+      unsubscribeWindowResize();
     };
   }, [limit, shown.length]);
 
