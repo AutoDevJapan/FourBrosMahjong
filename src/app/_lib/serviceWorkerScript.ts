@@ -367,27 +367,38 @@ async function cacheFirst(request, cacheKey) {
   return response;
 }
 
+/**
+ * Removing an old cache is housekeeping, not a prerequisite for serving the
+ * active worker. Cache Storage can expose the API and still reject reads or
+ * deletes in privacy-restricted, quota-constrained, or embedded runtimes.
+ * Keep those failures out of the lifecycle promise so activation remains
+ * usable; a later worker activation can retry the cleanup.
+ */
+async function removeStaleCaches() {
+  try {
+    const keys = await self.caches.keys();
+    await Promise.all(
+      keys
+        .filter(
+          (key) =>
+            key.startsWith(OWNED_CACHE_PREFIX) &&
+            key !== PRECACHE &&
+            key !== RUNTIME,
+        )
+        .map((key) => self.caches.delete(key)),
+    );
+  } catch {
+    // Cache cleanup is progressive enhancement. Do not fail activation when
+    // an embedded or privacy-restricted host rejects the housekeeping call.
+  }
+}
+
 self.addEventListener("install", (event) => {
   event.waitUntil(precacheAppShell());
 });
 
 self.addEventListener("activate", (event) => {
-  event.waitUntil(
-    self.caches
-      .keys()
-      .then((keys) =>
-        Promise.all(
-          keys
-            .filter(
-              (key) =>
-                key.startsWith(OWNED_CACHE_PREFIX) &&
-                key !== PRECACHE &&
-                key !== RUNTIME,
-            )
-            .map((key) => self.caches.delete(key)),
-        ),
-      ),
-  );
+  event.waitUntil(removeStaleCaches());
 });
 
 self.addEventListener("fetch", (event) => {

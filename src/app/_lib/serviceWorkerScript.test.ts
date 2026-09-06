@@ -80,6 +80,8 @@ class FakeCache {
 class FakeCacheStorage {
   readonly caches = new Map<string, FakeCache>();
   matchError: Error | null = null;
+  keysError: Error | null = null;
+  deleteError: Error | null = null;
 
   constructor(private readonly fetchImpl: () => typeof fetch) {}
 
@@ -93,10 +95,12 @@ class FakeCacheStorage {
   }
 
   async keys(): Promise<string[]> {
+    if (this.keysError) throw this.keysError;
     return [...this.caches.keys()];
   }
 
   async delete(name: string): Promise<boolean> {
+    if (this.deleteError) throw this.deleteError;
     return this.caches.delete(name);
   }
 
@@ -487,6 +491,26 @@ describe("buildServiceWorkerScript", () => {
     expect(remaining).toContain("unrelated-cache");
     expect(remaining).toContain("fbm-precache-v1");
     expect(buildServiceWorkerScript("v1")).not.toContain("clients.claim");
+  });
+
+  it("Cache Storageの一覧取得に失敗してもactivateを失敗させない", async () => {
+    const sw = bootServiceWorker();
+    await sw.dispatchLifecycle("install");
+    sw.cacheStorage.keysError = new DOMException("Cache Storage unavailable");
+
+    await expect(sw.dispatchLifecycle("activate")).resolves.toBeUndefined();
+    expect(sw.cacheStorage.caches.has("fbm-precache-v1")).toBe(true);
+  });
+
+  it("古いcacheの削除に失敗してもactivateを失敗させない", async () => {
+    const sw = bootServiceWorker();
+    await sw.cacheStorage.open("fbm-runtime-old");
+    await sw.dispatchLifecycle("install");
+    sw.cacheStorage.deleteError = new DOMException("Cache deletion blocked");
+
+    await expect(sw.dispatchLifecycle("activate")).resolves.toBeUndefined();
+    expect(sw.cacheStorage.caches.has("fbm-runtime-old")).toBe(true);
+    expect(sw.cacheStorage.caches.has("fbm-precache-v1")).toBe(true);
   });
 
   it("ナビゲーションはnetwork-first: オンライン時は最新を返しつつキャッシュへ退避する", async () => {
