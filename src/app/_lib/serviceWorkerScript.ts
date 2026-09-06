@@ -296,6 +296,18 @@ function putRuntimeCache(cacheKey, response) {
   return write;
 }
 
+// Cache Storage is progressive enhancement. A browser can expose the API but
+// reject a read because of privacy mode, quota pressure, or an embedded-host
+// policy. A failed lookup must not prevent the network path from serving the
+// asset (and must not replace the original network error when it is offline).
+async function matchCache(cacheKey) {
+  try {
+    return await self.caches.match(cacheKey);
+  } catch {
+    return undefined;
+  }
+}
+
 /** network-first: 成功したらキャッシュへ退避し、失敗(オフライン)時はキャッシュで応答する。 */
 async function networkFirst(
   request,
@@ -317,12 +329,12 @@ async function networkFirst(
     }
     return response;
   } catch (error) {
-    const cached = cacheKey ? await self.caches.match(cacheKey) : undefined;
+    const cached = cacheKey ? await matchCache(cacheKey) : undefined;
     if (cached) {
       return cached;
     }
     if (fallbackUrl) {
-      const fallback = await self.caches.match(fallbackUrl);
+      const fallback = await matchCache(fallbackUrl);
       if (fallback) {
         return fallback;
       }
@@ -338,7 +350,7 @@ function isHtmlDocument(response) {
 
 /** cache-first: 不変アセット用。キャッシュ済みなら network に一切出ない。 */
 async function cacheFirst(request, cacheKey) {
-  const cached = await self.caches.match(cacheKey);
+  const cached = await matchCache(cacheKey);
   if (cached) {
     return cached;
   }
