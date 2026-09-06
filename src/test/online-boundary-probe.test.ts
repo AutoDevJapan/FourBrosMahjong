@@ -18,6 +18,7 @@ const HEALTH_SERVICE = "four-bros-mahjong-online";
 interface BoundaryFixtureOptions {
   readonly allowMissingOrigin?: boolean;
   readonly hangUpgrades?: boolean;
+  readonly omitReadiness?: boolean;
   readonly healthBody?: string;
   readonly readinessBody?: string;
   readonly readinessStatus?: number;
@@ -57,6 +58,7 @@ async function closeServer(
 async function startBoundaryFixture({
   allowMissingOrigin = false,
   hangUpgrades = false,
+  omitReadiness = false,
   healthBody = JSON.stringify({ ok: true, service: HEALTH_SERVICE }),
   readinessBody,
   readinessStatus = 200,
@@ -65,7 +67,10 @@ async function startBoundaryFixture({
   const origins: Array<string | undefined> = [];
   const sockets = new Set<Socket>();
   const server = createServer((request, response) => {
-    if (request.url === "/healthz" || request.url === "/readyz") {
+    if (
+      request.url === "/healthz" ||
+      (request.url === "/readyz" && !omitReadiness)
+    ) {
       const status = request.url === "/readyz" ? readinessStatus : 200;
       response.writeHead(status, { "content-type": "application/json" });
       response.end(
@@ -632,6 +637,28 @@ describe("online boundary probe", () => {
       statusCode: 503,
       body: { ok: false },
     });
+  });
+
+  it("records a missing /readyz endpoint as failed readiness evidence", async () => {
+    const fixture = await startBoundaryFixture({ omitReadiness: true });
+    openFixtures.push(fixture);
+
+    const evidence = await runBoundaryProbe({
+      allowLocalTarget: true,
+      baseUrl: fixture.baseUrl,
+      allowedOrigin: ALLOWED_ORIGIN,
+      disallowedOrigin: DISALLOWED_ORIGIN,
+      timeoutMs: 1_000,
+    });
+
+    expect(evidence.ok).toBe(false);
+    expect(evidence.checks.health.statusCode).toBe(200);
+    expect(evidence.checks.readiness).toMatchObject({
+      expectedStatus: 200,
+      statusCode: 404,
+      error: "endpoint_missing",
+    });
+    expect(evidence.checks.readiness).not.toHaveProperty("body");
   });
 
   it.each([
