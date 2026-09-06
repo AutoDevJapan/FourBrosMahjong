@@ -1,6 +1,6 @@
-import { render, screen } from "@testing-library/react";
+import { act, render, screen } from "@testing-library/react";
 import { StrictMode } from "react";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { GameViewState } from "../types";
 import { useGameEffects } from "./useGameEffects";
 
@@ -110,5 +110,40 @@ describe("useGameEffects", () => {
     );
     expect(screen.getByTestId("effect")).toHaveTextContent("none");
     expect(screen.getByTestId("effect")).not.toHaveAttribute("data-effect-id");
+  });
+
+  it("cue timerの登録がthrowしても一時表示を即時に消去する", async () => {
+    const setTimeout = vi.spyOn(window, "setTimeout").mockImplementation(() => {
+      throw new Error("timer registration is unavailable");
+    });
+
+    try {
+      const { rerender } = render(<EffectHarness gameView={view()} />);
+      await act(async () => {
+        rerender(<EffectHarness gameView={view(1, [tile])} />);
+        await Promise.resolve();
+      });
+
+      expect(screen.getByTestId("effect")).toHaveTextContent("none");
+    } finally {
+      setTimeout.mockRestore();
+    }
+  });
+
+  it("cue timerのcleanupがthrowしてもunmountを中断しない", () => {
+    const { rerender, unmount } = render(<EffectHarness gameView={view()} />);
+    rerender(<EffectHarness gameView={view(1, [tile])} />);
+
+    const clearTimeout = vi
+      .spyOn(window, "clearTimeout")
+      .mockImplementation(() => {
+        throw new Error("timer cleanup is unavailable");
+      });
+
+    try {
+      expect(() => unmount()).not.toThrow();
+    } finally {
+      clearTimeout.mockRestore();
+    }
   });
 });

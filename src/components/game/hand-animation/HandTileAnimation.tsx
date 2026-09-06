@@ -7,6 +7,7 @@ import {
   useEffect,
   useState,
 } from "react";
+import { clearTimeoutSafely, trySetTimeout } from "../../common/browserTimer";
 import type { HandAnimationKind } from "./handAnimation";
 
 const HAND_ANIMATION_DURATION_MS = 200;
@@ -52,20 +53,26 @@ const HandTileAnimation = forwardRef<HTMLLIElement, HandTileAnimationProps>(
       // Let the initial opacity render before changing to the settled state so
       // the browser can perform a real CSS transition. Reduced-motion users
       // get opacity: 1 from the motion-reduce utility on the initial render.
-      const timer = window.setTimeout(() => {
+      const timer = trySetTimeout(() => {
         setCompletedAnimationKey(animationKey);
       }, 0);
+      if (timer === null) setCompletedAnimationKey(animationKey);
+
       const delayTimer =
         animationDelayMs === undefined
-          ? undefined
-          : window.setTimeout(() => {
+          ? null
+          : trySetTimeout(() => {
               // Keep the staggered delay through the entrance transition, but
               // do not let later selection/hover transforms inherit it.
               setCompletedDelayKey(animationKey);
             }, animationDelayMs + HAND_ANIMATION_DURATION_MS);
+      if (animationDelayMs !== undefined && delayTimer === null) {
+        setCompletedDelayKey(animationKey);
+      }
+
       return () => {
-        window.clearTimeout(timer);
-        if (delayTimer !== undefined) window.clearTimeout(delayTimer);
+        clearTimeoutSafely(timer);
+        clearTimeoutSafely(delayTimer);
       };
     }, [animationKey, animationDelayMs]);
 

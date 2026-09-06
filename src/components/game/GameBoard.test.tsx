@@ -1,4 +1,4 @@
-import { render, screen, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
@@ -402,6 +402,42 @@ describe("GameBoard (spec 6.6 client island / engine-driven)", () => {
     expect(
       selfAfterTwo.some((region) => region.textContent?.includes("ガリ2")),
     ).toBe(true);
+  });
+
+  it("北抜き通知のtimer登録がthrowしても盤面操作を継続し通知を消去する", async () => {
+    renderBoard(1);
+    const setTimeout = vi.spyOn(window, "setTimeout").mockImplementation(() => {
+      throw new Error("timer registration is unavailable");
+    });
+
+    try {
+      await act(async () => {
+        expect(() =>
+          fireEvent.click(screen.getAllByRole("button", { name: "北抜" })[0]),
+        ).not.toThrow();
+        await Promise.resolve();
+      });
+      expect(screen.queryByRole("status")).not.toBeInTheDocument();
+    } finally {
+      setTimeout.mockRestore();
+    }
+  });
+
+  it("北抜き通知のtimer cleanupがthrowしてもunmountを中断しない", () => {
+    const { unmount } = renderBoard(1);
+    fireEvent.click(screen.getAllByRole("button", { name: "北抜" })[0]);
+
+    const clearTimeout = vi
+      .spyOn(window, "clearTimeout")
+      .mockImplementation(() => {
+        throw new Error("timer cleanup is unavailable");
+      });
+
+    try {
+      expect(() => unmount()).not.toThrow();
+    } finally {
+      clearTimeout.mockRestore();
+    }
   });
 
   it("リーチ中の操作案内は実際にtrueの選択肢だけを読み上げる", () => {
