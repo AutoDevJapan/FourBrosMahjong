@@ -150,6 +150,68 @@ describe("Modal (spec 5.2.2 dialog / focus trap / Escape)", () => {
     }
   });
 
+  it("初期フォーカスがthrowしても背景の隔離とcleanupを中断しない(#1061)", () => {
+    vi.spyOn(HTMLElement.prototype, "focus").mockImplementation(() => {
+      throw new Error("focus is unavailable");
+    });
+
+    const { unmount } = render(
+      <>
+        <div data-testid="background-root">背景</div>
+        <Modal title="全体盤面" onClose={vi.fn()}>
+          <button type="button">中身</button>
+        </Modal>
+      </>,
+    );
+    const backgroundRoot = screen.getByTestId("background-root");
+    const backgroundContainer = backgroundRoot.parentElement;
+    const dialog = screen.getByRole("dialog", { name: "全体盤面" });
+
+    expect(backgroundContainer).toHaveAttribute("inert");
+    expect(() => fireEvent.focusIn(backgroundRoot)).not.toThrow();
+    expect(dialog).toBeInTheDocument();
+
+    expect(() => unmount()).not.toThrow();
+    expect(backgroundContainer).not.toHaveAttribute("inert");
+    expect(backgroundContainer).not.toHaveAttribute("aria-hidden");
+  });
+
+  it("フォーカストラップと復帰先のfocusがthrowしても操作を中断しない(#1061)", () => {
+    const opener = document.createElement("button");
+    opener.type = "button";
+    opener.textContent = "開く";
+    document.body.append(opener);
+    opener.focus();
+
+    const returnFocusRef = { current: opener };
+    const { unmount } = render(
+      <>
+        <div data-testid="background-root">背景</div>
+        <Modal
+          title="全体盤面"
+          onClose={vi.fn()}
+          returnFocusRef={returnFocusRef}
+        >
+          <button type="button">中身</button>
+        </Modal>
+      </>,
+    );
+    const dialog = screen.getByRole("dialog", { name: "全体盤面" });
+    const contentButton = screen.getByRole("button", { name: "中身" });
+    contentButton.focus();
+
+    vi.spyOn(HTMLElement.prototype, "focus").mockImplementation(() => {
+      throw new Error("focus is unavailable");
+    });
+
+    expect(() => fireEvent.keyDown(dialog, { key: "Tab" })).not.toThrow();
+    expect(() => unmount()).not.toThrow();
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(document.body).not.toHaveAttribute("inert");
+
+    opener.remove();
+  });
+
   it("閉じた後に開く前のフォーカス位置へ戻す", async () => {
     const user = userEvent.setup();
     function Harness() {
