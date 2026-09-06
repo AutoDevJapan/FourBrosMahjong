@@ -41,6 +41,7 @@ import {
   SECURE_RANDOM_UNAVAILABLE_MESSAGE,
   useGame,
 } from "./GameProvider";
+import { formatGameInteger } from "./gameNumberFormat";
 import type { HandProps, HandTileState } from "./Hand";
 import LiveRegion from "./LiveRegion";
 import PlayerSlot from "./PlayerSlot";
@@ -140,7 +141,7 @@ export function residualSticksNote(
 ): string {
   const award = summary?.residualSticks;
   if (!award) return "";
-  return `残存供託${award.sticks}本（${award.points.toLocaleString("ja-JP")}点）は${award.recipientName}が取得。`;
+  return `残存供託${award.sticks}本（${formatGameInteger(award.points)}点）は${award.recipientName}が取得。`;
 }
 
 export interface GameBoardProps {
