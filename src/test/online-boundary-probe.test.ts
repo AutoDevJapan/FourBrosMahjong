@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { EventEmitter } from "node:events";
 import type { ClientRequest } from "node:http";
 import { createServer, type Server } from "node:http";
@@ -14,6 +15,13 @@ import {
 const ALLOWED_ORIGIN = "http://allowed.local";
 const DISALLOWED_ORIGIN = "http://disallowed.local";
 const HEALTH_SERVICE = "four-bros-mahjong-online";
+const WEBSOCKET_GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
+
+function websocketAccept(key: string): string {
+  return createHash("sha1")
+    .update(`${key}${WEBSOCKET_GUID}`, "ascii")
+    .digest("base64");
+}
 
 interface BoundaryFixtureOptions {
   readonly allowMissingOrigin?: boolean;
@@ -95,10 +103,16 @@ async function startBoundaryFixture({
       origin === ALLOWED_ORIGIN ||
       (origin === undefined && allowMissingOrigin)
     ) {
+      const key = request.headers["sec-websocket-key"];
+      if (typeof key !== "string") {
+        socket.end("HTTP/1.1 400 Bad Request\r\nConnection: close\r\n\r\n");
+        return;
+      }
       socket.write(
         "HTTP/1.1 101 Switching Protocols\r\n" +
           "Connection: Upgrade\r\n" +
           "Upgrade: websocket\r\n" +
+          `Sec-WebSocket-Accept: ${websocketAccept(key)}\r\n` +
           "\r\n",
       );
       socket.on("data", (chunk: Buffer) => applicationBytes.push(chunk));
@@ -915,6 +929,46 @@ describe("online boundary probe", () => {
     expect(transport.end).toHaveBeenCalledOnce();
     expect(transport.destroy).toHaveBeenCalledOnce();
     expect(transport.destroy).toHaveBeenCalledWith(expect.any(Error));
+  });
+
+  it("rejects a 101 response without a valid WebSocket handshake", async () => {
+    const transport = new EventEmitter() as ClientRequest;
+    const socket = { destroy: vi.fn() };
+    transport.end = vi.fn(() => {
+      queueMicrotask(() =>
+        transport.emit(
+          "upgrade",
+          {
+            statusCode: 101,
+            headers: {
+              connection: "Upgrade",
+              upgrade: "websocket",
+            },
+          },
+          socket,
+        ),
+      );
+      return transport;
+    });
+    transport.destroy = vi.fn();
+
+    const evidence = await probeUpgrade(
+      "https://online.example.com",
+      ALLOWED_ORIGIN,
+      100,
+      () => transport,
+      {
+        address: "198.51.100.10",
+        family: 4,
+        hostname: "online.example.com",
+      },
+    );
+
+    expect(evidence).toMatchObject({
+      statusCode: 101,
+      error: "invalid_upgrade",
+    });
+    expect(socket.destroy).toHaveBeenCalledOnce();
   });
 
   it("does not expose arbitrary upgrade error messages in evidence", async () => {

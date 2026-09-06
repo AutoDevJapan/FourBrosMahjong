@@ -1,4 +1,4 @@
-import { randomBytes } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import { lookup } from "node:dns/promises";
 import { request as httpRequest } from "node:http";
 import { request as httpsRequest } from "node:https";
@@ -13,6 +13,7 @@ const DNS_LOOKUP_TIMEOUT_MS = 5_000;
 const MAX_HEALTH_BODY_BYTES = 4_096;
 const PROBE_EVIDENCE_SCHEMA_VERSION = 2;
 const EXPECTED_HEALTH_SERVICE = "four-bros-mahjong-online";
+const WEBSOCKET_GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
 const UNSAFE_HOSTNAMES = new Set([
   "localhost",
   "metadata",
@@ -835,6 +836,35 @@ function createUpgradeRequest(target, options) {
   return request(options);
 }
 
+function expectedWebSocketAccept(key) {
+  return createHash("sha1")
+    .update(`${key}${WEBSOCKET_GUID}`, "ascii")
+    .digest("base64");
+}
+
+function singleHeader(headers, name) {
+  const value = headers?.[name];
+  return typeof value === "string" ? value : null;
+}
+
+function hasHeaderToken(value, expected) {
+  return (
+    typeof value === "string" &&
+    value.split(",").some((token) => token.trim().toLowerCase() === expected)
+  );
+}
+
+function isValidWebSocketUpgrade(response, key) {
+  if (response?.statusCode !== 101) return false;
+  const headers = response.headers;
+  return (
+    singleHeader(headers, "upgrade")?.trim().toLowerCase() === "websocket" &&
+    hasHeaderToken(singleHeader(headers, "connection"), "upgrade") &&
+    singleHeader(headers, "sec-websocket-accept") ===
+      expectedWebSocketAccept(key)
+  );
+}
+
 export async function probeUpgrade(
   baseUrl,
   origin,
@@ -854,10 +884,11 @@ export async function probeUpgrade(
       if (timer !== undefined) clearTimeout(timer);
       resolveProbe({ startedAt, ...result });
     };
+    const webSocketKey = randomBytes(16).toString("base64");
     const headers = {
       Connection: "Upgrade",
       Upgrade: "websocket",
-      "Sec-WebSocket-Key": randomBytes(16).toString("base64"),
+      "Sec-WebSocket-Key": webSocketKey,
       "Sec-WebSocket-Version": "13",
       ...(origin === undefined ? {} : { Origin: origin }),
     };
@@ -870,9 +901,14 @@ export async function probeUpgrade(
       upgradeRequest.destroy(new Error("probe timeout"));
     }, timeoutMs);
     upgradeRequest.once("upgrade", (response, socket) => {
-      const statusCode = response.statusCode ?? 101;
+      const statusCode = response.statusCode ?? null;
       socket.destroy();
-      settle({ statusCode });
+      settle({
+        statusCode,
+        ...(isValidWebSocketUpgrade(response, webSocketKey)
+          ? {}
+          : { error: "invalid_upgrade" }),
+      });
     });
     upgradeRequest.once("response", (response) => {
       const statusCode = response.statusCode ?? null;
