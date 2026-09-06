@@ -93,6 +93,36 @@ type JoinRequest =
   | { readonly type: "resume"; readonly code: string; readonly token: string };
 type ConnectionFailure = Pick<OnlineServerError, "message" | "retryAfterMs">;
 
+type SocketEventName = keyof WebSocketEventMap;
+
+/**
+ * WebSocket event wiring is an optional host capability for the lobby. Some
+ * embedded runtimes expose the method but reject registration, so contain the
+ * failure and let the existing retryable connection path take over.
+ */
+function addSocketListener<K extends SocketEventName>(
+  socket: WebSocket,
+  type: K,
+  listener: (event: WebSocketEventMap[K]) => void,
+): boolean {
+  try {
+    socket.addEventListener(type, listener as EventListener);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** Closing a failed socket is cleanup, not a prerequisite for UI recovery. */
+function closeSocket(socket: WebSocket | null | undefined): void {
+  if (socket === null || socket === undefined) return;
+  try {
+    socket.close();
+  } catch {
+    // A restricted host may reject close(); the lobby can still retry.
+  }
+}
+
 type ErrorFeedbackKind = "connection" | "maintenance" | "operation";
 
 interface ErrorFeedback {
@@ -951,7 +981,7 @@ export default function OnlineLobby() {
       setStatus("failed");
       setConnectionError(failure.message);
       applyRetryCooldown(failure.retryAfterMs);
-      failedSocket.close();
+      closeSocket(failedSocket);
     },
     [applyRetryCooldown, requestTransitionFocus, setConnectionError],
   );
@@ -971,7 +1001,7 @@ export default function OnlineLobby() {
       pendingSessionSocketRef.current = null;
       socketRef.current = null;
       setSocket(null);
-      failedSocket.close();
+      closeSocket(failedSocket);
       if (manualCloseRef.current) {
         setStatus("idle");
         return;
@@ -1013,8 +1043,7 @@ export default function OnlineLobby() {
       socketRef.current = null;
       pendingSessionSocketRef.current = null;
       setSocket(null);
-      if (previous && previous.readyState !== WebSocket.CLOSED)
-        previous.close();
+      closeSocket(previous);
       setError(null);
       setStatus(reconnecting ? "reconnecting" : "connecting");
       let next: WebSocket;
@@ -1055,7 +1084,7 @@ export default function OnlineLobby() {
           handleTransportFailure(next);
         }
       };
-      next.addEventListener("open", () => {
+      const handleOpen = () => {
         if (socketRef.current !== next) return;
         lastPongAt = Date.now();
         clearHeartbeat();
@@ -1069,8 +1098,8 @@ export default function OnlineLobby() {
           clearHeartbeat();
           handleTransportFailure(next);
         }
-      });
-      next.addEventListener("message", (event) => {
+      };
+      const handleMessage = (event: MessageEvent) => {
         if (socketRef.current !== next) return;
         if (!isBoundedOnlineServerMessage(event.data)) return;
         try {
@@ -1187,8 +1216,8 @@ export default function OnlineLobby() {
             setConnectionError(failure.message);
           }
         }
-      });
-      next.addEventListener("close", () => {
+      };
+      const handleClose = () => {
         clearHeartbeat();
         if (socketRef.current !== next) return;
         const serverFailure =
@@ -1218,11 +1247,21 @@ export default function OnlineLobby() {
         } else {
           scheduleReconnect();
         }
-      });
-      next.addEventListener("error", () => {
+      };
+      const handleError = () => {
         clearHeartbeat();
         handleTransportFailure(next);
-      });
+      };
+      const listenersRegistered = [
+        addSocketListener(next, "open", handleOpen),
+        addSocketListener(next, "message", handleMessage),
+        addSocketListener(next, "close", handleClose),
+        addSocketListener(next, "error", handleError),
+      ].every(Boolean);
+      if (!listenersRegistered) {
+        clearHeartbeat();
+        handleTransportFailure(next);
+      }
     },
     [
       clearReconnectTimer,
@@ -1288,7 +1327,7 @@ export default function OnlineLobby() {
       const current = socketRef.current;
       socketRef.current = null;
       pendingSessionSocketRef.current = null;
-      current?.close();
+      closeSocket(current);
     },
     [clearReconnectTimer, clearRetryCooldown],
   );
@@ -1363,7 +1402,7 @@ export default function OnlineLobby() {
       }
     }
     socketRef.current = null;
-    current?.close();
+    closeSocket(current);
     setSocket(null);
     snapshotRef.current = null;
     setSnapshot(null);
