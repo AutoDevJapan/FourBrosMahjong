@@ -19,4 +19,16 @@ describe("ServiceWorkerRegister", () => {
 
     Reflect.deleteProperty(window.navigator, "serviceWorker");
   });
+
+  it("navigator が利用できないクライアントでも描画を壊さない", () => {
+    vi.stubGlobal("navigator", undefined);
+
+    try {
+      const { container } = render(<ServiceWorkerRegister />);
+
+      expect(container).toBeEmptyDOMElement();
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
 });
