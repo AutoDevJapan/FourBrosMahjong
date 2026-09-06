@@ -134,6 +134,30 @@ describe("match history store (#302)", () => {
     expect(() => unsubscribe()).not.toThrow();
   });
 
+  it("購読者1件の例外を隔離し、後続の同一タブ通知を維持する", () => {
+    const throwing = vi.fn(() => {
+      throw new Error("subscriber failed");
+    });
+    const following = vi.fn();
+    const unsubscribeThrowing = subscribe(throwing);
+    const unsubscribeFollowing = subscribe(following);
+
+    try {
+      expect(() => notifyHistoryChanged()).not.toThrow();
+      expect(following).toHaveBeenCalledTimes(1);
+
+      expect(() =>
+        window.dispatchEvent(
+          new StorageEvent("storage", { key: MATCH_HISTORY_KEY }),
+        ),
+      ).not.toThrow();
+      expect(following).toHaveBeenCalledTimes(2);
+    } finally {
+      unsubscribeThrowing();
+      unsubscribeFollowing();
+    }
+  });
+
   it("storage listener解除の失敗を閉じ込め、次の購読で再登録する", () => {
     const remove = vi
       .spyOn(window, "removeEventListener")

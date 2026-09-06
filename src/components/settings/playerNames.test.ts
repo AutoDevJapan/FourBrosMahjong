@@ -356,6 +356,30 @@ describe("loadPlayerNames / savePlayerNames", () => {
 });
 
 describe("subscribePlayerNames", () => {
+  it("購読者1件の例外を隔離し、保存成功と後続通知を維持する", () => {
+    const throwing = vi.fn(() => {
+      throw new Error("subscriber failed");
+    });
+    const following = vi.fn();
+    const unsubscribeThrowing = subscribePlayerNames(throwing);
+    const unsubscribeFollowing = subscribePlayerNames(following);
+
+    try {
+      expect(savePlayerNames(new MemoryStorage(), DEFAULT_NAMES)).toBe(true);
+      expect(following).toHaveBeenCalledTimes(1);
+
+      expect(() =>
+        window.dispatchEvent(
+          new StorageEvent("storage", { key: PLAYER_NAMES_STORAGE_KEY }),
+        ),
+      ).not.toThrow();
+      expect(following).toHaveBeenCalledTimes(2);
+    } finally {
+      unsubscribeThrowing();
+      unsubscribeFollowing();
+    }
+  });
+
   it("matching storage eventを各購読者へ一度だけ通知し、最後の解除でlistenerを外す", () => {
     const first = vi.fn();
     const second = vi.fn();
