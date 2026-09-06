@@ -147,9 +147,20 @@ describe("release tag ruleset audit helper", () => {
     ["--method=POST"],
     ["-X", "DELETE"],
     ["-XDELETE"],
-  ])("rejects a method override in read-only options: %s", (...options) => {
-    expect(() => buildGhApiArgv("repos/example", options)).toThrow(
-      /must not override GET/,
+    ["--field", "foo=bar"],
+    ["--header", "X-Test:value"],
+  ])(
+    "rejects non-pagination options in read-only requests: %s",
+    (...options) => {
+      expect(() => buildGhApiArgv("repos/example", options)).toThrow(
+        /limited to pagination flags/,
+      );
+    },
+  );
+
+  it("rejects an option-shaped endpoint path", () => {
+    expect(() => buildGhApiArgv("--method=POST")).toThrow(
+      /path must be a non-option string/,
     );
   });
 });

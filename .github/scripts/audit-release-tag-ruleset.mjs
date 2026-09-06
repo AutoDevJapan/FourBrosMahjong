@@ -10,6 +10,7 @@ import {
 
 const DEFAULT_REPOSITORY = "AutoDevJapan/FourBrosMahjong";
 const REPOSITORY_PATTERN = /^[^/\s]+\/[^/\s]+$/;
+const READ_ONLY_OPTIONS = new Set(["--paginate", "--slurp"]);
 
 /** @param {unknown} value @returns {value is number} */
 function isPositiveSafeInteger(value) {
@@ -77,16 +78,14 @@ function validateRepository(repository) {
  * @param {string[]} [options]
  */
 export function buildGhApiArgv(path, options = []) {
-  for (const [index, option] of options.entries()) {
-    if (
-      option === "--method" ||
-      option === "-X" ||
-      option.startsWith("--method=") ||
-      option.startsWith("-X") ||
-      (index > 0 && options[index - 1] === "--method") ||
-      (index > 0 && options[index - 1] === "-X")
-    ) {
-      throw new Error("read-only gh api options must not override GET");
+  if (typeof path !== "string" || path.trim() === "" || path.startsWith("-")) {
+    throw new Error("read-only gh api path must be a non-option string");
+  }
+  for (const option of options) {
+    if (typeof option !== "string" || !READ_ONLY_OPTIONS.has(option)) {
+      throw new Error(
+        "read-only gh api options must be limited to pagination flags",
+      );
     }
   }
   return ["api", "--method", "GET", ...options, path];
