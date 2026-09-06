@@ -395,6 +395,7 @@ describe("Hand (roving tabindex listbox, spec 5.2.2)", () => {
   it("フォーカス離脱先がNodeでない場合も例外を漏らさない", () => {
     render(<Hand tiles={tiles} />);
     const listbox = screen.getByRole("listbox", { name: "自家の手牌" });
+    screen.getAllByRole("option")[0].focus();
     let blurError: unknown;
     const handleError = (event: ErrorEvent) => {
       blurError = event.error;
