@@ -119,6 +119,37 @@ describe("match history store (#302)", () => {
     unsubscribe();
   });
 
+  it("storage listener登録が失敗しても同一タブ通知を維持する", () => {
+    vi.spyOn(window, "addEventListener").mockImplementation(() => {
+      throw new Error("storage listener unavailable");
+    });
+    vi.spyOn(window, "removeEventListener").mockImplementation(() => {
+      throw new Error("storage listener cleanup unavailable");
+    });
+
+    const callback = vi.fn();
+    const unsubscribe = subscribe(callback);
+    expect(() => notifyHistoryChanged()).not.toThrow();
+    expect(callback).toHaveBeenCalledTimes(1);
+    expect(() => unsubscribe()).not.toThrow();
+  });
+
+  it("storage listener解除の失敗を閉じ込め、次の購読で再登録する", () => {
+    const remove = vi
+      .spyOn(window, "removeEventListener")
+      .mockImplementation(() => {
+        throw new Error("storage listener cleanup unavailable");
+      });
+    const first = subscribe(() => {});
+    expect(() => first()).not.toThrow();
+    expect(remove).toHaveBeenCalledWith("storage", expect.any(Function));
+
+    const add = vi.spyOn(window, "addEventListener");
+    const second = subscribe(() => {});
+    expect(add).toHaveBeenCalledWith("storage", expect.any(Function));
+    expect(() => second()).not.toThrow();
+  });
+
   it("表示snapshotは破損cleanupを未保存と区別し、再読み込みで空状態へ復帰する", () => {
     window.localStorage.setItem(MATCH_HISTORY_KEY, CORRUPTED);
 
