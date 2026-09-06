@@ -175,6 +175,20 @@ describe("Railway production read-back contract (#980)", () => {
     );
   });
 
+  it("rejects DNS trailing-dot hostnames as non-canonical origins", () => {
+    const candidate = readback();
+    candidate.target.publicBaseUrl = "https://online.example.com.";
+    candidate.probe.baseUrl = candidate.target.publicBaseUrl;
+    candidate.configuration.allowedOrigin = "https://app.example.com.";
+    candidate.probe.checks.allowedOrigin.origin =
+      candidate.configuration.allowedOrigin;
+
+    const reasons = validateRailwayProductionReadback(candidate, NOW).reasons;
+    expect(reasons).toEqual(
+      expect.arrayContaining(["target-url-invalid", "allowed-origin-invalid"]),
+    );
+  });
+
   it("fails closed for malformed input without exposing its contents", () => {
     const secret = "authorization=Bearer top-secret";
     const result = validateRailwayProductionReadback({ secret }, NOW);
