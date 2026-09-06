@@ -588,6 +588,24 @@ function nameOf(state: EngineState, id: PlayerId): string {
 }
 
 /**
+ * 和了サマリの点数表示。これは精算結果を含むドメイン状態の一部なので、
+ * presentation層の表示formatterには依存しない。埋め込み環境で
+ * `Number.prototype.toLocaleString` が利用できない場合も、和了遷移を壊さず
+ * 決定的な3桁区切りへ退避する。
+ */
+function formatWinnerReceipt(value: number): string {
+  try {
+    return value.toLocaleString("ja-JP");
+  } catch {
+    if (!Number.isFinite(value)) return String(value);
+    const truncated = Math.trunc(value);
+    const sign = truncated < 0 ? "-" : "";
+    const digits = Math.abs(truncated).toString();
+    return `${sign}${digits.replace(/\B(?=(\d{3})+(?!\d))/g, ",")}`;
+  }
+}
+
+/**
  * ロン判定順(頭ハネ=上家取り): 放銃者の次席から巡目順に2席。
  *
  * SSOT: `docs/四兄弟麻雀ルール.md` §3「ダブロン等が発生した場合は上家取り」/
@@ -2092,7 +2110,7 @@ function settleWin(state: EngineState, win: WinInput): EngineState {
     winType === "tsumo" ? score.tsumo.total : score.ronTotal;
   const label = `${nameOf(state, winnerId)}の${
     winType === "tsumo" ? "ツモ" : "ロン"
-  } ${winnerReceipt.toLocaleString("ja-JP")}点`;
+  } ${formatWinnerReceipt(winnerReceipt)}点`;
 
   const deltas = diffPoints(state.points, points);
   const outcome: RoundOutcome = isDealerWin
