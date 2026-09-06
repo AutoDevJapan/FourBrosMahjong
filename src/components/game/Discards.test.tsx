@@ -1,5 +1,5 @@
 import { render, screen } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import Discards, {
   getRiverTileLayout,
   riverCueForTransition,
@@ -12,6 +12,10 @@ const tile = (rank: number, isRiichi = false): RiverTileData => ({
   suit: "man",
   rank,
   ...(isRiichi ? { isRiichi: true } : {}),
+});
+
+afterEach(() => {
+  vi.unstubAllGlobals();
 });
 
 describe("Discards", () => {
@@ -53,6 +57,57 @@ describe("Discards", () => {
     } finally {
       getComputedStyle.mockRestore();
     }
+  });
+
+  it("ResizeObserverのconstructorがthrowしてもwindowのresize fallbackで描画する", () => {
+    class ThrowingResizeObserver {
+      constructor() {
+        throw new Error("ResizeObserver is unavailable");
+      }
+    }
+    vi.stubGlobal("ResizeObserver", ThrowingResizeObserver);
+    const addEventListener = vi.spyOn(window, "addEventListener");
+
+    expect(() => render(<Discards tiles={[tile(1)]} />)).not.toThrow();
+    expect(document.querySelector("[data-river-state-key]")).not.toBeNull();
+    expect(addEventListener).toHaveBeenCalledWith(
+      "resize",
+      expect.any(Function),
+    );
+
+    addEventListener.mockRestore();
+  });
+
+  it("ResizeObserverのobserveがthrowしてもriverを描画する", () => {
+    const disconnect = vi.fn();
+    class ThrowingObserveResizeObserver {
+      observe(): void {
+        throw new Error("ResizeObserver.observe is unavailable");
+      }
+
+      disconnect = disconnect;
+    }
+    vi.stubGlobal("ResizeObserver", ThrowingObserveResizeObserver);
+
+    expect(() => render(<Discards tiles={[tile(1)]} />)).not.toThrow();
+    expect(document.querySelector("[data-river-state-key]")).not.toBeNull();
+    expect(disconnect).toHaveBeenCalledTimes(1);
+  });
+
+  it("ResizeObserverのdisconnectがthrowしてもunmountを中断しない", () => {
+    const disconnect = vi.fn(() => {
+      throw new Error("ResizeObserver.disconnect is unavailable");
+    });
+    class ThrowingDisconnectResizeObserver {
+      observe(): void {}
+
+      disconnect = disconnect;
+    }
+    vi.stubGlobal("ResizeObserver", ThrowingDisconnectResizeObserver);
+
+    const { unmount } = render(<Discards tiles={[tile(1)]} />);
+    expect(() => unmount()).not.toThrow();
+    expect(disconnect).toHaveBeenCalledTimes(1);
   });
 
   it("捨て牌を捨て順どおりにすべて表示する", () => {
