@@ -618,6 +618,60 @@ describe("GameBoard 打牌フェーズ外の自家手牌(#257)", () => {
   });
 });
 
+describe("GameBoard 結果ボタンのフォーカス能力境界(#1053)", () => {
+  function renderFinishedBoardWithFocusRef() {
+    const resultButtonRef = {
+      current: null,
+    } as NonNullable<GameBoardProps["resultButtonRef"]>;
+    render(
+      <GameProvider initialGame={finishedGame()}>
+        <GameBoard resultButtonRef={resultButtonRef} />
+      </GameProvider>,
+    );
+    return resultButtonRef;
+  }
+
+  it("CSSOMが無い環境でも結果ボタンのフォーカス先を保持する", () => {
+    const descriptor = Object.getOwnPropertyDescriptor(
+      window,
+      "getComputedStyle",
+    );
+    Object.defineProperty(window, "getComputedStyle", {
+      configurable: true,
+      value: undefined,
+      writable: true,
+    });
+
+    try {
+      const resultButtonRef = renderFinishedBoardWithFocusRef();
+      expect(resultButtonRef.current).toBe(
+        document.querySelector('[data-action-key="result"]'),
+      );
+    } finally {
+      if (descriptor) {
+        Object.defineProperty(window, "getComputedStyle", descriptor);
+      }
+    }
+  });
+
+  it("CSSOMの参照または呼び出しがthrowしても描画を中断しない", () => {
+    const getComputedStyle = vi
+      .spyOn(window, "getComputedStyle")
+      .mockImplementation(() => {
+        throw new Error("CSSOM is unavailable");
+      });
+
+    try {
+      const resultButtonRef = renderFinishedBoardWithFocusRef();
+      expect(resultButtonRef.current).toBe(
+        document.querySelector('[data-action-key="result"]'),
+      );
+    } finally {
+      getComputedStyle.mockRestore();
+    }
+  });
+});
+
 describe("GameBoard 終局後の出口(#206 / #207 / #277)", () => {
   it("対局中に gameEnd へ遷移しても自動遷移せず、最終局の和了内訳・点数増減を表示してからボタンで結果画面へ進める(#277)", async () => {
     const user = userEvent.setup();

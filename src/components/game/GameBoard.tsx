@@ -52,6 +52,44 @@ import WinDetails from "./WinDetails";
 const noopSubscribe = () => () => {};
 const HOST_CONTROL_WAITING_MESSAGE = "ホストの操作を待っています。";
 
+/**
+ * Pick the result button that is currently reachable, with a capability-safe
+ * fallback for embedded runtimes whose CSSOM is missing or throws.
+ *
+ * The result action is rendered in both wide and narrow board branches. When
+ * CSSOM is available, inspect the button and its ancestors so the focus ref
+ * points at the branch the user can actually reach. If that inspection cannot
+ * be performed, the first button is still a useful logical target and is safer
+ * than aborting the layout effect during commit.
+ */
+function findResultButton(
+  buttons: readonly HTMLButtonElement[],
+): HTMLButtonElement | null {
+  const fallback = buttons[0] ?? null;
+  if (fallback === null) return null;
+
+  try {
+    const view = fallback.ownerDocument.defaultView;
+    const getComputedStyle = view?.getComputedStyle;
+    if (typeof getComputedStyle !== "function") return fallback;
+
+    const visible = buttons.find((button) => {
+      let element: HTMLElement | null = button;
+      while (element !== null) {
+        const style = getComputedStyle.call(view, element);
+        if (style.display === "none" || style.visibility === "hidden") {
+          return false;
+        }
+        element = element.parentElement;
+      }
+      return true;
+    });
+    return visible ?? fallback;
+  } catch {
+    return fallback;
+  }
+}
+
 /** 対局ジャーナルの保存失敗を戦績(`localStorage`)と混同せずに案内する。 */
 function SessionSaveNotice({
   status,
@@ -170,18 +208,8 @@ export default function GameBoard({
       return;
     }
 
-    const visibleButton = [...buttons].find((button) => {
-      let element: HTMLElement | null = button;
-      while (element !== null) {
-        const style = window.getComputedStyle(element);
-        if (style.display === "none" || style.visibility === "hidden") {
-          return false;
-        }
-        element = element.parentElement;
-      }
-      return true;
-    });
-    resultButtonRef.current = visibleButton ?? buttons[0] ?? null;
+    const visibleButton = findResultButton([...buttons]);
+    resultButtonRef.current = visibleButton;
 
     return () => {
       if (resultButtonRef.current === visibleButton) {

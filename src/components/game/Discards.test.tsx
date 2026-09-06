@@ -1,5 +1,5 @@
 import { render, screen } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import Discards, {
   getRiverTileLayout,
   riverCueForTransition,
@@ -15,6 +15,46 @@ const tile = (rank: number, isRiichi = false): RiverTileData => ({
 });
 
 describe("Discards", () => {
+  it("CSSOMが無い環境でも河を描画し、未計測レイアウトへフォールバックする", () => {
+    const descriptor = Object.getOwnPropertyDescriptor(
+      window,
+      "getComputedStyle",
+    );
+    Object.defineProperty(window, "getComputedStyle", {
+      configurable: true,
+      value: undefined,
+      writable: true,
+    });
+
+    try {
+      expect(() =>
+        render(<Discards tiles={[tile(1), tile(2)]} />),
+      ).not.toThrow();
+      const list = document.querySelector("[data-river-state-key]");
+      expect(list).not.toBeNull();
+      expect(list).toHaveAttribute("data-river-state-key", expect.any(String));
+    } finally {
+      if (descriptor) {
+        Object.defineProperty(window, "getComputedStyle", descriptor);
+      }
+    }
+  });
+
+  it("CSSOMの呼び出しがthrowしても河の描画を中断しない", () => {
+    const getComputedStyle = vi
+      .spyOn(window, "getComputedStyle")
+      .mockImplementation(() => {
+        throw new Error("CSSOM is unavailable");
+      });
+
+    try {
+      expect(() => render(<Discards tiles={[tile(1)]} />)).not.toThrow();
+      expect(document.querySelector("[data-river-state-key]")).not.toBeNull();
+    } finally {
+      getComputedStyle.mockRestore();
+    }
+  });
+
   it("捨て牌を捨て順どおりにすべて表示する", () => {
     render(<Discards tiles={[tile(1), tile(2), tile(3)]} />);
     const list = screen.getByRole("list", { name: "捨て牌" });

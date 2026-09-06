@@ -136,12 +136,24 @@ export default function Discards({ tiles, limit }: DiscardsProps) {
     if (list === null) return;
 
     const updateColumnCount = () => {
-      const columns = window
-        .getComputedStyle(list)
-        .gridTemplateColumns.trim()
-        .split(/\s+/)
-        .filter(Boolean).length;
-      setColumnCount(columns > 0 ? columns : null);
+      try {
+        const view = list.ownerDocument.defaultView;
+        const getComputedStyle = view?.getComputedStyle;
+        if (typeof getComputedStyle !== "function") {
+          setColumnCount(null);
+          return;
+        }
+        const columns = getComputedStyle
+          .call(view, list)
+          .gridTemplateColumns.trim()
+          .split(/\s+/)
+          .filter(Boolean).length;
+        setColumnCount(columns > 0 ? columns : null);
+      } catch {
+        // CSSOM is optional for the river layout. Keep the unmeasured layout
+        // when an embedded runtime cannot expose or evaluate it.
+        setColumnCount(null);
+      }
     };
 
     updateColumnCount();
