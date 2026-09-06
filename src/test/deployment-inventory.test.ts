@@ -16,31 +16,29 @@ const TOPOLOGY_EVIDENCE_DOC = readFileSync(
 
 describe("deployment inventory evidence", () => {
   it("keeps the current main, Vercel deployment, and service-worker evidence aligned", () => {
+    expect(DEPLOYMENT_DOC).toContain("#996 merge後、監査対象commit `a60593ab`");
     expect(DEPLOYMENT_DOC).toContain(
-      "#1025 merge後、監査対象commit `f3130316`",
+      "`a60593abf8c2cbc59f55c8fbfde5e9c5615ea016`（#996 merge 後）",
     );
+    expect(DEPLOYMENT_DOC).toContain("GitHub deployment `6288141693`");
     expect(DEPLOYMENT_DOC).toContain(
-      "`f3130316ea81f56fc46d302fe572a658d44abce7`（#1025 merge 後）",
+      "https://four-bros-mahjong-6kgql8858.vercel.app",
     );
-    expect(DEPLOYMENT_DOC).toContain("GitHub deployment `6286927273`");
+    expect(DEPLOYMENT_DOC).toContain("VERSION` は `a60593abf8c2`");
     expect(DEPLOYMENT_DOC).toContain(
-      "https://four-bros-mahjong-8vjmtdf19.vercel.app",
-    );
-    expect(DEPLOYMENT_DOC).toContain("VERSION` は `f3130316ea81`");
-    expect(DEPLOYMENT_DOC).toContain(
-      "CI `33998271577`、gitleaks `33998271575`、CodeQL `33998271380` がすべて `success`",
+      "CI `34005636136`、gitleaks `34005636124`、CodeQL `34005635853` がすべて `success`",
     );
   });
 
   it("keeps the #725 current-head evidence aligned with the same deployment", () => {
     expect(TOPOLOGY_EVIDENCE_DOC).toContain(
-      "`f3130316ea81f56fc46d302fe572a658d44abce7`（#1025 merge 後",
+      "`a60593abf8c2cbc59f55c8fbfde5e9c5615ea016`（#996 merge 後",
     );
-    expect(TOPOLOGY_EVIDENCE_DOC).toContain("deployment `6286927273`");
+    expect(TOPOLOGY_EVIDENCE_DOC).toContain("deployment `6288141693`");
     expect(TOPOLOGY_EVIDENCE_DOC).toContain(
-      "https://four-bros-mahjong-8vjmtdf19.vercel.app",
+      "https://four-bros-mahjong-6kgql8858.vercel.app",
     );
-    expect(TOPOLOGY_EVIDENCE_DOC).toContain('VERSION = "f3130316ea81"');
+    expect(TOPOLOGY_EVIDENCE_DOC).toContain('VERSION = "a60593abf8c2"');
     expect(TOPOLOGY_EVIDENCE_DOC).toContain("6 route × 3 viewport");
   });
 
