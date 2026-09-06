@@ -91,6 +91,24 @@ function tryFocusAndVerify(element: HTMLElement | null | undefined): boolean {
   }
 }
 
+/**
+ * Scrolling the touch-confirmation control is an accessibility enhancement,
+ * not a prerequisite for confirming a discard. Some embedded DOM hosts expose
+ * `scrollIntoView` but reject the call, so keep that optional capability behind
+ * its own failure boundary.
+ */
+function tryScrollIntoView(element: HTMLElement): void {
+  try {
+    element.scrollIntoView?.({
+      block: "center",
+      inline: "nearest",
+      behavior: "auto",
+    });
+  } catch {
+    // The focused confirmation button remains usable when scrolling is blocked.
+  }
+}
+
 export default function Hand({
   tiles,
   readOnly = false,
@@ -218,11 +236,7 @@ export default function Hand({
     const button = confirmButtonRef.current;
     if (!button) return;
     tryFocus(button, { preventScroll: true });
-    button.scrollIntoView?.({
-      block: "center",
-      inline: "nearest",
-      behavior: "auto",
-    });
+    tryScrollIntoView(button);
   }, [confirmTouchSelection, touchSelectionIndex]);
 
   // 確定成功時はゲーム側の更新へフォーカスを委ねる。解除操作でのみ復帰先を予約し、
