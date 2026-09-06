@@ -800,7 +800,25 @@ export function setExplicitKitaPlayerIds(
   ) {
     return state;
   }
-  return { ...state, explicitKitaPlayerIds: unique };
+  const next = { ...state, explicitKitaPlayerIds: unique };
+  const pending = next.pending;
+  if (pending?.kind !== "humanDiscard" || next.hand === null) return next;
+
+  // `canKita` is a capability-derived field. A seat replacement can change
+  // the roster while that seat is already waiting for input; leaving the old
+  // value in place would show a North button that `declareKita` must reject.
+  const playerId = pending.playerId ?? HUMAN_ID;
+  const seat = seatOfPlayer(next.hand.seating, playerId);
+  if (seat === null || next.hand.turn !== seat) return next;
+  return {
+    ...next,
+    pending: {
+      ...pending,
+      canKita:
+        usesExplicitKita(next, playerId) &&
+        canDeclareKita(next.hand, seat, pending.locked),
+    },
+  };
 }
 
 /** 現局の席割り・配牌・ドラを用意し、進行を人間の意思決定点まで進める。 */

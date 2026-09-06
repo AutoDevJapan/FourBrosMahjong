@@ -1,9 +1,11 @@
 import { describe, expect, it } from "vitest";
 import {
   createGame,
+  declareKita,
   discard,
   type EngineState,
   removeHumanPlayerIds,
+  setExplicitKitaPlayerIds,
   setHumanPlayerIds,
 } from "./engine";
 
@@ -37,6 +39,31 @@ describe("engine: multiple human players", () => {
 
     const afterP0 = discard(state, drawnTile(state), "p0");
     expect(afterP0.pending?.playerId).toBe("p1");
+  });
+
+  it("recomputes pending North capability when a current seat loses it", () => {
+    let state = createGame({
+      seed: 4,
+      humanPlayerIds: ["p0", "p1"],
+      explicitKitaPlayerIds: ["p0", "p1"],
+    });
+    const hostDraw = drawnTile(state);
+    state = discard(state, hostDraw, "p0");
+
+    expect(state.pending).toMatchObject({
+      kind: "humanDiscard",
+      playerId: "p1",
+      canKita: true,
+    });
+
+    const replacement = setExplicitKitaPlayerIds(state, ["p0"]);
+
+    expect(replacement.pending).toMatchObject({
+      kind: "humanDiscard",
+      playerId: "p1",
+      canKita: false,
+    });
+    expect(declareKita(replacement, "p1")).toBe(replacement);
   });
 
   it("releases a disconnected human turn to AI and leaves the next connected seat actionable", () => {
