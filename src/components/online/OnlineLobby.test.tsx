@@ -810,6 +810,53 @@ describe("OnlineLobby のキーボード送信", () => {
     });
   });
 
+  it("submitterのintent読み取りがthrowしてもフォーカスの参加フォールバックを維持する(#1126)", () => {
+    render(<OnlineLobby />);
+
+    fireEvent.change(screen.getByLabelText("表示名"), {
+      target: { value: "たろう" },
+    });
+    fireEvent.change(screen.getByLabelText("ルームコード"), {
+      target: { value: "ABC234" },
+    });
+    const roomCodeInput = screen.getByLabelText("ルームコード");
+    const joinButton = screen.getByRole("button", { name: "参加する" });
+    roomCodeInput.focus();
+
+    const originalGetAttribute = HTMLElement.prototype.getAttribute;
+    let submitterIntentRead = false;
+    vi.spyOn(HTMLElement.prototype, "getAttribute").mockImplementation(
+      function (this: HTMLElement, name: string) {
+        if (this === joinButton && name === "data-intent") {
+          submitterIntentRead = true;
+          throw new Error("submitter intent is unavailable");
+        }
+        return originalGetAttribute.call(this, name);
+      },
+    );
+
+    const form = screen.getByRole("form", { name: "オンラインルーム接続" });
+    const submitEvent = new Event("submit", {
+      bubbles: true,
+      cancelable: true,
+    });
+    Object.defineProperty(submitEvent, "submitter", {
+      configurable: true,
+      value: joinButton,
+    });
+    expect(() => fireEvent(form, submitEvent)).not.toThrow();
+
+    expect(submitterIntentRead).toBe(true);
+    expect(sockets).toHaveLength(1);
+    act(() => sockets[0]?.open());
+    expect(JSON.parse(sockets[0]?.sent[0] ?? "{}")).toEqual({
+      type: "join",
+      code: "ABC234",
+      name: "たろう",
+      explicitKita: true,
+    });
+  });
+
   it("IME変換中のEnterでは候補確定を妨げず送信しない", () => {
     const preventDefault = vi.spyOn(Event.prototype, "preventDefault");
     render(<OnlineLobby />);
