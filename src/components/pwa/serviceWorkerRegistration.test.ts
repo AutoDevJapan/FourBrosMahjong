@@ -36,6 +36,23 @@ describe("registerServiceWorker", () => {
     expect(registerServiceWorker("production", undefined)).toBe(false);
   });
 
+  it("serviceWorker capability probe が同期例外を投げてもオンライン動作へ例外を漏らさない", () => {
+    const nav = new Proxy(
+      {},
+      {
+        has(_target, property) {
+          if (property === "serviceWorker") {
+            throw new Error("SecurityError");
+          }
+          return false;
+        },
+      },
+    ) as Navigator;
+
+    expect(() => registerServiceWorker("production", nav)).not.toThrow();
+    expect(registerServiceWorker("production", nav)).toBe(false);
+  });
+
   it("登録失敗(register reject)でも例外を漏らさない", async () => {
     const register = vi.fn().mockRejectedValue(new Error("SecurityError"));
     const { nav } = navigatorWithServiceWorker(register);
