@@ -127,18 +127,26 @@ function notifySubscribers(): void {
   for (const callback of subscribers) callback();
 }
 
+/** 別タブの保存変更を、共有ストアの購読者へ一度だけ伝える。 */
+function handleStorage(event: StorageEvent): void {
+  if (event.key === PLAYER_NAMES_STORAGE_KEY || event.key === null) {
+    notifySubscribers();
+  }
+}
+
 /** `localStorage` の変更(このタブの保存・別タブの `storage` イベント)を購読する。 */
 export function subscribePlayerNames(callback: () => void): () => void {
   subscribers.add(callback);
-  const onStorage = (event: StorageEvent) => {
-    if (event.key === PLAYER_NAMES_STORAGE_KEY || event.key === null) {
-      notifySubscribers();
-    }
-  };
-  window.addEventListener("storage", onStorage);
+  // `notifySubscribers` は全購読者へ通知するため、listenerもストアごとに1本だけ
+  // 登録する。購読者ごとにlistenerを持つと、同じstorage eventで通知が二重化する。
+  if (subscribers.size === 1) {
+    window.addEventListener("storage", handleStorage);
+  }
   return () => {
     subscribers.delete(callback);
-    window.removeEventListener("storage", onStorage);
+    if (subscribers.size === 0) {
+      window.removeEventListener("storage", handleStorage);
+    }
   };
 }
 

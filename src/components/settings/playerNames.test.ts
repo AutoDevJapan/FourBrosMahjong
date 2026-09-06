@@ -1,3 +1,5 @@
+// @vitest-environment jsdom
+
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { DEFAULT_NAMES } from "@/domain/game/engine";
 import {
@@ -15,6 +17,7 @@ import {
   resolvePlayerNames,
   sanitizePlayerName,
   savePlayerNames,
+  subscribePlayerNames,
 } from "./playerNames";
 
 afterEach(() => vi.unstubAllGlobals());
@@ -346,5 +349,37 @@ describe("loadPlayerNames / savePlayerNames", () => {
 
   it("保存できない環境ではfalseを返し例外を投げない", () => {
     expect(savePlayerNames(new FailingStorage(), DEFAULT_NAMES)).toBe(false);
+  });
+});
+
+describe("subscribePlayerNames", () => {
+  it("matching storage eventを各購読者へ一度だけ通知し、最後の解除でlistenerを外す", () => {
+    const first = vi.fn();
+    const second = vi.fn();
+    const unsubscribeFirst = subscribePlayerNames(first);
+    const unsubscribeSecond = subscribePlayerNames(second);
+
+    try {
+      window.dispatchEvent(new StorageEvent("storage", { key: "other.key" }));
+      expect(first).not.toHaveBeenCalled();
+      expect(second).not.toHaveBeenCalled();
+
+      window.dispatchEvent(
+        new StorageEvent("storage", { key: PLAYER_NAMES_STORAGE_KEY }),
+      );
+      expect(first).toHaveBeenCalledTimes(1);
+      expect(second).toHaveBeenCalledTimes(1);
+
+      unsubscribeFirst();
+      unsubscribeSecond();
+      window.dispatchEvent(
+        new StorageEvent("storage", { key: PLAYER_NAMES_STORAGE_KEY }),
+      );
+      expect(first).toHaveBeenCalledTimes(1);
+      expect(second).toHaveBeenCalledTimes(1);
+    } finally {
+      unsubscribeFirst();
+      unsubscribeSecond();
+    }
   });
 });
