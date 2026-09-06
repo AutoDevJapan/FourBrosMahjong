@@ -95,6 +95,29 @@ describe("Modal (spec 5.2.2 dialog / focus trap / Escape)", () => {
     expect(closeBtn).toHaveFocus();
   });
 
+  it("CSS で非表示の要素をフォーカストラップの端点に含めない", async () => {
+    const user = userEvent.setup();
+    render(
+      <Modal title="全体盤面" onClose={vi.fn()}>
+        <button type="button">最後の可視操作</button>
+        <div style={{ display: "none" }}>
+          <button type="button">非表示の操作</button>
+        </div>
+      </Modal>,
+    );
+
+    const closeBtn = screen.getByRole("button", { name: "閉じる" });
+    const visibleButton = screen.getByRole("button", {
+      name: "最後の可視操作",
+    });
+    visibleButton.focus();
+    await user.tab();
+
+    // 実ブラウザの Tab 順では display:none の子要素は存在しないため、
+    // 可視操作の次はダイアログ先頭(閉じる)へ循環する。
+    expect(closeBtn).toHaveFocus();
+  });
+
   it("閉じた後に開く前のフォーカス位置へ戻す", async () => {
     const user = userEvent.setup();
     function Harness() {

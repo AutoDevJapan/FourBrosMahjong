@@ -66,14 +66,43 @@ export function isRestoreFocusTarget(
 
 /**
  * ダイアログ内のフォーカス可能要素を DOM 順で列挙する。
- * `hidden` 属性の要素のみ除外する(レイアウト依存の可視判定は使わず、
- * jsdom を含め環境非依存でトラップの端点を求められるようにする)。
+ * 実ブラウザでは CSS の `display: none` / `visibility: hidden` もフォーカス不能なので、
+ * それらの祖先を含めて除外する。`getComputedStyle` はレイアウト寸法を参照しないため、
+ * jsdom でも inline style の退行を検出でき、実レイアウトに依存する `getClientRects()` は使わない。
  */
+function isUnavailableForFocus(element: HTMLElement): boolean {
+  for (
+    let current: HTMLElement | null = element;
+    current;
+    current = current.parentElement
+  ) {
+    if (
+      current.hidden ||
+      current.inert ||
+      current.getAttribute("aria-hidden") === "true"
+    ) {
+      return true;
+    }
+
+    const style = current.ownerDocument.defaultView?.getComputedStyle(current);
+    if (
+      style?.display === "none" ||
+      style?.visibility === "hidden" ||
+      style?.visibility === "collapse"
+    ) {
+      return true;
+    }
+  }
+  return false;
+}
+
 function focusableElements(root: HTMLElement): HTMLElement[] {
   const nodes = root.querySelectorAll<HTMLElement>(
     'a[href], button:not([disabled]), textarea:not([disabled]), input:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])',
   );
-  return Array.from(nodes).filter((el) => !el.hidden);
+  return Array.from(nodes).filter(
+    (el) => !el.matches(":disabled") && !isUnavailableForFocus(el),
+  );
 }
 
 export default function Modal({
