@@ -1658,6 +1658,32 @@ describe("OnlineLobby maintenance client-first (#726)", () => {
     ).not.toBeNull();
   });
 
+  it("maintenance noticeのretryAfterMsを残り時間として更新し、期限後に案内を隠す", () => {
+    vi.useFakeTimers();
+    render(<OnlineLobby />);
+    const socket = startSession();
+
+    act(() =>
+      socket.message({
+        type: "maintenance",
+        phase: "draining",
+        retryAfterMs: 5_000,
+      }),
+    );
+
+    expect(
+      screen.getByText("再試行まで約5秒お待ちください。"),
+    ).toBeInTheDocument();
+
+    act(() => vi.advanceTimersByTime(2_500));
+    expect(
+      screen.getByText("再試行まで約3秒お待ちください。"),
+    ).toBeInTheDocument();
+
+    act(() => vi.advanceTimersByTime(2_500));
+    expect(screen.queryByText(/再試行まで約/)).not.toBeInTheDocument();
+  });
+
   it.each(["draining", "drained"] as const)(
     "%s解除はsnapshotとcredentialを保ち、固定live通知後にnewGameとbounded reconnectを再許可する",
     (phase) => {

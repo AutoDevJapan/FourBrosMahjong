@@ -282,14 +282,25 @@ function maintenanceMessage(phase: OnlineMaintenancePhase): string {
 
 function MaintenanceBanner({
   maintenance,
+  retryAfterMs,
 }: {
   readonly maintenance: MaintenanceClientState;
+  /** Remaining client-side cooldown, not the notice's initial duration. */
+  readonly retryAfterMs: number;
 }) {
   const notice = maintenance.source === "notice" ? maintenance.notice : null;
-  const retryAfterMs =
+  const configuredRetryAfterMs =
     maintenance.source === "notice"
       ? maintenance.notice.retryAfterMs
       : maintenance.retryAfterMs;
+  // The server value is the duration at receipt time. Render the live local
+  // cooldown so an old notice cannot keep claiming that the same wait remains.
+  // Cap it at the value attached to this maintenance state so an unrelated
+  // later cooldown does not leak into the maintenance copy.
+  const remainingRetryAfterMs =
+    configuredRetryAfterMs === undefined
+      ? undefined
+      : Math.min(configuredRetryAfterMs, retryAfterMs);
   return (
     <div
       id={MAINTENANCE_NOTICE_ID}
@@ -310,9 +321,9 @@ function MaintenanceBanner({
           サーバー停止予定: {notice.deadline}
         </p>
       ) : null}
-      {retryAfterMs !== undefined && retryAfterMs > 0 ? (
+      {remainingRetryAfterMs !== undefined && remainingRetryAfterMs > 0 ? (
         <p className="mt-1 text-foreground/70">
-          {retryAfterMessage(retryAfterMs)}
+          {retryAfterMessage(remainingRetryAfterMs)}
         </p>
       ) : null}
       {maintenance.source === "rejection" ? (
@@ -1408,7 +1419,10 @@ export default function OnlineLobby() {
           ) : null}
 
           {maintenance ? (
-            <MaintenanceBanner maintenance={maintenance} />
+            <MaintenanceBanner
+              maintenance={maintenance}
+              retryAfterMs={retryAfterMs}
+            />
           ) : (
             <>
               {maintenanceRecoveryVisible ? (
@@ -1497,7 +1511,10 @@ export default function OnlineLobby() {
       <ScreenNavigation currentPath="/online" />
       <section className="mx-auto flex w-full max-w-md flex-col gap-6 rounded-xl border border-control-border p-6">
         {maintenance ? (
-          <MaintenanceBanner maintenance={maintenance} />
+          <MaintenanceBanner
+            maintenance={maintenance}
+            retryAfterMs={retryAfterMs}
+          />
         ) : maintenanceRecoveryVisible ? (
           <MaintenanceRecoveryNotice />
         ) : null}
