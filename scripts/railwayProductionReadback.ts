@@ -171,10 +171,11 @@ function isExactOrigin(value: unknown, requireHttps: boolean): value is string {
     ) {
       return false;
     }
-    const hostname = url.hostname.toLowerCase().replace(/\.$/, "");
+    const hostname = url.hostname.toLowerCase();
     return (
       hostname.length > 0 &&
       hostname.includes(".") &&
+      !hostname.endsWith(".") &&
       !hostname.includes("*") &&
       isIP(hostname) === 0 &&
       !PUBLIC_HOST_BLOCKLIST.has(hostname) &&
