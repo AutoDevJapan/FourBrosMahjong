@@ -164,6 +164,24 @@ describe("Railway production read-back contract (#980)", () => {
     );
   });
 
+  it("rejects a stale boundary probe even when the wrapper capture is fresh", () => {
+    const candidate = readback();
+    const staleOffset = -RAILWAY_PRODUCTION_READBACK_MAX_AGE_MS - 10_000;
+    candidate.probe.startedAt = iso(staleOffset - 4_000);
+    candidate.probe.finishedAt = iso(staleOffset - 1_000);
+    candidate.probe.checks.health.startedAt = iso(staleOffset - 4_000);
+    candidate.probe.checks.readiness.startedAt = iso(staleOffset - 3_000);
+    candidate.probe.checks.allowedOrigin.startedAt = iso(staleOffset - 2_000);
+    candidate.probe.checks.disallowedOrigin.startedAt = iso(
+      staleOffset - 1_500,
+    );
+    candidate.probe.checks.missingOrigin.startedAt = iso(staleOffset - 1_000);
+
+    expect(validateRailwayProductionReadback(candidate, NOW).reasons).toEqual([
+      "evidence-not-fresh",
+    ]);
+  });
+
   it("rejects non-public or non-canonical production origins", () => {
     const candidate = readback();
     candidate.target.publicBaseUrl = "http://localhost:8080/path";

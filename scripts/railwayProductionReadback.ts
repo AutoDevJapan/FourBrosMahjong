@@ -334,6 +334,14 @@ export function validateRailwayProductionReadback(
       nowMs + RAILWAY_PRODUCTION_READBACK_MAX_FUTURE_SKEW_MS
     ) {
       reasons.push("evidence-from-future");
+    } else if (
+      nowMs - probeFinishedAt >
+      RAILWAY_PRODUCTION_READBACK_MAX_AGE_MS
+    ) {
+      // A fresh wrapper capture must not make an old boundary probe appear
+      // current. The deployment/config read-back and the probe have to be
+      // from the same bounded observation window.
+      reasons.push("evidence-not-fresh");
     }
     if (capturedAt !== null && capturedAt < probeFinishedAt) {
       reasons.push("evidence-capture-skew");
