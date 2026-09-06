@@ -14,12 +14,15 @@
 
 | 画面 | パス | 責務 | Server/Client |
 |---|---|---|---|
-| ロビー | `/` | エントリーポイント。対局開始・ルール説明・設定への導線を提供する(#9で実装) | Server |
+| ロビー | `/` | エントリーポイント。ローカル/オンライン対局の開始、ルール説明、設定、戦績への導線を提供する | Server |
+| オンラインロビー | `/online` | ルームコードによる接続・退出・再接続と、権威サーバーから受け取ったオンライン対局の表示・操作を提供する | Server shell + Client island |
 | ルール説明 | `/rules` | `docs/四兄弟麻雀ルール.md` に基づくルール要約を表示する(閲覧専用) | Server |
 | 対局画面 | `/game` | 四人回しサンマの対局本体。卓・各家の手牌/河/得点・ドラ・卓情報・操作パネルを表示する | Server shell + Client island |
-| 結果画面 | `/game/result` | 半荘終了時の最終順位・ソシー内訳（素点＋ウマ・オカ＋役満祝儀）を表示する | Client |
+| 結果画面 | `/game/result` | 半荘終了時の最終順位・ソシー内訳（素点＋ウマ・オカ＋役満祝儀）を表示する | Server shell + Client island |
 | 戦績 | `/history` | `localStorage` に保存された半荘結果(最終順位・ソシー内訳・終了日時)を新しい順に一覧・閲覧し、全件削除できる(issue #293)。保存は半荘終了時に `GameProvider` が自動で行い、直近20件を上限に最古から破棄する。全件削除は失敗し得るため、成功したときだけ削除完了として通知する(issue #482 / 6.9) | Server shell + Client island |
 | 設定 | `/settings` | ダークモード手動切替(スペック5 5.4.1)と対局者名の設定(6.2.1)、戦績ページへの導線 | Server shell + Client island |
+
+`/prototype/unity-display` は本番の画面遷移には含めない、Unity表示契約のブラウザ・リファレンスである。固定fixtureと実際のWeb表示を比較する検証用画面として、実装ルートとa11y監査の対象には含める。
 
 ### 6.2.1 対局者名の設定(issue #291)
 
@@ -50,6 +53,7 @@
 ```mermaid
 flowchart LR
     Lobby["/ (ロビー)"] -->|対局を開始| Game["/game (対局画面)"]
+    Lobby -->|オンライン対戦| Online["/online (オンラインロビー)"]
     Lobby -->|ルールを見る| Rules["/rules (ルール説明)"]
     Rules -->|戻る| Lobby
     Lobby -->|設定| Settings["/settings"]
@@ -61,6 +65,7 @@ flowchart LR
     Result -->|戦績を見る| History
     Settings -->|戦績を見る| History
     History -->|ロビーへ戻る| Lobby
+    Online -->|ロビーへ戻る| Lobby
 ```
 
 - **半荘終了時の遷移はユーザー操作(ボタン)で行い、自動遷移しない**(#277)。半荘を終える局(トビ / 南4完了 / 親トップやめ)は engine が `roundEnd` を経由せず `gameEnd` へ直行する(スペック2 2.8)ため、`/game` は `gameEnd` でも最終局の決着(和了内訳 `WinDetails`・流局サマリ・各家の点数増減)を表示し、主要ボタン「結果を見る」(push)で `/game/result` へ進む。`/game` は `gameEnd` で自動リダイレクトしないため、結果画面から「戻る」→ `/game`(最終局の決着表示)→「戻る」→ ロビーと履歴トラップなく脱出できる。終局済み journal のリロード復元・ブラウザバックでも同じ決着表示に合流する。**流局で半荘が終わり供託が残存**した場合は、engine が残存供託を最終局デルタへ畳み込み(スペック3 3.4 / #282)、hint・読み上げに「残存供託N本(N,000点)は◯◯が取得。」を併記して持ち点・点数増減・供託カウント0の三者を検算可能に保つ。
@@ -101,14 +106,19 @@ flowchart LR
 ```
 src/app/
 ├── layout.tsx                  # ルートレイアウト (Server) — <html lang="ja">(#9), フォント, メタデータ
-├── page.tsx                    # `/`        ロビー (Server)                      … #9で実装
+├── page.tsx                    # `/`        ロビー (Server)
+├── online/
+│   └── page.tsx                 # `/online`  オンラインロビー (Server shell + Client island)
 ├── globals.css
 ├── rules/
 │   └── page.tsx                 # `/rules`   ルール説明 (Server)
 ├── settings/
-│   └── page.tsx                 # `/settings` 設定 (Client)
+│   └── page.tsx                 # `/settings` 設定 (Server shell + Client island)
 ├── history/
 │   └── page.tsx                 # `/history`  戦績 (Server shell + Client island) … issue #293
+├── prototype/
+│   └── unity-display/
+│       └── page.tsx             # `/prototype/unity-display` Unity表示契約リファレンス (検証用)
 └── game/
     ├── layout.tsx                # `/game` 配下の共有レイアウト (Client: GameProvider)
     ├── page.tsx                  # `/game`         対局画面
@@ -127,14 +137,16 @@ src/app/
 |---|---|---|
 | ルートレイアウト `src/app/layout.tsx` | Server | メタデータ・フォント読み込みのみ、状態を持たない |
 | `/`(ロビー) `page.tsx` | Server | 静的なナビゲーションのみ |
+| `/online` `page.tsx` | Server shell + Client island | ページはmetadata・戻る導線を持つServer shellとし、WebSocket接続・オンライン状態・対局操作を`OnlineLobby`/`GameBoard`へ分離する |
 | `/rules` `page.tsx` | Server | 静的コンテンツ表示、対話要素なし(折りたたみは `<details>`/`<summary>` 等HTML標準機能で対応しJS不要) |
-| `/settings` `page.tsx` | Client | テーマ切替が `localStorage` / `matchMedia` というブラウザAPIを操作するため |
+| `/settings` `page.tsx` | Server shell + Client island | ページは見出し・導線・metadataをServer shellに留め、テーマ/名前のブラウザAPI操作を`ThemeToggle`/`PlayerNamesForm`へ分離する |
 | `/game/layout.tsx`(`GameProvider`) | Client | 対局状態をメモリ上に保持し `/game` ⇄ `/game/result` 間で共有するため |
 | `/game/page.tsx` | Server shell + Client island | ページ自体は Server とし、卓の操作領域を `<GameBoard>` として切り出し、その内部のみ `"use client"` |
 | `<GameBoard>` 配下(`PlayerArea`・`ActionPanel`・`LiveRegion` 等) | Client | 打牌選択・鳴き・リーチ宣言等のキーボード/ポインタ操作、`aria-live` によるライブ更新(スペック5 5.2.2, 5.2.3)にローカル状態が必要 |
 | `<Tile>`・`<ScoreDisplay>`・`<TableInfo>` 等の純表示コンポーネント(`<DoraIndicator>` は開示注記の `aria-describedby` 関連付けに `useId` を用いるため Client ツリー前提 / #261) | 値渡しのみなら Server Component として実装可能。ただし Client なコンポーネント(`GameBoard`等)の子として使われる場合、実質的にクライアントバンドルに含まれる点に留意 | props 経由で値を受け取り描画するだけの責務に留めることで、将来的な配置転換を容易にする |
-| `/game/result/page.tsx` | Client | `GameProvider` の状態(確定したソシー内訳)を `useContext` 等で読み取るため |
+| `/game/result/page.tsx` | Server shell + Client island | ページはmetadata・見出し・導線をServer shellに留め、`GameProvider`の状態を読む`ResultPageClient`だけをClient Componentにする |
 | `/history/page.tsx` | Server shell + Client island | ページ自体は Server(metadata・見出し・戻る導線)とし、`localStorage` の戦績を読み書きする一覧・削除部分のみ `MatchHistoryList` として `"use client"` に分離する(issue #293) |
+| `/prototype/unity-display/page.tsx` | Server shell + Client island | 検証用ページのmetadata・見出し・導線はServer shellとし、固定fixture・Web表示・演出切替を`UnityDisplayReference`へ分離する |
 
 ## 6.7 コンポーネント分割方針(`src/components/` 初期ディレクトリ構成案)
 
