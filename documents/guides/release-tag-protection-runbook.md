@@ -14,11 +14,11 @@ GitHub Release の公開識別子である `v*` tag を、公開後に付け替�
 
 ### 2026-09-07 current-main 再監査
 
-2026-09-07 (JST)、`main` (`92d999a32d7c9b9a4ed0bb28ff8a3ba40e24d292`) を基準に、以下を読み取り専用で再確認した。
+2026-09-07 (JST)、`main` (`e8a29153752756fdf1b9af500dea46130991e775`) を基準に、以下を読み取り専用で再確認した。
 
 - `node .github/scripts/audit-release-tag-ruleset.mjs` は、repository-owned ruleset `protect-existing-release-tags` (`20858931`) の `active`、`target=tag`、`refs/tags/v*`、`deletion` / `non_fast_forward` / `update`、`bypass_actors=[]`、`current_user_can_bypass=never` を検証した。detail 応答で `update` の parameters が省略されていることも確認した。
 - Actions policy の read-back は `enabled=true`、`allowed_actions=all`、`sha_pinning_required=true` だった。Organization Team inventory は 0 件で、専用 Release Operators Team、break-glass Team、権限分離された検証用アカウントは未登録である。
-- `v*` tag と GitHub Release は 0 件だった。`main` の同一SHAに対する CI `34056228750`、gitleaks `34056228708`、CodeQL `34056228024` は success、Production deployment `6297267687` も同じSHAで記録されている。したがって、作成認可 A の実アカウント拒否、Release Operator の正常作成、公開後 tag の更新/削除拒否を実操作では検証していない。
+- `v*` tag と GitHub Release は 0 件だった。`main` の同一SHAに対する CI `34056822063`、gitleaks `34056822083`、CodeQL `34056821945` は success、Production deployment `6297375450` も同じSHAで success と記録されている。したがって、作成認可 A の実アカウント拒否、Release Operator の正常作成、公開後 tag の更新/削除拒否を実操作では検証していない。
 - runbook契約テスト（`release-tag-ruleset.test.ts`、`release-guard.test.ts`、`gitleaks-release.test.ts`）は、この差分の追加回帰を含めてローカルで再実行する。外部 ruleset / Team / collaborator 権限 / tag / Release / workflow / deployment は変更していない。
 
 この再監査では ruleset、Team、collaborator 権限、tag、Release、workflow、repository file を変更していない。B の不変性は継続して検証済みだが、owner が Release Operators / break-glass governance と実検証用アカウントを承認するまで、A の作成認可と実アカウントによる拒否テストは未完了のまま HOLD とする。
