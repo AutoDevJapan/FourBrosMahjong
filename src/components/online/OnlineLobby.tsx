@@ -32,6 +32,12 @@ import {
   ROOM_CODE_FORMAT_MESSAGE,
   ROOM_CODE_LENGTH,
 } from "@/lib/roomCode";
+import {
+  clearIntervalSafely,
+  clearTimeoutSafely,
+  trySetInterval,
+  trySetTimeout,
+} from "../common/browserTimer";
 import OnlineGameProvider, { onlineSocketUrl } from "./OnlineGameProvider";
 import {
   MAX_MAINTENANCE_RETRY_AFTER_MS,
@@ -779,11 +785,23 @@ export default function OnlineLobby() {
 
   useEffect(() => {
     if (!maintenanceRecoveryVisible) return;
-    const timer = window.setTimeout(
+    const timer = trySetTimeout(
       () => setMaintenanceRecoveryVisible(false),
       MAINTENANCE_RECOVERY_NOTICE_MS,
     );
-    return () => window.clearTimeout(timer);
+    if (timer === null) {
+      // The live-region notice is only a transient enhancement. If the host
+      // cannot schedule its expiry, hide it now rather than leaving it on
+      // screen forever or leaking the capability error from the effect.
+      let canceled = false;
+      void Promise.resolve().then(() => {
+        if (!canceled) setMaintenanceRecoveryVisible(false);
+      });
+      return () => {
+        canceled = true;
+      };
+    }
+    return () => clearTimeoutSafely(timer);
   }, [maintenanceRecoveryVisible]);
 
   const requestTransitionFocus = useCallback(
@@ -855,14 +873,14 @@ export default function OnlineLobby() {
 
   const clearReconnectTimer = useCallback(() => {
     if (reconnectTimerRef.current !== null) {
-      window.clearTimeout(reconnectTimerRef.current);
+      clearTimeoutSafely(reconnectTimerRef.current);
       reconnectTimerRef.current = null;
     }
   }, []);
 
   const clearRetryCooldown = useCallback(() => {
     if (retryAfterTimerRef.current !== null) {
-      window.clearInterval(retryAfterTimerRef.current);
+      clearIntervalSafely(retryAfterTimerRef.current);
       retryAfterTimerRef.current = null;
     }
     retryAfterUntilRef.current = 0;
@@ -878,19 +896,28 @@ export default function OnlineLobby() {
     retryAfterUntilRef.current = nextUntil;
     setRetryAfterMs(normalized);
     if (retryAfterTimerRef.current !== null) {
-      window.clearInterval(retryAfterTimerRef.current);
+      clearIntervalSafely(retryAfterTimerRef.current);
+      retryAfterTimerRef.current = null;
     }
-    const timer = window.setInterval(() => {
+    const timer = trySetInterval(() => {
       const remaining = Math.max(0, retryAfterUntilRef.current - Date.now());
       setRetryAfterMs(remaining);
       if (remaining === 0) {
         retryAfterUntilRef.current = 0;
-        window.clearInterval(timer);
+        clearIntervalSafely(timer);
         if (retryAfterTimerRef.current === timer) {
           retryAfterTimerRef.current = null;
         }
       }
     }, 250);
+    if (timer === null) {
+      // Retry-After is advisory UI state; the server remains authoritative.
+      // Do not strand the retry action disabled when this optional timer is
+      // unavailable.
+      retryAfterUntilRef.current = 0;
+      setRetryAfterMs(0);
+      return;
+    }
     retryAfterTimerRef.current = timer;
   }, []);
 
@@ -992,13 +1019,22 @@ export default function OnlineLobby() {
       applyRetryCooldown(retryAfter);
       const backoffDelay = Math.min(10_000, 500 * 2 ** Math.min(attempt, 4));
       const delay = Math.max(backoffDelay, retryAfter ?? 0);
-      reconnectTimerRef.current = window.setTimeout(() => {
+      const timer = trySetTimeout(() => {
         reconnectTimerRef.current = null;
         const current = credentialsRef.current;
         if (current) {
           connectRef.current({ type: "resume", ...current }, true);
         }
       }, delay);
+      if (timer === null) {
+        // Automatic reconnect is optional. Fall back to the existing manual
+        // retry control instead of leaving the lobby indefinitely reconnecting.
+        requestTransitionFocus("connection-retry");
+        setStatus("failed");
+        setConnectionError(message);
+        return;
+      }
+      reconnectTimerRef.current = timer;
     },
     [
       applyRetryCooldown,
@@ -1100,7 +1136,7 @@ export default function OnlineLobby() {
       let lastPongAt = Date.now();
       const clearHeartbeat = () => {
         if (heartbeatTimer !== null) {
-          window.clearInterval(heartbeatTimer);
+          clearIntervalSafely(heartbeatTimer);
           heartbeatTimer = null;
         }
       };
@@ -1126,10 +1162,17 @@ export default function OnlineLobby() {
         if (socketRef.current !== next) return;
         lastPongAt = Date.now();
         clearHeartbeat();
-        heartbeatTimer = window.setInterval(
+        heartbeatTimer = trySetInterval(
           sendHeartbeat,
           CLIENT_HEARTBEAT_INTERVAL_MS,
         );
+        if (heartbeatTimer === null) {
+          // Without the liveness timer a half-open connection could keep the
+          // game looking connected forever. Reuse the normal transport-failure
+          // path so the user gets a bounded reconnect/manual-retry outcome.
+          handleTransportFailure(next);
+          return;
+        }
         try {
           next.send(JSON.stringify({ ...request, explicitKita: true }));
         } catch {
@@ -1337,7 +1380,7 @@ export default function OnlineLobby() {
 
   useEffect(() => {
     restoreCanceledRef.current = false;
-    const timer = window.setTimeout(() => {
+    const timer = trySetTimeout(() => {
       restoreTimerRef.current = null;
       if (restoreCanceledRef.current) return;
       const sharedCode = readSharedRoomCode();
@@ -1362,10 +1405,16 @@ export default function OnlineLobby() {
       setRoomCode(stored.code);
       connect({ type: "resume", ...stored }, true);
     }, 0);
+    if (timer === null) {
+      // Session restore is an enhancement; the visible lobby remains usable
+      // for a manual create/join when the host cannot schedule the task.
+      restoreTimerRef.current = null;
+      return;
+    }
     restoreTimerRef.current = timer;
     return () => {
       if (restoreTimerRef.current === timer) restoreTimerRef.current = null;
-      window.clearTimeout(timer);
+      clearTimeoutSafely(timer);
     };
   }, [connect]);
 
@@ -1390,7 +1439,7 @@ export default function OnlineLobby() {
     }
     restoreCanceledRef.current = true;
     if (restoreTimerRef.current !== null) {
-      window.clearTimeout(restoreTimerRef.current);
+      clearTimeoutSafely(restoreTimerRef.current);
       restoreTimerRef.current = null;
     }
     manualCloseRef.current = false;
@@ -1430,7 +1479,7 @@ export default function OnlineLobby() {
   const leave = () => {
     restoreCanceledRef.current = true;
     if (restoreTimerRef.current !== null) {
-      window.clearTimeout(restoreTimerRef.current);
+      clearTimeoutSafely(restoreTimerRef.current);
       restoreTimerRef.current = null;
     }
     manualCloseRef.current = true;

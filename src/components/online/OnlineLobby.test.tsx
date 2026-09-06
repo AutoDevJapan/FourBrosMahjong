@@ -342,6 +342,205 @@ describe("OnlineLobby (#605)", () => {
     ).toBeInTheDocument();
   });
 
+  it("does not leave the recovery notice visible when its expiry timer cannot be registered", async () => {
+    const { unmount } = render(<OnlineLobby />);
+    fireEvent.change(screen.getByLabelText("表示名"), {
+      target: { value: "たろう" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "新しいルームを作る" }));
+
+    const socket = sockets[0];
+    if (!socket) throw new Error("maintenance timer test socket expected");
+    act(() => {
+      socket.open();
+      socket.message({
+        type: "session",
+        token: "t".repeat(24),
+        snapshot: snapshotFixture(),
+      });
+    });
+
+    const setTimeout = vi.spyOn(window, "setTimeout").mockImplementation(() => {
+      throw new Error("timer registration is unavailable");
+    });
+
+    try {
+      expect(() => {
+        act(() => {
+          socket.message({ type: "maintenance", phase: "draining" });
+          socket.message({ type: "maintenance", phase: "accepting" });
+        });
+      }).not.toThrow();
+      await act(async () => {
+        await Promise.resolve();
+      });
+      expect(
+        screen.queryByText(
+          "メンテナンス準備を解除しました。新しい受付を再開します。",
+        ),
+      ).not.toBeInTheDocument();
+    } finally {
+      setTimeout.mockRestore();
+      unmount();
+    }
+  });
+
+  it("falls back to an enabled manual retry when the cooldown interval cannot be registered", () => {
+    vi.useFakeTimers();
+    const { unmount } = render(<OnlineLobby />);
+    fireEvent.change(screen.getByLabelText("表示名"), {
+      target: { value: "たろう" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "新しいルームを作る" }));
+
+    const socket = sockets[0];
+    if (!socket) throw new Error("cooldown timer test socket expected");
+    act(() => socket.open());
+
+    const setInterval = vi
+      .spyOn(window, "setInterval")
+      .mockImplementation(() => {
+        throw new Error("interval registration is unavailable");
+      });
+
+    try {
+      expect(() => {
+        act(() =>
+          socket.message({
+            type: "error",
+            message: "参加の試行回数が上限に達しました。",
+            code: "rate_limited",
+            scope: "join",
+            retryAfterMs: 5_000,
+          }),
+        );
+      }).not.toThrow();
+      expect(
+        document.querySelector('[data-connection-status="failed"]'),
+      ).not.toBeNull();
+      expect(screen.getByRole("button", { name: "再試行" })).toBeEnabled();
+      expect(screen.queryByText(/再試行まで約/)).not.toBeInTheDocument();
+    } finally {
+      setInterval.mockRestore();
+      unmount();
+    }
+  });
+
+  it("falls back to manual retry when automatic reconnect timer registration throws", () => {
+    const { unmount } = render(<OnlineLobby />);
+    fireEvent.change(screen.getByLabelText("表示名"), {
+      target: { value: "たろう" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "新しいルームを作る" }));
+
+    const socket = sockets[0];
+    if (!socket) throw new Error("reconnect timer test socket expected");
+    act(() => {
+      socket.open();
+      socket.message({
+        type: "session",
+        token: "t".repeat(24),
+        snapshot: snapshotFixture(),
+      });
+    });
+
+    const setTimeout = vi.spyOn(window, "setTimeout").mockImplementation(() => {
+      throw new Error("timer registration is unavailable");
+    });
+
+    try {
+      expect(() =>
+        act(() => socket.serverClose(1012, "service restart")),
+      ).not.toThrow();
+      expect(
+        document.querySelector('[data-connection-status="failed"]'),
+      ).not.toBeNull();
+      expect(screen.getByRole("button", { name: "再試行" })).toBeEnabled();
+      expect(sockets).toHaveLength(1);
+    } finally {
+      setTimeout.mockRestore();
+      unmount();
+    }
+  });
+
+  it("enters a retryable failure when the heartbeat interval cannot be registered", () => {
+    vi.useFakeTimers();
+    const setInterval = vi
+      .spyOn(window, "setInterval")
+      .mockImplementation(() => {
+        throw new Error("interval registration is unavailable");
+      });
+
+    try {
+      const { unmount } = render(<OnlineLobby />);
+      fireEvent.change(screen.getByLabelText("表示名"), {
+        target: { value: "たろう" },
+      });
+      fireEvent.click(
+        screen.getByRole("button", { name: "新しいルームを作る" }),
+      );
+
+      const socket = sockets[0];
+      if (!socket) throw new Error("heartbeat timer test socket expected");
+      expect(() => act(() => socket.open())).not.toThrow();
+      expect(
+        document.querySelector('[data-connection-status="failed"]'),
+      ).not.toBeNull();
+      expect(screen.getByRole("button", { name: "再試行" })).toBeEnabled();
+      expect(socket.readyState).toBe(TestWebSocket.CLOSED);
+      unmount();
+    } finally {
+      setInterval.mockRestore();
+    }
+  });
+
+  it("does not fail unmount when an OnlineLobby timeout cleanup throws", () => {
+    vi.useFakeTimers();
+    const { unmount } = render(<OnlineLobby />);
+    const clearTimeout = vi
+      .spyOn(window, "clearTimeout")
+      .mockImplementationOnce(() => {
+        throw new Error("timer cleanup is unavailable");
+      });
+
+    try {
+      expect(() => unmount()).not.toThrow();
+    } finally {
+      clearTimeout.mockRestore();
+    }
+  });
+
+  it("does not fail unmount when an OnlineLobby interval cleanup throws", () => {
+    vi.useFakeTimers();
+    const { unmount } = render(<OnlineLobby />);
+    fireEvent.change(screen.getByLabelText("表示名"), {
+      target: { value: "たろう" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "新しいルームを作る" }));
+
+    const socket = sockets[0];
+    if (!socket) throw new Error("interval cleanup test socket expected");
+    act(() => socket.open());
+
+    const clearInterval = vi
+      .spyOn(window, "clearInterval")
+      .mockImplementation(() => {
+        throw new Error("interval cleanup is unavailable");
+      });
+
+    try {
+      expect(() => {
+        act(() => socket.serverClose(1000));
+      }).not.toThrow();
+    } finally {
+      try {
+        unmount();
+      } finally {
+        clearInterval.mockRestore();
+      }
+    }
+  });
+
   it("drops oversized server text frames before JSON.parse", () => {
     render(<OnlineLobby />);
 
