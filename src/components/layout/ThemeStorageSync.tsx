@@ -23,11 +23,23 @@ export function ThemeStorageSync() {
     // 変更がlistener登録より前ならcatch-up、後ならeventが拾うため、
     // hydrationと別タブ書き込みの順序にかかわらず現在値へ収束する。
     const unsubscribeStorage = subscribeThemeStorage();
-    window.addEventListener("pageshow", handlePageShow);
+    let pageShowListenerAttached = false;
+    try {
+      window.addEventListener("pageshow", handlePageShow);
+      pageShowListenerAttached = true;
+    } catch {
+      // BFCache catch-up is optional; the initial reconciliation and storage
+      // listener still keep the current document synchronized.
+    }
     reconcileThemeFromStorage();
     return () => {
       unsubscribeStorage();
-      window.removeEventListener("pageshow", handlePageShow);
+      if (!pageShowListenerAttached) return;
+      try {
+        window.removeEventListener("pageshow", handlePageShow);
+      } catch {
+        // A restricted host must not make unmount fail.
+      }
     };
   }, []);
 

@@ -64,6 +64,7 @@ let volatilePreference: ThemePreference | null = null;
 // 共有する。購読者ごとにlistenerを張ると、1回の別タブ変更で同じ外部ストアを複数回
 // 再評価する(issue #1051)。
 let storageListenerUsers = 0;
+let storageListenerAttached = false;
 
 /** 現在タブの揮発設定を優先し、なければ永続値を読む。 */
 function readStoredPreference(): ThemePreference {
@@ -132,8 +133,16 @@ function onStorage(event: StorageEvent): void {
 }
 
 function acquireStorageListener(): () => void {
-  if (storageListenerUsers === 0) {
-    window.addEventListener("storage", onStorage);
+  // listener registration is progressive enhancement. Keep the logical user
+  // count independent from the host capability so a restricted window cannot
+  // prevent the theme UI from mounting or a later subscription from retrying.
+  if (!storageListenerAttached) {
+    try {
+      window.addEventListener("storage", onStorage);
+      storageListenerAttached = true;
+    } catch {
+      // Same-tab notifications still work through the store subscribers.
+    }
   }
   storageListenerUsers += 1;
 
@@ -142,8 +151,13 @@ function acquireStorageListener(): () => void {
     if (released) return;
     released = true;
     storageListenerUsers -= 1;
-    if (storageListenerUsers === 0) {
+    if (storageListenerUsers !== 0 || !storageListenerAttached) return;
+    try {
       window.removeEventListener("storage", onStorage);
+      storageListenerAttached = false;
+    } catch {
+      // Treat the listener as still attached when cleanup is rejected. This
+      // avoids registering duplicates on a host with a broken remove API.
     }
   };
 }

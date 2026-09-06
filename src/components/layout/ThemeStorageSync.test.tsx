@@ -55,6 +55,66 @@ describe("ThemeStorageSync", () => {
     ).toHaveLength(1);
   });
 
+  it("pageshow listenerの登録が失敗してもテーマ同期のmountを妨げない", () => {
+    const addEventListener = window.addEventListener.bind(window);
+    vi.spyOn(window, "addEventListener").mockImplementation(
+      (type, listener, options) => {
+        if (type === "pageshow") {
+          throw new Error("pageshow unavailable");
+        }
+        return addEventListener(type, listener, options);
+      },
+    );
+    localStorage.setItem("theme", "dark");
+
+    const { unmount } = render(<ThemeStorageSync />);
+
+    expect(document.documentElement).toHaveAttribute("data-theme", "dark");
+    expect(() => unmount()).not.toThrow();
+  });
+
+  it("storage listenerの登録失敗後も後続subscriptionで再試行できる", () => {
+    const addEventListener = window.addEventListener.bind(window);
+    let storageAttempts = 0;
+    vi.spyOn(window, "addEventListener").mockImplementation(
+      (type, listener, options) => {
+        if (type === "storage" && storageAttempts++ === 0) {
+          throw new Error("storage unavailable");
+        }
+        return addEventListener(type, listener, options);
+      },
+    );
+
+    const first = render(<ThemeStorageSync />);
+    first.unmount();
+
+    const second = render(<ThemeStorageSync />);
+    localStorage.setItem("theme", "dark");
+    window.dispatchEvent(
+      new StorageEvent("storage", { key: "theme", newValue: "dark" }),
+    );
+
+    expect(document.documentElement).toHaveAttribute("data-theme", "dark");
+    expect(storageAttempts).toBe(2);
+    second.unmount();
+  });
+
+  it("pageshow listenerの解除が失敗してもunmountを妨げない", () => {
+    const removeEventListener = window.removeEventListener.bind(window);
+    vi.spyOn(window, "removeEventListener").mockImplementation(
+      (type, listener, options) => {
+        if (type === "pageshow") {
+          throw new Error("pageshow cleanup unavailable");
+        }
+        return removeEventListener(type, listener, options);
+      },
+    );
+
+    const { unmount } = render(<ThemeStorageSync />);
+
+    expect(() => unmount()).not.toThrow();
+  });
+
   it("mount前に保存されたthemeへDOMをcatch-upする", () => {
     localStorage.setItem("theme", "dark");
 
@@ -182,5 +242,21 @@ describe("ThemeStorageSync", () => {
         screen.getByRole("radio", { name: "システム設定に従う" }),
       ).toBeChecked(),
     );
+  });
+
+  it("storage listenerの解除が失敗してもunmountを妨げない", () => {
+    const removeEventListener = window.removeEventListener.bind(window);
+    vi.spyOn(window, "removeEventListener").mockImplementation(
+      (type, listener, options) => {
+        if (type === "storage") {
+          throw new Error("storage cleanup unavailable");
+        }
+        return removeEventListener(type, listener, options);
+      },
+    );
+
+    const { unmount } = render(<ThemeStorageSync />);
+
+    expect(() => unmount()).not.toThrow();
   });
 });
