@@ -40,16 +40,7 @@ import { SOSHII_BREAKDOWN_HEADING } from "@/components/result/resultLabels";
 import SoshiiBreakdown from "@/components/result/SoshiiBreakdown";
 import { formatSignedSoshii } from "@/components/result/soshiiFormat";
 import { CHARACTER_PLAYER_IDS } from "@/domain/game/characters";
-
-/**
- * 終了日時の表示フォーマット(例: 2026/07/20 14:05)。
- * 一覧はマウント後にのみ描画されるため、SSR とのロケール差異による
- * hydration 不一致は発生しない。
- */
-const finishedAtFormat = new Intl.DateTimeFormat("ja-JP", {
-  dateStyle: "medium",
-  timeStyle: "short",
-});
+import { formatFinishedAt } from "./finishedAt";
 
 /**
  * 削除できなかった場合の案内(issue #489)。
@@ -96,7 +87,7 @@ function focusAndVerify(element: HTMLElement): boolean {
 
 /** 半荘1件の見出し+展開内訳。 */
 function HistoryItem({ entry }: { entry: MatchHistoryEntry }) {
-  const finishedAt = finishedAtFormat.format(new Date(entry.finishedAt));
+  const finishedAt = formatFinishedAt(entry.finishedAt);
   // 保存JSONは旧クライアントと同じv1形状を維持する。engineが保存してきた固定配列順
   // p0→p3から表示モデルにだけIDを付け、旧戦績にも現在の肖像を対応させる。
   const fixedPlayers = entry.players.map((player, index) => ({
