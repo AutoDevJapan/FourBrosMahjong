@@ -16,30 +16,30 @@ const TOPOLOGY_EVIDENCE_DOC = readFileSync(
 
 describe("deployment inventory evidence", () => {
   it("keeps the current main, Vercel deployment, and service-worker evidence aligned", () => {
-    expect(DEPLOYMENT_DOC).toContain("#1149 merge後、監査対象commit `5d224c1`");
+    expect(DEPLOYMENT_DOC).toContain("#1155 merge後、監査対象commit `ad5f0cf`");
     expect(DEPLOYMENT_DOC).toContain(
-      "`5d224c10564537433b23b94173f677eb453b40ad`（#1149 merge 後）",
+      "`ad5f0cf8cf657d1f7b838374811831bc87a81a99`（#1155 merge 後）",
     );
-    expect(DEPLOYMENT_DOC).toContain("GitHub deployment `6298287889`");
+    expect(DEPLOYMENT_DOC).toContain("GitHub deployment `6299204772`");
     expect(DEPLOYMENT_DOC).toContain(
-      "https://four-bros-mahjong-3qhkztdy1.vercel.app",
+      "https://four-bros-mahjong-regcj54zz.vercel.app",
     );
-    expect(DEPLOYMENT_DOC).toContain("VERSION` は `5d224c105645`");
+    expect(DEPLOYMENT_DOC).toContain("VERSION` は `ad5f0cf8cf65`");
     expect(DEPLOYMENT_DOC).toContain(
-      "CI `34061532330`、gitleaks `34061532291`、CodeQL `34061532128` がすべて `success`",
+      "CI `34066640528`、gitleaks `34066640510`、CodeQL `34066640269` がすべて `success`",
     );
   });
 
   it("keeps the #725 current-head evidence aligned with the same deployment", () => {
     expect(TOPOLOGY_EVIDENCE_DOC).toContain(
-      "`5d224c10564537433b23b94173f677eb453b40ad`（#1149 merge 後",
+      "`ad5f0cf8cf657d1f7b838374811831bc87a81a99`（#1155 merge 後",
     );
-    expect(TOPOLOGY_EVIDENCE_DOC).toContain("deployment `6298287889`");
+    expect(TOPOLOGY_EVIDENCE_DOC).toContain("deployment `6299204772`");
     expect(TOPOLOGY_EVIDENCE_DOC).toContain(
-      "https://four-bros-mahjong-3qhkztdy1.vercel.app",
+      "https://four-bros-mahjong-regcj54zz.vercel.app",
     );
-    expect(TOPOLOGY_EVIDENCE_DOC).toContain('VERSION = "5d224c105645"');
-    expect(TOPOLOGY_EVIDENCE_DOC).toContain("6 route");
+    expect(TOPOLOGY_EVIDENCE_DOC).toContain('VERSION = "ad5f0cf8cf65"');
+    expect(TOPOLOGY_EVIDENCE_DOC).toContain("36/36 pass");
   });
 
   it("keeps the unresolved #653 Railway gate explicit", () => {
@@ -53,8 +53,10 @@ describe("deployment inventory evidence", () => {
   });
 
   it("keeps the six-screen fallback smoke evidence visible", () => {
-    expect(DEPLOYMENT_DOC).toContain("合計6/6 status 200");
-    expect(DEPLOYMENT_DOC).toContain("curlでread-only HTTP確認");
+    expect(DEPLOYMENT_DOC).toContain("合計36/36 pass");
+    expect(DEPLOYMENT_DOC).toContain(
+      "local Chromiumで、認証不要のcanonical Production URLをread-only検査",
+    );
     for (const path of [
       "/",
       "/rules",
