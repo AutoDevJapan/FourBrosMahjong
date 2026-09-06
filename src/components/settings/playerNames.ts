@@ -128,7 +128,15 @@ let storageListenerAttached = false;
 
 function notifySubscribers(): void {
   cachedSnapshot = DEFAULT_NAMES;
-  for (const callback of subscribers) callback();
+  for (const callback of subscribers) {
+    try {
+      callback();
+    } catch {
+      // A consumer callback is outside this store's persistence boundary. One
+      // broken subscriber must not hide the write from the remaining consumers
+      // or make a successful save look like a storage failure.
+    }
+  }
 }
 
 /** 別タブの保存変更を、共有ストアの購読者へ一度だけ伝える。 */

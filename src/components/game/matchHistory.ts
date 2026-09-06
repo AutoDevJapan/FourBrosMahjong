@@ -556,6 +556,24 @@ let cachedHistoryView: HistoryViewSnapshot = EMPTY_HISTORY_VIEW;
 // そのmount中は何が起き、保存値を削除したかを利用者へ伝える。
 let latchedCorruptView: "corrupt-cleaned" | "corrupt-retained" | null = null;
 
+/**
+ * Notify each external-store consumer independently.
+ *
+ * React normally supplies callbacks that do not throw, but the store also has
+ * direct same-tab and cross-tab notification entry points. A consumer failure
+ * must not abort the remaining subscribers or turn a completed persistence
+ * operation into an uncaught async rejection.
+ */
+function notifySubscribers(): void {
+  for (const callback of subscribers) {
+    try {
+      callback();
+    } catch {
+      // Subscriber failures are isolated from persistence and other consumers.
+    }
+  }
+}
+
 function invalidateHistoryViewSnapshot(): void {
   cachedViewRaw = undefined;
   cachedHistoryView = EMPTY_HISTORY_VIEW;
@@ -610,7 +628,7 @@ function onStorageEvent(event: StorageEvent): void {
     invalidateHistoryViewSnapshot();
     const storage = localStorageOrNull();
     if (storage !== null) latchCleanupResult(cleanupCorruptHistory(storage));
-    for (const callback of subscribers) callback();
+    notifySubscribers();
   }
 }
 
@@ -635,7 +653,7 @@ export function notifyHistoryChanged(): void {
   // 正規APIによる外部保存・全件削除後は、一過性の破損表示も含め
   // 必ず実値を読み直す。storage eventはcleanup成否を保つ専用経路を通る。
   invalidateHistoryViewSnapshot();
-  for (const callback of subscribers) callback();
+  notifySubscribers();
 }
 
 /**
@@ -723,7 +741,7 @@ export function retryHistoryViewSnapshot(): void {
   invalidateHistoryViewSnapshot();
   const storage = localStorageOrNull();
   if (storage !== null) latchCleanupResult(cleanupCorruptHistory(storage));
-  for (const callback of subscribers) callback();
+  notifySubscribers();
 }
 
 /**
