@@ -983,4 +983,91 @@ describe("createOnlineServer lifecycle", () => {
     expect(lateSocket.terminate).toHaveBeenCalledOnce();
     expect(server.httpServer.listening).toBe(false);
   });
+
+  it("releases an upgrade that becomes stale while drain waits for handoff", async () => {
+    const token = "Q".repeat(32);
+    const server = createOnlineServer({
+      environment: {
+        ...environment(true),
+        ONLINE_OPS_REQUIRED: "true",
+        ONLINE_OPS_TOKEN: token,
+        ONLINE_SOURCE_REVISION: "f".repeat(40),
+        ONLINE_SHUTDOWN_GRACE_MS: "5000",
+        ONLINE_SOCKET_CLOSE_GRACE_MS: "1000",
+      },
+    });
+    const port = await listen(server);
+    const host = await openWebSocket(port);
+    const session = waitForMessage(host, (value) => value.type === "session");
+    host.send(JSON.stringify({ type: "create", name: "drain-handoff" }));
+    await session;
+
+    let delayedHandoff:
+      | Parameters<typeof server.websocketServer.handleUpgrade>[3]
+      | null = null;
+    server.websocketServer.handleUpgrade = (
+      _request,
+      _socket,
+      _head,
+      callback,
+    ) => {
+      delayedHandoff = callback;
+    };
+    const raw = openRawUpgrade(port);
+    const headers = { authorization: `Bearer ${token}` };
+    try {
+      for (
+        let attempt = 0;
+        attempt < 50 && delayedHandoff === null;
+        attempt += 1
+      ) {
+        await new Promise((resolve) => setImmediate(resolve));
+      }
+      if (delayedHandoff === null) {
+        throw new Error("upgrade handoff was not held");
+      }
+
+      const started = await fetch(`http://127.0.0.1:${port}/ops/drain`, {
+        method: "POST",
+        headers,
+      });
+      await expect(started.json()).resolves.toMatchObject({
+        phase: "draining",
+        aggregate: { pendingUpgrades: 1, blockingDrainRooms: 1 },
+      });
+
+      const hostClosed = once(host, "close");
+      host.send(JSON.stringify({ type: "leave" }));
+      await hostClosed;
+
+      const drained = await fetch(`http://127.0.0.1:${port}/ops/status`, {
+        headers,
+      });
+      const drainedBody = await drained.json();
+      expect(drainedBody).toMatchObject({
+        phase: "drained",
+        aggregate: { pendingUpgrades: 0, blockingDrainRooms: 0 },
+      });
+      await expect(raw.response).resolves.toContain(
+        "HTTP/1.1 503 Service Unavailable",
+      );
+
+      const lateSocket = { terminate: vi.fn() } as unknown as WebSocket;
+      if (delayedHandoff === null) {
+        throw new Error("upgrade handoff was not held");
+      }
+      (
+        delayedHandoff as unknown as (
+          websocket: WebSocket,
+          request: unknown,
+        ) => void
+      )(lateSocket, {});
+      expect(lateSocket.terminate).toHaveBeenCalledOnce();
+    } finally {
+      raw.socket.destroy();
+      await raw.closed;
+      await server.handleSignal("SIGTERM");
+      if (host.readyState !== WebSocket.CLOSED) host.terminate();
+    }
+  });
 });

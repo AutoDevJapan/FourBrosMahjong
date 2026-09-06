@@ -228,6 +228,7 @@ export function createOnlineServer(
     status: DrainControllerStatus,
   ): MaintenanceBroadcastResult {
     syncDrainTickTimer(status);
+    if (status.phase === "drained") rejectPendingUpgradesForDrain();
     if (
       !opsConfiguration.config.maintenanceNoticesEnabled ||
       status.phase === "accepting"
@@ -257,6 +258,9 @@ export function createOnlineServer(
 
   function publishDrainTransition(transition: DrainTransition): void {
     syncDrainTickTimer(transition.status);
+    if (transition.status.phase === "drained") {
+      rejectPendingUpgradesForDrain();
+    }
     if (!transition.changed || transition.status.phase === "accepting") return;
     broadcastDrainStatus(transition.status);
   }
@@ -990,6 +994,7 @@ export function createOnlineServer(
   }
 
   function rejectMaintenanceUpgrade(socket: Socket): void {
+    if (socket.destroyed || socket.writableEnded) return;
     const body = JSON.stringify({
       ok: false,
       code: "maintenance",
@@ -1012,6 +1017,14 @@ export function createOnlineServer(
       );
     } catch {
       socket.destroy();
+    }
+  }
+
+  function rejectPendingUpgradesForDrain(): void {
+    for (const [socket, source] of [...pendingUpgrades]) {
+      if (!pendingUpgrades.delete(socket)) continue;
+      abuseControls.releasePendingUpgrade(source);
+      rejectMaintenanceUpgrade(socket);
     }
   }
 
@@ -1109,7 +1122,7 @@ export function createOnlineServer(
       return;
     }
     const releaseReservation = () => {
-      if (!releasePendingUpgrade(socket, source)) return;
+      releasePendingUpgrade(socket, source);
       socket.off("close", releaseReservation);
       socket.off("error", releaseReservation);
     };
@@ -1126,6 +1139,23 @@ export function createOnlineServer(
     socket.once("error", releaseReservation);
     try {
       websocketServer.handleUpgrade(request, socket, head, (websocket) => {
+        // handleUpgrade is asynchronous. The room may have drained after the
+        // reservation was admitted but before ws completed the handshake.
+        // Re-check at this final handoff boundary so a stale reservation cannot
+        // create a new terminal-phase session.
+        let phase: DrainControllerStatus["phase"];
+        try {
+          phase = observeDrainStatus().phase;
+        } catch {
+          releaseReservation();
+          websocket.terminate();
+          return;
+        }
+        if (phase === "drained" || phase === "terminating") {
+          releaseReservation();
+          websocket.terminate();
+          return;
+        }
         if (!transferReservation()) {
           websocket.terminate();
           return;
