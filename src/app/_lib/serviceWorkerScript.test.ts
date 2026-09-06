@@ -79,6 +79,7 @@ class FakeCache {
 
 class FakeCacheStorage {
   readonly caches = new Map<string, FakeCache>();
+  matchError: Error | null = null;
 
   constructor(private readonly fetchImpl: () => typeof fetch) {}
 
@@ -100,6 +101,7 @@ class FakeCacheStorage {
   }
 
   async match(target: FakeRequest | string): Promise<Response | undefined> {
+    if (this.matchError) throw this.matchError;
     for (const cache of this.caches.values()) {
       const hit = await cache.match(target);
       if (hit) {
@@ -721,6 +723,30 @@ describe("buildServiceWorkerScript", () => {
     expect(fetchSpy).toHaveBeenCalledTimes(1);
     const response: Response = await second.respondWith.mock.calls[0][0];
     expect(await response.text()).toBe("chunk");
+  });
+
+  it("Cache Storageの読み取りが失敗しても不変アセットをネットワークから返す", async () => {
+    const sw = bootServiceWorker();
+    const fetchSpy = vi.fn(
+      async () =>
+        new Response("network-chunk", {
+          headers: { "Content-Type": "application/javascript" },
+        }),
+    );
+    sw.setFetchImpl(fetchSpy);
+    sw.cacheStorage.matchError = new DOMException(
+      "Cache Storage unavailable",
+      "SecurityError",
+    );
+
+    const event = await sw.dispatchFetch(
+      request("/_next/static/chunks/app.js"),
+    );
+    const response: Response = await event.respondWith.mock.calls[0][0];
+
+    expect(fetchSpy).toHaveBeenCalledOnce();
+    expect(response.status).toBe(200);
+    expect(await response.text()).toBe("network-chunk");
   });
 
   it("manifestの200 HTML fallbackをruntime cacheへ保存せず正常応答へ回復する(#957)", async () => {
