@@ -302,7 +302,11 @@ function putRuntimeCache(cacheKey, response) {
 // asset (and must not replace the original network error when it is offline).
 async function matchCache(cacheKey) {
   try {
-    return await self.caches.match(cacheKey);
+    const cacheStorage = self.caches;
+    if (!cacheStorage || typeof cacheStorage.match !== "function") {
+      return undefined;
+    }
+    return await cacheStorage.match(cacheKey);
   } catch {
     return undefined;
   }
