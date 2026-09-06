@@ -17,30 +17,30 @@ const TOPOLOGY_EVIDENCE_DOC = readFileSync(
 describe("deployment inventory evidence", () => {
   it("keeps the current main, Vercel deployment, and service-worker evidence aligned", () => {
     expect(DEPLOYMENT_DOC).toContain(
-      "#1033 merge後、監査対象commit `24bc1ffd`",
+      "#1035 merge後、監査対象commit `aae1083b`",
     );
     expect(DEPLOYMENT_DOC).toContain(
-      "`24bc1ffd182d8453c9ed1c8724569c2fea2fa5fa`（#1033 merge 後）",
+      "`aae1083be80e330941d6d72867a591a9fd48881f`（#1035 merge 後）",
     );
-    expect(DEPLOYMENT_DOC).toContain("GitHub deployment `6288672330`");
+    expect(DEPLOYMENT_DOC).toContain("GitHub deployment `6288917306`");
     expect(DEPLOYMENT_DOC).toContain(
-      "https://four-bros-mahjong-h3wqq8kbk.vercel.app",
+      "https://four-bros-mahjong-2wwu78o6g.vercel.app",
     );
-    expect(DEPLOYMENT_DOC).toContain("VERSION` は `24bc1ffd182d`");
+    expect(DEPLOYMENT_DOC).toContain("VERSION` は `aae1083be80e`");
     expect(DEPLOYMENT_DOC).toContain(
-      "CI `34008878348`、gitleaks `34008878392`、CodeQL `34008878517` がすべて `success`",
+      "CI `34010359025`、gitleaks `34010359024`、CodeQL `34010358641` がすべて `success`",
     );
   });
 
   it("keeps the #725 current-head evidence aligned with the same deployment", () => {
     expect(TOPOLOGY_EVIDENCE_DOC).toContain(
-      "`24bc1ffd182d8453c9ed1c8724569c2fea2fa5fa`（#1033 merge 後",
+      "`aae1083be80e330941d6d72867a591a9fd48881f`（#1035 merge 後",
     );
-    expect(TOPOLOGY_EVIDENCE_DOC).toContain("deployment `6288672330`");
+    expect(TOPOLOGY_EVIDENCE_DOC).toContain("deployment `6288917306`");
     expect(TOPOLOGY_EVIDENCE_DOC).toContain(
-      "https://four-bros-mahjong-h3wqq8kbk.vercel.app",
+      "https://four-bros-mahjong-2wwu78o6g.vercel.app",
     );
-    expect(TOPOLOGY_EVIDENCE_DOC).toContain('VERSION = "24bc1ffd182d"');
+    expect(TOPOLOGY_EVIDENCE_DOC).toContain('VERSION = "aae1083be80e"');
     expect(TOPOLOGY_EVIDENCE_DOC).toContain("6 route × 3 viewport");
   });
 
