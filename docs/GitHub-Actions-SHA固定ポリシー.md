@@ -4,7 +4,7 @@ Issue #663 の受け入れ条件に基づき、外部 Action と reusable workfl
 
 ## Latest read-only re-audit
 
-2026-09-06 13:38 JST に、`origin/main` の `HEAD=c3299460f8903e0aa7aee44317fffe86c468bd21`（#1036 merge後）を対象として、repository/org の設定と実行可能な workflow 参照を再監査しました。設定、allowlist、workflow、tag、release、dispatch、rerun は変更していません。
+2026-09-06 17:05 JST に、`origin/main` の `HEAD=c1056ed7eb0eff634ee8873a8b4ba6e429b4fae6`（#1063 merge後）を対象として、repository/org の設定と実行可能な workflow 参照を再監査しました。設定、allowlist、workflow、tag、release、dispatch、rerun は変更していません。
 
 repository の再読結果:
 
@@ -25,10 +25,22 @@ repository の再読結果:
 - `GET /repos/AutoDevJapan/FourBrosMahjong/actions/permissions/selected-actions` は HTTP 409 (`All actions and workflows are allowed on this repository`)。既存の `allowed_actions=all` を維持しており、selected-actions allowlistへの暗黙の変更はありません。
 - `GET /orgs/AutoDevJapan/actions/permissions` と `/workflow` は HTTP 403 (`admin:org` または Actions policies fine-grained permission が必要)。現在のcredentialではorganization policyのeffective scope、precedence、ownerを確定できません。
 - 5つのrepository workflowの実行可能な外部 `uses:` は20件で、20/20件が完全40桁commit SHA固定、未固定0件、local workflow/action参照0件です。Playwrightのworkflow container imageもSHA-256 digest固定です。
-- 現行mainの同一SHAに対する [CI run 34010925403](https://github.com/AutoDevJapan/FourBrosMahjong/actions/runs/34010925403)、[gitleaks run 34010925305](https://github.com/AutoDevJapan/FourBrosMahjong/actions/runs/34010925305)、[CodeQL run 34010925446](https://github.com/AutoDevJapan/FourBrosMahjong/actions/runs/34010925446) はすべてsuccessです。Production deployment [6289011805](https://github.com/AutoDevJapan/FourBrosMahjong/deployments/6289011805) も同一SHAでsuccessです。gitleaks version-checkの直近successは [run 33465805332](https://github.com/AutoDevJapan/FourBrosMahjong/actions/runs/33465805332) です。
+- 現行mainの同一SHAに対する [CI run 34020405221](https://github.com/AutoDevJapan/FourBrosMahjong/actions/runs/34020405221)、[gitleaks run 34020405198](https://github.com/AutoDevJapan/FourBrosMahjong/actions/runs/34020405198)、[CodeQL run 34020403900](https://github.com/AutoDevJapan/FourBrosMahjong/actions/runs/34020403900) はすべてsuccessです。Production deployment [6290595952](https://github.com/AutoDevJapan/FourBrosMahjong/deployments/6290595952) も同一SHAでsuccessです。gitleaks version updaterの直近successは [run 33465805332](https://github.com/AutoDevJapan/FourBrosMahjong/actions/runs/33465805332) です。
 - `v*` tag、GitHub Release、`release.yml`、`gitleaks-version-bump.yml` の実行は0件です。承認なしにsynthetic tag/releaseやworkflow dispatchを作成していません。
 
 repository-levelのSHA固定は有効で、workflow参照と通常のCI/CodeQL/gitleaksは検証済みです。#663の残りは、organization policy ownerによるeffective scope/allowlistの確認と、承認済み実Releaseでのrelease workflow証跡です。これらは現在のcredentialと通常PRの範囲では完了扱いにせず、IssueをOPEN/HOLDとして引き継ぎます。
+
+## Sanitized read-back validator
+
+外部設定のread-backは、認証済みoperatorがGitHub APIから取得した値を、secretやraw variableを含まない固定schemaへ正規化してから、repository内のoffline gateへ渡します。
+
+```sh
+cat sanitized-actions-policy.json | pnpm verify:actions:policy
+```
+
+`verify:actions:policy` はGitHub APIへ接続せず、policyの有効化、明示されたallowlist mode、repository/orgのeffective scope、完全SHA参照監査の件数、CI・CodeQL・gitleaks・updater・releaseの検証状態をfail closedで確認します。`effectiveScope: "unknown"`、未固定参照、required checkの未成功、未検証のrelease、古い証跡、未知fieldは `hold` になります。結果は固定reason codeだけを返し、入力のID・token・secret・任意文字列を反射しません。`pass`でも設定変更やrelease作成を承認せず、policy mutationは別途authorized operatorの明示操作として扱います。
+
+現在のorg-level endpointはcredential権限不足でeffective scopeを確定できないため、このgateへ `unknown` を渡した場合も正しく `hold` とし、repository-levelの `sha_pinning_required=true` だけをorg-level設定の証明として扱いません。
 
 ## Repository policy
 
