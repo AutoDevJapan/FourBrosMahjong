@@ -87,6 +87,18 @@ describe("contentSecurityPolicy", () => {
     expect(policy).toContain("connect-src 'self' ws://localhost:8080");
   });
 
+  it("開発環境では明示的に要求されてもupgrade-insecure-requestsを許可しない", () => {
+    const policy = contentSecurityPolicy(
+      "lan-dev-nonce",
+      true,
+      undefined,
+      true,
+    );
+
+    expect(policy).toContain("'unsafe-eval'");
+    expect(policy).not.toContain("upgrade-insecure-requests");
+  });
+
   it("local production smokeだけupgrade-insecure-requestsを抑止し、他のproduction制約は維持する", () => {
     const policy = contentSecurityPolicy(
       "loopback-nonce",
