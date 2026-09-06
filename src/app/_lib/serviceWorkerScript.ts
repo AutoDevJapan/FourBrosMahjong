@@ -338,7 +338,14 @@ function isHtmlDocument(response) {
 
 /** cache-first: 不変アセット用。キャッシュ済みなら network に一切出ない。 */
 async function cacheFirst(request, cacheKey) {
-  const cached = await self.caches.match(cacheKey);
+  // Cache Storage は progressive enhancement。private/embedded runtime などで
+  // 読み取り権限が無くても、cache-first のアセット取得をネットワークへ継続する。
+  let cached;
+  try {
+    cached = await self.caches.match(cacheKey);
+  } catch {
+    cached = undefined;
+  }
   if (cached) {
     return cached;
   }

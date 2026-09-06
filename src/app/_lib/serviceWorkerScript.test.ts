@@ -79,6 +79,7 @@ class FakeCache {
 
 class FakeCacheStorage {
   readonly caches = new Map<string, FakeCache>();
+  matchError: Error | null = null;
 
   constructor(private readonly fetchImpl: () => typeof fetch) {}
 
@@ -100,6 +101,7 @@ class FakeCacheStorage {
   }
 
   async match(target: FakeRequest | string): Promise<Response | undefined> {
+    if (this.matchError) throw this.matchError;
     for (const cache of this.caches.values()) {
       const hit = await cache.match(target);
       if (hit) {
@@ -721,6 +723,44 @@ describe("buildServiceWorkerScript", () => {
     expect(fetchSpy).toHaveBeenCalledTimes(1);
     const response: Response = await second.respondWith.mock.calls[0][0];
     expect(await response.text()).toBe("chunk");
+  });
+
+  it("Cache Storageの読み取り失敗時も不変アセットをネットワークから返す(#1088)", async () => {
+    const sw = bootServiceWorker();
+    const fetchSpy = vi.fn(
+      async () =>
+        new Response("network-chunk", {
+          headers: { "Content-Type": "application/javascript" },
+        }),
+    );
+    sw.cacheStorage.matchError = new DOMException(
+      "Cache Storage unavailable",
+      "SecurityError",
+    );
+    sw.setFetchImpl(fetchSpy);
+
+    const event = await sw.dispatchFetch(
+      request("/_next/static/chunks/unavailable.js"),
+    );
+    const response: Response = await event.respondWith.mock.calls[0][0];
+
+    expect(await response.text()).toBe("network-chunk");
+    expect(fetchSpy).toHaveBeenCalledOnce();
+  });
+
+  it("Cache Storageとネットワークが失敗した場合は元のネットワークエラーを返す(#1088)", async () => {
+    const sw = bootServiceWorker();
+    const cacheError = new DOMException(
+      "Cache Storage unavailable",
+      "SecurityError",
+    );
+    const networkError = new TypeError("net::ERR_INTERNET_DISCONNECTED");
+    sw.cacheStorage.matchError = cacheError;
+    sw.setFetchImpl(vi.fn<typeof fetch>().mockRejectedValue(networkError));
+
+    await expect(
+      sw.dispatchFetch(request("/_next/static/chunks/offline.js")),
+    ).rejects.toBe(networkError);
   });
 
   it("manifestの200 HTML fallbackをruntime cacheへ保存せず正常応答へ回復する(#957)", async () => {
