@@ -37,6 +37,28 @@ const SCREEN_DESTINATIONS: readonly ScreenDestination[] = [
   },
 ];
 
+const NAVIGATION_HYDRATED_ATTRIBUTE = "data-navigation-hydrated";
+
+/**
+ * The hydration marker is diagnostic/progressive-enhancement metadata only.
+ * Restricted DOM hosts may expose attribute methods that throw, so a marker
+ * failure must not interrupt the navigation component's lifecycle.
+ */
+function setNavigationHydratedMarker(
+  navigation: HTMLElement,
+  hydrated: boolean,
+): void {
+  try {
+    if (hydrated) {
+      navigation.setAttribute(NAVIGATION_HYDRATED_ATTRIBUTE, "true");
+    } else {
+      navigation.removeAttribute(NAVIGATION_HYDRATED_ATTRIBUTE);
+    }
+  } catch {
+    // Native navigation remains usable when this optional marker is unavailable.
+  }
+}
+
 export interface ScreenNavigationProps {
   /** 現在の画面自身をリンク一覧から除き、同じ場所への不要な遷移を防ぐ。 */
   readonly currentPath: string;
@@ -65,8 +87,8 @@ export default function ScreenNavigation({
   useEffect(() => {
     const navigation = navigationRef.current;
     if (!navigation) return;
-    navigation.setAttribute("data-navigation-hydrated", "true");
-    return () => navigation.removeAttribute("data-navigation-hydrated");
+    setNavigationHydratedMarker(navigation, true);
+    return () => setNavigationHydratedMarker(navigation, false);
   }, []);
 
   return (

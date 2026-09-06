@@ -1,6 +1,6 @@
 import { render, screen, within } from "@testing-library/react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import ScreenNavigation from "./ScreenNavigation";
 
 describe("ScreenNavigation", () => {
@@ -19,6 +19,46 @@ describe("ScreenNavigation", () => {
     expect(navigation).toHaveAttribute("data-navigation-hydrated", "true");
     view.unmount();
     expect(navigation).not.toHaveAttribute("data-navigation-hydrated");
+  });
+
+  it("hydration markerのsetAttribute失敗でもナビゲーションをmountできる", () => {
+    const originalSetAttribute = HTMLElement.prototype.setAttribute;
+    const setAttribute = vi
+      .spyOn(HTMLElement.prototype, "setAttribute")
+      .mockImplementation(function (this: HTMLElement, name, value) {
+        if (name === "data-navigation-hydrated") {
+          throw new Error("attribute writes are unavailable");
+        }
+        originalSetAttribute.call(this, name, value);
+      });
+
+    expect(() =>
+      render(<ScreenNavigation currentPath="/settings" />),
+    ).not.toThrow();
+    expect(
+      screen.getByRole("navigation", { name: "画面メニュー" }),
+    ).toBeInTheDocument();
+
+    setAttribute.mockRestore();
+  });
+
+  it("hydration markerのremoveAttribute失敗でもunmountできる", () => {
+    const view = render(<ScreenNavigation currentPath="/settings" />);
+    const navigation = screen.getByRole("navigation", { name: "画面メニュー" });
+    const originalRemoveAttribute = HTMLElement.prototype.removeAttribute;
+    const removeAttribute = vi
+      .spyOn(HTMLElement.prototype, "removeAttribute")
+      .mockImplementation(function (this: HTMLElement, name) {
+        if (name === "data-navigation-hydrated") {
+          throw new Error("attribute removals are unavailable");
+        }
+        originalRemoveAttribute.call(this, name);
+      });
+
+    expect(() => view.unmount()).not.toThrow();
+    expect(navigation).toHaveAttribute("data-navigation-hydrated", "true");
+
+    removeAttribute.mockRestore();
   });
 
   it("現在の画面を除く主要画面へのリンクを折りたたみ内に表示する", () => {
