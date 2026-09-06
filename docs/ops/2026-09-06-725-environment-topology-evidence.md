@@ -9,8 +9,8 @@
 
 - 初期監査対象は `2026-09-06T01:26:31+09:00` に [PR #970](https://github.com/AutoDevJapan/FourBrosMahjong/pull/970)
   が着地させた `dcc6bfb72f8c71ca69fa90e230450f9dcd863d5c` だった。その後も main の更新が続いたため、
-  `2026-09-06T08:22:30+09:00` に読み取り専用 inventory として再確認し、この文書の current-head snapshot を
-  `f3130316ea81f56fc46d302fe572a658d44abce7`（#1025 merge 後）へ更新している。
+  `2026-09-06T10:57:50+09:00` に読み取り専用 inventory として再確認し、この文書の current-head snapshot を
+  `c86f515aa10307f36efb983df075073ae418b609`（#1030 merge 後）へ更新している。
 - GitHub の `main` は保護されている。current-head に対する `CI`、`gitleaks`、`CodeQL` は
   すべて成功している。証跡目的の Actions rerun は行っていない。
 - `dev` ref は存在せず、`stg` は `e240ceb585ca676147e0b44e79c88fa0c8871cf8` のままで
@@ -23,13 +23,13 @@
 
 | 対象 | 確認結果 |
 |---|---|
-| GitHub `main` | `f3130316ea81f56fc46d302fe572a658d44abce7`（#1025 merge 後、#970 の後続） |
+| GitHub `main` | `c86f515aa10307f36efb983df075073ae418b609`（#1030 merge 後、#970 の後続） |
 | GitHub `dev` | ref が存在しない（GitHub branches API / `git ls-remote`） |
 | GitHub `stg` | `e240ceb585ca676147e0b44e79c88fa0c8871cf8`。current `main` と異なる |
 | GitHub deployment environments | `Preview` / `Production` / `staging`。API の protection/deployment branch policy は未設定として返った |
 | `main` の required checks | `gitleaks`、`lint / typecheck / format / test / build`。PR review の required count は `0` |
-| current-head CI | [CI run 33998271577](https://github.com/AutoDevJapan/FourBrosMahjong/actions/runs/33998271577)、[gitleaks run 33998271575](https://github.com/AutoDevJapan/FourBrosMahjong/actions/runs/33998271575)、[CodeQL run 33998271380](https://github.com/AutoDevJapan/FourBrosMahjong/actions/runs/33998271380) はすべて `success` |
-| GitHub Production deployment record | deployment `6286927273`、SHA/ref は current-head と一致、status `success`。Vercel bot の target URL は [`four-bros-mahjong-8vjmtdf19.vercel.app`](https://four-bros-mahjong-8vjmtdf19.vercel.app) |
+| current-head CI | [CI run 34004964561](https://github.com/AutoDevJapan/FourBrosMahjong/actions/runs/34004964561)、[gitleaks run 34004964586](https://github.com/AutoDevJapan/FourBrosMahjong/actions/runs/34004964586)、[CodeQL run 34004964676](https://github.com/AutoDevJapan/FourBrosMahjong/actions/runs/34004964676) はすべて `success` |
+| GitHub Production deployment record | deployment `6288033665`、SHA/ref は current-head と一致、status `success`。Vercel bot の target URL は [`four-bros-mahjong-dm169nwna.vercel.app`](https://four-bros-mahjong-dm169nwna.vercel.app) |
 
 GitHub deployment record と公開 alias の到達性は、Vercel の Preview SSO や Railway の
 project/service/environment identity を証明しない。deployment ID、target URL、SHA の対応は
@@ -40,7 +40,7 @@ GitHub API の読み取り結果として記録している。
 in-app Browser はこの実行コンテキストでは利用できなかった（`No browser is available`）。
 SSO を迂回する認証や cookie の取得は行わず、local Chromium/Playwright `1.62.1` から
 認証不要の canonical Production alias `https://four-bros-mahjong.vercel.app` へ、画面を変更しない
-smoke を実行した。取得時刻は `2026-09-06T08:22:30+09:00` である。
+smoke を実行した。取得時刻は `2026-09-06T10:57:50+09:00`–`10:57:59+09:00` である。
 
 各ページについて HTTP status、期待するページ固有の `<h1>`、単一 `<main>`、横 overflow、
 console error、page error を確認した。
@@ -53,7 +53,7 @@ console error、page error を確認した。
 | **合計** | **6 route × 3 viewport** | **18/18 pass** |
 
 全 18 ケースで HTTP `200`、`h1=1`、`main=1`、overflow `0`、console/page error `0` だった。
-canonical alias の `/sw.js` も `VERSION = "f3130316ea81"` を返したため、公開 alias の
+canonical alias の `/sw.js` も `VERSION = "c86f515aa103"` を返したため、公開 alias の
 asset version は current-head の短縮 SHA と一致した。
 
 これは公開 Production の限定的な技術 smoke であり、次を合格扱いにはしない。
