@@ -422,6 +422,44 @@ describe("Hand (roving tabindex listbox, spec 5.2.2)", () => {
     ).not.toBeInTheDocument();
   });
 
+  it("scrollIntoView() がthrowしてもタッチ確認を中断しない", () => {
+    const descriptor = Object.getOwnPropertyDescriptor(
+      HTMLElement.prototype,
+      "scrollIntoView",
+    );
+    Object.defineProperty(HTMLElement.prototype, "scrollIntoView", {
+      configurable: true,
+      value: () => {
+        throw new Error("scrollIntoView is unavailable");
+      },
+      writable: true,
+    });
+
+    try {
+      render(<Hand tiles={tiles} confirmTouchSelection />);
+      const first = screen.getAllByRole("option")[0];
+
+      expect(() => {
+        fireEvent.touchStart(first);
+        fireEvent.touchEnd(first);
+        fireEvent.click(first);
+      }).not.toThrow();
+      expect(
+        screen.getByRole("button", { name: "一萬で打牌を確定" }),
+      ).toBeInTheDocument();
+    } finally {
+      if (descriptor) {
+        Object.defineProperty(
+          HTMLElement.prototype,
+          "scrollIntoView",
+          descriptor,
+        );
+      } else {
+        delete (HTMLElement.prototype as Partial<HTMLElement>).scrollIntoView;
+      }
+    }
+  });
+
   it("閲覧専用化のfallback focus()がthrowしても表示更新を中断しない(#1067)", () => {
     vi.spyOn(HTMLElement.prototype, "focus").mockImplementation(() => {
       throw new Error("focus is unavailable");
