@@ -31,6 +31,30 @@ afterEach(() => {
 });
 
 describe("ThemeStorageSync", () => {
+  it("ThemeToggleと同居してもstorage listenerを1本だけ共有する", async () => {
+    const addEventListener = vi.spyOn(window, "addEventListener");
+    const removeEventListener = vi.spyOn(window, "removeEventListener");
+
+    const { unmount } = render(
+      <>
+        <ThemeStorageSync />
+        <ThemeToggle />
+      </>,
+    );
+
+    await waitFor(() =>
+      expect(
+        addEventListener.mock.calls.filter(([type]) => type === "storage"),
+      ).toHaveLength(1),
+    );
+
+    unmount();
+
+    expect(
+      removeEventListener.mock.calls.filter(([type]) => type === "storage"),
+    ).toHaveLength(1);
+  });
+
   it("mount前に保存されたthemeへDOMをcatch-upする", () => {
     localStorage.setItem("theme", "dark");
 
