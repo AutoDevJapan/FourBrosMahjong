@@ -97,11 +97,57 @@ describe("RoomShareControls (#605)", () => {
 
     const status = await screen.findByRole("status");
     expect(status).toHaveTextContent("コピーできませんでした");
-    const shareUrl = screen.getByLabelText("共有URL");
+    const shareUrl = screen.getByLabelText("共有URL") as HTMLInputElement;
     expect(shareUrl).toHaveValue("https://mahjong.example/online?room=ABC234");
 
     await user.click(screen.getByRole("button", { name: "URLを選択" }));
     expect(shareUrl).toHaveFocus();
+  });
+
+  it("keeps the manual URL fallback usable when focus throws", async () => {
+    const user = userEvent.setup();
+    setNavigatorProperty("clipboard", undefined);
+    renderControls();
+
+    await user.click(screen.getByRole("button", { name: "コードをコピー" }));
+    const shareUrl = screen.getByLabelText("共有URL");
+    vi.spyOn(shareUrl, "focus").mockImplementation(() => {
+      throw new Error("focus is unavailable");
+    });
+
+    await user.click(screen.getByRole("button", { name: "URLを選択" }));
+
+    expect(shareUrl).toBeInTheDocument();
+    expect(shareUrl).toHaveValue("https://mahjong.example/online?room=ABC234");
+  });
+
+  it("keeps the manual URL fallback usable when selection throws", async () => {
+    const user = userEvent.setup();
+    setNavigatorProperty("clipboard", undefined);
+    renderControls();
+
+    await user.click(screen.getByRole("button", { name: "コードをコピー" }));
+    const shareUrl = screen.getByLabelText("共有URL") as HTMLInputElement;
+    const originalSelect = shareUrl.select;
+    Object.defineProperty(shareUrl, "select", {
+      configurable: true,
+      value: () => {
+        throw new Error("selection is unavailable");
+      },
+    });
+
+    try {
+      await user.click(screen.getByRole("button", { name: "URLを選択" }));
+      await user.click(shareUrl);
+    } finally {
+      Object.defineProperty(shareUrl, "select", {
+        configurable: true,
+        value: originalSelect,
+      });
+    }
+
+    expect(shareUrl).toBeInTheDocument();
+    expect(shareUrl).toHaveValue("https://mahjong.example/online?room=ABC234");
   });
 
   it("announces clipboard failures and keeps the manual fallback available", async () => {

@@ -29,6 +29,29 @@ function isAbortError(error: unknown): boolean {
   );
 }
 
+/**
+ * Focus and selection are best-effort enhancements for the manual fallback.
+ * Some embedded or privacy-restricted runtimes expose these methods but throw
+ * when they are invoked, so the URL must remain usable for ordinary
+ * touch/keyboard copy and paste even when either capability is unavailable.
+ */
+function selectInputText(input: HTMLInputElement): void {
+  try {
+    input.select();
+  } catch {
+    // The read-only URL remains available for manual selection/copy.
+  }
+}
+
+function focusAndSelectInput(input: HTMLInputElement): void {
+  try {
+    input.focus();
+  } catch {
+    // Selection can still work in runtimes where focusing is restricted.
+  }
+  selectInputText(input);
+}
+
 type ShareCapability = {
   readonly navigator: Navigator;
   readonly share: Navigator["share"];
@@ -62,8 +85,7 @@ export default function RoomShareControls({
   const selectManualUrl = () => {
     const input = manualUrlInputRef.current;
     if (!input) return;
-    input.focus();
-    input.select();
+    focusAndSelectInput(input);
   };
 
   const copyRoomCode = async () => {
@@ -194,8 +216,8 @@ export default function RoomShareControls({
               type="url"
               value={shareUrl}
               readOnly
-              onFocus={(event) => event.currentTarget.select()}
-              onClick={(event) => event.currentTarget.select()}
+              onFocus={(event) => selectInputText(event.currentTarget)}
+              onClick={(event) => selectInputText(event.currentTarget)}
               className="min-h-11 min-w-0 flex-1 rounded-lg border border-control-border bg-transparent px-3 py-2 text-sm"
             />
             <button
