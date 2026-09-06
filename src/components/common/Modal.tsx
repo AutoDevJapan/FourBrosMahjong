@@ -84,6 +84,39 @@ function tryFocus(
 }
 
 /**
+ * Background isolation is an enhancement at the modal lifecycle boundary. Some
+ * embedded DOM hosts expose these members but reject writes, so one rejected
+ * capability must not skip the remaining isolation or cleanup steps (#1083).
+ */
+function trySetInert(element: HTMLElement, value: boolean): void {
+  try {
+    element.inert = value;
+  } catch {
+    // Keep the modal lifecycle reachable when the host rejects inert writes.
+  }
+}
+
+function trySetAttribute(
+  element: HTMLElement,
+  name: string,
+  value: string,
+): void {
+  try {
+    element.setAttribute(name, value);
+  } catch {
+    // Keep isolating the other background elements/capabilities.
+  }
+}
+
+function tryRemoveAttribute(element: HTMLElement, name: string): void {
+  try {
+    element.removeAttribute(name);
+  } catch {
+    // Cleanup is best effort per capability; later cleanup must still run.
+  }
+}
+
+/**
  * ダイアログ内のフォーカス可能要素を DOM 順で列挙する。
  * 実ブラウザでは CSS の `display: none` / `visibility: hidden` もフォーカス不能なので、
  * それらの祖先を含めて除外する。`getComputedStyle` はレイアウト寸法を参照しないため、
@@ -202,9 +235,9 @@ export default function Modal({
         ariaHidden: element.getAttribute("aria-hidden"),
       }));
     for (const { element } of isolated) {
-      element.inert = true;
-      element.setAttribute("inert", "");
-      element.setAttribute("aria-hidden", "true");
+      trySetInert(element, true);
+      trySetAttribute(element, "inert", "");
+      trySetAttribute(element, "aria-hidden", "true");
     }
 
     // inert を適用した後にダイアログへ初期フォーカスを移す。
@@ -232,10 +265,10 @@ export default function Modal({
       document.removeEventListener("focusin", keepFocusInside, true);
       document.removeEventListener("keydown", closeOnEscape, true);
       for (const { element, inert, inertAttribute, ariaHidden } of isolated) {
-        element.inert = inert;
-        if (!inertAttribute) element.removeAttribute("inert");
-        if (ariaHidden === null) element.removeAttribute("aria-hidden");
-        else element.setAttribute("aria-hidden", ariaHidden);
+        trySetInert(element, inert);
+        if (!inertAttribute) tryRemoveAttribute(element, "inert");
+        if (ariaHidden === null) tryRemoveAttribute(element, "aria-hidden");
+        else trySetAttribute(element, "aria-hidden", ariaHidden);
       }
       // フォーカス復帰に preventScroll は指定しない。トリガーが可視なら既定の focus() は
       // 何もスクロールしないため #371 の復元位置は保たれ、画面外のときはフォーカスリングの
