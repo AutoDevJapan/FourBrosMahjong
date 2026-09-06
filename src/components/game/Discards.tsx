@@ -108,6 +108,45 @@ export function getRiverTileLayout(
   }));
 }
 
+/**
+ * Subscribe to ResizeObserver when the capability is usable.
+ *
+ * Some embedded runtimes expose the constructor but throw while reading it,
+ * constructing an observer, or observing a DOM node. The window resize
+ * listener remains a sufficient layout fallback, so none of those failures
+ * should escape the layout effect and prevent the river from rendering.
+ */
+function observeRiverResize(
+  list: HTMLUListElement,
+  callback: ResizeObserverCallback,
+): () => void {
+  let observer: ResizeObserver | null = null;
+
+  try {
+    const ResizeObserverConstructor = globalThis.ResizeObserver;
+    if (typeof ResizeObserverConstructor !== "function") return () => {};
+
+    observer = new ResizeObserverConstructor(callback);
+    observer.observe(list);
+  } catch {
+    try {
+      observer?.disconnect();
+    } catch {
+      // A partially initialized observer is optional as well.
+    }
+    observer = null;
+  }
+
+  return () => {
+    if (observer === null) return;
+    try {
+      observer.disconnect();
+    } catch {
+      // The fallback resize listener can still be removed when cleanup fails.
+    }
+  };
+}
+
 export default function Discards({ tiles, limit }: DiscardsProps) {
   const shown =
     typeof limit === "number" && limit >= 0
@@ -157,14 +196,12 @@ export default function Discards({ tiles, limit }: DiscardsProps) {
     };
 
     updateColumnCount();
-    const observer =
-      typeof ResizeObserver === "undefined"
-        ? null
-        : new ResizeObserver(() => updateColumnCount());
-    observer?.observe(list);
+    const disconnectRiverResize = observeRiverResize(list, () =>
+      updateColumnCount(),
+    );
     window.addEventListener("resize", updateColumnCount);
     return () => {
-      observer?.disconnect();
+      disconnectRiverResize();
       window.removeEventListener("resize", updateColumnCount);
     };
   }, [limit, shown.length]);
