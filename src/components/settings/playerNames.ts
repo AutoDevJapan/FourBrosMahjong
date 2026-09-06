@@ -121,6 +121,10 @@ export function savePlayerNames(storage: Storage, names: PlayerNames): boolean {
 const subscribers = new Set<() => void>();
 // `getSnapshot` は同値なら同一参照を返す必要がある(無限再レンダー防止)。
 let cachedSnapshot: PlayerNames = DEFAULT_NAMES;
+// The listener is shared, but its browser capability is optional. Keep the
+// state separate from `subscribers` so a throwing registration does not block
+// same-tab notifications or a later registration retry.
+let storageListenerAttached = false;
 
 function notifySubscribers(): void {
   cachedSnapshot = DEFAULT_NAMES;
@@ -139,13 +143,25 @@ export function subscribePlayerNames(callback: () => void): () => void {
   subscribers.add(callback);
   // `notifySubscribers` は全購読者へ通知するため、listenerもストアごとに1本だけ
   // 登録する。購読者ごとにlistenerを持つと、同じstorage eventで通知が二重化する。
-  if (subscribers.size === 1) {
-    window.addEventListener("storage", handleStorage);
+  if (subscribers.size === 1 && !storageListenerAttached) {
+    try {
+      window.addEventListener("storage", handleStorage);
+      storageListenerAttached = true;
+    } catch {
+      // Cross-tab updates are progressive enhancement. The subscriber stays
+      // registered so same-tab save notifications still update the form.
+    }
   }
   return () => {
     subscribers.delete(callback);
-    if (subscribers.size === 0) {
+    if (subscribers.size !== 0 || !storageListenerAttached) return;
+    try {
       window.removeEventListener("storage", handleStorage);
+      storageListenerAttached = false;
+    } catch {
+      // Keep the attached state when cleanup is rejected; retrying an add
+      // is still necessary because the host may have rejected before attach.
+      storageListenerAttached = false;
     }
   };
 }

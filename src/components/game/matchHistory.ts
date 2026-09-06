@@ -518,6 +518,10 @@ export async function clearHistoryAcrossTabs(
 // ---------------------------------------------------------------------------
 
 const subscribers = new Set<() => void>();
+// Cross-tab storage events are optional. This flag prevents a failed cleanup
+// from causing duplicate listeners while still allowing registration retries
+// after a registration failure.
+let storageListenerAttached = false;
 /** 空の結果は常に同一参照で返す(`getSnapshot` の参照安定性 = 無限再描画の防止)。 */
 const EMPTY_HISTORY: readonly MatchHistoryEntry[] = Object.freeze([]);
 /** 直近に解析した保存文字列と、その解析結果(同値なら同一参照を返すためのキャッシュ)。 */
@@ -647,19 +651,30 @@ export function notifyHistoryChanged(): void {
 export function subscribeHistory(callback: () => void): () => void {
   // `storage` リスナはモジュールで1本だけ張り、購読者数の 0↔1 の境界で着脱する。
   // 購読者ごとに張ると、イベント1回で購読者数の二乗回だけ callback が走る。
-  if (subscribers.size === 0) {
-    window.addEventListener("storage", onStorageEvent);
+  if (subscribers.size === 0 && !storageListenerAttached) {
+    try {
+      window.addEventListener("storage", onStorageEvent);
+      storageListenerAttached = true;
+    } catch {
+      // Cross-tab updates are optional; keep the callback for same-tab writes.
+    }
   }
   subscribers.add(callback);
   const storage = localStorageOrNull();
   if (storage !== null) latchCleanupResult(cleanupCorruptHistory(storage));
   return () => {
     subscribers.delete(callback);
-    if (subscribers.size === 0) {
+    if (subscribers.size !== 0 || !storageListenerAttached) return;
+    try {
       window.removeEventListener("storage", onStorageEvent);
-      // 破損通知は通常unmountで消さない。React Strict Modeのsetup→cleanup→setupで
-      // cleanup済みkeyしか見えなくなっても、明示的な再読込み/外部更新まで保つ。
+      storageListenerAttached = false;
+    } catch {
+      // Keep the attached state when cleanup is rejected; another add could
+      // still be needed when the host rejected before attaching the listener.
+      storageListenerAttached = false;
     }
+    // 破損通知は通常unmountで消さない。React Strict Modeのsetup→cleanup→setupで
+    // cleanup済みkeyしか見えなくなっても、明示的な再読込み/外部更新まで保つ。
   };
 }
 
