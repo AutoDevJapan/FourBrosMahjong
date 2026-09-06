@@ -78,6 +78,39 @@ export function validateReleaseTagRuleset(input) {
   if (!Array.isArray(rules)) {
     throw new Error("ruleset rules are missing");
   }
+  const updateRule = rules.find(
+    (rule) =>
+      rule !== null &&
+      typeof rule === "object" &&
+      /** @type {Record<string, unknown>} */ (rule).type === "update",
+  );
+  if (updateRule !== undefined) {
+    const parameters = /** @type {Record<string, unknown>} */ (updateRule)
+      .parameters;
+    if (parameters !== undefined) {
+      if (
+        parameters === null ||
+        typeof parameters !== "object" ||
+        Array.isArray(parameters)
+      ) {
+        throw new Error("update rule parameters must be a JSON object");
+      }
+      const updateParameters = /** @type {Record<string, unknown>} */ (
+        parameters
+      );
+      // GitHub may omit this tag-rule parameter in a detail response, but an
+      // explicit true would allow a fast-forward update. Preserve the
+      // omission-compatible contract while rejecting a mutable response.
+      if (
+        Object.hasOwn(updateParameters, "update_allows_fetch_and_merge") &&
+        updateParameters.update_allows_fetch_and_merge !== false
+      ) {
+        throw new Error(
+          "update rule must not allow fetch-and-merge tag updates",
+        );
+      }
+    }
+  }
   const ruleTypes = rules.map((rule) => {
     if (!rule || typeof rule !== "object") return undefined;
     return /** @type {Record<string, unknown>} */ (rule).type;

@@ -36,6 +36,25 @@ describe("release tag ruleset validator (#508)", () => {
     });
   });
 
+  it("accepts the explicit false update parameter used by the create API", () => {
+    expect(
+      validateReleaseTagRuleset({
+        ...ruleset,
+        rules: [
+          {
+            type: "update",
+            parameters: { update_allows_fetch_and_merge: false },
+          },
+          { type: "deletion" },
+          { type: "non_fast_forward" },
+        ],
+      }),
+    ).toMatchObject({
+      id: 42,
+      ruleTypes: ["deletion", "non_fast_forward", "update"],
+    });
+  });
+
   it.each([
     ["wrong target", { target: "branch" }],
     ["disabled enforcement", { enforcement: "disabled" }],
@@ -62,6 +81,29 @@ describe("release tag ruleset validator (#508)", () => {
     ],
     ["missing bypass visibility", { current_user_can_bypass: undefined }],
     ["inherited ruleset", { source_type: "Organization" }],
+    [
+      "fast-forward update permission",
+      {
+        rules: [
+          {
+            type: "update",
+            parameters: { update_allows_fetch_and_merge: true },
+          },
+          { type: "deletion" },
+          { type: "non_fast_forward" },
+        ],
+      },
+    ],
+    [
+      "malformed update parameters",
+      {
+        rules: [
+          { type: "update", parameters: "false" },
+          { type: "deletion" },
+          { type: "non_fast_forward" },
+        ],
+      },
+    ],
   ])("rejects %s", (_label, change) => {
     expect(() =>
       validateReleaseTagRuleset({
