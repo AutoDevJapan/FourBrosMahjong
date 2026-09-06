@@ -4,7 +4,7 @@ Issue #663 の受け入れ条件に基づき、外部 Action と reusable workfl
 
 ## Latest read-only re-audit
 
-2026-09-06 10:48 JST に、`origin/main` の `HEAD=6121101f8bd01cc3472c1a5d2cb578dc53621da5` を対象として、repository/org の設定と実行可能な workflow 参照を再監査しました。設定、allowlist、workflow、tag、release、dispatch、rerun は変更していません。
+2026-09-06 12:00 JST に、`origin/main` の `HEAD=2c391abc123aae8e27b12793e2e949a9e65382f5`（#1032 merge後）を対象として、repository/org の設定と実行可能な workflow 参照を再監査しました。設定、allowlist、workflow、tag、release、dispatch、rerun は変更していません。
 
 repository の再読結果:
 
@@ -25,7 +25,7 @@ repository の再読結果:
 - `GET /repos/AutoDevJapan/FourBrosMahjong/actions/permissions/selected-actions` は HTTP 409 (`All actions and workflows are allowed on this repository`)。既存の `allowed_actions=all` を維持しており、selected-actions allowlistへの暗黙の変更はありません。
 - `GET /orgs/AutoDevJapan/actions/permissions` と `/workflow` は HTTP 403 (`admin:org` または Actions policies fine-grained permission が必要)。現在のcredentialではorganization policyのeffective scope、precedence、ownerを確定できません。
 - 5つのrepository workflowの実行可能な外部 `uses:` は20件で、20/20件が完全40桁commit SHA固定、未固定0件、local workflow/action参照0件です。Playwrightのworkflow container imageもSHA-256 digest固定です。
-- 現行mainの同一SHAに対する [CI run 34004639319](https://github.com/AutoDevJapan/FourBrosMahjong/actions/runs/34004639319)、[gitleaks run 34004639348](https://github.com/AutoDevJapan/FourBrosMahjong/actions/runs/34004639348)、[CodeQL run 34004638819](https://github.com/AutoDevJapan/FourBrosMahjong/actions/runs/34004638819) はすべてsuccessです。gitleaks version-checkの直近successは [run 33465805332](https://github.com/AutoDevJapan/FourBrosMahjong/actions/runs/33465805332) です。
+- 現行mainの同一SHAに対する [CI run 34007456095](https://github.com/AutoDevJapan/FourBrosMahjong/actions/runs/34007456095)、[gitleaks run 34007456117](https://github.com/AutoDevJapan/FourBrosMahjong/actions/runs/34007456117)、[CodeQL run 34007455862](https://github.com/AutoDevJapan/FourBrosMahjong/actions/runs/34007455862) はすべてsuccessです。Production deployment [6288439500](https://github.com/AutoDevJapan/FourBrosMahjong/deployments/6288439500) も同一SHAでsuccessです。gitleaks version-checkの直近successは [run 33465805332](https://github.com/AutoDevJapan/FourBrosMahjong/actions/runs/33465805332) です。
 - `v*` tag、GitHub Release、`release.yml`、`gitleaks-version-bump.yml` の実行は0件です。承認なしにsynthetic tag/releaseやworkflow dispatchを作成していません。
 
 repository-levelのSHA固定は有効で、workflow参照と通常のCI/CodeQL/gitleaksは検証済みです。#663の残りは、organization policy ownerによるeffective scope/allowlistの確認と、承認済み実Releaseでのrelease workflow証跡です。これらは現在のcredentialと通常PRの範囲では完了扱いにせず、IssueをOPEN/HOLDとして引き継ぎます。
