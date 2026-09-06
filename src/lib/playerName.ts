@@ -129,14 +129,35 @@ function fallbackGraphemes(value: string): string[] {
   return result;
 }
 
+type SegmenterLike = {
+  segment: (value: string) => Iterable<{ readonly segment: string }>;
+};
+
+type SegmenterConstructor = new (
+  locales?: string | string[],
+  options?: { readonly granularity?: "grapheme" | "word" | "sentence" },
+) => SegmenterLike;
+
+/** Intl.Segmenter is optional and may be exposed by a host that rejects use. */
+function intlGraphemes(value: string): string[] | null {
+  try {
+    const intl = typeof Intl === "undefined" ? undefined : Intl;
+    const Segmenter = (intl as { Segmenter?: SegmenterConstructor } | undefined)
+      ?.Segmenter;
+    if (typeof Segmenter !== "function") return null;
+
+    const segmenter = new Segmenter("ja", { granularity: "grapheme" });
+    return [...segmenter.segment(value)].map(({ segment }) => segment);
+  } catch {
+    // A restricted host can reject the getter, constructor, or segment call.
+    return null;
+  }
+}
+
 /** ユーザーが認識する書記素クラスタへ分割する。 */
 export function playerNameGraphemes(value: string): string[] {
   const wellFormed = toWellFormed(value);
-  if (typeof Intl.Segmenter === "function") {
-    const segmenter = new Intl.Segmenter("ja", { granularity: "grapheme" });
-    return [...segmenter.segment(wellFormed)].map(({ segment }) => segment);
-  }
-  return fallbackGraphemes(wellFormed);
+  return intlGraphemes(wellFormed) ?? fallbackGraphemes(wellFormed);
 }
 
 /**
