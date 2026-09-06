@@ -422,6 +422,36 @@ describe("Hand (roving tabindex listbox, spec 5.2.2)", () => {
     ).not.toBeInTheDocument();
   });
 
+  it("タッチ選択解除時のaria-disabled参照がthrowしてもフォーカス復帰を中断しない", () => {
+    render(<Hand tiles={tiles} confirmTouchSelection />);
+    const first = screen.getAllByRole("option")[0];
+
+    fireEvent.touchStart(first);
+    fireEvent.touchEnd(first);
+    fireEvent.click(first);
+
+    const originalGetAttribute = HTMLElement.prototype.getAttribute;
+    const throwingLookup = vi.fn();
+    vi.spyOn(HTMLElement.prototype, "getAttribute").mockImplementation(
+      function (this: HTMLElement, name) {
+        if (name === "aria-disabled" && this.tagName === "LI") {
+          throwingLookup();
+          throw new Error("aria-disabled is unavailable");
+        }
+        return originalGetAttribute.call(this, name);
+      },
+    );
+
+    expect(() =>
+      fireEvent.click(screen.getByRole("button", { name: "選択を解除" })),
+    ).not.toThrow();
+    const restoredOption =
+      document.querySelector<HTMLLIElement>('li[role="option"]');
+    expect(throwingLookup).toHaveBeenCalledOnce();
+    expect(restoredOption).not.toBeNull();
+    expect(restoredOption).toHaveFocus();
+  });
+
   it("scrollIntoView() がthrowしてもタッチ確認を中断しない", () => {
     const descriptor = Object.getOwnPropertyDescriptor(
       HTMLElement.prototype,
