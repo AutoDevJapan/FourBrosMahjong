@@ -78,9 +78,34 @@ function readStoredPreference(): ThemePreference {
   return volatilePreference ?? "system";
 }
 
+/**
+ * `matchMedia` は古いWebViewやプライバシー制限された埋め込み環境では未実装、
+ * あるいはプロパティ取得・呼び出し時に例外を投げることがある。テーマ設定は
+ * OS判定なしでも利用できるため、能力境界の外側へ例外を漏らさずnullへ畳み込む。
+ */
+function getThemeMediaQuery(): MediaQueryList | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const matchMedia = window.matchMedia;
+    if (typeof matchMedia !== "function") return null;
+    return matchMedia.call(window, MEDIA_QUERY);
+  } catch {
+    return null;
+  }
+}
+
+/** 利用できないOS判定はライト相当として扱い、設定UI自体は継続して表示する。 */
+function readSystemPrefersDark(): boolean {
+  try {
+    return getThemeMediaQuery()?.matches === true;
+  } catch {
+    return false;
+  }
+}
+
 function getClientSnapshot(): ThemeSnapshot {
   const preference = readStoredPreference();
-  const systemPrefersDark = window.matchMedia(MEDIA_QUERY).matches;
+  const systemPrefersDark = readSystemPrefersDark();
   if (
     cachedSnapshot &&
     cachedSnapshot.preference === preference &&
@@ -112,7 +137,7 @@ function writeThemeToDom(preference: ThemePreference): void {
  */
 function subscribe(callback: () => void): () => void {
   subscribers.add(callback);
-  const media = window.matchMedia(MEDIA_QUERY);
+  const media = getThemeMediaQuery();
   const onMediaChange = () => {
     cachedSnapshot = null;
     callback();
@@ -126,11 +151,48 @@ function subscribe(callback: () => void): () => void {
       callback();
     }
   };
-  media.addEventListener("change", onMediaChange);
+  // 現行APIを優先し、古いWebViewのaddListenerにも対応する。どちらも利用
+  // できない場合はOS変更の購読だけを諦め、手動設定・storage同期は維持する。
+  let unsubscribeMedia = () => {};
+  let mediaSubscribed = false;
+  if (media !== null) {
+    try {
+      if (typeof media.addEventListener === "function") {
+        media.addEventListener("change", onMediaChange);
+        mediaSubscribed = true;
+        unsubscribeMedia = () => {
+          try {
+            media.removeEventListener("change", onMediaChange);
+          } catch {
+            // MediaQueryListが破棄済みでもstorage同期は継続する。
+          }
+        };
+      }
+    } catch {
+      // 非標準実装ではgetter/購読処理自体が失敗することがある。
+    }
+    if (!mediaSubscribed) {
+      try {
+        if (typeof media.addListener === "function") {
+          media.addListener(onMediaChange);
+          mediaSubscribed = true;
+          unsubscribeMedia = () => {
+            try {
+              media.removeListener(onMediaChange);
+            } catch {
+              // MediaQueryListが破棄済みでもstorage同期は継続する。
+            }
+          };
+        }
+      } catch {
+        // OS変更の購読だけを諦め、テーマ設定は利用可能なままにする。
+      }
+    }
+  }
   window.addEventListener("storage", onStorage);
   return () => {
     subscribers.delete(callback);
-    media.removeEventListener("change", onMediaChange);
+    unsubscribeMedia();
     window.removeEventListener("storage", onStorage);
   };
 }

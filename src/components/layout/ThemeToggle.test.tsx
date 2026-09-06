@@ -20,7 +20,21 @@ function stubMatchMedia(prefersDark: boolean) {
   }));
 }
 
+const initialMatchMediaDescriptor = Object.getOwnPropertyDescriptor(
+  window,
+  "matchMedia",
+);
+
+function restoreInitialMatchMedia() {
+  if (initialMatchMediaDescriptor) {
+    Object.defineProperty(window, "matchMedia", initialMatchMediaDescriptor);
+  } else {
+    Reflect.deleteProperty(window, "matchMedia");
+  }
+}
+
 beforeEach(() => {
+  restoreInitialMatchMedia();
   stubMatchMedia(false);
   localStorage.clear();
   document.documentElement.removeAttribute("data-theme");
@@ -28,6 +42,7 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.restoreAllMocks();
+  restoreInitialMatchMedia();
   localStorage.clear();
   document.documentElement.removeAttribute("data-theme");
 });
@@ -132,6 +147,63 @@ describe("ThemeToggle", () => {
     expect(status).toHaveTextContent("システム設定に追従中");
     // 未選択なので data-theme は付与されない。
     expect(document.documentElement.hasAttribute("data-theme")).toBe(false);
+  });
+
+  it("matchMediaが未実装でもテーマ設定を利用できる", async () => {
+    Object.defineProperty(window, "matchMedia", {
+      configurable: true,
+      writable: true,
+      value: undefined,
+    });
+
+    render(<ThemeToggle />);
+
+    expect(
+      await screen.findByRole("radio", { name: "システム設定に従う" }),
+    ).toBeChecked();
+    expect(screen.getByText(/現在の表示:/)).toHaveTextContent(
+      "ライト(システム設定に追従中)",
+    );
+
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("radio", { name: "ダーク" }));
+    expect(document.documentElement).toHaveAttribute("data-theme", "dark");
+  });
+
+  it("matchMediaの呼び出しが例外でもテーマ設定を利用できる", async () => {
+    Object.defineProperty(window, "matchMedia", {
+      configurable: true,
+      writable: true,
+      value: vi.fn(() => {
+        throw new DOMException("SecurityError");
+      }),
+    });
+
+    render(<ThemeToggle />);
+
+    expect(
+      await screen.findByRole("radio", { name: "システム設定に従う" }),
+    ).toBeChecked();
+    expect(screen.getByText(/現在の表示:/)).toHaveTextContent(
+      "ライト(システム設定に追従中)",
+    );
+  });
+
+  it("MediaQueryListに購読APIがなくても設定画面を壊さない", async () => {
+    Object.defineProperty(window, "matchMedia", {
+      configurable: true,
+      writable: true,
+      value: vi.fn(() => ({
+        matches: false,
+        media: "(prefers-color-scheme: dark)",
+      })),
+    });
+
+    render(<ThemeToggle />);
+
+    expect(
+      await screen.findByRole("radio", { name: "システム設定に従う" }),
+    ).toBeChecked();
   });
 
   it("localStorageへの保存失敗時も現在タブの選択と表示を一致させる", async () => {
