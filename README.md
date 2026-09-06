@@ -101,7 +101,7 @@ it("renders", () => {
 
 `playwright.config.ts` は `./e2e` 配下のスペックを対象に、`webServer` で E2E 専用の開発サーバを自動起動します。既定の URL は `http://127.0.0.1:3100` で、通常の開発サーバ(`http://localhost:3000`)とは分離されています。
 
-起動ポートとブラウザの接続先は、単一の環境変数 `E2E_PORT` から設定されます。並列作業などで変更する場合は `E2E_PORT=3200 pnpm test:e2e` のように実行してください。既存サーバはローカル・CI とも再利用しません。指定ポートが使用中の場合は、別アプリに対してテストを続行せず、サーバ起動エラーとしてテスト開始前に停止します。
+起動ポートとブラウザの接続先は、単一の環境変数 `E2E_PORT` から設定されます。並列作業などで変更する場合は `E2E_PORT=3200 pnpm test:e2e` のように実行してください。既存サーバはローカル・CI とも再利用しません。指定ポートが使用中の場合は、別アプリに対してテストを続行せず、サーバ起動エラーとしてテスト開始前に停止します。localのworker数は `playwright.config.ts` で2に固定し、マシン依存の既定worker数によるNext dev serverとの競合を避けます。CIはrunnerの実コア数に合わせて `100%` を使用します。
 
 ### ブラウザバイナリのインストール(初回のみ)
 
@@ -142,6 +142,7 @@ pnpm test:e2e:ui    # Playwright UI モード(対話的にテストを選択・�
 - CI の `ci` job では production E2E 用の Chromium と pnpm store をキャッシュします。通常の `E2E (Playwright)` job は Chromium/WebKit とOS依存を含むバージョン固定のPlaywrightイメージを使うため、毎回の `playwright install --with-deps` やE2E専用ブラウザcacheはありません。検証済みmain pushのE2Eは重複検証とsetupを省略し、共有cacheのseedは `ci` job だけが行います。
 - **キャッシュの保存は `main` の `ci` job に限定しています**([#380](https://github.com/AutoDevJapan/FourBrosMahjong/issues/380))。GitHub Actions のキャッシュ予算はリポジトリあたり 10GB・超過分は LRU で退避されるうえ、キャッシュは ref スコープなので、PR ref (`refs/pull/N/merge`) でも保存すると同一内容が ref の数だけ複製されて予算が数日で一巡し、「保存するが復元前に消える」恒常ミス状態になります。既定ブランチの `ci` cacheは全ブランチ・全 PR から復元できるため、保存をmainに限定してもヒット率は落ちません。PR / dev / stg の `ci` jobは `actions/cache/restore` による復元専用です。E2E jobは固定Playwrightイメージを使いブラウザcacheを持ちません。この不変条件は `src/test/ci-workflow.test.ts` が回帰テストとして固定しています。
 - `playwright.config.ts` は `retries: process.env.CI ? 2 : 0` としており、CI 環境(`CI=true`)でのみ失敗テストを自動リトライします。
+- localのE2E全体は2 workerで実行し、CIのworker設定は変更しません。localでworker上限を一時的に変えて切り分ける場合だけ、`pnpm exec playwright test --workers=1` のようにCLI引数で上書きできます。検証対象の通常コマンドは `pnpm test:e2e` です。
 - E2E テストは lint/typecheck 等と比べて不安定化(flaky)しやすいため、現時点ではブランチ保護の必須ステータスチェックには含めていません(結果は PR 上で可視化されます。必要になれば別途判断して追加します)。
 
 ## ドキュメント

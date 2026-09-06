@@ -1809,8 +1809,8 @@ describe("テスト入力資産をdocs-onlyで黙殺しない (#745)", () => {
 
 /**
  * Playwright 既定の `"50%"` は 2 コア runner で 1 worker = 完全な直列実行になる。
- * これは「遅いだけで緑」なので、設定が戻っても誰も気づけない。CI 実測で
- * 266s → 243s (1.09 倍) の改善があるため、明示指定が消えないよう固定する (#491)。
+ * CI の実測改善を維持しつつ、localのマシン依存な既定値がNext dev serverとの競合で
+ * timeoutを起こさないよう、CI/local双方のworker契約を明示して固定する (#491, #1026)。
  */
 describe("CI での Playwright 並列度 (#491)", () => {
   /** `CI` の有無で設定が変わるため、環境変数を差し替えて評価し直す。 */
@@ -1845,12 +1845,12 @@ describe("CI での Playwright 並列度 (#491)", () => {
     }
   });
 
-  it("ローカルでは Playwright の既定に委ねる", async () => {
+  it("ローカルでは2 workerに上限を固定する", async () => {
     const config = await configWith(undefined);
     expect(
       config.workers,
-      "ローカルはマシンによってコア数が異なるため、既定 (50%) に任せる",
-    ).toBeUndefined();
+      "ローカルのworker数をマシン依存の既定値に任せるとE2E専用dev serverと競合する",
+    ).toBe(2);
   });
 
   it("並列前提の fullyParallel が維持されている", () => {
