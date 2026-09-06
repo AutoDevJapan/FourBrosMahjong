@@ -875,7 +875,9 @@ export async function probeUpgrade(
       settle({ statusCode });
     });
     upgradeRequest.once("error", (error) => {
-      settle({ statusCode: null, error: errorMessage(error) });
+      // Probe evidence can be attached to an issue. Keep transport failures
+      // code-only so arbitrary Error.message values cannot leak into it.
+      settle({ statusCode: null, error: requestErrorCode(error) });
     });
     upgradeRequest.end();
   });
