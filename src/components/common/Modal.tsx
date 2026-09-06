@@ -175,12 +175,18 @@ function isUnavailableForFocus(element: HTMLElement): boolean {
     current;
     current = current.parentElement
   ) {
-    if (
-      current.hidden ||
-      current.inert ||
-      current.getAttribute("aria-hidden") === "true"
-    ) {
-      return true;
+    try {
+      if (
+        current.hidden ||
+        current.inert ||
+        current.getAttribute("aria-hidden") === "true"
+      ) {
+        return true;
+      }
+    } catch {
+      // Visibility/interaction markers are optional capabilities. If a
+      // restricted host rejects one read, let native focusability and the
+      // remaining CSSOM checks decide whether the element is usable.
     }
 
     try {
