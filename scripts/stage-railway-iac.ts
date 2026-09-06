@@ -103,12 +103,13 @@ function hasRailwayIacDefinition(source: string): boolean {
       statement.importClause?.namedBindings !== undefined &&
       ts.isNamedImports(statement.importClause.namedBindings)
     ) {
-      importsDefineRailway = statement.importClause.namedBindings.elements.some(
-        (element) =>
-          !element.isTypeOnly &&
-          element.propertyName === undefined &&
-          element.name.text === "defineRailway",
-      );
+      importsDefineRailway ||=
+        statement.importClause.namedBindings.elements.some(
+          (element) =>
+            !element.isTypeOnly &&
+            element.propertyName === undefined &&
+            element.name.text === "defineRailway",
+        );
     }
     visit(statement);
   }

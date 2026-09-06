@@ -170,6 +170,24 @@ describe("stageRailwayIacSource", () => {
     ).toEqual({ ok: false, reason: "source-is-not-railway-iac" });
   });
 
+  it("accepts defineRailway when railway imports are split across declarations", () => {
+    const repository = createRepository();
+    const source = createSource(`
+import { defineRailway } from "railway/iac";
+import { preserve, project, service } from "railway/iac";
+const web = service("online", { env: { ONLINE_OPS_TOKEN: preserve() } });
+export default defineRailway(() => project("four-bros", { resources: [web] }));
+`);
+
+    const result = stageRailwayIacSource({
+      sourcePath: source.path,
+      repositoryRoot: repository,
+      write: false,
+    });
+
+    expect(result).toMatchObject({ ok: true, mode: "validated" });
+  });
+
   it("rejects symlinked or oversized sources before parsing", () => {
     const repository = createRepository();
     const source = createSource();
