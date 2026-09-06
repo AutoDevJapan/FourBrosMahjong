@@ -84,6 +84,19 @@ function tryFocus(
 }
 
 /**
+ * `activeElement` is an optional observation capability. Restricted document
+ * hosts can expose the property but reject reads, so a failure must not abort
+ * modal setup, cleanup, or keyboard handling.
+ */
+function activeElementOrNull(): Element | null {
+  try {
+    return document.activeElement;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Background isolation is an enhancement at the modal lifecycle boundary. Some
  * embedded DOM hosts expose these members but reject writes, so one rejected
  * capability must not skip the remaining isolation or cleanup steps (#1083).
@@ -218,7 +231,7 @@ export default function Modal({
   // inert にすると、GameBoard の兄弟（ページヘッダー等）が操作可能なまま残るため、
   // body 直下に portal された overlay 以外を対象にする。既存属性は閉じる際に正確に戻す。
   useEffect(() => {
-    const previouslyFocused = document.activeElement as HTMLElement | null;
+    const previouslyFocused = activeElementOrNull() as HTMLElement | null;
     const overlay = overlayRef.current;
     const dialog = dialogRef.current;
     if (!overlay || !dialog) return;
@@ -319,7 +332,7 @@ export default function Modal({
       }
       const first = focusable[0];
       const last = focusable[focusable.length - 1];
-      const active = document.activeElement;
+      const active = activeElementOrNull();
       if (event.shiftKey) {
         if (active === first || active === dialog) {
           event.preventDefault();

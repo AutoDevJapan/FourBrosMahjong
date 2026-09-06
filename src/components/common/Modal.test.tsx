@@ -10,6 +10,51 @@ afterEach(() => {
 });
 
 describe("Modal (spec 5.2.2 dialog / focus trap / Escape)", () => {
+  it("activeElementの読み取りがthrowしてもeffectとTab操作を継続する", () => {
+    const originalDescriptor = Object.getOwnPropertyDescriptor(
+      document,
+      "activeElement",
+    );
+    Object.defineProperty(document, "activeElement", {
+      configurable: true,
+      get() {
+        throw new Error("activeElement is unavailable");
+      },
+    });
+
+    try {
+      const onClose = vi.fn();
+      const { unmount } = render(
+        <>
+          <div data-testid="background-root">背景</div>
+          <Modal title="全体盤面" onClose={onClose}>
+            <button type="button">中身</button>
+          </Modal>
+        </>,
+      );
+      const dialog = screen.getByRole("dialog", { name: "全体盤面" });
+      const backgroundContainer =
+        screen.getByTestId("background-root").parentElement;
+
+      expect(dialog).toBeInTheDocument();
+      expect(backgroundContainer).toHaveAttribute("inert");
+      expect(() => fireEvent.keyDown(dialog, { key: "Tab" })).not.toThrow();
+      expect(() =>
+        fireEvent.keyDown(document, { key: "Escape" }),
+      ).not.toThrow();
+      expect(onClose).toHaveBeenCalledTimes(1);
+      expect(() => unmount()).not.toThrow();
+      expect(backgroundContainer).not.toHaveAttribute("inert");
+      expect(backgroundContainer).not.toHaveAttribute("aria-hidden");
+    } finally {
+      if (originalDescriptor) {
+        Object.defineProperty(document, "activeElement", originalDescriptor);
+      } else {
+        Reflect.deleteProperty(document, "activeElement");
+      }
+    }
+  });
+
   it("公開: role=dialog + aria-modal + 見出しでラベル付けされる", () => {
     render(
       <Modal title="全体盤面" onClose={vi.fn()}>
