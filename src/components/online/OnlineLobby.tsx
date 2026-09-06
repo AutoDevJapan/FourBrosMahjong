@@ -66,7 +66,6 @@ const MAX_AUTOMATIC_RECONNECT_ATTEMPTS = 5;
 export const MAX_ONLINE_CREDENTIALS_BYTES = 4 * 1024;
 /** Drop untrusted server frames before synchronous JSON.parse can see them. */
 export const MAX_ONLINE_SERVER_MESSAGE_BYTES = 64 * 1024;
-const ONLINE_SERVER_MESSAGE_ENCODER = new TextEncoder();
 const ONLINE_SERVER_MESSAGE_BYTE_BUFFER = new Uint8Array(
   MAX_ONLINE_SERVER_MESSAGE_BYTES + 1,
 );
@@ -101,19 +100,78 @@ interface ErrorFeedback {
   readonly message: string;
 }
 
+type OnlineTextEncoder = {
+  readonly encodeInto?: (
+    input: string,
+    destination: Uint8Array,
+  ) => { read: number; written: number };
+};
+type OnlineTextEncoderConstructor = new () => OnlineTextEncoder;
+
+/**
+ * Count UTF-8 bytes without allocating a buffer proportional to the input.
+ * Lone surrogates match TextEncoder's replacement-character behavior.
+ */
+function isUtf8WithinByteLimit(value: string, limit: number): boolean {
+  let byteLength = 0;
+  for (let index = 0; index < value.length; index += 1) {
+    const codeUnit = value.charCodeAt(index);
+    if (codeUnit <= 0x7f) {
+      byteLength += 1;
+    } else if (codeUnit <= 0x7ff) {
+      byteLength += 2;
+    } else if (codeUnit >= 0xd800 && codeUnit <= 0xdbff) {
+      const nextCodeUnit = value.charCodeAt(index + 1);
+      if (nextCodeUnit >= 0xdc00 && nextCodeUnit <= 0xdfff) {
+        byteLength += 4;
+        index += 1;
+      } else {
+        byteLength += 3;
+      }
+    } else {
+      byteLength += 3;
+    }
+
+    if (byteLength > limit) return false;
+  }
+  return true;
+}
+
+function tryNativeOnlineServerMessageCheck(value: string): boolean | null {
+  try {
+    const TextEncoderConstructor = (
+      globalThis as unknown as {
+        TextEncoder?: OnlineTextEncoderConstructor;
+      }
+    ).TextEncoder;
+    if (typeof TextEncoderConstructor !== "function") return null;
+
+    const encoder = new TextEncoderConstructor();
+    if (typeof encoder.encodeInto !== "function") return null;
+    const { read, written } = encoder.encodeInto(
+      value,
+      ONLINE_SERVER_MESSAGE_BYTE_BUFFER,
+    );
+    return read === value.length && written <= MAX_ONLINE_SERVER_MESSAGE_BYTES;
+  } catch {
+    return null;
+  }
+}
+
 /**
  * Check the WebSocket text boundary without allocating a buffer proportional
  * to attacker-controlled input. `encodeInto` writes into one fixed-size
- * buffer, and non-text frames are not part of the JSON protocol.
+ * buffer when available; the fallback counts UTF-8 bytes directly. Capability
+ * checks stay inside the receive boundary because some runtimes expose a
+ * missing or throwing TextEncoder implementation.
  */
 function isBoundedOnlineServerMessage(value: unknown): value is string {
   if (typeof value !== "string") return false;
   if (value.length > MAX_ONLINE_SERVER_MESSAGE_BYTES) return false;
-  const { read, written } = ONLINE_SERVER_MESSAGE_ENCODER.encodeInto(
-    value,
-    ONLINE_SERVER_MESSAGE_BYTE_BUFFER,
+  return (
+    tryNativeOnlineServerMessageCheck(value) ??
+    isUtf8WithinByteLimit(value, MAX_ONLINE_SERVER_MESSAGE_BYTES)
   );
-  return read === value.length && written <= MAX_ONLINE_SERVER_MESSAGE_BYTES;
 }
 
 /**
