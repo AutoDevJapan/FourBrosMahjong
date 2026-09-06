@@ -65,6 +65,25 @@ export function isRestoreFocusTarget(
 }
 
 /**
+ * Focus is an enhancement at each modal lifecycle boundary. Some embedded DOM
+ * hosts expose an element but reject focus(), so a failed focus must not abort
+ * inert restoration or the remaining fallback candidates (#1061).
+ */
+function tryFocus(
+  element: HTMLElement | null | undefined,
+  options?: FocusOptions,
+): boolean {
+  if (element === null || element === undefined) return false;
+  try {
+    if (options === undefined) element.focus();
+    else element.focus(options);
+    return element.ownerDocument.activeElement === element;
+  } catch {
+    return false;
+  }
+}
+
+/**
  * ダイアログ内のフォーカス可能要素を DOM 順で列挙する。
  * 実ブラウザでは CSS の `display: none` / `visibility: hidden` もフォーカス不能なので、
  * それらの祖先を含めて除外する。`getComputedStyle` はレイアウト寸法を参照しないため、
@@ -148,8 +167,7 @@ export default function Modal({
         ]),
       ].filter(isRestoreFocusTarget);
       for (const candidate of candidates) {
-        candidate.focus();
-        if (candidate.ownerDocument.activeElement === candidate) return;
+        if (tryFocus(candidate)) return;
       }
       // 戻すべき先があったのに一つも到達できなかった場合だけ知らせる(候補が皆無なのは
       // 「開く前からフォーカスがどこにも無かった」ケースで、失われたものが無い)。
@@ -190,13 +208,15 @@ export default function Modal({
     }
 
     // inert を適用した後にダイアログへ初期フォーカスを移す。
-    dialog.focus();
+    // Focus is best effort. The modal remains usable through its native
+    // controls even when the host rejects the initial focus request.
+    tryFocus(dialog);
 
     // inert を実装しない環境や支援技術・スクリプトによる外部 focus() に対しても、
     // modal 外へ出たフォーカスを即座にダイアログへ回収する。
     const keepFocusInside = (event: FocusEvent) => {
       if (event.target instanceof Node && !overlay.contains(event.target)) {
-        dialog.focus();
+        tryFocus(dialog);
       }
     };
     const closeOnEscape = (event: KeyboardEvent) => {
@@ -233,7 +253,7 @@ export default function Modal({
       // フォーカス可能要素が無ければダイアログ内に留める。
       if (focusable.length === 0) {
         event.preventDefault();
-        dialog.focus();
+        tryFocus(dialog);
         return;
       }
       const first = focusable[0];
@@ -242,11 +262,11 @@ export default function Modal({
       if (event.shiftKey) {
         if (active === first || active === dialog) {
           event.preventDefault();
-          last.focus();
+          tryFocus(last);
         }
       } else if (active === last) {
         event.preventDefault();
-        first.focus();
+        tryFocus(first);
       }
     },
     [],
