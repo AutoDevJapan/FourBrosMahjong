@@ -1197,6 +1197,20 @@ export function generatedIacSourceIsSecretSafe(source: string): boolean {
       return;
     }
     if (
+      ts.isVariableDeclaration(node) &&
+      ts.isIdentifier(node.name) &&
+      secretLikePropertyName.test(node.name.text) &&
+      node.initializer !== undefined &&
+      !secretLikeValueIsStaticSafe(node.initializer)
+    ) {
+      // A raw secret can be hidden in an otherwise unused alias, so checking
+      // only the sensitive property assignment is insufficient. Keep the
+      // same explicit provenance rule for secret-like variable names before
+      // the source can be staged or included in an evidence hash.
+      safe = false;
+      return;
+    }
+    if (
       (isResourceEnvironmentAccess(node) || isSharedNamespaceAccess(node)) &&
       !isWithinAllowedVariableValue(node)
     ) {
