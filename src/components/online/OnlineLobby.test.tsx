@@ -2549,6 +2549,25 @@ describe("OnlineLobby maintenance client-first (#726)", () => {
     ).toBeNull();
   });
 
+  it("maintenance bannerをロビーのルームコード入力にもaccessible descriptionとして関連付ける", () => {
+    render(<OnlineLobby />);
+    fireEvent.change(screen.getByLabelText("表示名"), {
+      target: { value: "たろう" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "新しいルームを作る" }));
+    const socket = sockets[0];
+    if (!socket) throw new Error("maintenance accessibility socket expected");
+
+    act(() => {
+      socket.open();
+      socket.message({ type: "maintenance", phase: "draining" });
+    });
+
+    expect(screen.getByLabelText("ルームコード")).toHaveAccessibleDescription(
+      /現在の半荘はそのまま続けられます/,
+    );
+  });
+
   it("phase不明のmaintenance error後はcloseを再接続せず、snapshotとcredentialを保持する", () => {
     vi.useFakeTimers();
     render(<OnlineLobby />);
