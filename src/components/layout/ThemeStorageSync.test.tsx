@@ -78,6 +78,18 @@ describe("ThemeStorageSync", () => {
     expect(document.documentElement).toHaveAttribute("data-theme", "dark");
   });
 
+  it("BFCacheからの復帰時に取り逃がした保存値へcatch-upする", () => {
+    render(<ThemeStorageSync />);
+
+    // ページがBFCacheで停止している間に別タブから変更された状態を模擬する。
+    localStorage.setItem("theme", "dark");
+    const pageShow = new Event("pageshow");
+    Object.defineProperty(pageShow, "persisted", { value: true });
+    window.dispatchEvent(pageShow);
+
+    expect(document.documentElement).toHaveAttribute("data-theme", "dark");
+  });
+
   it("system選択の現在値で古いdata-themeを除去する", () => {
     document.documentElement.setAttribute("data-theme", "dark");
 
@@ -123,6 +135,12 @@ describe("ThemeStorageSync", () => {
 
     render(<ThemeStorageSync />);
 
+    expect(document.documentElement).toHaveAttribute("data-theme", "dark");
+    expect(screen.getByRole("radio", { name: "ダーク" })).toBeChecked();
+
+    const pageShow = new Event("pageshow");
+    Object.defineProperty(pageShow, "persisted", { value: true });
+    window.dispatchEvent(pageShow);
     expect(document.documentElement).toHaveAttribute("data-theme", "dark");
     expect(screen.getByRole("radio", { name: "ダーク" })).toBeChecked();
 
