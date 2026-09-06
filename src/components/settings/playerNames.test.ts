@@ -396,7 +396,9 @@ describe("subscribePlayerNames", () => {
 
     const callback = vi.fn();
     const unsubscribe = subscribePlayerNames(callback);
-    expect(() => savePlayerNames(new MemoryStorage(), DEFAULT_NAMES)).not.toThrow();
+    expect(() =>
+      savePlayerNames(new MemoryStorage(), DEFAULT_NAMES),
+    ).not.toThrow();
     expect(callback).toHaveBeenCalledTimes(1);
     expect(() => unsubscribe()).not.toThrow();
   });
