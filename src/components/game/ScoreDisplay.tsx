@@ -5,6 +5,8 @@
  * 増減表現は禁止)。ツモ支払い配分(Q12)には関与せず、与えられた差分数値を表示するのみ(スペック6 6.8)。
  * 値渡しのみの純表示コンポーネント(スペック6 6.6)。
  */
+import { formatGameInteger } from "./gameNumberFormat";
+
 export interface ScoreDisplayProps {
   /** 持ち点(素点)。 */
   points: number;
@@ -23,7 +25,7 @@ export default function ScoreDisplay({ points, delta }: ScoreDisplayProps) {
     // 折り返しを許す。折り返せないとスロット幅を超えてページが横スクロールする(#387)。
     <p className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
       <span className="font-mono text-lg font-bold tabular-nums">
-        {points.toLocaleString("ja-JP")}
+        {formatGameInteger(points)}
         <span className="ml-0.5 text-xs font-normal">点</span>
       </span>
       {hasDelta ? (
@@ -33,11 +35,11 @@ export default function ScoreDisplay({ points, delta }: ScoreDisplayProps) {
           {/* 符号は視覚記号ではなくテキストとして読み上げられるよう明示ラベルを付す。 */}
           <span aria-hidden="true">
             {sign}
-            {Math.abs(delta as number).toLocaleString("ja-JP")}
+            {formatGameInteger(Math.abs(delta as number))}
           </span>
           <span className="sr-only">
             {isPositive ? "プラス" : "マイナス"}
-            {Math.abs(delta as number).toLocaleString("ja-JP")}点
+            {formatGameInteger(Math.abs(delta as number))}点
           </span>
         </span>
       ) : null}

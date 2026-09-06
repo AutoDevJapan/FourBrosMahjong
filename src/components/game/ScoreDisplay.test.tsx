@@ -1,6 +1,10 @@
 import { render, screen } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import ScoreDisplay from "./ScoreDisplay";
+
+afterEach(() => {
+  vi.restoreAllMocks();
+});
 
 /**
  * 点差表示は色(text-positive / text-danger)だけで増減を伝えてはならない
@@ -45,5 +49,17 @@ describe("ScoreDisplay (スペック5 5.2.1 / #278)", () => {
     render(<ScoreDisplay points={36200} delta={1200} />);
     expect(screen.getByText("+1,200")).toHaveAttribute("aria-hidden", "true");
     expect(screen.getByText("プラス1,200点")).toHaveClass("sr-only");
+  });
+
+  it("ローカライズされた数値整形がthrowしても点数表示を継続する", () => {
+    vi.spyOn(Number.prototype, "toLocaleString").mockImplementation(() => {
+      throw new Error("localized number formatting is unavailable");
+    });
+
+    render(<ScoreDisplay points={35000} delta={1200} />);
+
+    expect(screen.getByText("35,000")).toBeInTheDocument();
+    expect(screen.getByText("+1,200")).toBeInTheDocument();
+    expect(screen.getByText("プラス1,200点")).toBeInTheDocument();
   });
 });

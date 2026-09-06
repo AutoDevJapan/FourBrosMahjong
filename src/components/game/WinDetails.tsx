@@ -2,6 +2,7 @@ import { useId } from "react";
 import type { RoundSummary } from "@/domain/game/engine";
 import Tile from "../common/Tile";
 import { tileLabel } from "../common/tileLabel";
+import { formatGameInteger } from "./gameNumberFormat";
 import { sortTiles } from "./gameView";
 import { SEAT_WIND_LABEL } from "./PlayerArea";
 
@@ -109,7 +110,7 @@ export default function WinDetails({ summary }: { summary: RoundSummary }) {
         <dd>{detail.honba}本</dd>
         <dt>供託回収</dt>
         <dd>
-          {detail.riichiSticks}本（{detail.stickPayout.toLocaleString("ja-JP")}
+          {detail.riichiSticks}本（{formatGameInteger(detail.stickPayout)}
           点）
         </dd>
       </dl>
@@ -126,7 +127,7 @@ export default function WinDetails({ summary }: { summary: RoundSummary }) {
         {detail.payments.map((payment, index) => (
           <li key={`payment-${index}`}>
             <span dir="auto" className="player-name-bidi-isolate">
-              {payment.name}: {payment.amount.toLocaleString("ja-JP")}点
+              {payment.name}: {formatGameInteger(payment.amount)}点
             </span>
           </li>
         ))}
