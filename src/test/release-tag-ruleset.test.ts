@@ -70,6 +70,15 @@ describe("release tag ruleset validator (#508)", () => {
       }),
     ).toThrow();
   });
+
+  it.each([0, -1, Number.MAX_SAFE_INTEGER + 1, 1.5, "42", undefined])(
+    "rejects an invalid ruleset ID (%s)",
+    (id) => {
+      expect(() => validateReleaseTagRuleset({ ...ruleset, id })).toThrow(
+        /ruleset id is missing or invalid/,
+      );
+    },
+  );
 });
 
 describe("release tag ruleset audit selector (#508)", () => {
@@ -97,6 +106,15 @@ describe("release tag ruleset audit selector (#508)", () => {
       /exactly one/,
     );
   });
+
+  it.each([0, -1, Number.MAX_SAFE_INTEGER + 1, 1.5, "42", undefined])(
+    "rejects an invalid selected ruleset ID (%s)",
+    (id) => {
+      expect(() =>
+        selectImmutableReleaseTagRuleset([{ ...listEntry, id }]),
+      ).toThrow(/selected release-tag ruleset id/);
+    },
+  );
 });
 
 describe("release tag ruleset audit helper", () => {
