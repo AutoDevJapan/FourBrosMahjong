@@ -152,6 +152,54 @@ describe("playerNameGraphemes", () => {
       "🇯🇵",
     ]);
   });
+
+  it.each([
+    {
+      label: "getter",
+      intl: () =>
+        Object.create(Intl, {
+          Segmenter: {
+            get() {
+              throw new Error("Segmenter capability is blocked");
+            },
+          },
+        }),
+    },
+    {
+      label: "constructor",
+      intl: () =>
+        Object.create(Intl, {
+          Segmenter: {
+            value: class {
+              constructor() {
+                throw new Error("Segmenter construction is blocked");
+              }
+            },
+          },
+        }),
+    },
+    {
+      label: "segment",
+      intl: () =>
+        Object.create(Intl, {
+          Segmenter: {
+            value: class {
+              segment() {
+                throw new Error("Segmenting is blocked");
+              }
+            },
+          },
+        }),
+    },
+  ])("Intl.Segmenterの$label失敗時もfallbackを使う", ({ intl }) => {
+    vi.stubGlobal("Intl", intl());
+
+    expect(playerNameGraphemes("か\u3099👨‍👩‍👧‍👦🇯🇵")).toEqual([
+      "か\u3099",
+      "👨‍👩‍👧‍👦",
+      "🇯🇵",
+    ]);
+  });
 });
 
 describe("isValidPlayerName", () => {
