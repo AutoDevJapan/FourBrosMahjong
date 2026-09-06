@@ -13,6 +13,7 @@
 import type { PlayableWind, Tile } from "../tiles/tile";
 import { decomposeAll, type MeldInput, type WinForm } from "./decompose";
 import { isConcealedHand, type Meld } from "./meld";
+import { isValidTileKind, sameKind } from "./tile-identity";
 import { detectYaku, type PaoYaku, type Yaku, type YakuInput } from "./yaku";
 
 /** 和了判定の入力(手牌+文脈)。席割り当て(Q9)・ドラ(#64)には依存しない。 */
@@ -64,6 +65,33 @@ function toMeldInputs(melds: readonly Meld[]): MeldInput[] {
   }));
 }
 
+function isValidTileInput(value: unknown): value is Tile {
+  if (value === null || typeof value !== "object") return false;
+  const tile = value as Pick<Tile, "suit" | "rank">;
+  return typeof tile.suit === "string" && isValidTileKind(tile);
+}
+
+/**
+ * 和了牌が牌カタログ上の牌種で、門前手牌に含まれているかを検証する。
+ *
+ * `WinContext` は公開された構造型なので、JSON や型アサーション経由で
+ * 「完成形とは無関係の牌」を `winningTile` に指定できる。これを許すと、
+ * 例えば完成済みの手に任意の牌を後付けしても門前ツモなどの文脈役だけで
+ * 和了を受理してしまう。和了牌は `concealedTiles` に含む契約なので、
+ * 牌種(赤フラグを除く)の一致を入口で固定する。
+ */
+function isWinningTileInConcealedHand(
+  concealedTiles: unknown,
+  winningTile: unknown,
+): winningTile is Tile {
+  if (!Array.isArray(concealedTiles) || !isValidTileInput(winningTile)) {
+    return false;
+  }
+  return concealedTiles.some(
+    (tile) => isValidTileInput(tile) && sameKind(tile, winningTile),
+  );
+}
+
 function summarize(form: WinForm, yaku: readonly Yaku[]): WinAnalysis {
   const yakuman = yaku.reduce((sum, y) => sum + y.yakuman, 0);
   const han = yakuman > 0 ? 0 : yaku.reduce((sum, y) => sum + y.han, 0);
@@ -79,6 +107,11 @@ function summarize(form: WinForm, yaku: readonly Yaku[]): WinAnalysis {
  */
 export function analyzeWin(context: WinContext): WinAnalysis | null {
   const melds = context.melds ?? [];
+  if (
+    !isWinningTileInConcealedHand(context.concealedTiles, context.winningTile)
+  ) {
+    return null;
+  }
   const meldInputs = toMeldInputs(melds);
   const forms = decomposeAll(context.concealedTiles, meldInputs);
   if (forms.length === 0) return null;
