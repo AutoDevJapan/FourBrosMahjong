@@ -92,6 +92,20 @@ function tryFocusAndVerify(element: HTMLElement | null | undefined): boolean {
 }
 
 /**
+ * Reading an optional aria-disabled marker must not make focus restoration
+ * unavailable. Embedded or privacy-restricted DOM hosts may reject the
+ * attribute lookup, in which case the option remains a best-effort target.
+ */
+function isAriaDisabled(element: HTMLElement | null | undefined): boolean {
+  if (element === null || element === undefined) return false;
+  try {
+    return element.getAttribute("aria-disabled") === "true";
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Scrolling the touch-confirmation control is an accessibility enhancement,
  * not a prerequisite for confirming a discard. Some embedded DOM hosts expose
  * `scrollIntoView` but reject the call, so keep that optional capability behind
@@ -247,7 +261,7 @@ export default function Hand({
     if (index === null) return;
     restoreFocusIndexRef.current = null;
     const option = optionRefs.current[index];
-    if (option?.getAttribute("aria-disabled") !== "true") tryFocus(option);
+    if (!isAriaDisabled(option)) tryFocus(option);
   }, [touchSelectionIndex]);
 
   const handleCancelTouchSelection = useCallback(() => {
