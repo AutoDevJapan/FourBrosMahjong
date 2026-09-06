@@ -789,7 +789,12 @@ async function probeHttp(path, baseUrl, timeoutMs, probeTarget) {
               await readBoundedIncomingResponseBody(response),
               path,
             );
-            settle({ statusCode, ...parsed });
+            settle({
+              statusCode,
+              ...(statusCode === 404 && parsed.body === undefined
+                ? { error: "endpoint_missing" }
+                : parsed),
+            });
           } catch (error) {
             const message = errorMessage(error);
             settle({
