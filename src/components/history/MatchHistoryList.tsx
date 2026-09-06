@@ -80,6 +80,20 @@ const CLEAR_FAILURE_MESSAGE: Record<
  */
 const CLEAR_PROGRESS_DELAY_MS = 150;
 
+/**
+ * フォーカス復帰は補助的なDOM capabilityに依存するため、埋め込み環境などで
+ * `focus()` または `activeElement` が例外を投げても履歴操作自体を中断しない。
+ * capability が使える場合の到達確認は維持し、使えない場合だけ次の候補へ進む。
+ */
+function focusAndVerify(element: HTMLElement): boolean {
+  try {
+    element.focus();
+    return element.ownerDocument.activeElement === element;
+  } catch {
+    return false;
+  }
+}
+
 /** 半荘1件の見出し+展開内訳。 */
 function HistoryItem({ entry }: { entry: MatchHistoryEntry }) {
   const finishedAt = finishedAtFormat.format(new Date(entry.finishedAt));
@@ -232,8 +246,7 @@ export default function MatchHistoryList() {
     for (const candidate of candidates) {
       if (candidate === null) continue;
       hasCandidate = true;
-      candidate.focus();
-      if (candidate.ownerDocument.activeElement === candidate) {
+      if (focusAndVerify(candidate)) {
         pendingFocusRef.current = null;
         return;
       }
@@ -295,10 +308,9 @@ export default function MatchHistoryList() {
       // 失敗時は確認UIがそのまま残るため、非同期の効果を待つと利用者が一時的に
       // 破壊操作のボタンへ留まる。失敗処理の完了時点で安全側のキャンセルへ移し、
       // focus() が到達できなかった場合だけ既存の効果による候補連鎖へ委ねる。
-      cancelButtonRef.current?.focus();
       if (
-        cancelButtonRef.current?.ownerDocument.activeElement ===
-        cancelButtonRef.current
+        cancelButtonRef.current !== null &&
+        focusAndVerify(cancelButtonRef.current)
       ) {
         pendingFocusRef.current = null;
       }
