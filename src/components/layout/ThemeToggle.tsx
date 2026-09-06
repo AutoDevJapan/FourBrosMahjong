@@ -155,11 +155,16 @@ export function subscribeThemeStorage(): () => void {
 
 /** 選択に応じて `<html data-theme>` を設定/除去する(DOM 反映のみ)。 */
 function writeThemeToDom(preference: ThemePreference): void {
-  const root = document.documentElement;
-  if (preference === "system") {
-    root.removeAttribute("data-theme");
-  } else {
-    root.setAttribute("data-theme", preference);
+  try {
+    const root = document.documentElement;
+    if (preference === "system") {
+      root.removeAttribute("data-theme");
+    } else {
+      root.setAttribute("data-theme", preference);
+    }
+  } catch {
+    // DOM attribute support is progressive enhancement; preference/storage
+    // synchronization must remain usable in restricted embedded hosts.
   }
 }
 

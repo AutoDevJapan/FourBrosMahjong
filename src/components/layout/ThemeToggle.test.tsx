@@ -170,6 +170,64 @@ describe("ThemeToggle", () => {
     expect(document.documentElement).toHaveAttribute("data-theme", "dark");
   });
 
+  it("data-themeの書き込みが例外でも選択と保存を継続する", async () => {
+    const user = userEvent.setup();
+    vi.spyOn(document.documentElement, "setAttribute").mockImplementation(
+      () => {
+        throw new DOMException("SecurityError");
+      },
+    );
+    render(<ThemeToggle />);
+
+    await expect(
+      user.click(screen.getByRole("radio", { name: "ダーク" })),
+    ).resolves.toBeUndefined();
+
+    expect(screen.getByRole("radio", { name: "ダーク" })).toBeChecked();
+    expect(localStorage.getItem("theme")).toBe("dark");
+  });
+
+  it("data-themeの除去が例外でもシステム選択と購読通知を継続する", async () => {
+    const user = userEvent.setup();
+    localStorage.setItem("theme", "dark");
+    vi.spyOn(document.documentElement, "removeAttribute").mockImplementation(
+      () => {
+        throw new DOMException("SecurityError");
+      },
+    );
+    render(<ThemeToggle />);
+
+    await user.click(screen.getByRole("radio", { name: "システム設定に従う" }));
+
+    expect(
+      screen.getByRole("radio", { name: "システム設定に従う" }),
+    ).toBeChecked();
+    expect(localStorage.getItem("theme")).toBeNull();
+  });
+
+  it("storage同期時のdata-theme書き込み失敗でもradioを更新する", async () => {
+    render(<ThemeToggle />);
+    vi.spyOn(document.documentElement, "setAttribute").mockImplementation(
+      () => {
+        throw new DOMException("SecurityError");
+      },
+    );
+    localStorage.setItem("theme", "dark");
+
+    await expect(
+      Promise.resolve(
+        window.dispatchEvent(
+          new StorageEvent("storage", { key: "theme", newValue: "dark" }),
+        ),
+      ),
+    ).resolves.toBe(true);
+
+    await waitFor(() =>
+      expect(screen.getByRole("radio", { name: "ダーク" })).toBeChecked(),
+    );
+    expect(localStorage.getItem("theme")).toBe("dark");
+  });
+
   it("matchMediaの呼び出しが例外でもテーマ設定を利用できる", async () => {
     Object.defineProperty(window, "matchMedia", {
       configurable: true,
