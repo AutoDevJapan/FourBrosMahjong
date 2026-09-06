@@ -14,8 +14,8 @@
  * - ナビゲーション(HTML): network-first。オンライン時は常に最新シェルを取得し、
  *   オフライン時のみキャッシュ(最後は `/` へフォールバック)で応答する。
  * - `/_next/static/`(コンテンツハッシュ付き)・牌 SVG・アイコン: cache-first(実質不変)。
- *   install 時には各 App シェル HTML が直接参照する build 固有 JS/CSS/font も
- *   抽出して保存する。初回登録ページは旧ページ保護のため SW 非制御なので、
+ *   install 時には各 App シェル HTML が直接参照する build 固有 JS/CSS と、CSS が
+ *   `url(...)` で参照する font 等も抽出して保存する。初回登録ページは旧ページ保護のため SW 非制御なので、
  *   runtime cache だけでは追加のオンライン再読込みなしのオフライン起動を保証できない。
  * - その他の同一オリジン GET(RSC/API/未知URL等): キャッシュせずブラウザへ委譲。
  *   未知URLへのナビゲーションだけは、オフライン時の `/` fallback のため仲介する。
@@ -106,27 +106,42 @@ let cacheWriteChain = Promise.resolve();
  * src/href 属性だけを小さく読む。URL は URL API で正規化し、攻撃者が指定した
  * external URL や通常 API を install が取得しないよう origin + pathname の両方を制限する。
  */
+function canonicalBuildAssetUrl(value, baseUrl) {
+  try {
+    const url = new URL(value, baseUrl);
+    if (
+      url.origin !== self.location.origin ||
+      !url.pathname.startsWith("/_next/static/")
+    ) {
+      return null;
+    }
+    url.search = "";
+    url.hash = "";
+    return url.href;
+  } catch {
+    return null;
+  }
+}
+
 function buildAssetUrlsFromHtml(html, baseUrl) {
   const assets = new Set();
   const attribute = /\\b(?:src|href)\\s*=\\s*["']([^"']+)["']/gi;
   for (const match of html.matchAll(attribute)) {
-    try {
-      const url = new URL(match[1], baseUrl);
-      if (
-        url.origin === self.location.origin &&
-        url.pathname.startsWith("/_next/static/")
-      ) {
-        // Runtime asset requests use canonical pathname-only keys to avoid a
-        // separate cache entry for every deployment/query variant. Store the
-        // same key during install; otherwise a query-bearing Next/Vercel asset
-        // is precached under its full URL but cannot be found offline.
-        url.search = "";
-        url.hash = "";
-        assets.add(url.href);
-      }
-    } catch {
-      // 壊れた URL 属性はブラウザと同じく無視する。
-    }
+    const asset = canonicalBuildAssetUrl(match[1], baseUrl);
+    if (asset) assets.add(asset);
+  }
+  return assets;
+}
+
+/** CSS が参照する build asset(font/image/import)も同一 origin のものだけ抽出する。 */
+function buildAssetUrlsFromCss(css, baseUrl) {
+  const assets = new Set();
+  const reference = /url\\(\\s*(?:(['"])(.*?)\\1|([^)]*?))\\s*\\)/gi;
+  for (const match of css.matchAll(reference)) {
+    const value = (match[2] ?? match[3] ?? "").trim();
+    if (!value || value.startsWith("#") || value.startsWith("data:")) continue;
+    const asset = canonicalBuildAssetUrl(value, baseUrl);
+    if (asset) assets.add(asset);
   }
   return assets;
 }
@@ -230,8 +245,11 @@ async function precacheAppShell() {
     }
 
     // 応答を個別に検証してから保存する。拡張子と MIME が一致しない200応答
-    // (HTML fallback等)も install 成功扱いにしない。
-    for (const asset of buildAssets) {
+    // (HTML fallback等)も install 成功扱いにしない。CSSを読んだ結果として追加された
+    // font/image/importも同じループで処理し、初回登録ページが未制御でもofflineで不足しない。
+    const pendingBuildAssets = [...buildAssets];
+    for (let index = 0; index < pendingBuildAssets.length; index += 1) {
+      const asset = pendingBuildAssets[index];
       const response = await self.fetch(asset);
       if (
         !isSameOriginResponse(response) ||
@@ -239,7 +257,16 @@ async function precacheAppShell() {
       ) {
         throw new TypeError("Invalid precached build asset response: " + asset);
       }
-      await cache.put(asset, response);
+      await cache.put(asset, response.clone());
+      if (normalizedContentType(response) === "text/css") {
+        const baseUrl = response.url || new URL(asset, self.location).href;
+        const css = await response.text();
+        for (const nestedAsset of buildAssetUrlsFromCss(css, baseUrl)) {
+          if (buildAssets.has(nestedAsset)) continue;
+          buildAssets.add(nestedAsset);
+          pendingBuildAssets.push(nestedAsset);
+        }
+      }
     }
   } catch (error) {
     // install は再試行され得る。同versionの部分cacheを残すと後続監査や容量を汚すため、
