@@ -58,6 +58,39 @@ interface HandAnimationState {
 
 const DEAL_STAGGER_MS = 30;
 
+/**
+ * Focus is an accessibility enhancement, not a prerequisite for using the hand.
+ * Embedded or privacy-restricted DOM hosts may expose a focus method that throws,
+ * so contain the write at every Hand focus boundary.
+ */
+function tryFocus(
+  element: HTMLElement | null | undefined,
+  options?: FocusOptions,
+): boolean {
+  if (element === null || element === undefined) return false;
+  try {
+    if (options === undefined) element.focus();
+    else element.focus(options);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Verify a focus move when the host permits reading activeElement. If that
+ * capability is unavailable, the successful focus call remains best effort.
+ */
+function tryFocusAndVerify(element: HTMLElement | null | undefined): boolean {
+  if (!tryFocus(element)) return false;
+  if (element === null || element === undefined) return false;
+  try {
+    return element.ownerDocument.activeElement === element;
+  } catch {
+    return true;
+  }
+}
+
 export default function Hand({
   tiles,
   readOnly = false,
@@ -159,7 +192,7 @@ export default function Hand({
     // body へフォーカスが落ちる。更新前に手牌内へ実フォーカスがあった場合だけ、DOM 更新後の
     // クランプ済み active option へ戻す。手牌外へ移動済みなら下記 blur が false にする。
     if (!handHadFocus.current || tiles.length === 0) return;
-    optionRefs.current[Math.min(activeIndex, tiles.length - 1)]?.focus();
+    tryFocus(optionRefs.current[Math.min(activeIndex, tiles.length - 1)]);
   }, [tiles, activeIndex]);
 
   useLayoutEffect(() => {
@@ -171,8 +204,7 @@ export default function Hand({
     // the caller's named board target so the user does not fall back to body (#966).
     const fallback = readOnlyFocusRef?.current;
     if (!fallback) return;
-    fallback.focus();
-    if (fallback.ownerDocument.activeElement === fallback) {
+    if (tryFocusAndVerify(fallback)) {
       handHadFocus.current = false;
     }
   }, [readOnly, readOnlyFocusRef]);
@@ -185,7 +217,7 @@ export default function Hand({
     if (!confirmTouchSelection || touchSelectionIndex === null) return;
     const button = confirmButtonRef.current;
     if (!button) return;
-    button.focus({ preventScroll: true });
+    tryFocus(button, { preventScroll: true });
     button.scrollIntoView?.({
       block: "center",
       inline: "nearest",
@@ -201,7 +233,7 @@ export default function Hand({
     if (index === null) return;
     restoreFocusIndexRef.current = null;
     const option = optionRefs.current[index];
-    if (option?.getAttribute("aria-disabled") !== "true") option?.focus();
+    if (option?.getAttribute("aria-disabled") !== "true") tryFocus(option);
   }, [touchSelectionIndex]);
 
   const handleCancelTouchSelection = useCallback(() => {
@@ -214,7 +246,7 @@ export default function Hand({
 
   const focusIndex = useCallback((index: number) => {
     setActiveIndex(index);
-    optionRefs.current[index]?.focus();
+    tryFocus(optionRefs.current[index]);
   }, []);
 
   const commitSelection = useCallback(

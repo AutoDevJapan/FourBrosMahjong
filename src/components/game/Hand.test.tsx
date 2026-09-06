@@ -1,9 +1,13 @@
 import { fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { createRef } from "react";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import Hand from "./Hand";
 import type { TileData } from "./types";
+
+afterEach(() => {
+  vi.restoreAllMocks();
+});
 
 const tiles: TileData[] = [
   { suit: "man", rank: 1 },
@@ -386,6 +390,100 @@ describe("Hand (roving tabindex listbox, spec 5.2.2)", () => {
     );
 
     expect(outside).toHaveFocus();
+  });
+
+  it("focus() がthrowしてもキーボード・タッチ確認・解除を中断しない(#1067)", () => {
+    vi.spyOn(HTMLElement.prototype, "focus").mockImplementation(() => {
+      throw new Error("focus is unavailable");
+    });
+    render(<Hand tiles={tiles} confirmTouchSelection />);
+
+    const options = screen.getAllByRole("option");
+    expect(() =>
+      fireEvent.keyDown(options[0], { key: "ArrowRight" }),
+    ).not.toThrow();
+    expect(options[1]).toHaveAttribute("tabindex", "0");
+
+    const first = options[0];
+    expect(() => {
+      fireEvent.touchStart(first);
+      fireEvent.touchEnd(first);
+      fireEvent.click(first);
+    }).not.toThrow();
+    expect(
+      screen.getByRole("button", { name: "一萬で打牌を確定" }),
+    ).toBeInTheDocument();
+
+    expect(() =>
+      fireEvent.click(screen.getByRole("button", { name: "選択を解除" })),
+    ).not.toThrow();
+    expect(
+      screen.queryByRole("button", { name: "選択を解除" }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("閲覧専用化のfallback focus()がthrowしても表示更新を中断しない(#1067)", () => {
+    vi.spyOn(HTMLElement.prototype, "focus").mockImplementation(() => {
+      throw new Error("focus is unavailable");
+    });
+    const fallbackRef = createRef<HTMLDivElement>();
+    const { rerender } = render(
+      <>
+        <div
+          ref={fallbackRef}
+          role="group"
+          aria-label="対局盤面"
+          tabIndex={-1}
+        />
+        <Hand tiles={tiles} readOnlyFocusRef={fallbackRef} />
+      </>,
+    );
+
+    fireEvent.focusIn(screen.getAllByRole("option")[0]);
+    expect(() =>
+      rerender(
+        <>
+          <div
+            ref={fallbackRef}
+            role="group"
+            aria-label="対局盤面"
+            tabIndex={-1}
+          />
+          <Hand tiles={tiles} readOnly readOnlyFocusRef={fallbackRef} />
+        </>,
+      ),
+    ).not.toThrow();
+    expect(
+      screen.getByRole("list", { name: "自家の手牌" }),
+    ).toBeInTheDocument();
+  });
+
+  it("activeElement の読み取りがthrowしても閲覧専用化を中断しない(#1067)", () => {
+    vi.spyOn(Document.prototype, "activeElement", "get").mockImplementation(
+      () => {
+        throw new Error("activeElement is unavailable");
+      },
+    );
+    const fallbackRef = createRef<HTMLDivElement>();
+    const { rerender } = render(
+      <>
+        <div ref={fallbackRef} role="group" tabIndex={-1} />
+        <Hand tiles={tiles} readOnlyFocusRef={fallbackRef} />
+      </>,
+    );
+
+    fireEvent.focusIn(screen.getAllByRole("option")[0]);
+    expect(() =>
+      rerender(
+        <>
+          <div ref={fallbackRef} role="group" tabIndex={-1} />
+          <Hand tiles={tiles} readOnly readOnlyFocusRef={fallbackRef} />
+        </>,
+      ),
+    ).not.toThrow();
+    expect(
+      screen.getByRole("list", { name: "自家の手牌" }),
+    ).toBeInTheDocument();
   });
 
   it("対話中の手牌が閲覧専用へ切り替わると盤面の着地点へフォーカスを移す(#966)", () => {
