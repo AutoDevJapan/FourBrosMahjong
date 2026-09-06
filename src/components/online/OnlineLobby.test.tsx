@@ -783,6 +783,33 @@ describe("OnlineLobby のキーボード送信", () => {
     });
   });
 
+  it("activeElementを読めなくてもsubmitの作成フォールバックを維持する", () => {
+    render(<OnlineLobby />);
+
+    fireEvent.change(screen.getByLabelText("表示名"), {
+      target: { value: "たろう" },
+    });
+    vi.spyOn(Document.prototype, "activeElement", "get").mockImplementation(
+      () => {
+        throw new Error("activeElement is unavailable");
+      },
+    );
+
+    expect(() => {
+      fireEvent.submit(
+        screen.getByRole("form", { name: "オンラインルーム接続" }),
+      );
+    }).not.toThrow();
+
+    expect(sockets).toHaveLength(1);
+    act(() => sockets[0]?.open());
+    expect(JSON.parse(sockets[0]?.sent[0] ?? "{}")).toEqual({
+      type: "create",
+      name: "たろう",
+      explicitKita: true,
+    });
+  });
+
   it("IME変換中のEnterでは候補確定を妨げず送信しない", () => {
     const preventDefault = vi.spyOn(Event.prototype, "preventDefault");
     render(<OnlineLobby />);

@@ -464,10 +464,12 @@ interface PendingTransitionFocus {
  * this boundary. Returning whether the target actually became active keeps
  * the existing fallback order intact when the capability is available.
  */
-function activeElementOrNull(): Element | null {
-  if (typeof document === "undefined") return null;
+function activeElementOrNull(ownerDocument?: Document): Element | null {
+  const targetDocument =
+    ownerDocument ?? (typeof document === "undefined" ? null : document);
+  if (targetDocument === null) return null;
   try {
-    return document.activeElement;
+    return targetDocument.activeElement;
   } catch {
     return null;
   }
@@ -1621,7 +1623,9 @@ export default function OnlineLobby() {
   const submitLobby = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     const submitter = (event.nativeEvent as SubmitEvent).submitter;
-    const activeElement = event.currentTarget.ownerDocument.activeElement;
+    const activeElement = activeElementOrNull(
+      event.currentTarget.ownerDocument,
+    );
     const intent =
       submitter?.getAttribute("data-intent") ??
       (activeElement?.id === ROOM_CODE_INPUT_ID ? "join" : "create");
