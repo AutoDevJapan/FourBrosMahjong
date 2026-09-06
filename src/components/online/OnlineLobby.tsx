@@ -1867,7 +1867,7 @@ export default function OnlineLobby() {
                   placeholder="ABC234"
                   required
                   aria-invalid={normalizedRoomCode === null}
-                  aria-describedby={ROOM_CODE_REQUIREMENT_ID}
+                  aria-describedby={`${ROOM_CODE_REQUIREMENT_ID}${maintenance ? ` ${MAINTENANCE_NOTICE_ID}` : ""}`}
                   className="min-h-11 rounded-lg border border-control-border bg-transparent px-3 py-2 font-mono font-normal tracking-widest"
                 />
                 <span
