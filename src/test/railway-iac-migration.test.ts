@@ -657,6 +657,20 @@ describe("Railway IaC parity snapshot contract (#742)", () => {
     expect(generatedIacSourceIsSecretSafe(GENERATED_SOURCE)).toBe(true);
     expect(
       generatedIacSourceIsSecretSafe(
+        `import { defineRailway, project } from "railway/iac";
+const token = "SECRET_SENTINEL";
+export default defineRailway(() => project("fixture", {}));`,
+      ),
+    ).toBe(false);
+    expect(
+      generatedIacSourceIsSecretSafe(
+        `import { defineRailway, preserve, project } from "railway/iac";
+const token = preserve();
+export default defineRailway(() => project("fixture", {}));`,
+      ),
+    ).toBe(true);
+    expect(
+      generatedIacSourceIsSecretSafe(
         `const env = { ONLINE_OPS_TOKEN: "SECRET_SENTINEL" }; preserve();`,
       ),
     ).toBe(false);
