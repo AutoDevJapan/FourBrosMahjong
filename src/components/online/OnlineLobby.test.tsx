@@ -177,6 +177,19 @@ function finishedSnapshotFixture(you: "p0" | "p1" = "p0"): OnlineSnapshot {
   };
 }
 
+function openCreatedRoom(): TestWebSocket {
+  render(<OnlineLobby />);
+  fireEvent.change(screen.getByLabelText("表示名"), {
+    target: { value: "たろう" },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "新しいルームを作る" }));
+
+  const socket = sockets[0];
+  if (!socket) throw new Error("TextEncoder capability test socket expected");
+  act(() => socket.open());
+  return socket;
+}
+
 beforeEach(() => {
   vi.stubEnv("NEXT_PUBLIC_ONLINE_WS_URL", "ws://localhost:8080/ws");
   vi.stubGlobal("WebSocket", TestWebSocket);
@@ -233,6 +246,59 @@ describe("OnlineLobby (#605)", () => {
     expect(
       document.querySelector('[data-connection-status="failed"]'),
     ).toBeNull();
+  });
+
+  it("falls back to bounded UTF-8 counting when TextEncoder is unavailable", () => {
+    vi.stubGlobal("TextEncoder", undefined as unknown as typeof TextEncoder);
+    const socket = openCreatedRoom();
+    const parse = vi.spyOn(JSON, "parse");
+    parse.mockClear();
+    const oversized = JSON.stringify({
+      type: "pong",
+      padding: "あ".repeat(Math.ceil(MAX_ONLINE_SERVER_MESSAGE_BYTES / 3)),
+    });
+    expect(oversized.length).toBeLessThan(MAX_ONLINE_SERVER_MESSAGE_BYTES);
+
+    expect(() => {
+      act(() => socket.rawMessage(oversized));
+    }).not.toThrow();
+    expect(parse).not.toHaveBeenCalled();
+  });
+
+  it("falls back when TextEncoder does not implement encodeInto", () => {
+    class IncompleteTextEncoder {}
+    vi.stubGlobal(
+      "TextEncoder",
+      IncompleteTextEncoder as unknown as typeof TextEncoder,
+    );
+    const socket = openCreatedRoom();
+    const parse = vi.spyOn(JSON, "parse");
+    parse.mockClear();
+
+    expect(() => {
+      act(() => socket.rawMessage('{"type":"pong"}'));
+    }).not.toThrow();
+    expect(parse).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not leak a throwing TextEncoder capability", () => {
+    class ThrowingTextEncoder {
+      encodeInto(): never {
+        throw new Error("encodeInto unavailable");
+      }
+    }
+    vi.stubGlobal(
+      "TextEncoder",
+      ThrowingTextEncoder as unknown as typeof TextEncoder,
+    );
+    const socket = openCreatedRoom();
+    const parse = vi.spyOn(JSON, "parse");
+    parse.mockClear();
+
+    expect(() => {
+      act(() => socket.rawMessage('{"type":"pong"}'));
+    }).not.toThrow();
+    expect(parse).toHaveBeenCalledTimes(1);
   });
 
   it("keeps the JSON protocol for a UTF-8 frame at the byte boundary", () => {
