@@ -175,6 +175,27 @@ describe("match history persistence (#293)", () => {
     expect(loadHistory(storage)).toEqual([]);
   });
 
+  it("navigator.locksの参照取得自体が失敗しても未対応として扱う", async () => {
+    const originalNavigator = globalThis.navigator;
+    vi.stubGlobal("navigator", {
+      get locks(): never {
+        throw new DOMException("Web Locks is unavailable", "SecurityError");
+      },
+    });
+
+    try {
+      const storage = new MemoryStorage();
+      expect(await persistHistoryAcrossTabs(storage, entry(1))).toBe("failed");
+      expect(loadHistory(storage)).toEqual([]);
+
+      appendHistory(storage, entry(2));
+      expect(await clearHistoryAcrossTabs(storage)).toBe("cleared");
+      expect(loadHistory(storage)).toEqual([]);
+    } finally {
+      vi.stubGlobal("navigator", originalNavigator);
+    }
+  });
+
   it("上限を超えると最古の記録から破棄する", () => {
     const storage = new MemoryStorage();
     for (let seed = 0; seed < MAX_HISTORY_ENTRIES + 3; seed++) {

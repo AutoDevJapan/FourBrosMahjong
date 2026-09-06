@@ -255,9 +255,18 @@ function resolveLockManager(
   locks: HistoryLockManager | null | undefined,
 ): HistoryLockManager | null {
   if (locks !== undefined) return locks;
-  return typeof navigator !== "undefined" && navigator.locks !== undefined
-    ? (navigator.locks as HistoryLockManager)
-    : null;
+  try {
+    if (typeof navigator === "undefined") return null;
+    // Optional Web APIs may be exposed through a throwing accessor in embedded or
+    // privacy-restricted runtimes. Treat an unreadable capability as unavailable,
+    // just like an absent one, so the public persistence result contract is kept.
+    const browserLocks = navigator.locks;
+    return browserLocks === undefined
+      ? null
+      : (browserLocks as HistoryLockManager);
+  } catch {
+    return null;
+  }
 }
 
 /**
