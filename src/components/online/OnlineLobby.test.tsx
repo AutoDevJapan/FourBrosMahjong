@@ -132,6 +132,19 @@ class TestWebSocket {
   }
 }
 
+class ThrowingSocketCapabilityWebSocket extends TestWebSocket {
+  override addEventListener(
+    _type: string,
+    _listener: EventListenerOrEventListenerObject,
+  ): void {
+    throw new DOMException("event wiring is unavailable", "SecurityError");
+  }
+
+  override close(): void {
+    throw new DOMException("socket close is unavailable", "SecurityError");
+  }
+}
+
 const sockets: TestWebSocket[] = [];
 
 function snapshotFixture(): OnlineSnapshot {
@@ -209,6 +222,21 @@ afterEach(() => {
 });
 
 describe("OnlineLobby (#605)", () => {
+  it("keeps a retryable connection state when socket wiring and close throw", () => {
+    vi.stubGlobal("WebSocket", ThrowingSocketCapabilityWebSocket);
+    render(<OnlineLobby />);
+
+    fireEvent.change(screen.getByLabelText("表示名"), {
+      target: { value: "たろう" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "新しいルームを作る" }));
+
+    expect(
+      document.querySelector('[data-connection-status="failed"]'),
+    ).not.toBeNull();
+    expect(screen.getByRole("button", { name: "再試行" })).toBeEnabled();
+  });
+
   it("drops oversized server text frames before JSON.parse", () => {
     render(<OnlineLobby />);
 
