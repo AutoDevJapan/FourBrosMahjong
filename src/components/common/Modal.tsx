@@ -258,12 +258,40 @@ export default function Modal({
       event.stopPropagation();
       requestClose();
     };
-    document.addEventListener("focusin", keepFocusInside, true);
-    document.addEventListener("keydown", closeOnEscape, true);
+    // Global event listeners are optional enhancement boundaries. Some
+    // embedded or privacy-restricted hosts expose EventTarget methods but
+    // reject a particular registration; one rejected listener must not abort
+    // the modal effect or prevent the other listener from being installed.
+    let focusinListenerAttached = false;
+    let keydownListenerAttached = false;
+    try {
+      document.addEventListener("focusin", keepFocusInside, true);
+      focusinListenerAttached = true;
+    } catch {
+      // Native controls remain usable when the focus recovery listener is unavailable.
+    }
+    try {
+      document.addEventListener("keydown", closeOnEscape, true);
+      keydownListenerAttached = true;
+    } catch {
+      // The close button remains available when Escape handling is unavailable.
+    }
 
     return () => {
-      document.removeEventListener("focusin", keepFocusInside, true);
-      document.removeEventListener("keydown", closeOnEscape, true);
+      if (focusinListenerAttached) {
+        try {
+          document.removeEventListener("focusin", keepFocusInside, true);
+        } catch {
+          // A restricted host may reject cleanup; continue restoring the modal.
+        }
+      }
+      if (keydownListenerAttached) {
+        try {
+          document.removeEventListener("keydown", closeOnEscape, true);
+        } catch {
+          // Cleanup is best effort per capability; background restoration follows.
+        }
+      }
       for (const { element, inert, inertAttribute, ariaHidden } of isolated) {
         trySetInert(element, inert);
         if (!inertAttribute) tryRemoveAttribute(element, "inert");

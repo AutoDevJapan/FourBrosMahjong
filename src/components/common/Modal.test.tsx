@@ -235,6 +235,80 @@ describe("Modal (spec 5.2.2 dialog / focus trap / Escape)", () => {
     backgroundRoot.remove();
   });
 
+  it("グローバルlistener登録がthrowしても他のlistenerとモーダル操作を維持する(#1107)", () => {
+    const originalAddEventListener = document.addEventListener;
+    const addEventListener = vi
+      .spyOn(document, "addEventListener")
+      .mockImplementation((type, listener, options) => {
+        if (type === "focusin") {
+          throw new Error("focusin listener is unavailable");
+        }
+        return originalAddEventListener.call(document, type, listener, options);
+      });
+    const removeEventListener = vi.spyOn(document, "removeEventListener");
+    const onClose = vi.fn();
+
+    const { unmount } = render(
+      <Modal title="全体盤面" onClose={onClose}>
+        <p>本文</p>
+      </Modal>,
+    );
+
+    expect(
+      screen.getByRole("dialog", { name: "全体盤面" }),
+    ).toBeInTheDocument();
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(onClose).toHaveBeenCalledTimes(1);
+
+    expect(() => unmount()).not.toThrow();
+    expect(removeEventListener).toHaveBeenCalledWith(
+      "keydown",
+      expect.any(Function),
+      true,
+    );
+    expect(removeEventListener).not.toHaveBeenCalledWith(
+      "focusin",
+      expect.any(Function),
+      true,
+    );
+    addEventListener.mockRestore();
+  });
+
+  it("listener cleanupがthrowしてもモーダルの隔離復元を継続する(#1107)", () => {
+    const originalRemoveEventListener = document.removeEventListener;
+    const removeEventListener = vi
+      .spyOn(document, "removeEventListener")
+      .mockImplementation((type, listener, options) => {
+        if (type === "focusin") {
+          throw new Error("focusin cleanup is unavailable");
+        }
+        return originalRemoveEventListener.call(
+          document,
+          type,
+          listener,
+          options,
+        );
+      });
+    const backgroundRoot = document.createElement("div");
+    document.body.append(backgroundRoot);
+
+    const { unmount } = render(
+      <Modal title="全体盤面" onClose={vi.fn()}>
+        <p>本文</p>
+      </Modal>,
+    );
+
+    expect(backgroundRoot).toHaveAttribute("inert");
+    expect(() => unmount()).not.toThrow();
+    expect(backgroundRoot).not.toHaveAttribute("inert");
+    expect(removeEventListener).toHaveBeenCalledWith(
+      "keydown",
+      expect.any(Function),
+      true,
+    );
+    backgroundRoot.remove();
+  });
+
   it("cleanupのremoveAttributeがthrowしても残りの復元を継続する(#1083)", () => {
     const backgroundRoot = document.createElement("div");
     document.body.append(backgroundRoot);
