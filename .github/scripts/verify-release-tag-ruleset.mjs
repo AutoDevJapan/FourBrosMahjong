@@ -5,6 +5,11 @@ export const EXPECTED_RULESET_NAME = "protect-existing-release-tags";
 export const EXPECTED_TAG_PATTERN = "refs/tags/v*";
 const EXPECTED_RULE_TYPES = ["deletion", "non_fast_forward", "update"];
 
+/** @param {unknown} value @returns {value is number} */
+function isPositiveSafeInteger(value) {
+  return Number.isSafeInteger(value) && Number(value) > 0;
+}
+
 /**
  * Validate the live JSON returned by GET /repos/{owner}/{repo}/rulesets/{id}.
  *
@@ -87,7 +92,7 @@ export function validateReleaseTagRuleset(input) {
     );
   }
 
-  if (typeof ruleset.id !== "number" || !Number.isInteger(ruleset.id)) {
+  if (!isPositiveSafeInteger(ruleset.id)) {
     throw new Error("ruleset id is missing or invalid");
   }
 

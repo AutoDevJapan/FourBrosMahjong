@@ -11,6 +11,11 @@ import {
 const DEFAULT_REPOSITORY = "AutoDevJapan/FourBrosMahjong";
 const REPOSITORY_PATTERN = /^[^/\s]+\/[^/\s]+$/;
 
+/** @param {unknown} value @returns {value is number} */
+function isPositiveSafeInteger(value) {
+  return Number.isSafeInteger(value) && Number(value) > 0;
+}
+
 /**
  * Select the one repository-owned immutable release-tag ruleset from the
  * list endpoint. Parent rulesets are excluded by the API request as a second
@@ -42,7 +47,7 @@ export function selectImmutableReleaseTagRuleset(input) {
   }
 
   const ruleset = /** @type {Record<string, unknown>} */ (matches[0]);
-  if (typeof ruleset.id !== "number" || !Number.isInteger(ruleset.id)) {
+  if (!isPositiveSafeInteger(ruleset.id)) {
     throw new Error("selected release-tag ruleset id is missing or invalid");
   }
 
