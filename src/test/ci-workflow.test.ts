@@ -1519,7 +1519,7 @@ describe("verification-scope の分類契約 (#491)", () => {
   it.each([
     // [説明, パス, 期待する分類]
     ["仕様書", "documents/spec/game-flow.md", "documentation"],
-    ["ルートの md", "CLAUDE.md", "documentation"],
+    ["質問ステータス索引", "CLAUDE.md", "unit-test"],
     [
       "immutable pre-cutover fixture",
       "documents/fixtures/railway-pre-cutover.json",
@@ -1577,7 +1577,7 @@ describe("verification-scope の分類契約 (#491)", () => {
   });
 
   it("文書のみの変更は ci も e2e も検証しない", () => {
-    const paths = ["documents/spec/game-flow.md", "CLAUDE.md"];
+    const paths = ["documents/spec/game-flow.md"];
     for (const job of ["ci", "e2e"] as const) {
       expect(
         resolveScope({ job, paths, postMergeDuplicate: false }).verify,
@@ -1672,7 +1672,7 @@ describe("テスト入力資産をdocs-onlyで黙殺しない (#745)", () => {
         const literal = match[2];
         if (
           !/(^|\/)(?:docs|documents)\//.test(literal) &&
-          !/^(?:README|CHANGELOG)\.md$/.test(literal)
+          !/^(?:CLAUDE|README|CHANGELOG|質問リスト)\.md$/.test(literal)
         )
           continue;
         const path = sourcePath(file, literal);

@@ -43,6 +43,12 @@ const DOCUMENTATION = [/^docs\//, /^documents\//, /\.md$/];
 export const TEST_INPUT_PATHS = [
   // src/app/rules/rules-doc.test.ts が内容を読み、/rules の記載と突き合わせる。
   "docs/四兄弟麻雀ルール.md",
+  // src/test/question-status-index.test.ts が質問ステータスの単一台帳を検証する。
+  "質問リスト.md",
+  "CLAUDE.md",
+  "docs/README.md",
+  "documents/spec/README.md",
+  "documents/spec/screen-design-and-routing.md",
   // src/test/deployment-inventory.test.ts が公開 deployment の証跡を検証する。
   "docs/デプロイ環境運用.md",
   // src/test/deployment-inventory.test.ts が #725 の現行head証跡を検証する。
