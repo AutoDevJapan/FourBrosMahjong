@@ -78,4 +78,79 @@ describe("documentScrollLock (#371 モーダル中の背面スクロールロッ
     releaseOuter();
     expect(document.body.style.position).toBe("");
   });
+
+  it("スクロール位置の取得が失敗してもモーダル用ロックをno-opへ退避する", () => {
+    vi.spyOn(window, "scrollY", "get").mockImplementation(() => {
+      throw new Error("scroll position is unavailable");
+    });
+
+    const release = lockDocumentScroll();
+
+    expect(() => release()).not.toThrow();
+    expect(document.body.style.position).toBe("");
+  });
+
+  it("スタイル適用途中のCSSOM例外で部分ロックを残さない", () => {
+    const style = document.body.style;
+    style.position = "relative";
+    style.overflow = "auto";
+    const previousTop = style.top;
+    const topDescriptor = Object.getOwnPropertyDescriptor(style, "top");
+    Object.defineProperty(style, "top", {
+      configurable: true,
+      get: () => previousTop,
+      set: () => {
+        throw new Error("CSSOM is unavailable");
+      },
+    });
+
+    try {
+      const release = lockDocumentScroll();
+
+      expect(() => release()).not.toThrow();
+      expect(style.position).toBe("relative");
+      expect(style.overflow).toBe("auto");
+      expect(style.top).toBe(previousTop);
+    } finally {
+      if (topDescriptor) {
+        Object.defineProperty(style, "top", topDescriptor);
+      } else {
+        Reflect.deleteProperty(style, "top");
+      }
+    }
+  });
+
+  it("レイアウト復元やscrollToの例外を閉じる操作へ漏らさない", () => {
+    stubScrollPosition(0, 120);
+    const release = lockDocumentScroll();
+    const offsetHeightDescriptor = Object.getOwnPropertyDescriptor(
+      document.body,
+      "offsetHeight",
+    );
+    Object.defineProperty(document.body, "offsetHeight", {
+      configurable: true,
+      get: () => {
+        throw new Error("layout flush is unavailable");
+      },
+    });
+    const scrollTo = vi.spyOn(window, "scrollTo").mockImplementation(() => {
+      throw new Error("scroll restoration is unavailable");
+    });
+
+    try {
+      expect(() => release()).not.toThrow();
+      expect(scrollTo).toHaveBeenCalledWith(0, 120);
+      expect(document.body.style.position).toBe("");
+    } finally {
+      if (offsetHeightDescriptor) {
+        Object.defineProperty(
+          document.body,
+          "offsetHeight",
+          offsetHeightDescriptor,
+        );
+      } else {
+        Reflect.deleteProperty(document.body, "offsetHeight");
+      }
+    }
+  });
 });

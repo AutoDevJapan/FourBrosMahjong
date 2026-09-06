@@ -31,34 +31,88 @@ let lockCount = 0;
 /** 最外のロックが退避した状態の復元処理。ロック中のみ非 null。 */
 let restore: (() => void) | null = null;
 
-function applyLock(): () => void {
-  const { body } = document;
-  const scrollX = window.scrollX;
-  const scrollY = window.scrollY;
-  // body を fixed 化すると document のスクロールバーが消え、その幅ぶん内容が横へずれる。
-  // 消える幅を padding で補って、ロックの前後でレイアウトが動かないようにする。
-  const scrollbarWidth =
-    window.innerWidth - document.documentElement.clientWidth;
+/** 読み取り専用・書き込み専用のどちらかが壊れていてもスタイルを戻す。 */
+function restoreBodyStyles(
+  style: CSSStyleDeclaration,
+  previous: LockedStyle,
+): void {
+  for (const property of LOCKED_STYLE_PROPERTIES) {
+    try {
+      style[property] = previous[property];
+    } catch {
+      // A restricted CSSOM can reject an individual property. Continue restoring
+      // the remaining properties so a partial lock does not remain in place.
+    }
+  }
+}
 
-  const previous = Object.fromEntries(
-    LOCKED_STYLE_PROPERTIES.map((property) => [property, body.style[property]]),
-  ) as LockedStyle;
+/**
+ * Apply the lock only when the complete capability boundary is usable.
+ *
+ * Embedded/privacy-restricted documents can expose a DOM/CSSOM object whose
+ * getter or setter throws. A modal must remain usable even when its optional
+ * scroll lock cannot be applied, so a failed or partial application degrades
+ * to a no-op after best-effort restoration.
+ */
+function applyLock(): (() => void) | null {
+  let body: HTMLElement | null = null;
+  let style: CSSStyleDeclaration | null = null;
+  let previous: LockedStyle | null = null;
+  let scrollX = 0;
+  let scrollY = 0;
 
-  body.style.position = "fixed";
-  body.style.top = `${-scrollY}px`;
-  body.style.left = `${-scrollX}px`;
-  body.style.width = "100%";
-  body.style.overflow = "hidden";
-  if (scrollbarWidth > 0) body.style.paddingRight = `${scrollbarWidth}px`;
+  try {
+    body = document.body;
+    const root = document.documentElement;
+    if (!body || !root) return null;
+
+    scrollX = window.scrollX;
+    scrollY = window.scrollY;
+    // body を fixed 化すると document のスクロールバーが消え、その幅ぶん内容が横へずれる。
+    // 消える幅を padding で補って、ロックの前後でレイアウトが動かないようにする。
+    const scrollbarWidth = window.innerWidth - root.clientWidth;
+
+    const currentStyle = body.style;
+    style = currentStyle;
+    previous = Object.fromEntries(
+      LOCKED_STYLE_PROPERTIES.map((property) => [
+        property,
+        currentStyle[property],
+      ]),
+    ) as LockedStyle;
+
+    currentStyle.position = "fixed";
+    currentStyle.top = `${-scrollY}px`;
+    currentStyle.left = `${-scrollX}px`;
+    currentStyle.width = "100%";
+    currentStyle.overflow = "hidden";
+    if (scrollbarWidth > 0) currentStyle.paddingRight = `${scrollbarWidth}px`;
+  } catch {
+    if (style !== null && previous !== null) {
+      restoreBodyStyles(style, previous);
+    }
+    return null;
+  }
+
+  if (body === null || style === null || previous === null) return null;
+  const lockedBody = body;
+  const lockedStyle = style;
+  const lockedPrevious = previous;
 
   return () => {
-    for (const property of LOCKED_STYLE_PROPERTIES) {
-      body.style[property] = previous[property];
-    }
+    restoreBodyStyles(lockedStyle, lockedPrevious);
     // スタイルを戻しただけでは document のスクロール範囲が再計算されておらず、
     // scrollTo が上限 0 にクランプされて位置を失う。強制的にレイアウトを確定させてから戻す。
-    void body.offsetHeight;
-    window.scrollTo(scrollX, scrollY);
+    try {
+      void lockedBody.offsetHeight;
+    } catch {
+      // Layout reads are optional for restoration and must not break modal close.
+    }
+    try {
+      window.scrollTo(scrollX, scrollY);
+    } catch {
+      // A restricted window may reject scroll restoration; the styles are already restored.
+    }
   };
 }
 
@@ -70,7 +124,13 @@ function applyLock(): () => void {
 export function lockDocumentScroll(): () => void {
   // applyLock が失敗した場合にカウントだけ進んで復元不能になるのを避けるため、
   // 適用が成功してからカウントを進める。
-  if (lockCount === 0) restore = applyLock();
+  if (lockCount === 0) {
+    const nextRestore = applyLock();
+    // スクロールロックはモーダル操作の補助機能。DOM/CSSOMが使えない環境でも
+    // ダイアログ自体は使えるよう、適用不能時は冪等なno-opへ退避する。
+    if (nextRestore === null) return () => {};
+    restore = nextRestore;
+  }
   lockCount += 1;
 
   let released = false;
