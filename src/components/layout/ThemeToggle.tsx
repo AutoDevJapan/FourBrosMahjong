@@ -254,7 +254,7 @@ export function reconcileThemeFromStorage(): void {
 }
 
 /** 全ページ共通の storage listener から別タブのテーマをDOMへ同期する。 */
-export function syncThemeFromStorage(): void {
+function syncThemeFromStorage(): void {
   // 別タブの永続値が権威となるため、このタブの揮発fallbackは破棄する。
   volatilePreference = null;
   reconcileThemeFromStorage();
