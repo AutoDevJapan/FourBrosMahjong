@@ -427,6 +427,35 @@ interface PendingTransitionFocus {
   readonly target: TransitionFocusTarget;
 }
 
+/**
+ * Focus is an accessibility enhancement, not a prerequisite for the online
+ * lobby. Embedded or privacy-restricted DOM hosts may expose focus-related
+ * accessors that throw, so contain both the write and the verification read at
+ * this boundary. Returning whether the target actually became active keeps
+ * the existing fallback order intact when the capability is available.
+ */
+function activeElementOrNull(): Element | null {
+  if (typeof document === "undefined") return null;
+  try {
+    return document.activeElement;
+  } catch {
+    return null;
+  }
+}
+
+function focusElement(
+  element: HTMLElement | null,
+  options?: FocusOptions,
+): boolean {
+  if (element === null) return false;
+  try {
+    element.focus(options);
+  } catch {
+    return false;
+  }
+  return activeElementOrNull() === element;
+}
+
 function ConnectionFeedback({
   status,
   error,
@@ -468,7 +497,7 @@ function ConnectionFeedback({
           type="button"
           disabled={!canRetry || retryAfterMs > 0}
           onClick={() =>
-            onRetry(document.activeElement === retryButtonRef.current)
+            onRetry(activeElementOrNull() === retryButtonRef.current)
           }
           ref={retryButtonRef}
           className="min-h-11 shrink-0 rounded-lg border border-control-border px-3 py-2 font-medium whitespace-nowrap hover:bg-foreground/5 disabled:cursor-not-allowed disabled:opacity-40"
@@ -498,7 +527,7 @@ function OnlineResultView({
   const orderedPlayers = [...result.players].sort((a, b) => a.rank - b.rank);
 
   useEffect(() => {
-    headingRef.current?.focus({ preventScroll: true });
+    focusElement(headingRef.current, { preventScroll: true });
   }, []);
 
   const newGameUnavailableMessage = !isHost
@@ -695,7 +724,7 @@ export default function OnlineLobby() {
       // The node is compared after commit so an already-focused, persistent
       // feedback element is not focused again on every connection update.
       pendingTransitionFocusRef.current = {
-        origin: document.activeElement,
+        origin: activeElementOrNull(),
         target,
       };
     },
@@ -725,7 +754,7 @@ export default function OnlineLobby() {
             ? gameHeadingRef.current
             : lobbyHeadingRef.current;
     if (!target || target === pending.origin) return;
-    target.focus({ preventScroll: true });
+    focusElement(target, { preventScroll: true });
   }, [snapshot, status]);
 
   useEffect(() => {
@@ -745,14 +774,13 @@ export default function OnlineLobby() {
     }
 
     const resultButton = onlineResultButtonRef.current;
-    resultButton?.focus({ preventScroll: true });
-    if (resultButton !== null && document.activeElement === resultButton) {
+    if (focusElement(resultButton, { preventScroll: true })) {
       restoreOnlineResultFocusRef.current = false;
       restoreOnlineGameFocusRef.current = false;
       return;
     }
 
-    onlineGameFallbackRef.current?.focus({ preventScroll: true });
+    focusElement(onlineGameFallbackRef.current, { preventScroll: true });
     restoreOnlineResultFocusRef.current = false;
     restoreOnlineGameFocusRef.current = false;
   }, [onlineResultOpen]);
