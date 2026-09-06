@@ -1,7 +1,10 @@
 "use client";
 
 import { useEffect } from "react";
-import { reconcileThemeFromStorage, syncThemeFromStorage } from "./ThemeToggle";
+import {
+  reconcileThemeFromStorage,
+  subscribeThemeStorage,
+} from "./ThemeToggle";
 
 /**
  * 別タブのテーマ変更を、現在のルートに関係なく反映する全ページ共通の同期境界。
@@ -9,11 +12,6 @@ import { reconcileThemeFromStorage, syncThemeFromStorage } from "./ThemeToggle";
  */
 export function ThemeStorageSync() {
   useEffect(() => {
-    const handleStorage = (event: StorageEvent) => {
-      if (event.key === "theme" || event.key === null) {
-        syncThemeFromStorage();
-      }
-    };
     const handlePageShow = (event: PageTransitionEvent) => {
       if (!event.persisted) return;
       // BFCacheからの復帰ではmountされず、復帰中のstorage eventを
@@ -24,11 +22,11 @@ export function ThemeStorageSync() {
     // listenerを先に登録し、その直後に現在値へcatch-upする。
     // 変更がlistener登録より前ならcatch-up、後ならeventが拾うため、
     // hydrationと別タブ書き込みの順序にかかわらず現在値へ収束する。
-    window.addEventListener("storage", handleStorage);
+    const unsubscribeStorage = subscribeThemeStorage();
     window.addEventListener("pageshow", handlePageShow);
     reconcileThemeFromStorage();
     return () => {
-      window.removeEventListener("storage", handleStorage);
+      unsubscribeStorage();
       window.removeEventListener("pageshow", handlePageShow);
     };
   }, []);

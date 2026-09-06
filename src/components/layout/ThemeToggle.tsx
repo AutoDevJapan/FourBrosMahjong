@@ -60,6 +60,10 @@ let cachedSnapshot: ThemeSnapshot | null = null;
 // localStorage が利用できないタブでも、現在のセッション中は選択と実テーマを
 // 一致させる。永続化に成功した時点、または別タブの storage 通知で破棄する。
 let volatilePreference: ThemePreference | null = null;
+// 全ページの同期境界と設定UIが同じstorage eventを購読するため、listenerは1本だけ
+// 共有する。購読者ごとにlistenerを張ると、1回の別タブ変更で同じ外部ストアを複数回
+// 再評価する(issue #1051)。
+let storageListenerUsers = 0;
 
 /** 現在タブの揮発設定を優先し、なければ永続値を読む。 */
 function readStoredPreference(): ThemePreference {
@@ -121,6 +125,34 @@ function getServerSnapshot(): ThemeSnapshot {
   return SERVER_SNAPSHOT;
 }
 
+function onStorage(event: StorageEvent): void {
+  if (event.key === STORAGE_KEY || event.key === null) {
+    syncThemeFromStorage();
+  }
+}
+
+function acquireStorageListener(): () => void {
+  if (storageListenerUsers === 0) {
+    window.addEventListener("storage", onStorage);
+  }
+  storageListenerUsers += 1;
+
+  let released = false;
+  return () => {
+    if (released) return;
+    released = true;
+    storageListenerUsers -= 1;
+    if (storageListenerUsers === 0) {
+      window.removeEventListener("storage", onStorage);
+    }
+  };
+}
+
+/** 全ページのテーマ同期境界がstorage eventを共有購読する。 */
+export function subscribeThemeStorage(): () => void {
+  return acquireStorageListener();
+}
+
 /** 選択に応じて `<html data-theme>` を設定/除去する(DOM 反映のみ)。 */
 function writeThemeToDom(preference: ThemePreference): void {
   const root = document.documentElement;
@@ -137,19 +169,11 @@ function writeThemeToDom(preference: ThemePreference): void {
  */
 function subscribe(callback: () => void): () => void {
   subscribers.add(callback);
+  const unsubscribeStorage = acquireStorageListener();
   const media = getThemeMediaQuery();
   const onMediaChange = () => {
     cachedSnapshot = null;
     callback();
-  };
-  const onStorage = (event: StorageEvent) => {
-    if (event.key === STORAGE_KEY || event.key === null) {
-      volatilePreference = null;
-      // 別タブでの選択をこのタブの DOM へ同期(localStorage は書き換えない)。
-      writeThemeToDom(readStoredPreference());
-      cachedSnapshot = null;
-      callback();
-    }
   };
   // 現行APIを優先し、古いWebViewのaddListenerにも対応する。どちらも利用
   // できない場合はOS変更の購読だけを諦め、手動設定・storage同期は維持する。
@@ -189,11 +213,10 @@ function subscribe(callback: () => void): () => void {
       }
     }
   }
-  window.addEventListener("storage", onStorage);
   return () => {
     subscribers.delete(callback);
+    unsubscribeStorage();
     unsubscribeMedia();
-    window.removeEventListener("storage", onStorage);
   };
 }
 
@@ -231,7 +254,7 @@ export function reconcileThemeFromStorage(): void {
 }
 
 /** 全ページ共通の storage listener から別タブのテーマをDOMへ同期する。 */
-export function syncThemeFromStorage(): void {
+function syncThemeFromStorage(): void {
   // 別タブの永続値が権威となるため、このタブの揮発fallbackは破棄する。
   volatilePreference = null;
   reconcileThemeFromStorage();
