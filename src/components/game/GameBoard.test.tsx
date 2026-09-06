@@ -692,6 +692,41 @@ describe("GameBoard 終局後の出口(#206 / #207 / #277)", () => {
     // 新規半荘の開始(gameEnd → playing)でも自動遷移は発火しない。
     expect(routerMock.replace).not.toHaveBeenCalled();
   });
+
+  it("安全な乱数が使えない新規半荘では現在の局面を保持して再試行を案内する", async () => {
+    const user = userEvent.setup();
+    const random = vi
+      .spyOn(globalThis.crypto, "getRandomValues")
+      .mockImplementation(() => {
+        throw new Error("random source is unavailable");
+      });
+
+    try {
+      render(
+        <GameProvider initialGame={finishedGame()}>
+          <GameBoard />
+        </GameProvider>,
+      );
+
+      await user.click(
+        screen.getAllByRole("button", { name: "新しい半荘を開始" })[0],
+      );
+
+      expect(
+        screen.getByText(
+          "安全な乱数を利用できないため、対局を開始できません。ブラウザの設定を確認してから再試行してください。",
+        ),
+      ).toBeVisible();
+      expect(
+        document.querySelector('[data-seed-generation-status="failed"]'),
+      ).not.toBeNull();
+      expect(
+        screen.getAllByRole("heading", { name: "和了内訳" }),
+      ).not.toHaveLength(0);
+    } finally {
+      random.mockRestore();
+    }
+  });
 });
 
 describe("GameBoard online host handoff controls(#681 / #678)", () => {

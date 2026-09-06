@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { render } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { DEFAULT_NAMES } from "@/domain/game/engine";
 import { saveJournal } from "@/domain/game/gamePersistence";
@@ -8,8 +8,24 @@ import {
   deterministicSeedEnabled,
   freshSeed,
   GameProvider,
+  SecureRandomUnavailableError,
   seedFromLocation,
+  useGame,
 } from "./GameProvider";
+
+function NewGameSeedProbe() {
+  const { controls, seedGenerationError } = useGame();
+  return (
+    <>
+      <button type="button" onClick={controls.newGame}>
+        新しい半荘
+      </button>
+      <output data-testid="seed-generation-error">
+        {seedGenerationError ? "failed" : "ready"}
+      </output>
+    </>
+  );
+}
 
 describe("deterministicSeedEnabled", () => {
   it("developmentではE2Eフラグなしでも決定的seedを許可する", () => {
@@ -50,6 +66,87 @@ describe("freshSeed", () => {
       });
       expect(freshSeed()).toBe(expected);
     }
+  });
+
+  it("Web Crypto の getter/method 失敗を固定エラーへ変換し、予測可能なseedを作らない", () => {
+    const originalDescriptor = Object.getOwnPropertyDescriptor(
+      globalThis,
+      "crypto",
+    );
+
+    try {
+      Object.defineProperty(globalThis, "crypto", {
+        configurable: true,
+        get() {
+          throw new Error("crypto capability is unreadable");
+        },
+      });
+      expect(() => freshSeed()).toThrow(SecureRandomUnavailableError);
+
+      Object.defineProperty(globalThis, "crypto", {
+        configurable: true,
+        value: {
+          getRandomValues() {
+            throw new Error("random source is unavailable");
+          },
+        },
+      });
+      expect(() => freshSeed()).toThrow(SecureRandomUnavailableError);
+    } finally {
+      if (originalDescriptor) {
+        Object.defineProperty(globalThis, "crypto", originalDescriptor);
+      }
+    }
+  });
+});
+
+describe("GameProvider secure seed failure (#1046)", () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  it("初期seedを作れない場合は未処理例外ではなく再試行とロビー復帰を表示する", () => {
+    const originalDescriptor = Object.getOwnPropertyDescriptor(
+      globalThis,
+      "crypto",
+    );
+    try {
+      Object.defineProperty(globalThis, "crypto", {
+        configurable: true,
+        value: {},
+      });
+
+      expect(() => render(<GameProvider>{null}</GameProvider>)).not.toThrow();
+      expect(
+        screen.getByRole("heading", { name: "対局を開始できません" }),
+      ).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "再試行" })).toBeVisible();
+      expect(
+        screen.getByRole("link", { name: "ロビーへ戻る" }),
+      ).toHaveAttribute("href", "/");
+    } finally {
+      if (originalDescriptor) {
+        Object.defineProperty(globalThis, "crypto", originalDescriptor);
+      }
+    }
+  });
+
+  it("新しい半荘のseedを作れない場合も現在のproviderを保持して状態を通知する", () => {
+    render(
+      <GameProvider>
+        <NewGameSeedProbe />
+      </GameProvider>,
+    );
+    const random = vi
+      .spyOn(globalThis.crypto, "getRandomValues")
+      .mockImplementation(() => {
+        throw new Error("random source is unavailable");
+      });
+
+    fireEvent.click(screen.getByRole("button", { name: "新しい半荘" }));
+
+    expect(random).toHaveBeenCalledOnce();
+    expect(screen.getByTestId("seed-generation-error")).toHaveTextContent(
+      "failed",
+    );
   });
 });
 

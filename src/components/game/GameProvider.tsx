@@ -20,6 +20,7 @@
  *
  * 永続範囲は同一タブのセッション内だけであり、バックエンド/複数デバイス同期は行わない。
  */
+import Link from "next/link";
 import {
   createContext,
   useCallback,
@@ -65,7 +66,7 @@ import {
 import type { GameViewState, TileData } from "./types";
 
 /** UI から呼べる対局操作。判定は engine 側が行う。 */
-export interface GameControls {
+interface GameControls {
   /** 自家の打牌(表示手牌から選んだ牌)。 */
   readonly discard: (tile: TileData) => void;
   /** 自家のツモ切り(リーチ後にツモ和了しないとき)。 */
@@ -111,6 +112,8 @@ export interface GameContextValue {
   readonly sessionSaveStatus: "idle" | "saved" | "failed";
   /** 現在の半荘結果をこの端末の戦績へ保存した状態。 */
   readonly historySaveStatus: "idle" | "pending" | "saved" | "failed";
+  /** 安全な乱数が利用できず、新しい半荘を開始できなかった状態。 */
+  readonly seedGenerationError: boolean;
   /** 対局操作。 */
   readonly controls: GameControls;
 }
@@ -181,15 +184,47 @@ export function seedFromLocation(): number | null {
 }
 
 /**
+ * 暗号学的に安全な乱数源が利用できないときの固定エラー。
+ *
+ * 対局seedを `Date.now()` や `Math.random()` へフォールバックすると、開始時刻から
+ * 牌山を推測できるため、利用者向けの乱数では予測可能な代替を許可しない。呼び出し側は
+ * このエラーだけを復旧可能な「対局を開始できない」状態へ変換し、他の予期しない例外は
+ * 通常どおり上位へ伝播させる。
+ */
+export class SecureRandomUnavailableError extends Error {
+  constructor(cause?: unknown) {
+    super("A secure random source is unavailable", { cause });
+    this.name = "SecureRandomUnavailableError";
+  }
+}
+
+export const SECURE_RANDOM_UNAVAILABLE_MESSAGE =
+  "安全な乱数を利用できないため、対局を開始できません。ブラウザの設定を確認してから再試行してください。";
+
+/**
  * 通常対局の壁を決める、予測困難な uint32 seed を生成する。
  *
  * 時刻由来の seed は開始時刻から全牌順を総当たりできるため使わない。
  * Web Crypto はブラウザとサポート対象の Node.js の双方で利用できる。
  */
 export function freshSeed(): number {
-  const values = new Uint32Array(1);
-  globalThis.crypto.getRandomValues(values);
-  return values[0];
+  try {
+    // Optional browser capabilities can be absent or exposed through a
+    // throwing accessor in embedded/privacy-restricted runtimes. Keep the
+    // capability lookup and invocation in one boundary so callers can show a
+    // recoverable fail-closed state instead of leaking a TypeError.
+    const cryptoApi = (globalThis as { crypto?: Crypto }).crypto;
+    const getRandomValues = cryptoApi?.getRandomValues;
+    if (typeof getRandomValues !== "function") {
+      throw new TypeError("Web Crypto getRandomValues is unavailable");
+    }
+    const values = new Uint32Array(1);
+    getRandomValues.call(cryptoApi, values);
+    return values[0];
+  } catch (error) {
+    if (error instanceof SecureRandomUnavailableError) throw error;
+    throw new SecureRandomUnavailableError(error);
+  }
 }
 
 /**
@@ -324,12 +359,73 @@ export interface GameProviderProps {
   initialGame?: EngineState;
 }
 
-export function GameProvider({ children, initialGame }: GameProviderProps) {
-  // 実対局の乱数状態は初期化子で1度だけ生成する。SSR とクライアント初回描画の不一致は、
-  // 盤面を描く `GameBoard` 側のマウントゲート(クライアントでのみ盤面を描画)で回避する。
-  // `initialGame`(単体テストの明示注入)を最優先し、次に URL の `?seed`(E2E の決定的再現)、
-  // どちらも無ければ既定の乱数半荘。seed 経路は本番導線(クエリ無し)では発火しない。
-  const [session, setSession] = useState(() => initialSession(initialGame));
+type InitialSession = ReturnType<typeof initialSession>;
+
+function GameSeedUnavailable() {
+  const retry = () => {
+    try {
+      window.location.reload();
+    } catch {
+      // The link below remains available if a host blocks reload().
+    }
+  };
+
+  return (
+    <main
+      className="mx-auto flex min-h-[16rem] w-full max-w-2xl flex-col items-center justify-center gap-4 rounded-xl border border-control-border p-6 text-center"
+      aria-labelledby="game-seed-error-heading"
+    >
+      <p className="text-sm font-semibold tracking-widest text-foreground/60">
+        対局準備エラー
+      </p>
+      <h1 id="game-seed-error-heading" className="text-2xl font-bold">
+        対局を開始できません
+      </h1>
+      <p role="alert" className="max-w-xl text-sm/6 text-foreground/80">
+        {SECURE_RANDOM_UNAVAILABLE_MESSAGE}
+      </p>
+      <div className="flex flex-wrap justify-center gap-2">
+        <button
+          type="button"
+          className="inline-flex min-h-11 items-center rounded-lg border border-control-border px-4 py-2 text-sm font-medium hover:bg-foreground/5"
+          onClick={retry}
+        >
+          再試行
+        </button>
+        <Link
+          href="/"
+          className="inline-flex min-h-11 items-center rounded-lg border border-control-border px-4 py-2 text-sm hover:bg-foreground/5"
+        >
+          ロビーへ戻る
+        </Link>
+      </div>
+    </main>
+  );
+}
+
+function createInitialSession(
+  initialGame?: EngineState,
+): InitialSession | null {
+  try {
+    return initialSession(initialGame);
+  } catch (error) {
+    if (error instanceof SecureRandomUnavailableError) return null;
+    throw error;
+  }
+}
+
+interface GameProviderRuntimeProps {
+  children: React.ReactNode;
+  initial: InitialSession;
+}
+
+function GameProviderRuntime({ children, initial }: GameProviderRuntimeProps) {
+  // 実対局の乱数状態はprovider外のlazy initializerで1度だけ生成する。SSR とクライアント
+  // 初回描画の不一致は、盤面を描く `GameBoard` 側のマウントゲート(クライアントでのみ盤面を
+  // 描画)で回避する。`initialGame`(単体テストの明示注入)を最優先し、次に URL の `?seed`
+  // (E2E の決定的再現)、どちらも無ければ既定の乱数半荘。seed 経路は本番導線(クエリ無し)では
+  // 発火しない。
+  const [session, setSession] = useState(initial);
   // React が再レンダーする前に操作イベントが連続しても、必ず直前の確定 session から
   // 次の遷移を計算する。engine は Wall/RNG を含め入力を可変更新するため、レンダー時点の
   // session をクロージャから再利用するとライブ状態だけが二重に進み、journal と分岐する。
@@ -347,6 +443,7 @@ export function GameProvider({ children, initialGame }: GameProviderProps) {
       ),
   );
   const pendingHistoryAttemptsRef = useRef(new Set<number>());
+  const [seedGenerationError, setSeedGenerationError] = useState(false);
   const persistPendingHistoryEntry = useCallback(
     (entry: MatchHistoryEntry, expectedJournal?: GameJournal) => {
       if (pendingHistoryAttemptsRef.current.has(entry.seed)) return;
@@ -528,7 +625,17 @@ export function GameProvider({ children, initialGame }: GameProviderProps) {
             );
           }
         }
-        const seed = freshSeed();
+        let seed: number;
+        try {
+          seed = freshSeed();
+        } catch (error) {
+          if (error instanceof SecureRandomUnavailableError) {
+            setSeedGenerationError(true);
+            return;
+          }
+          throw error;
+        }
+        setSeedGenerationError(false);
         const storage = sessionStorageOrNull();
         // 「もう一半荘」は新しい半荘の開始なので、設定で変更された名前をここで取り込む。
         const names = currentPlayerNames();
@@ -562,12 +669,31 @@ export function GameProvider({ children, initialGame }: GameProviderProps) {
       roundSummary: engine.lastRound,
       sessionSaveStatus: session.sessionSaveStatus,
       historySaveStatus: session.historySaveStatus,
+      seedGenerationError,
       controls,
     }),
-    [engine, session.sessionSaveStatus, session.historySaveStatus, controls],
+    [
+      engine,
+      seedGenerationError,
+      session.sessionSaveStatus,
+      session.historySaveStatus,
+      controls,
+    ],
   );
 
   return <GameContext.Provider value={value}>{children}</GameContext.Provider>;
+}
+
+export function GameProvider({ children, initialGame }: GameProviderProps) {
+  // Seed generation happens in a lazy initializer so a normal game still has
+  // one stable seed. A missing secure RNG is converted to a local recovery
+  // surface before the runtime provider mounts; no predictable fallback is
+  // ever written to the session journal.
+  const [initial] = useState(() => createInitialSession(initialGame));
+  if (initial === null) return <GameSeedUnavailable />;
+  return (
+    <GameProviderRuntime initial={initial}>{children}</GameProviderRuntime>
+  );
 }
 
 /** 対局状態・操作にアクセスする。`GameProvider` の外で呼ぶとエラー。 */

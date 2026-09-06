@@ -39,6 +39,7 @@ function resultContext(
     roundSummary: state.lastRound,
     sessionSaveStatus: "idle",
     historySaveStatus,
+    seedGenerationError: false,
     controls: {
       discard: noop,
       tsumogiri: noop,

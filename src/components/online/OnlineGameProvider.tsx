@@ -172,6 +172,7 @@ export default function OnlineGameProvider({
       roundSummary: snapshot.roundSummary,
       sessionSaveStatus: "idle",
       historySaveStatus: "idle",
+      seedGenerationError: false,
       controls,
     }),
     [controls, isHost, playerId, snapshot],

@@ -36,7 +36,11 @@ import { tileLabel } from "../common/tileLabel";
 import ActionPanel, { type ActionItem } from "./ActionPanel";
 import EffectOverlay from "./effects/EffectOverlay";
 import { useGameEffects } from "./effects/useGameEffects";
-import { type GameContextValue, useGame } from "./GameProvider";
+import {
+  type GameContextValue,
+  SECURE_RANDOM_UNAVAILABLE_MESSAGE,
+  useGame,
+} from "./GameProvider";
 import type { HandProps, HandTileState } from "./Hand";
 import LiveRegion from "./LiveRegion";
 import PlayerSlot from "./PlayerSlot";
@@ -132,6 +136,7 @@ export default function GameBoard({
     controls,
     isHost,
     sessionSaveStatus,
+    seedGenerationError,
   } = useGame();
   const { slots, tableInfo, dora } = view;
   const router = useRouter();
@@ -793,6 +798,21 @@ export default function GameBoard({
       ) : null}
 
       <SessionSaveNotice status={sessionSaveStatus} />
+
+      {seedGenerationError ? (
+        <div
+          role="status"
+          aria-live="polite"
+          aria-atomic="true"
+          data-seed-generation-status="failed"
+          className="mx-auto mt-3 max-w-2xl rounded-lg border border-danger px-3 py-2 text-sm"
+        >
+          <strong>{SECURE_RANDOM_UNAVAILABLE_MESSAGE}</strong>
+          <p className="mt-1">
+            現在の対局は保持しています。ブラウザの設定を確認してから、もう一度お試しください。
+          </p>
+        </div>
+      ) : null}
 
       {kitaAnnouncement ? (
         <p
