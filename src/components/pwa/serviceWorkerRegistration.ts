@@ -22,10 +22,13 @@ export function registerServiceWorker(
   if (nodeEnv !== "production") {
     return false;
   }
-  if (!nav || !("serviceWorker" in nav)) {
+  if (!nav) {
     return false;
   }
   try {
+    // Capability probes can be implemented by a host proxy and may throw
+    // before the property getter or registration call is reached.
+    if (!("serviceWorker" in nav)) return false;
     nav.serviceWorker.register(SERVICE_WORKER_URL).catch(() => {
       // 登録失敗(プライベートブラウジング等)はオンライン動作へ影響しないため黙って続行する。
       // オフライン強化は progressive enhancement であり、失敗をユーザーへ通知する必要はない。
