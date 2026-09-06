@@ -480,6 +480,75 @@ describe("MatchHistoryList (#293)", () => {
     expect(document.body).not.toHaveFocus();
   });
 
+  it("フォーカス書き込みが例外でも削除完了の処理を中断しない", async () => {
+    appendHistory(window.localStorage, entry(1, 1_753_000_000_000));
+    vi.spyOn(HTMLElement.prototype, "focus").mockImplementation(() => {
+      throw new Error("focus unavailable");
+    });
+
+    render(<MatchHistoryList />);
+    fireEvent.click(
+      await screen.findByRole("button", { name: "戦績をすべて削除" }),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "削除する" }));
+
+    expect(
+      await screen.findByRole("region", {
+        name: "保存された戦績はまだありません",
+      }),
+    ).toBeInTheDocument();
+    expect(
+      await screen.findByText("保存されていた戦績をすべて削除しました。"),
+    ).toBeInTheDocument();
+  });
+
+  it("activeElementの読み取りが例外でも削除完了の処理を中断しない", async () => {
+    appendHistory(window.localStorage, entry(1, 1_753_000_000_000));
+    vi.spyOn(Document.prototype, "activeElement", "get").mockImplementation(
+      () => {
+        throw new Error("activeElement unavailable");
+      },
+    );
+
+    render(<MatchHistoryList />);
+    fireEvent.click(
+      await screen.findByRole("button", { name: "戦績をすべて削除" }),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "削除する" }));
+
+    expect(
+      await screen.findByRole("region", {
+        name: "保存された戦績はまだありません",
+      }),
+    ).toBeInTheDocument();
+    expect(
+      await screen.findByText("保存されていた戦績をすべて削除しました。"),
+    ).toBeInTheDocument();
+  });
+
+  it("削除失敗時もフォーカス書き込みの例外を閉じ込める", async () => {
+    appendHistory(window.localStorage, entry(1, 1_753_000_000_000));
+    vi.spyOn(Storage.prototype, "removeItem").mockImplementation(() => {
+      throw new Error("storage unavailable");
+    });
+    vi.spyOn(HTMLElement.prototype, "focus").mockImplementation(() => {
+      throw new Error("focus unavailable");
+    });
+
+    render(<MatchHistoryList />);
+    fireEvent.click(
+      await screen.findByRole("button", { name: "戦績をすべて削除" }),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "削除する" }));
+
+    expect(
+      await screen.findByText(/この端末のストレージを操作できず/),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("list", { name: "保存された半荘結果" }),
+    ).toBeInTheDocument();
+  });
+
   it("削除完了までに別タブの保存が届いてもフォーカスをbodyへ落とさない(#482)", async () => {
     appendHistory(window.localStorage, entry(1, 1_753_000_000_000));
     // 削除の lock を解放した直後に別タブの終局保存が入り、一覧が再び描かれる状況。
