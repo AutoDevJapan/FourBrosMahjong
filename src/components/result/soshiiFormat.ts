@@ -16,12 +16,28 @@ export interface SignedSoshii {
   readonly isPositive: boolean;
 }
 
+function fallbackFormatGroupedInteger(value: number): string {
+  const truncated = Math.trunc(value);
+  const sign = truncated < 0 ? "-" : "";
+  const digits = Math.abs(truncated).toString();
+  return `${sign}${digits.replace(/\B(?=(\d{3})+(?!\d))/g, ",")}`;
+}
+
+/** Number.prototype.toLocaleString is progressive enhancement for embedded hosts. */
+function formatAbsoluteSoshii(value: number): string {
+  try {
+    return Math.abs(value).toLocaleString("ja-JP");
+  } catch {
+    return fallbackFormatGroupedInteger(Math.abs(value));
+  }
+}
+
 /**
  * 素点・ウマ・祝儀・合計など、増減の向きが意味を持つ値を符号付きで整形する。
  * マイナス記号にはハイフンではなく U+2212(−)を用い、フォント上の視認性を確保する。
  */
 export function formatSignedSoshii(value: number): SignedSoshii {
-  const abs = Math.abs(value).toLocaleString("ja-JP");
+  const abs = formatAbsoluteSoshii(value);
   if (value === 0) {
     return { display: "0", srLabel: "0ソシー", isPositive: false };
   }
