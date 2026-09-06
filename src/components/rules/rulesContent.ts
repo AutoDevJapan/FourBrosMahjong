@@ -1,3 +1,4 @@
+import { formatInteger } from "@/components/common/numberFormat";
 import {
   OKA,
   RETURN_POINTS,
@@ -160,12 +161,12 @@ export const RULE_SECTIONS = [
       {
         id: "rule-settlement-and-soshii-starting-points",
         label: "配給原点・返し",
-        body: `1人${STARTING_POINTS.toLocaleString("ja-JP")}点持ち(4人合計${(STARTING_POINTS * 4).toLocaleString("ja-JP")}点)、${RETURN_POINTS.toLocaleString("ja-JP")}点返し。`,
+        body: `1人${formatInteger(STARTING_POINTS)}点持ち(4人合計${formatInteger(STARTING_POINTS * 4)}点)、${formatInteger(RETURN_POINTS)}点返し。`,
       },
       {
         id: "rule-settlement-and-soshii-settlement",
         label: "ソシー精算",
-        body: `最終持ち点から${RETURN_POINTS.toLocaleString("ja-JP")}点を引いた素点に順位ウマを加え、1位にはオカ${OKA.toLocaleString("ja-JP")}を加算する。オカは4人分の配給原点と返しの差額合計。`,
+        body: `最終持ち点から${formatInteger(RETURN_POINTS)}点を引いた素点に順位ウマを加え、1位にはオカ${formatInteger(OKA)}を加算する。オカは4人分の配給原点と返しの差額合計。`,
       },
       {
         id: "rule-settlement-and-soshii-uma",
