@@ -6,20 +6,20 @@ GitHub Release の公開識別子である `v*` tag を、公開後に付け替�
 
 2026-08-15 (JST) の適用監査と 2026-08-17 (JST) の follow-up 読み取り監査では、repository ruleset `protect-existing-release-tags` (ID `20858931`) が `active` で適用済みである。対象は `target=tag`、`refs/tags/v*`、除外なし、rules は `update`・`deletion`・`non_fast_forward`、`bypass_actors` は空である。したがって Release Operator を含む全 actor が、公開済み `v*` tag の付け替え・削除・force-update を拒否される。今回この ruleset の適用・再監査にあたり、tag の作成・更新・削除は行っていない。
 
-監査の再現可能性のため、repository 内に read-only helper [`audit-release-tag-ruleset.mjs`](../../.github/scripts/audit-release-tag-ruleset.mjs) を置く。helper は `includes_parents=false` の ruleset 一覧から repository-owned の対象を **ちょうど 1 件**選び、詳細を取得して validator に渡す。各 API 呼び出しは `gh api --method GET` を argv に明示し、将来のオプション追加による method 上書きも拒否する。対象が無い・複数ある・詳細の一部が取得できない場合は fail closed する。`bypass_actors` は GitHub API の仕様上、ruleset への write access がない caller には返されないため、管理者または ruleset の write access を持つ operator の `gh` 認証で実行する。read-only token での欠落を「bypass なし」と解釈しない。
+監査の再現可能性のため、repository 内に read-only helper [`audit-release-tag-ruleset.mjs`](../../.github/scripts/audit-release-tag-ruleset.mjs) を置く。helper は `includes_parents=false` の ruleset 一覧から repository-owned の対象を **ちょうど 1 件**選び、詳細を取得して validator に渡す。各 API 呼び出しは `gh api --method GET` を argv に明示し、将来のオプション追加による method 上書きも拒否する。対象が無い・複数ある・詳細の一部が取得できない場合は fail closed する。`bypass_actors` は GitHub API の仕様上、ruleset への write access がない caller には返されないため、管理者または ruleset の write access を持つ operator の `gh` 認証で実行する。read-only token での欠落を「bypass なし」と解釈しない。`update` rule の `parameters.update_allows_fetch_and_merge` は、現行 tag detail 応答のように省略された場合を許容しつつ、明示された `true` や不正型を拒否する。
 
 作成認可 ruleset A は不変性 ruleset B と責務が異なるため、[`audit-release-tag-creation-ruleset.mjs`](../../.github/scripts/audit-release-tag-creation-ruleset.mjs) で別に監査する。A の監査は承認済み Release Operators Team の numeric ID を明示し、repository-owned の対象を **ちょうど 1 件**選んで詳細を取得した後、`creation` のみ・`Always allow` の Team 1件という契約を検証する。Team ID 未解決、対象の欠落・重複、継承 ruleset、詳細不一致は fail closed とし、ruleset・Team・tag は変更しない。
 
 同日の tag / Release inventory には `v*` tag と GitHub Release が存在しない。そのため既存公開物の SHA を変更しておらず、正常 Release の実作成と実 tag 操作による拒否テストは、次の承認済み release rehearsal まで未実施である。
 
-### 2026-09-05 current-main 再監査
+### 2026-09-07 current-main 再監査
 
-2026-09-05 (JST)、#838 の merge 後の `main` (`c99a68cc0e8282a36f1f5d811489b16ab78d7179`) を基準に、以下を読み取り専用で再確認した。
+2026-09-07 (JST)、`main` (`e8a29153752756fdf1b9af500dea46130991e775`) を基準に、以下を読み取り専用で再確認した。
 
-- `node .github/scripts/audit-release-tag-ruleset.mjs` は、repository-owned ruleset `protect-existing-release-tags` (`20858931`) の `active`、`target=tag`、`refs/tags/v*`、`deletion` / `non_fast_forward` / `update`、`bypass_actors=[]`、`current_user_can_bypass=never` を検証した。
-- Organization Team は 0 件、repository で push/admin 権限を持つ collaborator は `mashfromband` と `Dev-AK28` の2名だった。専用 Release Operators Team、break-glass Team、権限分離された検証用アカウントは未登録である。
-- `v*` tag、GitHub Release、`Release` workflow run はいずれも 0 件だった。したがって、作成認可 A の実アカウント拒否、Release Operator の正常作成、公開後 tag の更新/削除拒否を実操作では検証していない。
-- runbook契約テスト（`release-tag-ruleset.test.ts`、`release-guard.test.ts`、`gitleaks-release.test.ts`）は 3 files / 127 tests が成功した。
+- `node .github/scripts/audit-release-tag-ruleset.mjs` は、repository-owned ruleset `protect-existing-release-tags` (`20858931`) の `active`、`target=tag`、`refs/tags/v*`、`deletion` / `non_fast_forward` / `update`、`bypass_actors=[]`、`current_user_can_bypass=never` を検証した。detail 応答で `update` の parameters が省略されていることも確認した。
+- Actions policy の read-back は `enabled=true`、`allowed_actions=all`、`sha_pinning_required=true` だった。Organization Team inventory は 0 件で、専用 Release Operators Team、break-glass Team、権限分離された検証用アカウントは未登録である。
+- `v*` tag と GitHub Release は 0 件だった。`main` の同一SHAに対する CI `34056822063`、gitleaks `34056822083`、CodeQL `34056821945` は success、Production deployment `6297375450` も同じSHAで success と記録されている。したがって、作成認可 A の実アカウント拒否、Release Operator の正常作成、公開後 tag の更新/削除拒否を実操作では検証していない。
+- runbook契約テスト（`release-tag-ruleset.test.ts`、`release-guard.test.ts`、`gitleaks-release.test.ts`）は、この差分の追加回帰を含めてローカルで再実行する。外部 ruleset / Team / collaborator 権限 / tag / Release / workflow / deployment は変更していない。
 
 この再監査では ruleset、Team、collaborator 権限、tag、Release、workflow、repository file を変更していない。B の不変性は継続して検証済みだが、owner が Release Operators / break-glass governance と実検証用アカウントを承認するまで、A の作成認可と実アカウントによる拒否テストは未完了のまま HOLD とする。
 
