@@ -638,6 +638,42 @@ describe("OnlineLobby focus lifecycle (#682)", () => {
         .filter(([options]) => options?.preventScroll === true),
     ).toHaveLength(1);
   });
+
+  it("keeps connection recovery usable when focus is unavailable", () => {
+    vi.spyOn(HTMLElement.prototype, "focus").mockImplementation(() => {
+      throw new Error("focus is unavailable");
+    });
+    render(<OnlineLobby />);
+    startRoom();
+
+    expect(() => {
+      act(() => sockets[0]?.fail());
+    }).not.toThrow();
+
+    expect(
+      document.querySelector('[data-connection-status="failed"]'),
+    ).not.toBeNull();
+    expect(screen.getByRole("button", { name: "再試行" })).toBeEnabled();
+  });
+
+  it("keeps connection recovery usable when activeElement cannot be read", () => {
+    vi.spyOn(Document.prototype, "activeElement", "get").mockImplementation(
+      () => {
+        throw new Error("activeElement is unavailable");
+      },
+    );
+    render(<OnlineLobby />);
+    startRoom();
+
+    expect(() => {
+      act(() => sockets[0]?.fail());
+    }).not.toThrow();
+
+    expect(
+      document.querySelector('[data-connection-status="failed"]'),
+    ).not.toBeNull();
+    expect(screen.getByRole("button", { name: "再試行" })).toBeEnabled();
+  });
 });
 
 describe("OnlineLobby のキーボード送信", () => {
