@@ -1,5 +1,9 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import { formatSignedSoshii } from "./soshiiFormat";
+
+afterEach(() => {
+  vi.restoreAllMocks();
+});
 
 describe("formatSignedSoshii", () => {
   it("prefixes a plus and a positive screen-reader label for positive values", () => {
@@ -22,5 +26,27 @@ describe("formatSignedSoshii", () => {
     expect(r.display).toBe("0");
     expect(r.srLabel).toBe("0ソシー");
     expect(r.isPositive).toBe(false);
+  });
+
+  it("uses a deterministic grouped fallback when localized formatting throws", () => {
+    vi.spyOn(Number.prototype, "toLocaleString").mockImplementation(() => {
+      throw new Error("localized number formatting unavailable");
+    });
+
+    expect(formatSignedSoshii(1_234_000)).toEqual({
+      display: "+1,234,000",
+      srLabel: "プラス1,234,000ソシー",
+      isPositive: true,
+    });
+    expect(formatSignedSoshii(-5_000)).toEqual({
+      display: "−5,000",
+      srLabel: "マイナス5,000ソシー",
+      isPositive: false,
+    });
+    expect(formatSignedSoshii(0)).toEqual({
+      display: "0",
+      srLabel: "0ソシー",
+      isPositive: false,
+    });
   });
 });
