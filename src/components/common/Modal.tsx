@@ -69,6 +69,8 @@ export function isRestoreFocusTarget(
  * 実ブラウザでは CSS の `display: none` / `visibility: hidden` もフォーカス不能なので、
  * それらの祖先を含めて除外する。`getComputedStyle` はレイアウト寸法を参照しないため、
  * jsdom でも inline style の退行を検出でき、実レイアウトに依存する `getClientRects()` は使わない。
+ * CSSOM が無い/throwする環境ではスタイル由来の非表示判定だけを省略し、ネイティブの
+ * focus可否へ委ねる(モーダル操作そのものは継続できるようにする)。
  */
 function isUnavailableForFocus(element: HTMLElement): boolean {
   for (
@@ -84,13 +86,20 @@ function isUnavailableForFocus(element: HTMLElement): boolean {
       return true;
     }
 
-    const style = current.ownerDocument.defaultView?.getComputedStyle(current);
-    if (
-      style?.display === "none" ||
-      style?.visibility === "hidden" ||
-      style?.visibility === "collapse"
-    ) {
-      return true;
+    try {
+      const view = current.ownerDocument.defaultView;
+      const getComputedStyle = view?.getComputedStyle;
+      if (typeof getComputedStyle !== "function") continue;
+      const style = getComputedStyle.call(view, current);
+      if (
+        style.display === "none" ||
+        style.visibility === "hidden" ||
+        style.visibility === "collapse"
+      ) {
+        return true;
+      }
+    } catch {
+      // A restricted CSSOM must not make the dialog's focus trap throw.
     }
   }
   return false;

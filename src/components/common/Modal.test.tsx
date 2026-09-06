@@ -118,6 +118,38 @@ describe("Modal (spec 5.2.2 dialog / focus trap / Escape)", () => {
     expect(closeBtn).toHaveFocus();
   });
 
+  it("CSSOMの呼び出しがthrowしてもフォーカストラップを継続する", () => {
+    const getComputedStyle = vi
+      .spyOn(window, "getComputedStyle")
+      .mockImplementation(() => {
+        throw new Error("CSSOM is unavailable");
+      });
+
+    try {
+      render(
+        <Modal title="全体盤面" onClose={vi.fn()}>
+          <button type="button">中身</button>
+        </Modal>,
+      );
+      const dialog = document.querySelector('[role="dialog"]');
+      expect(dialog).not.toBeNull();
+      const closeBtn = dialog?.querySelector(
+        'button[aria-label="閉じる"]',
+      ) as HTMLButtonElement;
+      const contentButton = [
+        ...(dialog?.querySelectorAll("button") ?? []),
+      ].find((button) => button.textContent === "中身") as HTMLButtonElement;
+      contentButton.focus();
+
+      expect(() =>
+        fireEvent.keyDown(dialog as HTMLElement, { key: "Tab" }),
+      ).not.toThrow();
+      expect(closeBtn).toHaveFocus();
+    } finally {
+      getComputedStyle.mockRestore();
+    }
+  });
+
   it("閉じた後に開く前のフォーカス位置へ戻す", async () => {
     const user = userEvent.setup();
     function Harness() {
