@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { RULE_ITEM_COUNT, RULE_SECTIONS } from "./rulesContent";
 
 const EXPECTED_ITEM_IDS = [
@@ -32,6 +32,10 @@ const EXPECTED_ITEM_IDS = [
   "rule-special-elements-introduction",
   "rule-special-elements-24-hours",
 ] as const;
+
+afterEach(() => {
+  vi.restoreAllMocks();
+});
 
 describe("rulesContent", () => {
   it("6セクション・29項目を一意な安定IDで定義する", () => {
@@ -101,5 +105,31 @@ describe("rulesContent", () => {
         defaultOpen: false,
       },
     ]);
+  });
+
+  it("keeps the settlement constants grouped in the normal locale path", () => {
+    const items = RULE_SECTIONS.find(
+      (section) => section.id === "rule-settlement-and-soshii",
+    )?.items;
+    expect(items?.[0]?.body).toBe(
+      "1人35,000点持ち(4人合計140,000点)、40,000点返し。",
+    );
+    expect(items?.[1]?.body).toContain("オカ20,000");
+  });
+
+  it("builds the rules content when localized number formatting throws", async () => {
+    vi.spyOn(Number.prototype, "toLocaleString").mockImplementation(() => {
+      throw new Error("localized number formatting is unavailable");
+    });
+
+    vi.resetModules();
+    const { RULE_SECTIONS: freshRuleSections } = await import("./rulesContent");
+    const items = freshRuleSections.find(
+      (section) => section.id === "rule-settlement-and-soshii",
+    )?.items;
+    expect(items?.[0]?.body).toBe(
+      "1人35,000点持ち(4人合計140,000点)、40,000点返し。",
+    );
+    expect(items?.[1]?.body).toContain("オカ20,000");
   });
 });
