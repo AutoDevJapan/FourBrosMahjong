@@ -153,6 +153,29 @@ class ThrowingCloseWebSocket extends TestWebSocket {
   }
 }
 
+class PartiallyWiredWebSocket extends ThrowingCloseWebSocket {
+  readonly removedListenerTypes: string[] = [];
+
+  override addEventListener(
+    type: string,
+    listener: EventListenerOrEventListenerObject,
+  ): void {
+    if (type === "open") {
+      super.addEventListener(type, listener);
+      return;
+    }
+    throw new DOMException("event wiring is unavailable", "SecurityError");
+  }
+
+  override removeEventListener(
+    type: string,
+    listener: EventListenerOrEventListenerObject,
+  ): void {
+    this.removedListenerTypes.push(type);
+    super.removeEventListener(type, listener);
+  }
+}
+
 const sockets: TestWebSocket[] = [];
 
 function snapshotFixture(): OnlineSnapshot {
@@ -261,6 +284,27 @@ describe("OnlineLobby (#605)", () => {
       act(() => socket.fail());
     }).not.toThrow();
 
+    expect(
+      document.querySelector('[data-connection-status="failed"]'),
+    ).not.toBeNull();
+    expect(screen.getByRole("button", { name: "再試行" })).toBeEnabled();
+  });
+
+  it("rolls back partial listener wiring before recovering from a close failure", () => {
+    vi.stubGlobal("WebSocket", PartiallyWiredWebSocket);
+    render(<OnlineLobby />);
+
+    fireEvent.change(screen.getByLabelText("表示名"), {
+      target: { value: "たろう" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "新しいルームを作る" }));
+
+    const socket = sockets[0];
+    if (!socket)
+      throw new Error("partial listener wiring test socket expected");
+    expect((socket as PartiallyWiredWebSocket).removedListenerTypes).toEqual([
+      "open",
+    ]);
     expect(
       document.querySelector('[data-connection-status="failed"]'),
     ).not.toBeNull();

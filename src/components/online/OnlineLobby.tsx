@@ -94,6 +94,10 @@ type JoinRequest =
 type ConnectionFailure = Pick<OnlineServerError, "message" | "retryAfterMs">;
 
 type SocketEventName = keyof WebSocketEventMap;
+type SocketListenerRegistration = {
+  readonly type: SocketEventName;
+  readonly listener: EventListener;
+};
 
 /**
  * WebSocket event wiring is an optional host capability for the lobby. Some
@@ -110,6 +114,21 @@ function addSocketListener<K extends SocketEventName>(
     return true;
   } catch {
     return false;
+  }
+}
+
+/** Roll back partial event wiring without making cleanup another failure path. */
+function removeSocketListeners(
+  socket: WebSocket | null | undefined,
+  registrations: readonly SocketListenerRegistration[],
+): void {
+  if (socket === null || socket === undefined) return;
+  for (const { type, listener } of registrations) {
+    try {
+      socket.removeEventListener(type, listener);
+    } catch {
+      // Restricted hosts may reject listener cleanup as well as registration.
+    }
   }
 }
 
@@ -1271,14 +1290,27 @@ export default function OnlineLobby() {
         clearHeartbeat();
         handleTransportFailure(next);
       };
+      const registeredListeners: SocketListenerRegistration[] = [];
+      const registerSocketListener = <K extends SocketEventName>(
+        type: K,
+        listener: (event: WebSocketEventMap[K]) => void,
+      ): boolean => {
+        if (!addSocketListener(next, type, listener)) return false;
+        registeredListeners.push({
+          type,
+          listener: listener as EventListener,
+        });
+        return true;
+      };
       const listenersRegistered = [
-        addSocketListener(next, "open", handleOpen),
-        addSocketListener(next, "message", handleMessage),
-        addSocketListener(next, "close", handleClose),
-        addSocketListener(next, "error", handleError),
+        registerSocketListener("open", handleOpen),
+        registerSocketListener("message", handleMessage),
+        registerSocketListener("close", handleClose),
+        registerSocketListener("error", handleError),
       ].every(Boolean);
       if (!listenersRegistered) {
         clearHeartbeat();
+        removeSocketListeners(next, registeredListeners);
         handleTransportFailure(next);
       }
     },
