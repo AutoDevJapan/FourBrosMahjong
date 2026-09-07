@@ -1,5 +1,9 @@
 # Unity版 対局演出テキスト・スパイク（Issue #818）
 
+後続実装: ユーザーの#818実装依頼により、同日の後続作業で表示専用C#プロジェクトを追加した。
+[実装・検証記録](./unity-display-prototype.md)と[起動手順](../../prototypes/unity-display/README.md)を参照。
+以下は基準HEADにおけるテキストスパイクの記録として保持する。Unity実行は後続でも未実施。
+
 ## 目的と結論
 
 このガイドは、Unity Editorや新規アセットを使わずに、既存Web実装からUnity表示へ切り出せる最小の仕様スライスを記録する。既存の[実現性ガイド](./unity-display-feasibility.md)と[Web表示リファレンス](./unity-display-reference.md)を補足するもので、Unityプロジェクトや本番移行を開始する承認ではない。
