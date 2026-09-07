@@ -159,8 +159,8 @@ namespace FourBros.Display
             DisplayValidation.Validate(next); // Reject invalid input before advancing the version.
             bool sameRoom = Current != null && next.roomId == Current.roomId;
             if (sameRoom && next.version <= Current.version) return false;
-            bool sameRound = sameRoom && next.roundLabel == Current.roundLabel;
-            if (!sameRoom || !sameRound) seenEffects.Clear();
+            // Committed effect identities remain consumed across round changes within a room.
+            if (!sameRoom) seenEffects.Clear();
             Animate = sameRoom && !restore;
             bool freshEffect = next.effect != null && seenEffects.Add(next.effect.id);
             Effect = Animate && freshEffect ? next.effect : null;
@@ -177,6 +177,8 @@ namespace FourBros.Display
     public static class DisplayLayout
     {
         public const float TileWidth = .30f, TileDepth = .42f, TileHeight = .16f, Spacing = .05f, DrawGap = .28f;
+        // Leave clearance between adjacent six-column rivers, including the wider reach row.
+        private const float RiverRadius = 1.2f;
         public static TilePlacement[] River(TileDisplay[] tiles, int columns = 6)
         {
             DisplayValidation.Require(columns >= 1 && columns <= 6, "River columns must be 1..6");
@@ -191,6 +193,21 @@ namespace FourBros.Display
                     result[i] = new TilePlacement(cursor + width / 2, -(start / columns) * (TileDepth + Spacing), tiles[i].sideways ? 90 : 0);
                     cursor += width + Spacing;
                 }
+            }
+            return result;
+        }
+        // Board-local placements are consumed directly by the renderer and separation checks.
+        public static TilePlacement[] RiverOnBoard(TileDisplay[] tiles, string position, int columns = 6)
+        {
+            var result = River(tiles, columns);
+            float yaw = SeatYaw(position);
+            double angle = yaw * Math.PI / 180;
+            float sin = (float)Math.Sin(angle), cos = (float)Math.Cos(angle);
+            for (int i = 0; i < result.Length; i++)
+            {
+                var p = result[i];
+                float z = p.z - RiverRadius;
+                result[i] = new TilePlacement(p.x * cos + z * sin, -p.x * sin + z * cos, (p.yaw + yaw) % 360);
             }
             return result;
         }

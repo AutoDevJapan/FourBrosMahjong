@@ -35,7 +35,7 @@ Unity Hub/Editorはこの環境にインストールされておらず、Unity�
 | 操作 | 確認すること |
 |---|---|
 | 各`before`/`after`ボタン（12状態） | fixtureの全4回転・連荘・東4→南1。物理位置はplayer IDに固定、席風と抜け番だけ入力どおり更新。抜け番に河/手牌/席風なし |
-| `River wrap` | 6列/4列の折り返し、捨て順、7枚目の赤い横向き牌、その隣の牌と非重複 |
+| `River wrap` | 6列/4列の折り返し、捨て順、7枚目の赤い横向き牌、同じ河内と隣席の河との非重複 |
 | `draw`/`replacement`（手牌欄） | 自家の最後の牌だけ追加の0.28単位の隙間。fixture指定の200msで入場 |
 | `deal`/`meld` | index依存の配牌遅延／短い横移動。鳴き後の枚数・別置き牌の除去は固定表示例。鳴き合法性の判定なし |
 | 9種のeffectボタン | discard、riichi、pon、kan、kita、tsumo、ron、draw、roundEnd。確定snapshotのeffect IDから1度だけ表示。kitaは当該プレイヤーのnorth表示も更新 |
@@ -62,6 +62,7 @@ Unity Hub/Editorはこの環境にインストールされておらず、Unity�
 本番adapterはサーバー/Domainが確定したslot・牌表示・点数・演出IDを渡す。
 `Apply` 後のsnapshotは呼出元で変更しない。schema/slot/秘匿境界検査はversion更新より先に行う。
 同一roomの同値以下は無視し、room切替や初回・restoreでは過去演出を抑止する。
+effect IDはroom内で一意とし、局替わりでも消費済みIDを再演出しない。新しいIDの演出は局替わり時も表示する。
 transport、token、合法手、山、向聴、点数、フリテンの責務はここへ渡さない。
 
 ## 任意FBXとの接続（#1165）
@@ -96,8 +97,9 @@ git diff --check
 ```
 
 このコンソール検証は本番と同じ`DisplayContract.cs`/`FixtureScenarios.cs`をコンパイルする。
-全12状態、4人の抜け番、点数ID保持、河座標の非重複、隙間、全演出/遷移、
-version sequence、別room、初回/復元/重複effect、入力拒否後のwatermark不変を検査する。
+全12状態、4人の抜け番、点数ID保持、4/6列の河座標の席間を含む非重複、隙間、全演出/遷移、
+version sequence、別room、初回/復元/局替わり時の重複effect、入力拒否後のwatermark不変を検査する。
+河の検査は描画側も直接使う`DisplayLayout.RiverOnBoard`を通し、通常時と打牌追加後の回転済み牌の境界を比較する。
 パーサーは.NET側では`System.Text.Json`なので、Unityの`JsonUtility`の検証はEditor側で必要。
 `UnityEngine`依存コードのコンパイルを代用するものではない。
 

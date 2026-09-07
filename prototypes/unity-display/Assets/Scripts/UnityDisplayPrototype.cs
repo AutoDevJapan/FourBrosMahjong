@@ -73,7 +73,7 @@ namespace FourBros.Display
                     optionalAssets.CreateVisual("character", marker);
                 }
                 if (slot.bench) continue;
-                var river = DisplayLayout.River(slot.river, columns);
+                var river = DisplayLayout.RiverOnBoard(slot.river, slot.position, columns);
                 SlotDisplay oldSlot = null;
                 if (previous != null && previous.roomId == session.Current.roomId && previous.roundLabel == session.Current.roundLabel)
                     foreach (var old in previous.slots) if (old.playerId == slot.playerId) oldSlot = old;
@@ -81,8 +81,8 @@ namespace FourBros.Display
                 for (int i = 0; i < river.Length; i++)
                 {
                     var p = river[i];
-                    var tile = DrawTile(seat, slot.river[i], new Vector3(p.x, .08f, p.z + 2.0f), p.yaw);
-                    if (appended && i == river.Length - 1) StartCoroutine(Enter(tile, 0, false));
+                    var tile = DrawTile(board, slot.river[i], new Vector3(p.x, .08f, p.z), p.yaw);
+                    if (appended && i == river.Length - 1) StartCoroutine(Enter(tile, 0, false, DisplayLayout.SeatYaw(slot.position)));
                 }
                 int count = slot.hand.Length > 0 ? slot.hand.Length : slot.concealedCount;
                 int total = count + (slot.drawn == null ? 0 : 1);
@@ -147,10 +147,11 @@ namespace FourBros.Display
             label.GetComponent<Renderer>().sharedMaterial = font.material;
         }
 
-        private IEnumerator Enter(Transform tile, float delay, bool slide)
+        private IEnumerator Enter(Transform tile, float delay, bool slide, float seatYaw = 0)
         {
             Vector3 target = tile.localPosition;
             Vector3 offset = slide ? Vector3.right * .2f : new Vector3(0, .3f, -.25f);
+            offset = Quaternion.Euler(0, seatYaw, 0) * offset;
             tile.localPosition = target + offset;
             float start = Time.unscaledTime + delay;
             while (Time.unscaledTime < start) yield return null;

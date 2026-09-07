@@ -28,7 +28,7 @@ Unityを起動・インストール・認証・ビルドしたとは扱わない
 player IDの物理位置はfixtureの`slotShape`に固定し、席風・抜け番・点数は各入力値から表示する。
 Unity側に親流れ・連荘・点数・ルールの導出コードは置いていない。
 
-河は6列/4列を切り替え、横向きリーチ牌の幅を考慮して隣接牌と間隔を取る。
+河は6列/4列を切り替え、横向きリーチ牌の幅を考慮して同じ河内と隣席の河との間隔を取る。
 手牌は自家のみ牌面を受け取り、他家は枚数だけから裏面を表示する。
 ツモ/置換200ms、決定的な配牌遅延、鳴き後整列、打牌末尾追加の短い位置補間を用意した。
 9種の演出（既存8種＋北抜き）は、コミット済み表示snapshotのeffect IDから表示する。
@@ -36,6 +36,7 @@ Unity側に親流れ・連荘・点数・ルールの導出コードは置いて
 
 表示ゲートは同一roomの同値/古いversionを拒否し、不正な入力ではwatermarkを進めない。
 初回・room切替・復元時は過去のeffect/牌入場を再演出しない。
+effect IDはroom内で一意とし、局替わりでも消費済みIDを保持する。新しいIDの演出は局替わり時も表示する。
 UIには固定version sequence再生と、現在のsnapshotをJSON往復で復元する操作を置いた。
 これはメモリ内の表示復元であり、オンライン認証・resume・保存永続化の実装ではない。
 
@@ -48,22 +49,29 @@ UIには固定version sequence再生と、現在のsnapshotをJSON往復で復�
 リポジトリルートで実行したコマンド（`dotnet`は一時SDKの実行ファイル）:
 
 ```bash
-dotnet run --project prototypes/unity-display/Tests/DisplayContractChecks.csproj -- documents/fixtures/unity-display-contract.json
+check_dir="$(mktemp -d /tmp/unity-display-checks.XXXXXX)"
+export DOTNET_CLI_HOME="$check_dir/home"
+export DOTNET_GENERATE_ASPNET_CERTIFICATE=false DOTNET_CLI_TELEMETRY_OPTOUT=1
+dotnet build prototypes/unity-display/Tests/DisplayContractChecks.csproj \
+  -p:BaseIntermediateOutputPath="$check_dir/obj/" -p:BaseOutputPath="$check_dir/bin/"
+dotnet "$check_dir/bin/Debug/net8.0/DisplayContractChecks.dll" documents/fixtures/unity-display-contract.json
 git diff --check
 ```
 
-結果: **237 assertions passed**。実際の`DisplayContract.cs`と`FixtureScenarios.cs`を
+結果: **2251 assertions passed**（ビルド警告/エラーともに0）。実際の`DisplayContract.cs`と`FixtureScenarios.cs`を
 .NET 8でコンパイル・実行した。独立したJSによるC#ロジックの模倣テストではない。
 
 - 12状態の座席投影、4人全員の抜け番、点数のplayer ID紐付け、他家の牌面非公開
 - fixture指定の演出・手牌遷移の網羅、200ms、北抜き・鳴き後の表示例
-- 4/6列の河座標、捨て順、リーチ横向きと隣接牌の非重複、ツモ牌の追加間隔、4方向角度
+- 4/6列の河座標、捨て順、リーチ横向きと席間を含む非重複、ツモ牌の追加間隔、4方向角度。描画側も直接使う`RiverOnBoard`で全12状態の通常時/打牌追加後の牌境界を比較
 - `41 apply → 42 apply → 41 ignore → 42 ignore → 43 apply`
-- 同一effect IDの重複抑止、リロードの静的復元、room切替、明示restore
+- 同一effect IDの局替わりをまたぐ重複抑止、局替わり時の新しいIDの表示、リロードの静的復元、room切替によるID履歴リセット、明示restore
 - schema違い、抜け番の風/北、他家牌面、重複player/position、null牌の拒否、拒否後の正常復帰
 
 `git diff --check`は成功。C#チェックは同じコードをEditorメニューからも実行できるが、
 今回の.NET実行ではパーサーに`System.Text.Json`を使っている。
+追加した回帰検査は修正前の配置で`self[11] / right[0]`の間隔`-0.03`を検出し、
+配置修正後には局替わりでの同一effect ID再演出を検出した。両修正後に全検査が通過した。
 **Unity APIのコンパイル、JsonUtilityの解析、GameObject配置・回転、文字・演出の描画は未確認**。
 Unityの代用品としてAPIスタブを作ってコンパイル成功とすることも行っていない。
 Web実装を変更していないため、既存WebテストをUnity成果として再掲しない。

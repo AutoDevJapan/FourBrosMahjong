@@ -20,6 +20,77 @@ namespace FourBros.Display
         }
         private static void Near(float a, float b, string message) { Check(Math.Abs(a - b) < .0001f, message); }
 
+        private static void CheckRiverSeparation(DisplaySnapshot snapshot, int columns)
+        {
+            var placements = new List<TilePlacement>();
+            var names = new List<string>();
+            foreach (var slot in snapshot.slots)
+            {
+                var river = DisplayLayout.RiverOnBoard(slot.river, slot.position, columns);
+                Check(river.Length == slot.river.Length, "board placement preserves every river tile");
+                for (int i = 0; i < river.Length; i++)
+                {
+                    Near(river[i].yaw, (DisplayLayout.SeatYaw(slot.position) + (slot.river[i].sideways ? 90 : 0)) % 360,
+                        "board placement preserves seat and reach orientation");
+                    placements.Add(river[i]);
+                    names.Add(slot.position + "[" + i + "]");
+                }
+            }
+            float minimumGap = float.MaxValue;
+            string closestPair = "";
+            for (int i = 0; i < placements.Count; i++)
+            {
+                var a = placements[i];
+                float aw = (a.yaw % 180 == 0 ? DisplayLayout.TileWidth : DisplayLayout.TileDepth) / 2;
+                float ad = (a.yaw % 180 == 0 ? DisplayLayout.TileDepth : DisplayLayout.TileWidth) / 2;
+                for (int j = i + 1; j < placements.Count; j++)
+                {
+                    var b = placements[j];
+                    float bw = (b.yaw % 180 == 0 ? DisplayLayout.TileWidth : DisplayLayout.TileDepth) / 2;
+                    float bd = (b.yaw % 180 == 0 ? DisplayLayout.TileDepth : DisplayLayout.TileWidth) / 2;
+                    // The fixture uses quarter turns, so these are exact tile bounds in board space.
+                    float gap = Math.Max(Math.Abs(a.x - b.x) - aw - bw, Math.Abs(a.z - b.z) - ad - bd);
+                    if (gap < minimumGap) { minimumGap = gap; closestPair = names[i] + " / " + names[j]; }
+                }
+            }
+            Check(minimumGap >= DisplayLayout.Spacing - .0001f,
+                "river separation: " + snapshot.roundLabel + ", " + columns + " columns, " + closestPair + ", gap " + minimumGap);
+        }
+
+        private static void CheckRoundEffects(FixtureScenarios scenarios, int beforeCase, int afterCase)
+        {
+            var session = new DisplaySession();
+            Check(session.Apply(scenarios.Snapshot(beforeCase, 41)), "initial round snapshot");
+            var ended = scenarios.Snapshot(beforeCase, 42, "roundEnd");
+            Check(session.Apply(ended) && session.Effect == ended.effect, "committed round end appears once");
+            var carried = scenarios.Snapshot(afterCase, 43, "roundEnd");
+            carried.effect.id = ended.effect.id;
+            Check(session.Apply(carried) && session.Animate && session.Effect == null,
+                "round change must not replay the same committed effect id");
+            var fresh = scenarios.Snapshot(afterCase, 44, "riichi");
+            Check(session.Apply(fresh) && session.Effect == fresh.effect, "fresh effect in the new round appears");
+
+            var boundary = new DisplaySession();
+            boundary.Apply(scenarios.Snapshot(beforeCase, 41));
+            var freshBoundary = scenarios.Snapshot(afterCase, 42, "pon");
+            Check(boundary.Apply(freshBoundary) && boundary.Animate && boundary.Effect == freshBoundary.effect,
+                "round change permits a fresh committed effect");
+
+            var restored = new DisplaySession();
+            Check(restored.Apply(ended, true) && !restored.Animate && restored.Effect == null, "restore suppresses round end history");
+            Check(restored.Apply(carried) && restored.Effect == null, "restored id stays suppressed across the round boundary");
+            var restoreInPlace = scenarios.Snapshot(afterCase, 44, "kita");
+            Check(restored.Apply(restoreInPlace, true) && !restored.Animate && restored.Effect == null, "in-place restore suppresses new history");
+            var repeated = scenarios.Snapshot(afterCase, 45, "kita");
+            repeated.effect.id = restoreInPlace.effect.id;
+            Check(restored.Apply(repeated) && restored.Effect == null, "in-place restore records the effect id");
+
+            var otherRoom = scenarios.Snapshot(beforeCase, 0); otherRoom.roomId = "other";
+            Check(session.Apply(otherRoom) && !session.Animate && session.Effect == null, "room change resets version and suppresses history");
+            var reused = scenarios.Snapshot(afterCase, 1, "roundEnd"); reused.roomId = "other"; reused.effect.id = ended.effect.id;
+            Check(session.Apply(reused) && session.Effect == reused.effect, "effect ids are scoped to the room session");
+        }
+
         public static int Run(ContractFixture contract)
         {
             checks = 0;
@@ -38,6 +109,11 @@ namespace FourBros.Display
                     Check(slot.seatWind == source.seats.WindFor(slot.playerId), "supplied seat assignment preserved");
                     if (source.points != null) Check(slot.points == source.points.For(slot.playerId), "points follow player id");
                     Check(slot.position == "self" || (slot.hand.Length == 0 && slot.drawn == null), "hidden opponents");
+                }
+                foreach (int columns in new[] { 4, 6 })
+                {
+                    CheckRiverSeparation(snapshot, columns);
+                    CheckRiverSeparation(scenarios.Snapshot(i, i + 1, "discard"), columns);
                 }
             }
             Check(benched.Count == 4, "every player has a bench case");
@@ -74,6 +150,8 @@ namespace FourBros.Display
             Check(restored.Apply(otherRoom) && !restored.Animate && restored.Effect == null, "room switch resets watermark and suppresses history");
             var restoreInPlace = scenarios.Snapshot(0, 1, "tsumo"); restoreInPlace.roomId = "other";
             Check(restored.Apply(restoreInPlace, true) && !restored.Animate && restored.Effect == null, "explicit fresh-version restore suppresses effects");
+            for (int i = contract.rotationCases.Length * 2; i < scenarios.Cases.Count; i += 2)
+                CheckRoundEffects(scenarios, i, i + 1);
 
             var river = scenarios.Snapshot(0, 1).slots[0].river;
             foreach (int columns in new[] { 4, 6 })
