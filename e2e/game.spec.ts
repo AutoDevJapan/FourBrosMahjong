@@ -2,6 +2,7 @@ import AxeBuilder from "@axe-core/playwright";
 import { expect, type Page, test } from "@playwright/test";
 import { expectCharacterPortraits } from "./helpers/characters";
 import { advanceUntil, armRiichi, visibleHand } from "./helpers/gameDriver";
+import { expectTouchTarget } from "./helpers/touchTarget";
 import { LANDMARK_RULES } from "./screens";
 
 const GAME_VISUAL_STYLE = "e2e/visual-screenshot.css";
@@ -1154,11 +1155,13 @@ test.describe("対局画面(/game)", () => {
 
         const hand = visibleHand(page);
         const firstTile = hand.getByRole("option").first();
-        await expect(firstTile).toBeVisible();
-        const box = await firstTile.boundingBox();
-        expect(box).not.toBeNull();
-        expect(box?.width).toBeGreaterThanOrEqual(44);
-        expect(box?.height).toBeGreaterThanOrEqual(44);
+        // 44px 判定は共有ヘルパへ集約する(#1168)。boundingBox は合成 quad 由来の
+        // サブピクセル誤差(43.999969482421875 など)を含むため直接 44 と比べない。
+        const metrics = await expectTouchTarget(
+          firstTile,
+          `${width}pxの自家手牌先頭牌`,
+        );
+        const box = metrics.boundingBox;
 
         const self = page
           .getByRole("region", { name: /^粗悪品/ })

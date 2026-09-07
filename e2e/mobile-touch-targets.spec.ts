@@ -1,30 +1,18 @@
 import AxeBuilder from "@axe-core/playwright";
-import { expect, type Locator, type Page, test } from "@playwright/test";
+import { expect, type Page, test } from "@playwright/test";
 import { walkToGameEnd } from "../src/components/game/finishedGameFixture";
 import {
   installWebSocketStub,
   type OnlineTestWindow,
   onlineSnapshotFixture,
 } from "./helpers/onlineTest";
+import { expectTouchTarget } from "./helpers/touchTarget";
 
 const NARROW_WIDTHS = [320, 360] as const;
 const GAME_RESPONSIVE_WIDTHS = [320, 360, 393, 414, 460, 700] as const;
-const MIN_TOUCH_SIZE = 44;
 
-async function expectTouchTarget(
-  target: Locator,
-  label: string,
-): Promise<void> {
-  await expect(target, `${label} が表示されていません`).toBeVisible();
-  const box = await target.boundingBox();
-  expect(box, `${label} の寸法を取得できません`).not.toBeNull();
-  expect(box?.width, `${label} の幅が44px未満`).toBeGreaterThanOrEqual(
-    MIN_TOUCH_SIZE,
-  );
-  expect(box?.height, `${label} の高さが44px未満`).toBeGreaterThanOrEqual(
-    MIN_TOUCH_SIZE,
-  );
-}
+// 44px 判定は e2e/helpers/touchTarget.ts の唯一の実装を使う(#1168)。
+// ここで boundingBox を直接 44 と比較しないこと(サブピクセル誤差で flaky になる)。
 
 async function expectNoHorizontalOverflow(page: Page): Promise<void> {
   const overflow = await page.evaluate(
