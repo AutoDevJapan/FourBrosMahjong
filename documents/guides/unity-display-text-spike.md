@@ -74,7 +74,7 @@ UnityDisplaySnapshot {
   phase: GamePhase
   view: GameViewState         // slots / tableInfo / dora / result
   currentTurn: PlayerId|null  // 表示上の手番。合法性は判定しない
-  roundSummary: DisplaySummary|null
+  roundSummary: RoundSummary|null // src/domain/game/engine.ts。wire schemaは未凍結
 }
 ```
 
