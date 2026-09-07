@@ -113,13 +113,20 @@ function collectCompositeActionUses(
     return [];
   }
 
+  let currentTrustedWorkspace = trustedWorkspace;
   return action.runs.steps.flatMap((step, index) => {
     if (!isRecord(step) || !Object.hasOwn(step, "uses")) return [];
+    if (
+      typeof step.uses === "string" &&
+      step.uses.startsWith("actions/checkout@")
+    ) {
+      currentTrustedWorkspace = isTrustedCheckout(step);
+    }
     return [
       {
         kind: "step" as const,
         path: `runs.steps.${index}.uses`,
-        trustedWorkspace,
+        trustedWorkspace: currentTrustedWorkspace,
         value: step.uses,
       },
     ];
@@ -484,5 +491,40 @@ runs:
     expect(auditActionReferences(cycle).violations).toEqual([
       ".github/actions/a/action.yml: local action cycle",
     ]);
+  });
+
+  it("composite内のuntrusted checkout後のlocal actionを拒否する", () => {
+    const sha = "a".repeat(40);
+    const root = fixtureRepository({
+      ".github/workflows/fixture.yml": `
+jobs:
+  verify:
+    steps:
+      - uses: actions/checkout@${sha}
+      - uses: ./.github/actions/outer
+`,
+      ".github/actions/outer/action.yml": `
+runs:
+  using: composite
+  steps:
+    - uses: actions/checkout@${sha}
+      with:
+        ref: \${{ github.event.inputs.ref }}
+    - uses: ./.github/actions/inner
+`,
+      ".github/actions/inner/action.yml": `
+runs:
+  using: composite
+  steps: []
+`,
+    });
+
+    expect(auditActionReferences(root)).toMatchObject({
+      externalReferenceCount: 2,
+      localReferenceCount: 2,
+      violations: [
+        ".github/actions/outer/action.yml:runs.steps.1.uses: local action requires a preceding SHA-pinned checkout with no ref override or ref github.sha",
+      ],
+    });
   });
 });
