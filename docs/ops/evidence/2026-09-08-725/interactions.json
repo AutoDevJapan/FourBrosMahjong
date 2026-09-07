@@ -1,0 +1,28 @@
+{
+  "capturedAt": "2026-09-07T19:46:35.441Z",
+  "browser": "152.0.7977.77",
+  "checks": [
+    {
+      "name": "canonical service worker matches main 2074f2cae287",
+      "passed": true
+    },
+    {
+      "name": "lobby keyboard navigation",
+      "passed": true
+    },
+    {
+      "name": "320px board dialog keyboard and focus return",
+      "passed": true
+    },
+    {
+      "name": "theme radio keyboard and system preference",
+      "passed": true
+    },
+    {
+      "name": "offline settings route and CSS",
+      "passed": true
+    }
+  ],
+  "pageErrors": [],
+  "consoleErrors": ["Failed to load resource: net::ERR_INTERNET_DISCONNECTED"]
+}

@@ -1,6 +1,6 @@
 name: CI
 
-# docs/デプロイ環境運用.md の昇格フロー (feature → dev → stg → main) の全段をガードするため、
+# docs/デプロイ環境運用.md の Option A 目標フロー (feature → main → dev → stg) の全段をガードするため、
 # 3 つの永続ブランチ (main / dev / stg) を宛先とする PR とそれらへの push で CI を実行する。
 # dev / stg に活動がない間はトリガが発火しないため、Actions 実行時間 (課金) は増えない。
 on:
