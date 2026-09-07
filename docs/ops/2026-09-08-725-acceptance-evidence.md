@@ -1,5 +1,9 @@
 # #725: Production 追加検証と環境構成の判断資料
 
+追記: この検証後、2026-09-08 JST に owner が会話内で「Bで進めて」と選択した。
+以下の実行時点の証跡は保持し、採用と実装・外部整理の現在地は
+[B cutover 記録](./2026-09-08-725-topology-b-cutover.md) と ADR-0006 を参照する。
+
 ## 事実: 今回の対象と exact deployment
 
 2026-09-08 JST、専用 worktree の base と GitHub `main` は
@@ -75,7 +79,7 @@ offline の実打牌と戦績復元、同じページでの OS light への再�
 ## 評価: 判断可能な実装案
 
 [ADR-0006](../../documents/adr/0006-preview-production-topology.md) に Option B の具体案を用意した。
-Status は **Proposed**。変更前 inventory、stg 独自履歴の保全、docs/CI の対象、認証済み Preview
+この検証時点の Status は **Proposed** だった（後に owner の B 採用を受け Accepted へ更新）。変更前 inventory、stg 独自履歴の保全、docs/CI の対象、認証済み Preview
 の合格記録、旧環境の整理順、frontend rollback と環境復元、各担当の決定欄を含む。
 
 現行文書の `feature → main → dev → stg` は Production が先に公開される。
@@ -86,7 +90,7 @@ workflow の trigger/job/権限と、外部環境は変更していない。
 
 | 項目 | 状態と次の証拠 |
 |---|---|
-| topology decision | A/B の owner 承認は全 issue comments に未記録。ADR の decision record を埋めてから採用を反映する |
+| topology decision | 検証時点は未決定。その後 owner が B を明示採用。実装／外部 cutover の進捗は別記録 |
 | 認証済み Preview | in-app session は利用不能。保護された実画面の QA 担当と認証済み6画面検証が必要 |
 | dev/stg | dev 不在。stg は `e240ceb585ca676147e0b44e79c88fa0c8871cf8` のまま。A なら通常 PR での履歴統合・tree 一致・環境検証、B なら承認された整理と read-back が必要 |
 | route 固有受け入れ条件 | この96ケースは #708 北抜/#709 合法順の全局面、#711 の全席対応、保存済み Result/History の全状態を網羅しない。既存 local 回帰と、選択環境の matrix を対応づける必要 |

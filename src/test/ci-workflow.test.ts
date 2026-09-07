@@ -128,6 +128,24 @@ function readWorkflowFile(filename: string): Workflow {
   ) as Workflow;
 }
 
+describe("PR Preview → main Production の CI 境界 (#725)", () => {
+  it("main 宛て PR と main push のみを常設 CI にし、手動実行は残す", () => {
+    const workflow = readWorkflowFile("ci.yml");
+    expect(workflow.on?.pull_request).toEqual({ branches: ["main"] });
+    expect(workflow.on?.push).toEqual({ branches: ["main"] });
+    expect(workflow.on).toHaveProperty("workflow_dispatch");
+  });
+
+  it("gitleaks は宛先ブランチを問わず全 PR を検査する", () => {
+    const workflow = readWorkflowFile("gitleaks.yml");
+    expect(workflow.on).toHaveProperty("pull_request");
+    expect(workflow.on?.pull_request ?? {}).not.toHaveProperty("branches");
+    expect(workflow.on?.pull_request ?? {}).not.toHaveProperty(
+      "branches-ignore",
+    );
+  });
+});
+
 const ALLOWED_WRITE_PERMISSION_JOBS = {
   "gitleaks-version-bump.yml/open-bump-pr": {
     contents: "write",
@@ -1613,7 +1631,7 @@ describe("verification-scope の分類契約 (#491)", () => {
     }
   });
 
-  it("dev / stg の検証済み昇格 push は保存不能なsetupを行わない", () => {
+  it("共有cache投入が不要な検証済み重複ではsetupを行わない", () => {
     for (const job of ["ci", "e2e"] as const) {
       expect(
         resolveScope({
@@ -2160,16 +2178,15 @@ describe("マージ後 push のスキップ前提を実行時に検証する (#4
   const OTHER_TREE = "f".repeat(40);
   const CHECK = "lint / typecheck / format / test / build";
 
-  it.each([
-    ["main", "refs/heads/main", "main"],
-    ["dev", "refs/heads/dev", "dev"],
-    ["stg", "refs/heads/stg", "stg"],
-  ])("%s への push は証拠検証の対象になる", (_name, ref, expected) => {
-    expect(protectedPushBranch("push", ref)).toBe(expected);
+  it("main への push だけが証拠検証の対象になる", () => {
+    expect(protectedPushBranch("push", "refs/heads/main")).toBe("main");
   });
 
   it.each([
     ["PR", "pull_request", "refs/pull/1/merge"],
+    ["旧 dev", "push", "refs/heads/dev"],
+    ["旧 stg", "push", "refs/heads/stg"],
+    ["手動実行", "workflow_dispatch", "refs/heads/main"],
     ["未知の branch", "push", "refs/heads/feature/test"],
     ["tag", "push", "refs/tags/v1.0.0"],
   ])("%s は証拠検証の対象外", (_name, event, ref) => {
@@ -2258,7 +2275,7 @@ describe("マージ後 push のスキップ前提を実行時に検証する (#4
       forced: boolean;
       before: string;
       sha: string;
-      branch: "main" | "dev" | "stg";
+      branch: string;
     }> = {},
   ) =>
     resolvePostMergeEvidence({
@@ -2279,152 +2296,40 @@ describe("マージ後 push のスキップ前提を実行時に検証する (#4
     });
   });
 
-  it("PR #519型の履歴が分岐したmain→dev昇格を祖先比較とtreeの一致で許可する", async () => {
-    const merge = "545e1e05517bee2c526c07596b3fbe7b1b7be56f";
-    const devBefore = "b9a05e53894113613342e9b0cfabe55b8c20df5b";
-    const mainHead = "85efd840ef6c23183a80ad6dd20f6dfb38b09527";
-    const result = await call(
-      {
-        pulls: [
-          {
-            number: 519,
-            merged_at: "2026-08-11T18:03:49Z",
-            merge_commit_sha: merge,
-            base: { ref: "dev" },
-            head: {
-              ref: "main",
-              sha: mainHead,
-              repo: { full_name: REPO },
+  it.each([
+    ["main→dev", "dev", "main"],
+    ["dev→stg", "stg", "dev"],
+    ["feature→dev", "dev", "feature/arbitrary"],
+    ["未知の宛先", "release", "main"],
+  ])(
+    "%s は旧昇格の成功証拠があってもスキップしない (#725)",
+    async (_label, branch, headRef) => {
+      const api = vi.fn(
+        happyPath({
+          pulls: [
+            {
+              number: 519,
+              merged_at: "2026-08-11T18:03:49Z",
+              merge_commit_sha: SHA,
+              base: { ref: branch },
+              head: { ref: headRef, sha: HEAD, repo: { full_name: REPO } },
             },
-          },
-        ],
-        workflowRun: {
-          event: "pull_request",
-          path: ".github/workflows/ci.yml",
-          head_sha: mainHead,
-          conclusion: "success",
-        },
-        trees: { [merge]: TREE, [mainHead]: TREE },
-      },
-      { sha: merge, before: devBefore, branch: "dev" },
-    );
-    expect(result).toEqual({
-      skip: true,
-      reason: "verified-by-merged-pull-request",
-    });
-  });
-
-  it("devへの任意feature PRは昇格証拠として扱わない", async () => {
-    const result = await call(
-      {
-        pulls: [
-          {
-            number: 520,
-            merged_at: "2026-08-11T18:10:00Z",
-            merge_commit_sha: SHA,
-            base: { ref: "dev" },
-            head: {
-              ref: "feature/arbitrary",
-              sha: HEAD,
-              repo: { full_name: REPO },
-            },
-          },
-        ],
-      },
-      { branch: "dev" },
-    );
-    expect(result).toEqual({
-      skip: false,
-      reason: "no-merged-pull-request",
-    });
-  });
-
-  it("履歴が分岐したdev→stg昇格も親とtreeの一致で許可する", async () => {
-    const result = await call(
-      {
-        pulls: [
-          {
-            number: 521,
-            merged_at: "2026-08-11T19:00:00Z",
-            merge_commit_sha: SHA,
-            base: { ref: "stg" },
-            head: { ref: "dev", sha: HEAD, repo: { full_name: REPO } },
-          },
-        ],
-      },
-      { branch: "stg" },
-    );
-    expect(result).toEqual({
-      skip: true,
-      reason: "verified-by-merged-pull-request",
-    });
-  });
-
-  it("昇格先tipが着地commitの祖先でなければ拒否する", async () => {
-    const result = await call(
-      {
-        pulls: [
-          {
-            number: 519,
-            merged_at: "2026-08-11T18:03:49Z",
-            merge_commit_sha: SHA,
-            base: { ref: "dev" },
-            head: { ref: "main", sha: HEAD, repo: { full_name: REPO } },
-          },
-        ],
-        comparison: { status: "behind" },
-      },
-      { branch: "dev" },
-    );
-    expect(result).toEqual({
-      skip: false,
-      reason: "base-not-ancestor-of-landed-commit",
-    });
-  });
-
-  it("一親のfast-forward/rebase昇格も祖先比較とtreeの一致で許可する", async () => {
-    const result = await call(
-      {
-        pulls: [
-          {
-            number: 522,
-            merged_at: "2026-08-14T16:30:35Z",
-            merge_commit_sha: SHA,
-            base: { ref: "dev" },
-            head: { ref: "main", sha: HEAD, repo: { full_name: REPO } },
-          },
-        ],
-        comparison: { status: "ahead" },
-      },
-      { branch: "dev" },
-    );
-    expect(result).toEqual({
-      skip: true,
-      reason: "verified-by-merged-pull-request",
-    });
-  });
-
-  it("昇格先の祖先比較APIが失敗したらスキップしない", async () => {
-    const result = await call(
-      {
-        apiError: "/compare/",
-        pulls: [
-          {
-            number: 523,
-            merged_at: "2026-08-14T16:30:35Z",
-            merge_commit_sha: SHA,
-            base: { ref: "dev" },
-            head: { ref: "main", sha: HEAD, repo: { full_name: REPO } },
-          },
-        ],
-      },
-      { branch: "dev" },
-    );
-    expect(result).toEqual({
-      skip: false,
-      reason: "landed-ancestor-api-failed",
-    });
-  });
+          ],
+        }).api,
+      );
+      const result = await resolvePostMergeEvidence({
+        repo: REPO,
+        sha: SHA,
+        before: BEFORE,
+        forced: false,
+        branch,
+        checkName: CHECK,
+        api,
+      });
+      expect(result).toEqual({ skip: false, reason: "unsupported-branch" });
+      expect(api).not.toHaveBeenCalled();
+    },
+  );
 
   it("同名のpush checkが共存しても成功したPR checkを証拠にする", async () => {
     const result = await call({
@@ -2906,36 +2811,30 @@ describe("マージ後 push のスキップ前提を実行時に検証する (#4
     expect(paths).toContain(`/repos/${REPO}/compare/${BEFORE}...${HEAD}`);
   });
 
-  it("昇格の祖先関係もCompare APIで確認し、ローカルgitのcommit形状に依存しない", async () => {
+  it("main の古い PR head を着地commitの祖先証拠で代用しない (#725)", async () => {
     const paths: string[] = [];
-    const dependencies = happyPath({
-      pulls: [
-        {
-          number: 519,
-          merged_at: "2026-08-14T16:30:35Z",
-          merge_commit_sha: SHA,
-          base: { ref: "dev" },
-          head: { ref: "main", sha: HEAD, repo: { full_name: REPO } },
-        },
-      ],
-    });
+    const dependencies = happyPath();
     const result = await resolvePostMergeEvidence({
       repo: REPO,
       sha: SHA,
       before: BEFORE,
       forced: false,
-      branch: "dev",
+      branch: "main",
       checkName: CHECK,
       api: async (path) => {
         paths.push(path);
+        if (path === `/repos/${REPO}/compare/${BEFORE}...${HEAD}`)
+          return { status: "diverged" };
+        if (path === `/repos/${REPO}/compare/${BEFORE}...${SHA}`)
+          return { status: "ahead" };
         return dependencies.api(path);
       },
     });
     expect(result).toEqual({
-      skip: true,
-      reason: "verified-by-merged-pull-request",
+      skip: false,
+      reason: "base-not-ancestor-of-pull-head",
     });
-    expect(paths).toContain(`/repos/${REPO}/compare/${BEFORE}...${SHA}`);
+    expect(paths).not.toContain(`/repos/${REPO}/compare/${BEFORE}...${SHA}`);
   });
 
   it("着地 tree は commit API で検証し、ローカル git の tree 解決に依存しない", async () => {

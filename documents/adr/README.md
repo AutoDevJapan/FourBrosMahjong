@@ -13,7 +13,7 @@
 | [0003](./0003-engine-state-ownership.md) | engine 公開アクションの state 所有権契約(入力は使い捨て) | Accepted | 2026-08-03 |
 | [0004](./0004-history-exclusion-policy.md) | 戦績の排他制御方針(追記は fail-closed、全件削除は「排他APIが無い環境だけ」fail-open) | Accepted | 2026-08-06 |
 | [0005](./0005-online-multiplayer-transport.md) | オンライン対戦の Vercel + Railway WebSocket 構成 | Accepted | 2026-08-15 |
-| [0006](./0006-preview-production-topology.md) | PR Preview と main Production への環境構成整理案 | Proposed | 2026-09-08 |
+| [0006](./0006-preview-production-topology.md) | PR Preview と main Production への環境構成整理 | Accepted（移行未完） | 2026-09-08 |
 
 ## 運用方針
 

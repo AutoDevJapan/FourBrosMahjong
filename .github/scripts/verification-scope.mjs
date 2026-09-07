@@ -153,11 +153,10 @@ export function classifyChangedPaths(paths) {
  * @param {"ci" | "e2e"} input.job
  * @param {readonly string[] | null | undefined} input.paths
  * @param {boolean} input.postMergeDuplicate
- *   永続ブランチへのマージ後 push で、着地treeが直前にchecksを通過したPR headと
+ *   main へのマージ後 push で、着地treeが直前にchecksを通過したPR headと
  *   同一だと証拠判定済みか。trueなら検証は重複である。
  * @param {boolean} [input.seedCaches=false]
- *   既定ブランチの ci job として共有キャッシュを投入するか。dev / stg の cache は
- *   保存しないため、検証済み昇格 push で setup を行っても消費するだけで再利用されない。
+ *   main の ci job として共有キャッシュを投入するか。PR は復元専用。
  * @returns {{ setup: boolean, verify: boolean, quality: boolean, production: boolean, browser: boolean }}
  *   `verify`: この job の検証コマンド (ci の品質全体 / e2e) を実行するか。
  *   `quality`: ci のうち lint/typecheck/format/Vitest を実行するか。
@@ -428,11 +427,8 @@ export async function resolveChangedPaths({
  * 3. **この job 自身の check run** が PR head SHA で `success` になっている。
  *    「required だったか」ではなく「実際に緑だったか」を見るため、required checks の
  *    設定変更から独立している。
- * 4. 通常PRでは push 前の宛先 tip が PR head の祖先である。環境昇格では push 前の宛先 tip が
- *    **着地した commit の祖先**である。main→dev / dev→stg は環境固有の過去の履歴により
- *    分岐するため、merge commit の親配列を固定せず Compare API で fast-forward / rebase /
- *    squash を含む前進を検証する。任意 commit の混入は、source branch、PR checks、tree 一致
- *    の検証で防ぐ。
+ * 4. push 前の main tip が PR head の祖先である。古い base の PR はスキップしない。
+ *    dev/stg の環境昇格特例は ADR-0006 / #725 の Option B 採用に伴い廃止する。
  * 5. 着地したツリーが **PR head のツリーと完全一致**する。3 で緑を確認した中身が
  *    そのまま入ったことを、内容そのもので照合する。
  *
@@ -463,6 +459,8 @@ export async function resolvePostMergeEvidence({
   const isSha = (/** @type {unknown} */ value) =>
     typeof value === "string" && /^[0-9a-f]{40}$/.test(value);
 
+  // 呼出し元の ref 判定だけに依存せず、旧環境や未知の branch を直接渡されても拒否する。
+  if (branch !== "main") return { skip: false, reason: "unsupported-branch" };
   if (forced) return { skip: false, reason: "forced-push" };
   if (!isSha(sha)) return { skip: false, reason: "head-sha-unresolved" };
   // 全 0 = ブランチ新規作成。比較対象が無く、着地内容を照合できない。
@@ -483,15 +481,6 @@ export async function resolvePostMergeEvidence({
       candidate?.merged_at &&
       candidate?.merge_commit_sha === sha &&
       candidate?.base?.ref === branch &&
-      // 環境昇格は経路を固定する。任意の feature PR が dev / stg の重い検証を
-      // PR側の成功だけで短絡することを許さない。
-      (branch === "main" ||
-        (branch === "dev" &&
-          candidate?.head?.ref === "main" &&
-          candidate?.head?.repo?.full_name === repo) ||
-        (branch === "stg" &&
-          candidate?.head?.ref === "dev" &&
-          candidate?.head?.repo?.full_name === repo)) &&
       isSha(candidate?.head?.sha),
   );
   // 直 push、未マージ、別ブランチ宛のいずれもここで落ちる。
@@ -589,19 +578,17 @@ export async function resolvePostMergeEvidence({
     return { skip: false, reason: "pull-head-commit-invalid" };
   }
 
-  if (branch === "main") {
-    /** @type {any} */
-    let comparison;
-    try {
-      comparison = await api(`/repos/${repo}/compare/${before}...${headSha}`);
-    } catch {
-      return { skip: false, reason: "base-ancestor-api-failed" };
-    }
-    // `identical` is also an ancestor relationship; GitHub normally reports
-    // `ahead` for a PR head that contains the pre-merge base tip.
-    if (comparison?.status !== "ahead" && comparison?.status !== "identical") {
-      return { skip: false, reason: "base-not-ancestor-of-pull-head" };
-    }
+  /** @type {any} */
+  let comparison;
+  try {
+    comparison = await api(`/repos/${repo}/compare/${before}...${headSha}`);
+  } catch {
+    return { skip: false, reason: "base-ancestor-api-failed" };
+  }
+  // `identical` is also an ancestor relationship; GitHub normally reports
+  // `ahead` for a PR head that contains the pre-merge base tip.
+  if (comparison?.status !== "ahead" && comparison?.status !== "identical") {
+    return { skip: false, reason: "base-not-ancestor-of-pull-head" };
   }
 
   // The checkout is not a stable source of merge metadata: a partial clone or
@@ -620,22 +607,6 @@ export async function resolvePostMergeEvidence({
     !/^[0-9a-f]{40}$/.test(String(landedCommit?.tree?.sha ?? ""))
   ) {
     return { skip: false, reason: "landed-commit-invalid" };
-  }
-
-  if (branch !== "main") {
-    /** @type {any} */
-    let comparison;
-    try {
-      comparison = await api(`/repos/${repo}/compare/${before}...${sha}`);
-    } catch {
-      return { skip: false, reason: "landed-ancestor-api-failed" };
-    }
-    // Promotion methods may produce a one-parent fast-forward/rebase commit or
-    // a two-parent merge commit. Only the ancestry relation matters here; the
-    // source branch, PR checks, and landed tree are verified independently.
-    if (comparison?.status !== "ahead" && comparison?.status !== "identical") {
-      return { skip: false, reason: "base-not-ancestor-of-landed-commit" };
-    }
   }
 
   const landed = String(landedCommit.tree.sha);
@@ -716,17 +687,15 @@ export async function githubApi(/** @type {string} */ path) {
 }
 
 /**
- * CI の対象となる永続ブランチへの push ならブランチ名を返す。
- * PR と未知のブランチは証拠検証の対象にしない。
+ * main への push だけを重複検証省略の対象にする。
+ * PR、廃止した dev/stg、未知のブランチは証拠検証の対象にしない。
  *
  * @param {string | undefined} eventName
  * @param {string | undefined} ref
- * @returns {"main" | "dev" | "stg" | null}
+ * @returns {"main" | null}
  */
 export function protectedPushBranch(eventName, ref) {
-  if (eventName !== "push") return null;
-  const match = String(ref ?? "").match(/^refs\/heads\/(main|dev|stg)$/);
-  return /** @type {"main" | "dev" | "stg" | null} */ (match?.[1] ?? null);
+  return eventName === "push" && ref === "refs/heads/main" ? "main" : null;
 }
 
 /** GitHub Actions の `$GITHUB_OUTPUT` へ書き出す。 */
@@ -763,8 +732,7 @@ async function main() {
     job,
     paths,
     postMergeDuplicate: Boolean(pushBranch) && evidence.skip,
-    // 保存 step は main 限定。dev / stg で setup しても共有cacheへ保存できず、
-    // 特にbrowser cache miss時のdownloadが完全な浪費になる。
+    // 保存 step は main 限定。PR から共有cacheを書き換えない。
     seedCaches: pushBranch === "main",
   });
 

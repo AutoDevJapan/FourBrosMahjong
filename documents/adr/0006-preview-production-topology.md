@@ -1,14 +1,18 @@
-# ADR-0006: PR Preview と main Production への環境構成整理案
+# ADR-0006: PR Preview と main Production への環境構成整理
 
 ## Status
 
-Proposed
+Accepted — implementation / external cutover pending
 
-本 ADR は [issue #725](https://github.com/AutoDevJapan/FourBrosMahjong/issues/725) の
-**Option B のレビュー用提案**であり、採用・外部変更の承認ではない。
-owner の決定記録を得るまで、[ADR-0001](./0001-deploy-architecture-and-preview-policy.md)
-の Accepted 状態、CI trigger、remote ref、Vercel/GitHub 設定、共有 `agents.prompt` は変更しない。
-この Proposed 文書の merge だけで Option B を採用したとは扱わない。
+2026-09-08 JST、owner が会話内で A/B の説明を確認し、**「Bで進めて」**と明示した。
+[issue #725](https://github.com/AutoDevJapan/FourBrosMahjong/issues/725) の Option B を採用する。
+[ADR-0001](./0001-deploy-architecture-and-preview-policy.md) の Decision 3 の
+「dev/stg/main の3環境モデルと併用」だけを本 ADR で supersede する。配置先と Preview 有効の決定は維持する。
+
+構成の採用承認と、PR の merge 合格・認証済み Preview QA・画像利用権の承認は別である。
+この文書だけで外部環境の整理完了とは扱わず、実装・保全・外部変更の状態を
+[cutover 記録](../../docs/ops/2026-09-08-725-topology-b-cutover.md) で追跡する。
+共有 `agents.prompt` は編集禁止のため変更せず、本 repository の `AGENTS.md` に適用手順を記録する。
 
 ## Date
 
@@ -36,9 +40,9 @@ owner の決定記録を得るまで、[ADR-0001](./0001-deploy-architecture-and
 公開 Production の技術検査は、Preview のアクセス権、画像利用権、Railway runtime の一致を
 証明しない。これらを別の未完項目として扱う。
 
-## Options considered: 評価と推奨
+## Options considered: 選択肢と採用理由
 
-| 項目 | A: dev/stg を維持 | B: PR Preview → main Production（提案） |
+| 項目 | A: dev/stg を維持（不採用） | B: PR Preview → main Production（採用） |
 |---|---|---|
 | 実際の役割 | 現行順のままなら Production 後の snapshot 回帰確認 | PR ごとの変更を Preview で確認してから Production へ反映 |
 | 必要な復旧・整理 | dev 作成、stg の独自履歴を通常 PR で扱い、各 deployment を照合 | docs/CI の切替、stg の独自履歴の保全、承認された旧環境の整理 |
@@ -46,12 +50,11 @@ owner の決定記録を得るまで、[ADR-0001](./0001-deploy-architecture-and
 | 残る制約 | 本番前の staging が必要なら `feature → dev → stg → main` を別途設計 | 固定 staging URL はなくなる。Preview QA の担当・認証が必須 |
 | 判断上の注意 | stg の 13 unique commits を消さず、着地 tree が承認済み snapshot と一致する必要 | Preview と Production は異なる build。merge SHA と Production の検証を省略できない |
 
-**技術的には B を推奨する。** 既存の main Production と PR Preview を活かせるため、
+**B を採用する。** 既存の main Production と PR Preview を活かせるため、
 陳腐化した環境を公開後に追随させる作業を減らし、QA を main merge 前に置ける。
-これは実態と必要作業からの評価であり、owner の選択を代行するものではない。
-A を選択した場合、本 ADR は Accepted にせず、A の役割・履歴統合・検証担当を決定記録へ残す。
+owner はこの A/B の説明を確認したうえで B を選択した。
 
-## Proposed decision: B を採用する場合の責務
+## Decision: B の責務
 
 | 対象 | 責務 | 合格証拠 |
 |---|---|---|
@@ -61,12 +64,12 @@ A を選択した場合、本 ADR は Accepted にせず、A の役割・履歴�
 | Railway Production | オンライン対戦の既存 backend。frontend の merge と切り離した運用 | #653 / #726 の authorized deployment/config read-back と rollout 証拠 |
 
 Vercel の Production branch は `main`、PR comments と Preview 保護は維持する。
-本案は frontend の環境構成に限定し、Railway の設定・再起動・deploy、環境変数、
+本決定は frontend の環境構成に限定し、Railway の設定・再起動・deploy、環境変数、
 main の required checks を変更しない。GitHub の review count 0 は機械的な QA gate が
 設定済みであることを意味しないため、担当 reviewer の Preview 合格記録を merge 前に照合する。
 review count / GitHub environment protection を変更する場合は、対象設定を追加で明示する。
 
-## Implementation boundary: 承認後に行う具体的変更
+## Implementation boundary: 採用後に順番に行う変更
 
 1. **変更前記録**: 下記の decision record を埋める。認証済み operator が既存の Vercel
    project/team、Production branch、PR comments、Preview 保護、custom `staging` の ID・
@@ -76,7 +79,8 @@ review count / GitHub environment protection を変更する場合は、対象�
    読み戻し結果を記録する。古い snapshot との不一致は削除前に解決する。
 2. **reviewed docs/infra PR**: ADR-0001 の「3 環境との併用」部分だけを本 ADR で supersede
    し、配置先と Preview 有効の決定は継続する。`docs/デプロイ環境運用.md`、README、
-   `docs/品質ツール運用方針.md`、owner が管理する共有 `agents.prompt` の昇格手順を整合させる。
+   `docs/品質ツール運用方針.md` と repository の `AGENTS.md` の公開手順を整合させる。
+   共有 `agents.prompt` は編集しない。そこに残る dev/stg 昇格手順を本 repository へ適用しない。
    `.github/workflows/ci.yml` の対象を main に揃え、
    `.github/scripts/verification-scope.mjs` の dev/stg 昇格特例と
    `src/test/ci-workflow.test.ts` の対応 fixture/test を整理する。
@@ -98,7 +102,7 @@ review count / GitHub environment protection を変更する場合は、対象�
    が不存在であることを再取得する。削除や設定変更の一部失敗は partial と記録し、
    docs だけを実環境変更済みにしない。CI run/deployment の件数と使用時間を記録する。
 
-上記は採用後の実装計画であり、この提案作成時点では実行していない。
+上記全体の完了は未宣言。各段階の実行済み／未実施と read-back を cutover 記録に分けて残す。
 
 ## Rollback
 
@@ -117,15 +121,16 @@ frontend 障害の rollback と、環境構成の取り消しを分けて扱う�
   差分を確認する。branch tracking 復元で build が発生した場合も実行記録へ含める。
 - Railway の room・runtime・設定、画像利用権は frontend rollback で復元・承認されない。
 
-## Decision record: 未確認
+## Decision record
 
 | 決定項目 | 記録 |
 |---|---|
-| 採用 Option A / B、決定者、日時、理由 | 未決定 |
-| 共有 `agents.prompt` の改定担当・合意 | 未決定 |
+| 採用 Option A / B、決定者、日時、理由 | B。owner（本依頼のユーザー）、2026-09-08 JST、会話内の「Bで進めて」。main Production と PR Preview を活用し、後追いの環境昇格を廃止する |
+| 実装担当 | Codex（本依頼）。変更は #725 専用の docs/infra PR としてレビューする |
+| 共有 `agents.prompt` | 編集しない。repository の `AGENTS.md` に B の適用手順を記録する |
 | 認証済み Preview QA 担当 / merge 合格確認者 | 未決定 |
-| 旧環境整理の対象 ID・実行者・履歴/設定保存先 | 未決定 |
-| 実装 PR に伴う通常 Production deployment | owner 決定記録待ち |
+| 旧環境整理の対象 ID・実行者・履歴/設定保存先 | 対象 ID と検証済み bundle は cutover 記録を参照。整理は PR/Preview 合格後、認証された実行者が read-back と照合して行う |
+| 実装 PR に伴う通常 Production deployment | B の公開フローとして採用。実装 PR の review/Preview/release 合格は別途必要 |
 | frontend rollback / promote 担当 | 未決定 |
 | 環境復元担当 | 未決定 |
 | UI/character の rights evidence / release 判断者 | #725 の未完項目として継続 |

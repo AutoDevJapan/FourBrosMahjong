@@ -10,6 +10,11 @@ Accepted
 
 ## Current status
 
+2026-09-08、Decision 3 の「dev/stg/main の3環境モデルと併用」だけを
+[ADR-0006](./0006-preview-production-topology.md) で supersede した。
+現在の採用構成は PR Preview → main Production。配置先・Preview 有効は本 ADR の決定を維持する。
+外部環境の移行完了は ADR の Accepted 状態からは導出せず、ADR-0006 の cutover 記録で確認する。
+
 この ADR は 2026-07-17 時点の配置先決定を記録する。以後、オンライン対戦の実装として
 `server/index.ts`・`railway.json`・[ADR-0005](./0005-online-multiplayer-transport.md) が追加されたため、
 「バックエンドがまだ存在しない」「Railway の疎通がない」という記述は当時の確認結果として読む。
@@ -43,7 +48,7 @@ Vercel CLI(`vercel project ls` / `project inspect` / `domains ls` / `alias ls`)�
 
 1. **フロントエンド(現行アプリ全体)の prd は Vercel を継続利用する。** `main` ブランチへのマージで Production へ自動デプロイする既存構成を正式な prd とする。
 2. **バックエンドの prd 配置先は Railway とする。** 決定時点ではバックエンドが存在しなかったため、Railway 上のリソースを作成せず、「将来配置先 = Railway」を確定事項として記録するに留めた(新たな課金要因を増やさない判断)。その後のオンライン対戦実装と Railway への反映確認は [ADR-0005](./0005-online-multiplayer-transport.md) および [#653](https://github.com/AutoDevJapan/FourBrosMahjong/issues/653) を参照する。
-3. **Vercel Preview(PR ごとの Preview デプロイ + PR コメント)を正式に有効とする。** レビュー時に実際にデプロイされた URL で動作確認できる利点を採用し、`dev` / `stg` / `main` の 3 環境モデルと併用する。
+3. **Vercel Preview(PR ごとの Preview デプロイ + PR コメント)を正式に有効とする。** レビュー時に実際にデプロイされた URL で動作確認できる利点を採用する。当初の `dev` / `stg` / `main` との併用は、2026-09-08 の ADR-0006 により PR Preview → main Production へ変更した。
 4. **カスタムドメインの公開手順を `documents/guides/` に整備する**(具体的なドメイン名の確定と DNS 設定は本 ADR のスコープ外。手順の準備のみ)。
 
 この決定により、`config.godd` / `AGENTS.md` の `infra` に含まれる `vercel` と `railway` の役割分担が明確になる(vercel = フロントエンド prd + Preview、railway = 将来のバックエンド prd)。
