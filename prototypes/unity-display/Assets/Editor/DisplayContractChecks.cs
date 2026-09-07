@@ -154,8 +154,23 @@ namespace FourBros.Display
                 CheckRoundEffects(scenarios, i, i + 1);
 
             var river = scenarios.Snapshot(0, 1).slots[0].river;
+            // An asymmetric tile fixes the physical side independently of the rotation formula.
+            // Separation and yaw alone would also accept mirrored left/right positions.
+            var expectedSecondTile = new Dictionary<string, TilePlacement>
+            {
+                { "self", new TilePlacement(-.85f, -1.2f, 0) },
+                { "left", new TilePlacement(-1.2f, .85f, 90) },
+                { "across", new TilePlacement(.85f, 1.2f, 180) },
+                { "right", new TilePlacement(1.2f, -.85f, 270) }
+            };
             foreach (int columns in new[] { 4, 6 })
             {
+                foreach (var expected in expectedSecondTile)
+                {
+                    var actual = DisplayLayout.RiverOnBoard(river, expected.Key, columns)[1];
+                    Near(actual.x, expected.Value.x, expected.Key + " river board x");
+                    Near(actual.z, expected.Value.z, expected.Key + " river board z");
+                }
                 var positions = DisplayLayout.River(river, columns);
                 Check(positions.Length == river.Length, "no river tiles dropped");
                 for (int i = 0; i < river.Length; i++)

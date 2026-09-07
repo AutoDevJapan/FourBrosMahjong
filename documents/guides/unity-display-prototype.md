@@ -58,12 +58,12 @@ dotnet "$check_dir/bin/Debug/net8.0/DisplayContractChecks.dll" documents/fixture
 git diff --check
 ```
 
-結果: **2251 assertions passed**（ビルド警告/エラーともに0）。実際の`DisplayContract.cs`と`FixtureScenarios.cs`を
+結果: **2267 assertions passed**（ビルド警告/エラーともに0）。実際の`DisplayContract.cs`と`FixtureScenarios.cs`を
 .NET 8でコンパイル・実行した。独立したJSによるC#ロジックの模倣テストではない。
 
 - 12状態の座席投影、4人全員の抜け番、点数のplayer ID紐付け、他家の牌面非公開
 - fixture指定の演出・手牌遷移の網羅、200ms、北抜き・鳴き後の表示例
-- 4/6列の河座標、捨て順、リーチ横向きと席間を含む非重複、ツモ牌の追加間隔、4方向角度。描画側も直接使う`RiverOnBoard`で全12状態の通常時/打牌追加後の牌境界を比較
+- 4/6列の河座標、捨て順、リーチ横向きと席間を含む非重複、ツモ牌の追加間隔、4方向角度。描画側も直接使う`RiverOnBoard`で全12状態の通常時/打牌追加後の牌境界を比較。各席の非対称な牌の期待座標も固定し、左右の鏡像配置を検出
 - `41 apply → 42 apply → 41 ignore → 42 ignore → 43 apply`
 - 同一effect IDの局替わりをまたぐ重複抑止、局替わり時の新しいIDの表示、リロードの静的復元、room切替によるID履歴リセット、明示restore
 - schema違い、抜け番の風/北、他家牌面、重複player/position、null牌の拒否、拒否後の正常復帰
@@ -72,6 +72,7 @@ git diff --check
 今回の.NET実行ではパーサーに`System.Text.Json`を使っている。
 追加した回帰検査は修正前の配置で`self[11] / right[0]`の間隔`-0.03`を検出し、
 配置修正後には局替わりでの同一effect ID再演出を検出した。両修正後に全検査が通過した。
+席の回転計算でsinの符号を反転する負の検証も行い、期待座標の検査が`left river board x`で拒否した。元の計算へ戻した後に再度全検査を通した。
 **Unity APIのコンパイル、JsonUtilityの解析、GameObject配置・回転、文字・演出の描画は未確認**。
 Unityの代用品としてAPIスタブを作ってコンパイル成功とすることも行っていない。
 Web実装を変更していないため、既存WebテストをUnity成果として再掲しない。
