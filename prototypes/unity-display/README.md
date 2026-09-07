@@ -103,6 +103,18 @@ version sequence、別room、初回/復元/局替わり時の重複effect、入�
 パーサーは.NET側では`System.Text.Json`なので、Unityの`JsonUtility`の検証はEditor側で必要。
 `UnityEngine`依存コードのコンパイルを代用するものではない。
 
+このC#検証は**CIでは実行されない**（`.github/workflows/ci.yml` に`dotnet`は無い）。
+そのためC#の宣言とfixture・Web実装の乖離は、`src/test/unity-display-csharp-contract.test.ts`
+（.NET不要、`pnpm test`に載る）が別途固定する。検査対象は
+`DisplayValidation.EffectKinds` / `TransitionKinds` と、契約の `kinds` / `unityOnlyKinds` /
+`transitionKinds` / `drawEntranceDurationMs`、Web側の `GameEffectKind` /
+`HAND_ANIMATION_DURATION_MS`。C#のコンパイル・実行の代用ではない。
+
+`kita`（北抜き・ガリ）はC#の`EffectKinds`にあるが、Web側`gameEffect`には演出実装が無い。
+契約では `unityOnlyKinds` として分離している。Unity側の `UnityDisplayPrototype` には
+`kita` ボタンと共通の文字演出、`FixtureScenarios` には北枚数の更新が実装済み。
+Editor上の実描画検証と専用表現の検討は未完了で、Web側には比較用の演出見本が無い。
+
 インストール済みUnityのCLIでの後続検証例（今回未実行）:
 
 ```bash

@@ -191,6 +191,8 @@
           "draw",
           "roundEnd"
         ],
+        "unityOnlyKinds": ["kita"],
+        "unityOnlyKindsReason": "北抜き(ガリ)は#818の受け入れ条件が挙げる演出だが、Web側の gameEffect には対応する演出実装が無い。Unity側にはkitaボタンと共通の文字演出が実装済みで、Editor上の実描画検証と専用表現の検討が残る。Webリファレンスには演出見本が存在しない。",
         "effectIsDerivedFromCommittedView": true,
         "resolutionIsAssertive": true
       }
