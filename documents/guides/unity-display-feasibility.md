@@ -1,5 +1,10 @@
 # Unity版 対局演出の実現性検証
 
+更新（2026-09-07）: 表示専用のC#プロトタイプを `prototypes/unity-display` に追加した。
+最新の実装・検証状態は[Unity表示プロトタイプ実装記録](./unity-display-prototype.md)を参照。
+以下は2026-09-03時点の調査記録であり、「Unityプロジェクトがない」等の記述も当時の状態を示す。
+Unity Editor/Runtimeの実行と製品採用判断は引き続き未完了。
+
 対象: [Issue #818](https://github.com/AutoDevJapan/FourBrosMahjong/issues/818)
 検証日: 2026-09-03 JST
 検証範囲: Unityクライアントへ表示・演出だけを移植できるか
