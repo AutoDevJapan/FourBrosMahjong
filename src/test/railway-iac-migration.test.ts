@@ -486,6 +486,22 @@ describe("Railway IaC parity snapshot contract (#742)", () => {
     });
   });
 
+  it("rejects malformed UTF-8 before hashing repository text evidence", () => {
+    const filesystem = withTemporaryRepository((rootDirectory) => {
+      writeFileSync(
+        join(rootDirectory, ".railway", "railway.ts"),
+        Buffer.from([0xc3, 0x28]),
+      );
+      return localFilesystemEvidence(rootDirectory);
+    });
+
+    expect(filesystem).toMatchObject({
+      generatedIacPath: null,
+      generatedIacSha256: null,
+      generatedIacSecretSafe: null,
+    });
+  });
+
   it("resolves a symlinked verifier entrypoint before invoking main", () => {
     const moduleUrl = new URL(
       "../../scripts/verify-railway-iac-migration.ts",
