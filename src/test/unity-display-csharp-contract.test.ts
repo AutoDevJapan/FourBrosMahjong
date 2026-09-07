@@ -134,7 +134,7 @@ describe("Unity表示コア(C#)と表示契約・Web実装の整合", () => {
     expect([...kinds]).toEqual(web);
   });
 
-  it("Unity専用演出はWeb実装に対応が無い(=Unity側で新規実装が要る)ことを固定する", () => {
+  it("Unity専用演出はWeb実装に対応する見本が無いことを固定する", () => {
     const web = new Set(
       typeScriptUnionMembers(
         readRepositoryFile(WEB_GAME_EFFECT),

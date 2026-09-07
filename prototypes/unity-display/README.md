@@ -111,7 +111,9 @@ version sequence、別room、初回/復元/局替わり時の重複effect、入�
 `HAND_ANIMATION_DURATION_MS`。C#のコンパイル・実行の代用ではない。
 
 `kita`（北抜き・ガリ）はC#の`EffectKinds`にあるが、Web側`gameEffect`には演出実装が無い。
-契約では `unityOnlyKinds` として分離し、Unity側の新規実装対象であることを明示している。
+契約では `unityOnlyKinds` として分離している。Unity側の `UnityDisplayPrototype` には
+`kita` ボタンと共通の文字演出、`FixtureScenarios` には北枚数の更新が実装済み。
+Editor上の実描画検証と専用表現の検討は未完了で、Web側には比較用の演出見本が無い。
 
 インストール済みUnityのCLIでの後続検証例（今回未実行）:
 

@@ -118,7 +118,7 @@ describe("UnityDisplayReference (#828)", () => {
     }
 
     // 4回転で全員が1度ずつ抜け番になる。
-    const benchedAfterRotation = [...states]
+    const benchedBeforeRotation = [...states]
       .filter(
         (state) =>
           state.getAttribute("data-rotation-phase") === "before" &&
@@ -129,7 +129,7 @@ describe("UnityDisplayReference (#828)", () => {
           .querySelector('[data-player-kind="bench"]')
           ?.getAttribute("data-character-id"),
       );
-    expect([...new Set(benchedAfterRotation)].sort()).toEqual([
+    expect([...new Set(benchedBeforeRotation)].sort()).toEqual([
       "p0",
       "p1",
       "p2",

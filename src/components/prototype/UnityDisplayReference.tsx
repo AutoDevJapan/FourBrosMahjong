@@ -182,7 +182,7 @@ const WEB_EFFECT_PREVIEWS: readonly EffectPreview[] = (
   .filter(isWebEffectKind)
   .map((kind) => EFFECT_PREVIEW_BY_KIND[kind]);
 
-/** Web側に演出実装が無く、Unity表示クライアントで新規実装が要る演出。 */
+/** Web側に見本が無く、Unity側で表示検証が要る演出。 */
 const UNITY_ONLY_EFFECT_KINDS: readonly string[] =
   majorEffectAssertions().unityOnlyKinds ?? [];
 
@@ -193,7 +193,7 @@ const UNITY_ONLY_EFFECT_COPY: Record<
   kita: {
     title: "北抜き(ガリ)",
     description:
-      "抜いた北の枚数は `KitaDisplay` が常時表示するが、抜いた瞬間の演出はWeb側に無い。Unity側は表示契約のeffect種別 kita を受けて新規に演出を実装する。",
+      "抜いた北の枚数は `KitaDisplay` が常時表示するが、抜いた瞬間の演出はWeb側に無い。Unity側には kita ボタンと共通の文字演出が実装済みで、Editor上の表示検証と専用表現の検討が残る。",
   },
 };
 
@@ -518,7 +518,7 @@ function EffectCasePreview() {
         data-testid="unity-display-unity-only-effects"
       >
         <p className="unity-display-effect-gap-title">
-          Web側に演出実装が無く、Unityで新規実装が必要な演出
+          Web側に演出見本が無く、Unityで表示検証が必要な演出
         </p>
         <ul>
           {UNITY_ONLY_EFFECT_KINDS.map((kind) => {

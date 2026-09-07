@@ -20,6 +20,23 @@ const EFFECT_TITLE: Record<string, string> = {
 };
 
 test.describe("#828 Unity表示リファレンス", () => {
+  test("狭い画面でも席回転ボードが表示領域に収まる", async ({ page }) => {
+    await page.setViewportSize({ width: 320, height: 740 });
+    await page.goto("/prototype/unity-display");
+    const boards = page.getByTestId("unity-display-rotation-boards");
+    await expect(boards).toBeVisible();
+    const overflow = await boards.evaluate((element) =>
+      Math.max(
+        ...[...element.querySelectorAll("[data-rotation-case]")].map(
+          (board) =>
+            board.getBoundingClientRect().right -
+            element.getBoundingClientRect().right,
+        ),
+      ),
+    );
+    expect(overflow).toBeLessThanOrEqual(1);
+  });
+
   test("Vercel/Previewで固定fixtureと実盤面を確認できる", async ({ page }) => {
     await page.goto("/prototype/unity-display");
 

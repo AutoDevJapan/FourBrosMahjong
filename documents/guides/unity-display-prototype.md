@@ -117,7 +117,9 @@ C#のコンパイル・実行・Unity API・描画を検証するものではな
 
 そのため契約に `unityOnlyKinds: ["kita"]` と理由を追加し、
 「Web演出8種 ∪ Unity専用1種 = C#の9種」を上記ガードで固定した。
-Unity側は `kita` を**新規実装**する必要があり、Webリファレンスには比較対象の見本が無い。
+Unity側には `UnityDisplayPrototype` の `kita` ボタンと共通の文字演出、
+`FixtureScenarios` の北枚数更新が実装済み。Editor上の表示検証と専用表現の検討が残り、
+Webリファレンスには比較対象の見本が無い。
 この非対称は工数見積りとGo/No-Goの前提であり、隠さず契約と画面に出す。
 
 ### ブラウザ・リファレンスによる席ローテーション/局替わりの画面証跡
@@ -126,7 +128,8 @@ Unity側は `kita` を**新規実装**する必要があり、Webリファレン
 （席回転4件×前後 + 局替わり2件×前後）を、本番の `PlayerSlot` / `PlayerArea` /
 `BenchArea` / `Discards` / `KitaDisplay` でそのまま描く一覧を追加した。
 物理スロット（自家=下 / 上家=左 / 対面=上 / 下家=右）は契約の `slotShape` に固定し、
-席風・親・抜け番・持ち点・ガリ枚数だけが入力どおり入れ替わる。
+席風・親・抜け番・持ち点が入力どおり入れ替わる。ガリ枚数はfixtureの入力ではなく、
+表示用サンプルとして各状態の東家に1枚を設定する。
 親流れ・点数計算はここに無く、fixtureの値をそのまま読む。
 
 これは **Unity Runtimeではない**。Unity画面の代用として扱わないが、
@@ -179,7 +182,7 @@ UNITY_EDITOR=/Applications/Unity/Hub/Editor/2022.3.62f2/Unity.app/Contents/MacOS
 |---|---|---|
 | 河の配置・折り返し・リーチ横置き | Web `Discards` の実装と実ブラウザ描画。C#側は純粋座標計算として設計済み | Unityの実GameObject配置・回転・カメラ越しの見え方 |
 | 手牌のツモ間隔・遷移 | 契約の200msがWeb `HAND_ANIMATION_DURATION_MS` と一致することをテストで固定 | Unityでの補間・入場の実描画とフレーム挙動 |
-| 演出9種 | Web実装8種の発火をE2Eで確認。北抜きはWeb未実装として契約に明示 | UnityでのIMGUI/文字演出の実描画、北抜き演出の新規実装 |
+| 演出9種 | Web実装8種の発火をE2Eで確認。北抜きはWeb未実装として契約に明示 | UnityでのIMGUI/文字演出（北抜きも実装済み）の実描画検証、専用表現の検討 |
 | 4物理スロット・全席回転・局替わり | 12状態を実ブラウザで描画し、4/3/1の内訳・席風・抜け番・持ち点保持を自動検証 | Unityでの席再配置と過去演出の抑止を録画で確認 |
 | 表示契約・状態所有権 | fixture・C#ソース宣言・Web実装の三者整合を`pnpm test`で固定 | 変更なし（Unity側にルール計算を置かない設計は維持） |
 | JsonUtility / UnityEngineコンパイル | 不可 | 必須 |
@@ -218,7 +221,7 @@ UNITY_EDITOR=/Applications/Unity/Hub/Editor/2022.3.62f2/Unity.app/Contents/MacOS
 |---|---|---|
 | Unity Hub/Editor導入・ライセンス有効化・初回コンパイル | 0.5–1人日 | アカウントと承認があること |
 | Unity上の描画調整・シーン生成・12状態の画面証跡 | 1–3人日 | 既存C#がそのままコンパイルできる場合 |
-| 北抜き演出の新規実装（Web側に見本が無い） | 0.5–1人日 | 表示のみ。ルール側の変更を含まない |
+| 北抜き演出の表示検証・専用表現の検討（Web側に見本が無い） | 0.5–1人日 | 共通の文字演出は実装済み。表示のみでルール側の変更を含まない |
 | 性能・入力遅延・メモリ・ビルドサイズ測定 | 1–2人日 | 対象端末が決まっていること |
 | 表示契約の変更1回あたりの追随（fixture更新+Unity再検証） | 0.5–1人日/回 | 保守コストの継続分 |
 
@@ -246,7 +249,7 @@ Go/No-Goを確定させる条件:
 |---|---|---|
 | `unity/editor-bringup` | Unity Hub/Editor導入、コンパイル、`JsonUtility`検証、生成シーンの起動 | 環境・ライセンス |
 | `unity/display-evidence` | 12状態＋操作表のスクリーンショット/録画、Console例外0の確認 | `unity/editor-bringup` |
-| `unity/kita-effect` | 北抜き演出のUnity新規実装（Web側に見本が無い分） | `unity/editor-bringup` |
+| `unity/kita-effect` | 既存の北抜き文字演出の実描画検証と専用表現の検討（Web側に見本が無い分） | `unity/editor-bringup` |
 | `unity/performance` | frame time・入力遅延・メモリ・ビルドサイズの実測 | 対象端末の確定 |
 | `unity/assets-rights` | 任意FBX・本番素材の利用/改変/再配布の権利確認 | 素材候補の確定 |
 | `unity/transport` | 表示snapshotの配信・認証・resume（#818の対象外） | サーバー側の確定 |
