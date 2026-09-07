@@ -10,6 +10,7 @@ import {
 } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { TextDecoder } from "node:util";
 import {
   generatedIacSourceIsSecretSafe,
   RAILWAY_LEGACY_FIXTURE_PATH,
@@ -22,6 +23,7 @@ const MAX_INPUT_BYTES = 64 * 1_024;
 export const MAX_GENERATED_IAC_BYTES = 64 * 1_024;
 export const MAX_LEGACY_CONFIG_BYTES = 64 * 1_024;
 const repositoryRoot = process.cwd();
+const UTF8_DECODER = new TextDecoder("utf-8", { fatal: true });
 
 function legacyTomlFileIsPresent(rootDirectory: string): boolean {
   try {
@@ -231,7 +233,15 @@ export function readBoundedTextFile(
   rootDirectory = dirname(filePath),
 ): string | null {
   const content = readBoundedFile(filePath, maxBytes, rootDirectory);
-  return content === null ? null : content.toString("utf8");
+  if (content === null) return null;
+  try {
+    // Evidence hashes and AST checks must cover the exact valid UTF-8 bytes.
+    // Buffer.toString("utf8") replaces malformed sequences, which could make
+    // a different on-disk file appear to be the reviewed source.
+    return UTF8_DECODER.decode(content);
+  } catch {
+    return null;
+  }
 }
 
 export function localFilesystemEvidence(
