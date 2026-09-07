@@ -1,0 +1,657 @@
+{
+  "schemaVersion": 1,
+  "recordedAtUtc": "2026-09-07T19:48:18.1154830Z",
+  "unityVersion": "2022.3.62f2",
+  "operatingSystem": "Mac OS X 26.2.0",
+  "processor": "Apple M2",
+  "graphicsDevice": "Apple M2",
+  "graphicsApi": "Metal",
+  "validation": "Unity Editor FBX import, GPU render and scripted controller checks",
+  "interaction": "Controller methods used by Update; physical mouse/keyboard input not exercised",
+  "performanceScope": "Editor Camera.Render CPU wall time; excludes presentation, GPU completion and player FPS",
+  "checks": [
+    "6 FBX imported; mesh/triangle counts, metre dimensions, UVs and normals verified",
+    "All renderer materials reference external Standard materials",
+    "Baseline to revision keeps model GUIDs, prefab references, transforms, geometry, UVs and normals",
+    "Only Felt changes color; material references, metallic and glossiness retained",
+    "Nose and asymmetric chest crest prove Blender X/Z/Y maps to Unity X/Y/Z",
+    "Orbit, zoom, tile focus, 100/200 ms movement and return executed through runtime controller methods",
+    "4 GPU-rendered PNGs contain non-uniform image data"
+  ],
+  "captures": [
+    {
+      "file": "unity-baseline.png",
+      "sha256": "fef83da3c650f96be5b5bfb5a80f0b6a0c416818c395bfb777337598c4e8e95c"
+    },
+    {
+      "file": "unity-revision.png",
+      "sha256": "72d7ec7a362a6482414d2762745c3fff861ed2031d55f933ff91a0ff00f53d98"
+    },
+    {
+      "file": "unity-tile-detail.png",
+      "sha256": "c2a66992bd0725aeb6796433bb5edd73e1b96a6f3676ea30414f923256842817"
+    },
+    {
+      "file": "unity-tile-moved.png",
+      "sha256": "862c1abb200a36ee95175d14177827b865c0c7ae9246fa8ec9518cb048a7bb9e"
+    }
+  ],
+  "baseline": [
+    {
+      "name": "MahjongTable",
+      "guid": "d70432fba0e3e4c8693d4bb1c4c464b8",
+      "prefabGuid": "d70432fba0e3e4c8693d4bb1c4c464b8",
+      "geometrySha256": "d9184423c63e82f49fdce5e240ed9998da2d3a0206607cae5c907e7065326f09",
+      "sourceFbxSha256": "835beeecbc6f9628d245695f986dc9465b6afd426b103c6fe0d468403ed53ca0",
+      "position": {
+        "x": -0.3799999952316284,
+        "y": 0.0,
+        "z": 0.0
+      },
+      "rotation": {
+        "x": 270.019775390625,
+        "y": 180.0,
+        "z": 0.0
+      },
+      "scale": {
+        "x": 1.0,
+        "y": 1.0,
+        "z": 1.0
+      },
+      "boundsSize": {
+        "x": 0.940000057220459,
+        "y": 0.7795000076293945,
+        "z": 0.9400001168251038
+      },
+      "boundsMin": {
+        "x": -0.4700000286102295,
+        "y": -5.960464477539063e-8,
+        "z": -0.4699999690055847
+      },
+      "conservativeMeshBoundsSize": {
+        "x": 0.940000057220459,
+        "y": 0.7795000076293945,
+        "z": 0.9400001168251038
+      },
+      "characterLandmarks": [],
+      "meshes": 18,
+      "triangles": 1656,
+      "vertices": 3312,
+      "uvMeshes": 18,
+      "normalMeshes": 18,
+      "materialPaths": [
+        "Assets/FourBrosBlenderStudy/Materials/Black.mat",
+        "Assets/FourBrosBlenderStudy/Materials/Felt.mat",
+        "Assets/FourBrosBlenderStudy/Materials/Frame.mat",
+        "Assets/FourBrosBlenderStudy/Materials/Green.mat",
+        "Assets/FourBrosBlenderStudy/Materials/Ivory.mat",
+        "Assets/FourBrosBlenderStudy/Materials/Red.mat"
+      ]
+    },
+    {
+      "name": "TilePin5",
+      "guid": "cbe1a8a79381f42a0857a3e3637792a3",
+      "prefabGuid": "cbe1a8a79381f42a0857a3e3637792a3",
+      "geometrySha256": "abb7a38c803503b79f2a35194df6173f6cc171574404663ffff5ae80b58842da",
+      "sourceFbxSha256": "86b294093fea7e16c467de82fabc1b37b2ceb86b3c41d1882f062bfec7f366af",
+      "position": {
+        "x": -0.3799999952316284,
+        "y": 0.7680000066757202,
+        "z": -0.1599999964237213
+      },
+      "rotation": {
+        "x": 270.019775390625,
+        "y": 180.0,
+        "z": 0.0
+      },
+      "scale": {
+        "x": 1.0,
+        "y": 1.0,
+        "z": 1.0
+      },
+      "boundsSize": {
+        "x": 0.026000022888183595,
+        "y": 0.018539726734161378,
+        "z": 0.035999998450279239
+      },
+      "boundsMin": {
+        "x": -0.013000011444091797,
+        "y": 0.0,
+        "z": -0.01799999177455902
+      },
+      "conservativeMeshBoundsSize": {
+        "x": 0.026000022888183595,
+        "y": 0.018539726734161378,
+        "z": 0.03600001335144043
+      },
+      "characterLandmarks": [],
+      "meshes": 12,
+      "triangles": 2056,
+      "vertices": 3712,
+      "uvMeshes": 12,
+      "normalMeshes": 12,
+      "materialPaths": [
+        "Assets/FourBrosBlenderStudy/Materials/Green.mat",
+        "Assets/FourBrosBlenderStudy/Materials/Ink.mat",
+        "Assets/FourBrosBlenderStudy/Materials/Ivory.mat",
+        "Assets/FourBrosBlenderStudy/Materials/Red.mat"
+      ]
+    },
+    {
+      "name": "SoakuhinStudy",
+      "guid": "3c9b4c17ec11c4953b366ef6607c625d",
+      "prefabGuid": "3c9b4c17ec11c4953b366ef6607c625d",
+      "geometrySha256": "a95e64be1523d24ab4517665b5151d75967ae8a09e1afd36a9c1d6b2f99fcdc1",
+      "sourceFbxSha256": "5d81a9b95a4e65d01796038a3ed2176705eec2d74fccb6da73293d089ae087e1",
+      "position": {
+        "x": 0.5400000214576721,
+        "y": 0.0,
+        "z": 0.15000000596046449
+      },
+      "rotation": {
+        "x": 270.019775390625,
+        "y": 180.0,
+        "z": 0.0
+      },
+      "scale": {
+        "x": 1.0,
+        "y": 1.0,
+        "z": 1.0
+      },
+      "boundsSize": {
+        "x": 0.7480000257492065,
+        "y": 1.7979998588562012,
+        "z": 0.3050002455711365
+      },
+      "boundsMin": {
+        "x": -0.37400001287460329,
+        "y": 0.006999969482421875,
+        "z": -0.17999999225139619
+      },
+      "conservativeMeshBoundsSize": {
+        "x": 0.7761653661727905,
+        "y": 1.804539680480957,
+        "z": 0.3050001859664917
+      },
+      "characterLandmarks": [
+        {
+          "x": 0.0,
+          "y": 1.626999855041504,
+          "z": -0.0989997386932373
+        },
+        {
+          "x": 0.1119999885559082,
+          "y": 1.3369998931884766,
+          "z": -0.12199974060058594
+        }
+      ],
+      "meshes": 86,
+      "triangles": 11228,
+      "vertices": 22576,
+      "uvMeshes": 86,
+      "normalMeshes": 86,
+      "materialPaths": [
+        "Assets/FourBrosBlenderStudy/Materials/Black.mat",
+        "Assets/FourBrosBlenderStudy/Materials/Hair.mat",
+        "Assets/FourBrosBlenderStudy/Materials/Ivory.mat",
+        "Assets/FourBrosBlenderStudy/Materials/Jacket.mat",
+        "Assets/FourBrosBlenderStudy/Materials/Lip.mat",
+        "Assets/FourBrosBlenderStudy/Materials/Red.mat",
+        "Assets/FourBrosBlenderStudy/Materials/Silver.mat",
+        "Assets/FourBrosBlenderStudy/Materials/Skin.mat"
+      ]
+    }
+  ],
+  "revision": [
+    {
+      "name": "MahjongTable",
+      "guid": "d70432fba0e3e4c8693d4bb1c4c464b8",
+      "prefabGuid": "d70432fba0e3e4c8693d4bb1c4c464b8",
+      "geometrySha256": "d9184423c63e82f49fdce5e240ed9998da2d3a0206607cae5c907e7065326f09",
+      "sourceFbxSha256": "c165ec487bd5b275497ef02dc0e8ee06e125907ffdbe9125c21c826b6fcff43a",
+      "position": {
+        "x": -0.3799999952316284,
+        "y": 0.0,
+        "z": 0.0
+      },
+      "rotation": {
+        "x": 270.019775390625,
+        "y": 180.0,
+        "z": 0.0
+      },
+      "scale": {
+        "x": 1.0,
+        "y": 1.0,
+        "z": 1.0
+      },
+      "boundsSize": {
+        "x": 0.940000057220459,
+        "y": 0.7795000076293945,
+        "z": 0.9400001168251038
+      },
+      "boundsMin": {
+        "x": -0.4700000286102295,
+        "y": -5.960464477539063e-8,
+        "z": -0.4699999690055847
+      },
+      "conservativeMeshBoundsSize": {
+        "x": 0.940000057220459,
+        "y": 0.7795000076293945,
+        "z": 0.9400001168251038
+      },
+      "characterLandmarks": [],
+      "meshes": 18,
+      "triangles": 1656,
+      "vertices": 3312,
+      "uvMeshes": 18,
+      "normalMeshes": 18,
+      "materialPaths": [
+        "Assets/FourBrosBlenderStudy/Materials/Black.mat",
+        "Assets/FourBrosBlenderStudy/Materials/Felt.mat",
+        "Assets/FourBrosBlenderStudy/Materials/Frame.mat",
+        "Assets/FourBrosBlenderStudy/Materials/Green.mat",
+        "Assets/FourBrosBlenderStudy/Materials/Ivory.mat",
+        "Assets/FourBrosBlenderStudy/Materials/Red.mat"
+      ]
+    },
+    {
+      "name": "TilePin5",
+      "guid": "cbe1a8a79381f42a0857a3e3637792a3",
+      "prefabGuid": "cbe1a8a79381f42a0857a3e3637792a3",
+      "geometrySha256": "abb7a38c803503b79f2a35194df6173f6cc171574404663ffff5ae80b58842da",
+      "sourceFbxSha256": "037b0ac684018174056c0094956d363fad3904e9da0648e84c3131997d977e0e",
+      "position": {
+        "x": -0.3799999952316284,
+        "y": 0.7680000066757202,
+        "z": -0.1599999964237213
+      },
+      "rotation": {
+        "x": 270.019775390625,
+        "y": 180.0,
+        "z": 0.0
+      },
+      "scale": {
+        "x": 1.0,
+        "y": 1.0,
+        "z": 1.0
+      },
+      "boundsSize": {
+        "x": 0.026000022888183595,
+        "y": 0.018539726734161378,
+        "z": 0.035999998450279239
+      },
+      "boundsMin": {
+        "x": -0.013000011444091797,
+        "y": 0.0,
+        "z": -0.01799999177455902
+      },
+      "conservativeMeshBoundsSize": {
+        "x": 0.026000022888183595,
+        "y": 0.018539726734161378,
+        "z": 0.03600001335144043
+      },
+      "characterLandmarks": [],
+      "meshes": 12,
+      "triangles": 2056,
+      "vertices": 3712,
+      "uvMeshes": 12,
+      "normalMeshes": 12,
+      "materialPaths": [
+        "Assets/FourBrosBlenderStudy/Materials/Green.mat",
+        "Assets/FourBrosBlenderStudy/Materials/Ink.mat",
+        "Assets/FourBrosBlenderStudy/Materials/Ivory.mat",
+        "Assets/FourBrosBlenderStudy/Materials/Red.mat"
+      ]
+    },
+    {
+      "name": "SoakuhinStudy",
+      "guid": "3c9b4c17ec11c4953b366ef6607c625d",
+      "prefabGuid": "3c9b4c17ec11c4953b366ef6607c625d",
+      "geometrySha256": "a95e64be1523d24ab4517665b5151d75967ae8a09e1afd36a9c1d6b2f99fcdc1",
+      "sourceFbxSha256": "f4385177c99cd2e2d430c3a66eab4ddf5710232587f57a68627f878a0defba4e",
+      "position": {
+        "x": 0.5400000214576721,
+        "y": 0.0,
+        "z": 0.15000000596046449
+      },
+      "rotation": {
+        "x": 270.019775390625,
+        "y": 180.0,
+        "z": 0.0
+      },
+      "scale": {
+        "x": 1.0,
+        "y": 1.0,
+        "z": 1.0
+      },
+      "boundsSize": {
+        "x": 0.7480000257492065,
+        "y": 1.7979998588562012,
+        "z": 0.3050002455711365
+      },
+      "boundsMin": {
+        "x": -0.37400001287460329,
+        "y": 0.006999969482421875,
+        "z": -0.17999999225139619
+      },
+      "conservativeMeshBoundsSize": {
+        "x": 0.7761653661727905,
+        "y": 1.804539680480957,
+        "z": 0.3050001859664917
+      },
+      "characterLandmarks": [
+        {
+          "x": 0.0,
+          "y": 1.626999855041504,
+          "z": -0.0989997386932373
+        },
+        {
+          "x": 0.1119999885559082,
+          "y": 1.3369998931884766,
+          "z": -0.12199974060058594
+        }
+      ],
+      "meshes": 86,
+      "triangles": 11228,
+      "vertices": 22576,
+      "uvMeshes": 86,
+      "normalMeshes": 86,
+      "materialPaths": [
+        "Assets/FourBrosBlenderStudy/Materials/Black.mat",
+        "Assets/FourBrosBlenderStudy/Materials/Hair.mat",
+        "Assets/FourBrosBlenderStudy/Materials/Ivory.mat",
+        "Assets/FourBrosBlenderStudy/Materials/Jacket.mat",
+        "Assets/FourBrosBlenderStudy/Materials/Lip.mat",
+        "Assets/FourBrosBlenderStudy/Materials/Red.mat",
+        "Assets/FourBrosBlenderStudy/Materials/Silver.mat",
+        "Assets/FourBrosBlenderStudy/Materials/Skin.mat"
+      ]
+    }
+  ],
+  "baselineMaterials": [
+    {
+      "name": "Black",
+      "color": {
+        "r": 0.013000000268220902,
+        "g": 0.014999999664723874,
+        "b": 0.017999999225139619,
+        "a": 1.0
+      },
+      "metallic": 0.05000000074505806,
+      "glossiness": 0.5
+    },
+    {
+      "name": "Felt",
+      "color": {
+        "r": 0.014999999664723874,
+        "g": 0.1599999964237213,
+        "b": 0.10000000149011612,
+        "a": 1.0
+      },
+      "metallic": 0.0,
+      "glossiness": 0.050000011920928958
+    },
+    {
+      "name": "Frame",
+      "color": {
+        "r": 0.07000000029802323,
+        "g": 0.09000000357627869,
+        "b": 0.10000000149011612,
+        "a": 1.0
+      },
+      "metallic": 0.20000000298023225,
+      "glossiness": 0.5
+    },
+    {
+      "name": "Green",
+      "color": {
+        "r": 0.017000000923871995,
+        "g": 0.23999999463558198,
+        "b": 0.14000000059604646,
+        "a": 1.0
+      },
+      "metallic": 0.0,
+      "glossiness": 0.5
+    },
+    {
+      "name": "Hair",
+      "color": {
+        "r": 0.010999999940395356,
+        "g": 0.008999999612569809,
+        "b": 0.00800000037997961,
+        "a": 1.0
+      },
+      "metallic": 0.029999999329447748,
+      "glossiness": 0.699999988079071
+    },
+    {
+      "name": "Ink",
+      "color": {
+        "r": 0.012000000104308129,
+        "g": 0.054999999701976779,
+        "b": 0.10000000149011612,
+        "a": 1.0
+      },
+      "metallic": 0.0,
+      "glossiness": 0.5
+    },
+    {
+      "name": "Ivory",
+      "color": {
+        "r": 0.8999999761581421,
+        "g": 0.8700000047683716,
+        "b": 0.7200000286102295,
+        "a": 1.0
+      },
+      "metallic": 0.0,
+      "glossiness": 0.6800000071525574
+    },
+    {
+      "name": "Jacket",
+      "color": {
+        "r": 0.03500000014901161,
+        "g": 0.03799999877810478,
+        "b": 0.04500000178813934,
+        "a": 1.0
+      },
+      "metallic": 0.11999999731779099,
+      "glossiness": 0.6200000047683716
+    },
+    {
+      "name": "Lip",
+      "color": {
+        "r": 0.3199999928474426,
+        "g": 0.10000000149011612,
+        "b": 0.07000000029802323,
+        "a": 1.0
+      },
+      "metallic": 0.0,
+      "glossiness": 0.5
+    },
+    {
+      "name": "Red",
+      "color": {
+        "r": 0.6200000047683716,
+        "g": 0.02500000037252903,
+        "b": 0.017999999225139619,
+        "a": 1.0
+      },
+      "metallic": 0.05000000074505806,
+      "glossiness": 0.5
+    },
+    {
+      "name": "Silver",
+      "color": {
+        "r": 0.550000011920929,
+        "g": 0.5699999928474426,
+        "b": 0.6000000238418579,
+        "a": 1.0
+      },
+      "metallic": 0.699999988079071,
+      "glossiness": 0.75
+    },
+    {
+      "name": "Skin",
+      "color": {
+        "r": 0.6600000262260437,
+        "g": 0.3799999952316284,
+        "b": 0.23000000417232514,
+        "a": 1.0
+      },
+      "metallic": 0.0,
+      "glossiness": 0.3999999761581421
+    }
+  ],
+  "revisionMaterials": [
+    {
+      "name": "Black",
+      "color": {
+        "r": 0.013000000268220902,
+        "g": 0.014999999664723874,
+        "b": 0.017999999225139619,
+        "a": 1.0
+      },
+      "metallic": 0.05000000074505806,
+      "glossiness": 0.5
+    },
+    {
+      "name": "Felt",
+      "color": {
+        "r": 0.02500000037252903,
+        "g": 0.10999999940395355,
+        "b": 0.23999999463558198,
+        "a": 1.0
+      },
+      "metallic": 0.0,
+      "glossiness": 0.050000011920928958
+    },
+    {
+      "name": "Frame",
+      "color": {
+        "r": 0.07000000029802323,
+        "g": 0.09000000357627869,
+        "b": 0.10000000149011612,
+        "a": 1.0
+      },
+      "metallic": 0.20000000298023225,
+      "glossiness": 0.5
+    },
+    {
+      "name": "Green",
+      "color": {
+        "r": 0.017000000923871995,
+        "g": 0.23999999463558198,
+        "b": 0.14000000059604646,
+        "a": 1.0
+      },
+      "metallic": 0.0,
+      "glossiness": 0.5
+    },
+    {
+      "name": "Hair",
+      "color": {
+        "r": 0.010999999940395356,
+        "g": 0.008999999612569809,
+        "b": 0.00800000037997961,
+        "a": 1.0
+      },
+      "metallic": 0.029999999329447748,
+      "glossiness": 0.699999988079071
+    },
+    {
+      "name": "Ink",
+      "color": {
+        "r": 0.012000000104308129,
+        "g": 0.054999999701976779,
+        "b": 0.10000000149011612,
+        "a": 1.0
+      },
+      "metallic": 0.0,
+      "glossiness": 0.5
+    },
+    {
+      "name": "Ivory",
+      "color": {
+        "r": 0.8999999761581421,
+        "g": 0.8700000047683716,
+        "b": 0.7200000286102295,
+        "a": 1.0
+      },
+      "metallic": 0.0,
+      "glossiness": 0.6800000071525574
+    },
+    {
+      "name": "Jacket",
+      "color": {
+        "r": 0.03500000014901161,
+        "g": 0.03799999877810478,
+        "b": 0.04500000178813934,
+        "a": 1.0
+      },
+      "metallic": 0.11999999731779099,
+      "glossiness": 0.6200000047683716
+    },
+    {
+      "name": "Lip",
+      "color": {
+        "r": 0.3199999928474426,
+        "g": 0.10000000149011612,
+        "b": 0.07000000029802323,
+        "a": 1.0
+      },
+      "metallic": 0.0,
+      "glossiness": 0.5
+    },
+    {
+      "name": "Red",
+      "color": {
+        "r": 0.6200000047683716,
+        "g": 0.02500000037252903,
+        "b": 0.017999999225139619,
+        "a": 1.0
+      },
+      "metallic": 0.05000000074505806,
+      "glossiness": 0.5
+    },
+    {
+      "name": "Silver",
+      "color": {
+        "r": 0.550000011920929,
+        "g": 0.5699999928474426,
+        "b": 0.6000000238418579,
+        "a": 1.0
+      },
+      "metallic": 0.699999988079071,
+      "glossiness": 0.75
+    },
+    {
+      "name": "Skin",
+      "color": {
+        "r": 0.6600000262260437,
+        "g": 0.3799999952316284,
+        "b": 0.23000000417232514,
+        "a": 1.0
+      },
+      "metallic": 0.0,
+      "glossiness": 0.3999999761581421
+    }
+  ],
+  "baselineFelt": {
+    "r": 0.014999999664723874,
+    "g": 0.1599999964237213,
+    "b": 0.10000000149011612,
+    "a": 1.0
+  },
+  "revisionFelt": {
+    "r": 0.02500000037252903,
+    "g": 0.10999999940395355,
+    "b": 0.23999999463558198,
+    "a": 1.0
+  },
+  "renderWidth": 960,
+  "renderHeight": 540,
+  "renderSamples": 30,
+  "renderCpuMedianMilliseconds": 0.31625000000000005,
+  "renderCpuP95Milliseconds": 0.35400000000000006,
+  "totalAllocatedMemoryBytes": 94910004
+}
