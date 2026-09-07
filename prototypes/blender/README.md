@@ -1,6 +1,6 @@
 # Blender → Unity 3Dアセット試作（#1165）
 
-Blender 5.2.0 LTSで制作・保存・FBX書き出し・再読み込みまで実行した、卓／五筒／粗悪品の簡略静止モデル。#818のUnity表示試作と独立して確認できる。**Unityでのコンパイル・取り込み・実画面確認は未実施**（2026-09-08時点でもEditor／Hub未導入を再確認）。
+Blender 5.2.0 LTSで制作・保存・FBX書き出し・再読み込みまで実行した、卓／五筒／粗悪品の簡略静止モデル。#818のUnity表示試作と独立して確認できる。**Unityでのコンパイル・取り込み・実画面確認は未実施**（元の追試時点の記録。レビュー時のコンパイル検証は下記）。
 
 2026-09-08に、全スクリプトを別実行で再走させた追試記録を「[第三者による追試記録](#第三者による追試記録2026-09-08)」に追加した。
 
@@ -26,7 +26,7 @@ Unityプレビューカメラと同一の視点・画角で撮ったBlender側�
 | `generated/unity-camera-parity.json` | 上のレンダーのカメラ諸元・除外オブジェクト・一致範囲 |
 | `generated/revision/unity-camera-parity.png` | 同一視点での青フェルト改訂版レンダー |
 | `generated/reproduction-2026-09-08.json` | 2026-09-08の追試記録（環境・実行時間・再現性の測定結果） |
-| `../unity-display/Assets/FourBrosBlenderStudy/` | Unity用取り込み・材質再適用・シーン作成・カメラ／牌移動・パリティキャプチャのスクリプト。未コンパイル・未実行 |
+| `../unity-display/Assets/FourBrosBlenderStudy/` | Unity用取り込み・材質再適用・シーン作成・カメラ／牌移動・パリティキャプチャのスクリプト。レビュー時にUnity 2022.3.62f2でコンパイル確認、実画面は未検証 |
 
 ## 再生成
 
@@ -57,6 +57,8 @@ Unityプレビューカメラと同一の視点・画角で撮ったBlender側�
 コミット済み成果物だけを再検証する場合、最後のコマンドのbaseline/revisionを`prototypes/blender/generated`とその`revision`へ変更し、reportだけ`validation-local/`へ出す。成功条件は終了コード0と`PASS: 3 assets`。失敗時は`--python-exit-code 1`で非ゼロ終了する。
 
 再生成した成果物がコミット済み成果物と一致するかは`compare_builds.py`で確認する。FBXはバイト一致しない（後述）ため、両方をBlenderへ読み込んで幾何・材質を比較する。
+
+比較は空の資産集合と、左右で資産名が増減している場合も拒否する。Blender不要の回帰検証は`python3 -m unittest discover -s prototypes/blender -p 'test_*.py'`で実行でき、資産の増減・空集合・面順序・巻き方向・面の重複を確認する。
 
 ```sh
 /Applications/Blender.app/Contents/MacOS/Blender \
@@ -122,6 +124,8 @@ Blender/Unityを持たないCIでも壊れを検出できるよう、`src/test/b
 
 ## Unity側での確認手順（未実施）
 
+手順8のキャプチャはPlayモードを終了してから実行する（Play中は拒否する）。これにより牌の移動を戻し、カメラのyaw／pitch／distanceも既定値へ明示的にリセットして基準画像と比較する。レビュー時点のローカルにはUnity 2022.3.62f2が導入されていた。存在しないUPM依存`com.unity.modules.textrendering`を除去し、PNG出力に必要な`com.unity.modules.imageconversion`を追加した後、batch起動でC#のコンパイル成功を確認した。実画面での操作・キャプチャ・Profilerは未検証。下記と追試JSONの「未導入」は元の追試時点の記録。
+
 対象候補はmacOS Editor、Built-in Render Pipeline、Unity 2022.3.62f2（#818と共通）。実行後にEditorの正確な版を記録する。URP/HDRPのシェーダー変換は対象外。FBXはUnityが主にサポートするモデル形式のため採用した（[Unity公式](https://docs.unity3d.com/2022.3/Documentation/Manual/ImportingModelFiles.html)）。
 
 1. Unity Editorのインストールとライセンス認証を済ませる。#818と#1165の両変更を含むcheckoutで`prototypes/unity-display`を開く（Unityプロジェクト設定は#818側で追加）。
@@ -131,7 +135,7 @@ Blender/Unityを持たないCIでも壊れを検出できるよう、`src/test/b
 5. `2 Build asset preview scene`を実行する。既存の開いているシーンは保持し、追加シーンを固有名で保存する。プレビューシーンだけを開いてPlayし、右ドラッグで周回、ホイールでズーム、Spaceで牌を200msで移動させる。
 6. 人物の正面・卓の上面・五筒の牌面が正しく向いているか、1 Unity unit＝1mの寸法かを確認する。材質はmanifestのパレットからStandard材質へ明示的に割り当てる。BlenderとUnityの照明・色管理による差も確認する。
 7. Playを終了し、各モデルのTransformとFBXのGUIDを記録する。`3 Reimport blue felt revision`を実行し、フェルトだけ青に変わり、モデル参照・配置が保持されるか確認する。スクリプトは`.meta`を残し、既存GUIDの不一致をエラーにする。
-8. `4 Capture Unity parity screenshot`を実行する。プレビューカメラを初期視点へ戻し、垂直画角60°・960×540でRenderTextureへ描画して`Assets/FourBrosBlenderStudy/Captures/unity-camera-parity.png`を書き出す（Captures/はgitignore）。これは`generated/unity-camera-parity.png`と**同じカメラ位置・注視点・画角・アスペクト・可視オブジェクト集合**で撮られるため、2枚を並べて形状・寸法・配置を1対1で比較できる。照明と色管理は一致させていない（BlenderはCycles studio rig、Unityは平行光源＋環境光）ので、差が出るのは想定内。**このメニュー項目を含め`Assets/FourBrosBlenderStudy/`のC#は一度もコンパイルしていない**ので、最初の実行者はコンパイルエラーの有無を最初に記録する。
+8. Playモードを終了してから`4 Capture Unity parity screenshot`を実行する。プレビューカメラを初期視点へ戻し、垂直画角60°・960×540でRenderTextureへ描画して`Assets/FourBrosBlenderStudy/Captures/unity-camera-parity.png`を書き出す（Captures/はgitignore）。これは`generated/unity-camera-parity.png`と**同じカメラ位置・注視点・画角・アスペクト・可視オブジェクト集合**で撮られるため、2枚を並べて形状・寸法・配置を1対1で比較できる。照明と色管理は一致させていない（BlenderはCycles studio rig、Unityは平行光源＋環境光）ので、差が出るのは想定内。レビュー時にこのメニュー項目を含むC#はコンパイル済みだが、実画面での描画は未検証なので、実行者はConsoleエラーの有無も記録する。
 9. 牌面の可読性はこの初期視点では判定しない。カメラ→牌の距離2.854 m・垂直画角60°では、五筒の牌面は960×540で高さ約5.9 px、1920×1080でも約11.8 px、点の直径は1 px未満になる。ホイールでズーム下限0.6 mまで寄せ、1920×1080以上で判定する（この距離なら牌面高さ約56 px、点の直径約2.2 px）。数値は`generated/reproduction-2026-09-08.json`の`unityParityRender`にある。
 10. Unityのスクリーンショット／短い録画、Consoleエラー、Profilerのフレーム時間・メモリ、実機／画面解像度を記録する。Blenderの証跡をUnityの証跡として扱わない。
 

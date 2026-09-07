@@ -101,6 +101,8 @@ def main():
     left_manifest = json.loads((args.left/"manifest.json").read_text(encoding="utf-8"))
     right_manifest = json.loads((args.right/"manifest.json").read_text(encoding="utf-8"))
     assert left_manifest["variant"] == right_manifest["variant"], "Comparing different variants"
+    assert left_manifest["assets"], "No assets to compare"
+    assert left_manifest["assets"].keys() == right_manifest["assets"].keys(), "Asset sets differ"
     report = {"schemaVersion": 1, "blenderVersion": bpy.app.version_string,
               "comparison": "Blender FBX reimport of two independent builds",
               "unityValidation": "not-run-editor-unavailable",

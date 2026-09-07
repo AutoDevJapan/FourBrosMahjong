@@ -160,13 +160,16 @@ namespace FourBros.BlenderStudy
         [MenuItem("FourBros/Blender Study/4 Capture Unity parity screenshot")]
         public static void CaptureParityScreenshot()
         {
+            if (EditorApplication.isPlayingOrWillChangePlaymode)
+                throw new InvalidOperationException("Exit Play mode before capturing so the tile is at its original position.");
             var cameraObject = GameObject.Find("Preview camera");
             if (cameraObject == null)
                 throw new InvalidOperationException("Open the preview scene from step 2 before capturing.");
             var camera = cameraObject.GetComponent<Camera>();
             if (camera == null) throw new InvalidOperationException("Preview camera has no Camera component.");
             var controller = cameraObject.GetComponent<BlenderStudyCamera>();
-            if (controller != null) controller.SetInitialView();
+            if (controller == null) throw new InvalidOperationException("Preview camera has no BlenderStudyCamera component.");
+            controller.ResetInitialView();
             var previousFov = camera.fieldOfView;
             var previousTarget = camera.targetTexture;
             var previousActive = RenderTexture.active;

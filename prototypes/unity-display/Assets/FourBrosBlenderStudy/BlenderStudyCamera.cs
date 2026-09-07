@@ -11,6 +11,14 @@ namespace FourBros.BlenderStudy
         private float movement = 1;
         private bool moveOut;
 
+        public void ResetInitialView()
+        {
+            yaw = 25;
+            pitch = 25;
+            distance = 3.1f;
+            SetInitialView();
+        }
+
         public void SetInitialView()
         {
             transform.position = new Vector3(0, .8f, 0) +

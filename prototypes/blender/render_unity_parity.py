@@ -17,7 +17,7 @@ import sys
 from pathlib import Path
 
 import bpy
-from mathutils import Euler, Vector
+from mathutils import Vector
 
 # Mirrors BlenderStudyCamera.SetInitialView and BlenderAssetStudy.BuildScene.
 UNITY_PIVOT = (0.0, 0.8, 0.0)
