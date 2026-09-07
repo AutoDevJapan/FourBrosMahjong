@@ -77,9 +77,9 @@ transport、token、合法手、山、向聴、点数、フリテンの責務は
 元モデルはメートル単位で、卓の幅約0.94m/高さ0.78m、牌は0.026×0.036×0.018m、
 人物は約1.8m。自動的に単位立方体になるとは限らないため、インポート後のRenderer.boundsを
 確認してPrefab内で寸法・pivotを合わせる。アセットの実寸評価には#1165の専用プレビューを使う。
-親側が用意する `prototypes/blender/unity/` はディレクトリ構造ごと、このプロジェクトの
-`Assets/FourBrosBlenderStudy/` へコピーして実行できる。`BlenderStudyCamera.cs`は直下、
-`BlenderAssetStudy.cs`は`Editor/`以下に保つ（#818単独の必須依存ではない）。
+#1165はこのプロジェクトの`Assets/FourBrosBlenderStudy/`へ専用プレビューを追加する。
+両変更を取り込むと、`FourBros > Blender Study`メニューでFBXの取り込みと実寸プレビューを
+実行できる。#818単独ではこの追加メニューはなく、表示fixtureの試作は独立して動く。
 
 この試作の座標単位は視認性のための任意単位で、実寸卓の物理シミュレーションではない。
 リーチは注入したtileの親Transformを90度回す。文字ラベルはモデルと独立して追加する。
