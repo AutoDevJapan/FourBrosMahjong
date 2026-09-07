@@ -1,0 +1,511 @@
+{
+  "blenderVersion": "5.2.0 LTS",
+  "validation": "Blender FBX reimport only",
+  "unityValidation": "not-run-editor-unavailable",
+  "assets": {
+    "MahjongTable": {
+      "baseline": {
+        "names": [
+          "Base",
+          "CenterIndicator",
+          "CenterPanel",
+          "Felt",
+          "Foot_-1_-1",
+          "Foot_-1_1",
+          "Foot_1_-1",
+          "Foot_1_1",
+          "Leg_-1_-1",
+          "Leg_-1_1",
+          "Leg_1_-1",
+          "Leg_1_1",
+          "PanelBar",
+          "PanelBar.001",
+          "PanelBar.002",
+          "RedRail_-1",
+          "RedRail_1",
+          "Rim"
+        ],
+        "meshes": 18,
+        "triangles": 1656,
+        "boundsMeters": {
+          "min": [
+            -0.4699999988079071, -0.46999990940093994, -6.530687102213051e-8
+          ],
+          "max": [0.4699999988079071, 0.47000011801719666, 0.7795000076293945]
+        },
+        "dimensionsMeters": [
+          0.9399999976158142, 0.9400000274181366, 0.7795000729362656
+        ],
+        "materials": ["Black", "Felt", "Frame", "Green", "Ivory", "Red"],
+        "baseColors": {
+          "Black": [
+            0.013000000268220901, 0.014999999664723873, 0.017999999225139618,
+            1.0
+          ],
+          "Felt": [
+            0.014999999664723873, 0.1599999964237213, 0.10000000149011612, 1.0
+          ],
+          "Frame": [
+            0.07000000029802322, 0.09000000357627869, 0.10000000149011612, 1.0
+          ],
+          "Green": [
+            0.017000000923871994, 0.23999999463558197, 0.14000000059604645, 1.0
+          ],
+          "Ivory": [
+            0.8999999761581421, 0.8700000047683716, 0.7200000286102295, 1.0
+          ],
+          "Red": [
+            0.6200000047683716, 0.02500000037252903, 0.017999999225139618, 1.0
+          ]
+        }
+      },
+      "baselineChecks": "passed",
+      "negativeChecksRejected": [
+        "translated-bounds",
+        "internal-geometry-change",
+        "manifest-color-mismatch"
+      ],
+      "revision": {
+        "names": [
+          "Base",
+          "CenterIndicator",
+          "CenterPanel",
+          "Felt",
+          "Foot_-1_-1",
+          "Foot_-1_1",
+          "Foot_1_-1",
+          "Foot_1_1",
+          "Leg_-1_-1",
+          "Leg_-1_1",
+          "Leg_1_-1",
+          "Leg_1_1",
+          "PanelBar",
+          "PanelBar.001",
+          "PanelBar.002",
+          "RedRail_-1",
+          "RedRail_1",
+          "Rim"
+        ],
+        "meshes": 18,
+        "triangles": 1656,
+        "boundsMeters": {
+          "min": [
+            -0.4699999988079071, -0.46999990940093994, -6.530687102213051e-8
+          ],
+          "max": [0.4699999988079071, 0.47000011801719666, 0.7795000076293945]
+        },
+        "dimensionsMeters": [
+          0.9399999976158142, 0.9400000274181366, 0.7795000729362656
+        ],
+        "materials": ["Black", "Felt", "Frame", "Green", "Ivory", "Red"],
+        "baseColors": {
+          "Black": [
+            0.013000000268220901, 0.014999999664723873, 0.017999999225139618,
+            1.0
+          ],
+          "Felt": [
+            0.02500000037252903, 0.10999999940395355, 0.23999999463558197, 1.0
+          ],
+          "Frame": [
+            0.07000000029802322, 0.09000000357627869, 0.10000000149011612, 1.0
+          ],
+          "Green": [
+            0.017000000923871994, 0.23999999463558197, 0.14000000059604645, 1.0
+          ],
+          "Ivory": [
+            0.8999999761581421, 0.8700000047683716, 0.7200000286102295, 1.0
+          ],
+          "Red": [
+            0.6200000047683716, 0.02500000037252903, 0.017999999225139618, 1.0
+          ]
+        }
+      },
+      "revisionChecks": "passed",
+      "geometryComparison": "world-space vertices and polygon indices; tolerance 0.00001 metres"
+    },
+    "TilePin5": {
+      "baseline": {
+        "names": [
+          "PipDot_0",
+          "PipDot_1",
+          "PipDot_2",
+          "PipDot_3",
+          "PipDot_4",
+          "Pip_0",
+          "Pip_1",
+          "Pip_2",
+          "Pip_3",
+          "Pip_4",
+          "TileBack",
+          "TileFace"
+        ],
+        "meshes": 12,
+        "triangles": 2056,
+        "boundsMeters": {
+          "min": [
+            -0.013000000268220901, -0.017999999225139618, -2.9325721850881337e-9
+          ],
+          "max": [
+            0.013000000268220901, 0.018000002950429916, 0.018539713695645332
+          ]
+        },
+        "dimensionsMeters": [
+          0.026000000536441803, 0.036000002175569534, 0.018539716628217517
+        ],
+        "materials": ["Green", "Ink", "Ivory", "Red"],
+        "baseColors": {
+          "Green": [
+            0.017000000923871994, 0.23999999463558197, 0.14000000059604645, 1.0
+          ],
+          "Ink": [
+            0.012000000104308128, 0.054999999701976776, 0.10000000149011612, 1.0
+          ],
+          "Ivory": [
+            0.8999999761581421, 0.8700000047683716, 0.7200000286102295, 1.0
+          ],
+          "Red": [
+            0.6200000047683716, 0.02500000037252903, 0.017999999225139618, 1.0
+          ]
+        }
+      },
+      "baselineChecks": "passed",
+      "negativeChecksRejected": [
+        "translated-bounds",
+        "internal-geometry-change",
+        "manifest-color-mismatch"
+      ],
+      "revision": {
+        "names": [
+          "PipDot_0",
+          "PipDot_1",
+          "PipDot_2",
+          "PipDot_3",
+          "PipDot_4",
+          "Pip_0",
+          "Pip_1",
+          "Pip_2",
+          "Pip_3",
+          "Pip_4",
+          "TileBack",
+          "TileFace"
+        ],
+        "meshes": 12,
+        "triangles": 2056,
+        "boundsMeters": {
+          "min": [
+            -0.013000000268220901, -0.017999999225139618, -2.9325721850881337e-9
+          ],
+          "max": [
+            0.013000000268220901, 0.018000002950429916, 0.018539713695645332
+          ]
+        },
+        "dimensionsMeters": [
+          0.026000000536441803, 0.036000002175569534, 0.018539716628217517
+        ],
+        "materials": ["Green", "Ink", "Ivory", "Red"],
+        "baseColors": {
+          "Green": [
+            0.017000000923871994, 0.23999999463558197, 0.14000000059604645, 1.0
+          ],
+          "Ink": [
+            0.012000000104308128, 0.054999999701976776, 0.10000000149011612, 1.0
+          ],
+          "Ivory": [
+            0.8999999761581421, 0.8700000047683716, 0.7200000286102295, 1.0
+          ],
+          "Red": [
+            0.6200000047683716, 0.02500000037252903, 0.017999999225139618, 1.0
+          ]
+        }
+      },
+      "revisionChecks": "passed",
+      "geometryComparison": "world-space vertices and polygon indices; tolerance 0.00001 metres"
+    },
+    "SoakuhinStudy": {
+      "baseline": {
+        "names": [
+          "Ankle_-1",
+          "Ankle_1",
+          "BomberTorso",
+          "BootLace",
+          "BootLace.001",
+          "BootLace.002",
+          "BootLace.003",
+          "BootLace.004",
+          "BootLace.005",
+          "Boot_-1",
+          "Boot_1",
+          "Brow",
+          "Brow.001",
+          "ChestCrest",
+          "CollarTrim_0",
+          "CollarTrim_0.001",
+          "CollarTrim_1",
+          "CollarTrim_1.001",
+          "Collar_0",
+          "Collar_0.001",
+          "Collar_1",
+          "Collar_1.001",
+          "CrestPetal",
+          "CrestPetal.001",
+          "CrestPetal.002",
+          "CrestPetal.003",
+          "CrestPetal.004",
+          "Cuff",
+          "Cuff.001",
+          "CuffTrim",
+          "CuffTrim.001",
+          "Ear",
+          "Ear.001",
+          "Elbow",
+          "Elbow.001",
+          "Eye",
+          "Eye.001",
+          "EyeWhite",
+          "EyeWhite.001",
+          "HairCap",
+          "Hand",
+          "Hand.001",
+          "Head",
+          "HemPiping",
+          "HemPiping.001",
+          "JacketHem",
+          "Jaw",
+          "Knee",
+          "Knee.001",
+          "Mouth_0",
+          "Mouth_1",
+          "Neck",
+          "Necklace_0",
+          "Necklace_1",
+          "Nose",
+          "OuterSeam",
+          "OuterSeam.001",
+          "Pendant",
+          "Shirt",
+          "Shoulder",
+          "Shoulder.001",
+          "SideHair",
+          "SideHair.001",
+          "SleeveLower",
+          "SleeveLower.001",
+          "SleeveStripe_0",
+          "SleeveStripe_0.001",
+          "SleeveStripe_1",
+          "SleeveStripe_1.001",
+          "SleeveUpper",
+          "SleeveUpper.001",
+          "Sole_-1",
+          "Sole_1",
+          "SweptHair_0",
+          "SweptHair_1",
+          "SweptHair_2",
+          "SweptHair_3",
+          "SweptHair_4",
+          "SweptHair_5",
+          "SweptHair_6",
+          "TrouserLower_-1",
+          "TrouserLower_1",
+          "TrouserUpper_-1",
+          "TrouserUpper_1",
+          "Waist",
+          "Zip"
+        ],
+        "meshes": 86,
+        "triangles": 11228,
+        "boundsMeters": {
+          "min": [
+            -0.38808268308639526, -0.18000000715255737, 0.006999986711889505
+          ],
+          "max": [0.38808268308639526, 0.1250002384185791, 1.8115397691726685]
+        },
+        "dimensionsMeters": [
+          0.7761653661727905, 0.3050002455711365, 1.804539782460779
+        ],
+        "materials": [
+          "Black",
+          "Hair",
+          "Ivory",
+          "Jacket",
+          "Lip",
+          "Red",
+          "Silver",
+          "Skin"
+        ],
+        "baseColors": {
+          "Black": [
+            0.013000000268220901, 0.014999999664723873, 0.017999999225139618,
+            1.0
+          ],
+          "Hair": [
+            0.010999999940395355, 0.008999999612569809, 0.00800000037997961, 1.0
+          ],
+          "Ivory": [
+            0.8999999761581421, 0.8700000047683716, 0.7200000286102295, 1.0
+          ],
+          "Jacket": [
+            0.03500000014901161, 0.03799999877810478, 0.04500000178813934, 1.0
+          ],
+          "Lip": [
+            0.3199999928474426, 0.10000000149011612, 0.07000000029802322, 1.0
+          ],
+          "Red": [
+            0.6200000047683716, 0.02500000037252903, 0.017999999225139618, 1.0
+          ],
+          "Silver": [
+            0.550000011920929, 0.5699999928474426, 0.6000000238418579, 1.0
+          ],
+          "Skin": [
+            0.6600000262260437, 0.3799999952316284, 0.23000000417232513, 1.0
+          ]
+        }
+      },
+      "baselineChecks": "passed",
+      "negativeChecksRejected": [
+        "translated-bounds",
+        "internal-geometry-change",
+        "manifest-color-mismatch"
+      ],
+      "revision": {
+        "names": [
+          "Ankle_-1",
+          "Ankle_1",
+          "BomberTorso",
+          "BootLace",
+          "BootLace.001",
+          "BootLace.002",
+          "BootLace.003",
+          "BootLace.004",
+          "BootLace.005",
+          "Boot_-1",
+          "Boot_1",
+          "Brow",
+          "Brow.001",
+          "ChestCrest",
+          "CollarTrim_0",
+          "CollarTrim_0.001",
+          "CollarTrim_1",
+          "CollarTrim_1.001",
+          "Collar_0",
+          "Collar_0.001",
+          "Collar_1",
+          "Collar_1.001",
+          "CrestPetal",
+          "CrestPetal.001",
+          "CrestPetal.002",
+          "CrestPetal.003",
+          "CrestPetal.004",
+          "Cuff",
+          "Cuff.001",
+          "CuffTrim",
+          "CuffTrim.001",
+          "Ear",
+          "Ear.001",
+          "Elbow",
+          "Elbow.001",
+          "Eye",
+          "Eye.001",
+          "EyeWhite",
+          "EyeWhite.001",
+          "HairCap",
+          "Hand",
+          "Hand.001",
+          "Head",
+          "HemPiping",
+          "HemPiping.001",
+          "JacketHem",
+          "Jaw",
+          "Knee",
+          "Knee.001",
+          "Mouth_0",
+          "Mouth_1",
+          "Neck",
+          "Necklace_0",
+          "Necklace_1",
+          "Nose",
+          "OuterSeam",
+          "OuterSeam.001",
+          "Pendant",
+          "Shirt",
+          "Shoulder",
+          "Shoulder.001",
+          "SideHair",
+          "SideHair.001",
+          "SleeveLower",
+          "SleeveLower.001",
+          "SleeveStripe_0",
+          "SleeveStripe_0.001",
+          "SleeveStripe_1",
+          "SleeveStripe_1.001",
+          "SleeveUpper",
+          "SleeveUpper.001",
+          "Sole_-1",
+          "Sole_1",
+          "SweptHair_0",
+          "SweptHair_1",
+          "SweptHair_2",
+          "SweptHair_3",
+          "SweptHair_4",
+          "SweptHair_5",
+          "SweptHair_6",
+          "TrouserLower_-1",
+          "TrouserLower_1",
+          "TrouserUpper_-1",
+          "TrouserUpper_1",
+          "Waist",
+          "Zip"
+        ],
+        "meshes": 86,
+        "triangles": 11228,
+        "boundsMeters": {
+          "min": [
+            -0.38808268308639526, -0.18000000715255737, 0.006999986711889505
+          ],
+          "max": [0.38808268308639526, 0.1250002384185791, 1.8115397691726685]
+        },
+        "dimensionsMeters": [
+          0.7761653661727905, 0.3050002455711365, 1.804539782460779
+        ],
+        "materials": [
+          "Black",
+          "Hair",
+          "Ivory",
+          "Jacket",
+          "Lip",
+          "Red",
+          "Silver",
+          "Skin"
+        ],
+        "baseColors": {
+          "Black": [
+            0.013000000268220901, 0.014999999664723873, 0.017999999225139618,
+            1.0
+          ],
+          "Hair": [
+            0.010999999940395355, 0.008999999612569809, 0.00800000037997961, 1.0
+          ],
+          "Ivory": [
+            0.8999999761581421, 0.8700000047683716, 0.7200000286102295, 1.0
+          ],
+          "Jacket": [
+            0.03500000014901161, 0.03799999877810478, 0.04500000178813934, 1.0
+          ],
+          "Lip": [
+            0.3199999928474426, 0.10000000149011612, 0.07000000029802322, 1.0
+          ],
+          "Red": [
+            0.6200000047683716, 0.02500000037252903, 0.017999999225139618, 1.0
+          ],
+          "Silver": [
+            0.550000011920929, 0.5699999928474426, 0.6000000238418579, 1.0
+          ],
+          "Skin": [
+            0.6600000262260437, 0.3799999952316284, 0.23000000417232513, 1.0
+          ]
+        }
+      },
+      "revisionChecks": "passed",
+      "geometryComparison": "world-space vertices and polygon indices; tolerance 0.00001 metres"
+    }
+  }
+}

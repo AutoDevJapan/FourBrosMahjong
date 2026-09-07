@@ -1,0 +1,178 @@
+{
+  "schemaVersion": 1,
+  "blenderVersion": "5.2.0 LTS",
+  "variant": "baseline",
+  "units": "metres",
+  "blenderUp": "Z",
+  "fbxUp": "Y",
+  "characterForwardBlender": "-Y",
+  "exportForward": "-Z",
+  "reference": {
+    "path": "documents/assets/characters/originals/p0-soakuhin-character-sheet.png",
+    "sha256": "ef6c81eb0ce02dbc5227d3320f61c760527214eea1ecd8e7e42cd88dbb4aebbf"
+  },
+  "assets": {
+    "MahjongTable": {
+      "meshes": 18,
+      "vertices": 864,
+      "triangles": 1656,
+      "boundsMeters": {
+        "min": [-0.4699999988079071, -0.4699999988079071, 0.0],
+        "max": [0.4699999988079071, 0.4699999988079071, 0.7795000076293945]
+      },
+      "dimensionsMeters": [
+        0.9399999976158142, 0.9399999976158142, 0.7795000076293945
+      ],
+      "materials": ["Black", "Felt", "Frame", "Green", "Ivory", "Red"],
+      "uvMeshes": 18,
+      "imageTextureBytes": 0,
+      "fbxBytes": 90572,
+      "sha256": "835beeecbc6f9628d245695f986dc9465b6afd426b103c6fe0d468403ed53ca0"
+    },
+    "TilePin5": {
+      "meshes": 12,
+      "vertices": 1042,
+      "triangles": 2056,
+      "boundsMeters": {
+        "min": [-0.013000000268220901, -0.017999999225139618, 0.0],
+        "max": [
+          0.013000000268220901, 0.017999999225139618, 0.018539711833000183
+        ]
+      },
+      "dimensionsMeters": [
+        0.026000000536441803, 0.035999998450279236, 0.018539711833000183
+      ],
+      "materials": ["Green", "Ink", "Ivory", "Red"],
+      "uvMeshes": 12,
+      "imageTextureBytes": 0,
+      "fbxBytes": 85884,
+      "sha256": "86b294093fea7e16c467de82fabc1b37b2ceb86b3c41d1882f062bfec7f366af"
+    },
+    "SoakuhinStudy": {
+      "meshes": 86,
+      "vertices": 5784,
+      "triangles": 11228,
+      "boundsMeters": {
+        "min": [
+          -0.38808271288871765, -0.18000000715255737, 0.007000001147389412
+        ],
+        "max": [0.38808271288871765, 0.125, 1.8115397691726685]
+      },
+      "dimensionsMeters": [
+        0.7761654257774353, 0.3050000071525574, 1.804539768025279
+      ],
+      "materials": [
+        "Black",
+        "Hair",
+        "Ivory",
+        "Jacket",
+        "Lip",
+        "Red",
+        "Silver",
+        "Skin"
+      ],
+      "uvMeshes": 86,
+      "imageTextureBytes": 0,
+      "fbxBytes": 470924,
+      "sha256": "5d81a9b95a4e65d01796038a3ed2176705eec2d74fccb6da73293d089ae087e1"
+    }
+  },
+  "unityValidation": "not-run-editor-unavailable",
+  "rigging": "not-implemented-static-study",
+  "renderEngine": "CYCLES CPU",
+  "materialPalette": [
+    {
+      "name": "Frame",
+      "rgba": [
+        0.07000000029802322, 0.09000000357627869, 0.10000000149011612, 1.0
+      ],
+      "metallic": 0.20000000298023224,
+      "roughness": 0.5
+    },
+    {
+      "name": "Black",
+      "rgba": [
+        0.013000000268220901, 0.014999999664723873, 0.017999999225139618, 1.0
+      ],
+      "metallic": 0.05000000074505806,
+      "roughness": 0.5
+    },
+    {
+      "name": "Jacket",
+      "rgba": [
+        0.03500000014901161, 0.03799999877810478, 0.04500000178813934, 1.0
+      ],
+      "metallic": 0.11999999731779099,
+      "roughness": 0.3799999952316284
+    },
+    {
+      "name": "Red",
+      "rgba": [
+        0.6200000047683716, 0.02500000037252903, 0.017999999225139618, 1.0
+      ],
+      "metallic": 0.05000000074505806,
+      "roughness": 0.5
+    },
+    {
+      "name": "Ivory",
+      "rgba": [0.8999999761581421, 0.8700000047683716, 0.7200000286102295, 1.0],
+      "metallic": 0.0,
+      "roughness": 0.3199999928474426
+    },
+    {
+      "name": "Green",
+      "rgba": [
+        0.017000000923871994, 0.23999999463558197, 0.14000000059604645, 1.0
+      ],
+      "metallic": 0.0,
+      "roughness": 0.5
+    },
+    {
+      "name": "Felt",
+      "rgba": [
+        0.014999999664723873, 0.1599999964237213, 0.10000000149011612, 1.0
+      ],
+      "metallic": 0.0,
+      "roughness": 0.949999988079071
+    },
+    {
+      "name": "Ink",
+      "rgba": [
+        0.012000000104308128, 0.054999999701976776, 0.10000000149011612, 1.0
+      ],
+      "metallic": 0.0,
+      "roughness": 0.5
+    },
+    {
+      "name": "Skin",
+      "rgba": [
+        0.6600000262260437, 0.3799999952316284, 0.23000000417232513, 1.0
+      ],
+      "metallic": 0.0,
+      "roughness": 0.6000000238418579
+    },
+    {
+      "name": "Hair",
+      "rgba": [
+        0.010999999940395355, 0.008999999612569809, 0.00800000037997961, 1.0
+      ],
+      "metallic": 0.029999999329447746,
+      "roughness": 0.30000001192092896
+    },
+    {
+      "name": "Lip",
+      "rgba": [
+        0.3199999928474426, 0.10000000149011612, 0.07000000029802322, 1.0
+      ],
+      "metallic": 0.0,
+      "roughness": 0.5
+    },
+    {
+      "name": "Silver",
+      "rgba": [0.550000011920929, 0.5699999928474426, 0.6000000238418579, 1.0],
+      "metallic": 0.699999988079071,
+      "roughness": 0.25
+    }
+  ],
+  "elapsedSeconds": 14.981
+}
