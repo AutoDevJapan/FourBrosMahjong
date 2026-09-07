@@ -7,7 +7,7 @@ import { expect, type Locator } from "@playwright/test";
  * 個別スペックで `boundingBox()` を直接 44 と比較しないこと(#1168 の再発防止)。
  */
 
-/** WCAG 2.2 目標サイズ(最小)に合わせた、操作領域の1辺の下限(CSS px)。 */
+/** このプロジェクトで要求する操作領域の1辺の下限(CSS px)。 */
 export const MIN_TOUCH_SIZE = 44;
 
 /**

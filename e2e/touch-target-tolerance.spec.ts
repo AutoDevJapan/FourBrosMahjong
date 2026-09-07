@@ -40,7 +40,7 @@ test.describe("44pxタッチ領域判定の許容幅(#1168)", () => {
     );
     const target = page.locator("#tile");
     const metrics = await measureTouchTarget(target, "端数座標の44px要素");
-    test.info().attach("subpixel-repro-metrics.json", {
+    await test.info().attach("subpixel-repro-metrics.json", {
       body: describeTouchTarget(metrics),
       contentType: "application/json",
     });
@@ -112,7 +112,7 @@ test.describe("実画面の手牌タッチ領域の実測記録(#1168)", () => {
 
       const tile = visibleHand(page).getByRole("option").first();
       const metrics = await expectTouchTarget(tile, `${width}pxの手牌先頭牌`);
-      test.info().attach(`hand-tile-${width}px-metrics.json`, {
+      await test.info().attach(`hand-tile-${width}px-metrics.json`, {
         body: describeTouchTarget(metrics),
         contentType: "application/json",
       });
@@ -121,8 +121,8 @@ test.describe("実画面の手牌タッチ領域の実測記録(#1168)", () => {
       // 測定誤差の許容はこの要件を弱めない。
       expect(metrics.computed.minHeight).toBe("44px");
       expect(metrics.computed.minWidth).toBe("44px");
-      expect(metrics.domRect.height).toBeGreaterThanOrEqual(MIN_TOUCH_SIZE);
-      expect(metrics.domRect.width).toBeGreaterThanOrEqual(MIN_TOUCH_SIZE);
+      // DOMRect / boundingBox の寸法は上の expectTouchTarget が許容幅つきで検査済み。
+      // DOMRect も同じ測定誤差を含むため、ここで厳密な 44px 比較を重ねない。
     });
   }
 });
