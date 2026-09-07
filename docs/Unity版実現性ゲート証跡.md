@@ -2,6 +2,13 @@
 
 対象: [Issue #818](https://github.com/AutoDevJapan/FourBrosMahjong/issues/818)
 
+> **2026-09-08 追記**: この文書は 2026-09-06 時点の監査証跡であり、以後は更新しない。
+> 現在の受け入れ条件の状態・再現コマンド・暫定Go/No-Go・後続Issue分割案は
+> [Unity表示プロトタイプ実装記録](../documents/guides/unity-display-prototype.md)を参照する。
+> なお本文の「主要8演出」は、Web側 `gameEffect` が実装している8種を指す。
+> 北抜き(ガリ)の演出はWeb側に実装が無く、Unity側の新規実装対象として
+> 表示契約の `unityOnlyKinds` に分離した。
+
 この文書は、Unity Editorを実行できない環境で行った、#818の現在状態に対する限定監査の証跡である。既存の[表示専用の実現性ガイド](../documents/guides/unity-display-feasibility.md)を置き換えず、今回確認できたrepo-local証拠と、Unity実行前に残る判定ゲートを分離して記録する。
 
 ## 判定

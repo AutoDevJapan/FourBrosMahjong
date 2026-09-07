@@ -1,6 +1,10 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import {
+  CHARACTER_PROFILES,
+  type CharacterPlayerId,
+} from "@/domain/game/characters";
 import { createGame } from "@/domain/game/engine";
 import contract from "../../../documents/fixtures/unity-display-contract.json";
 import Discards from "../game/Discards";
@@ -9,8 +13,15 @@ import type { ActiveGameEffect } from "../game/effects/useGameEffects";
 import GameBoard from "../game/GameBoard";
 import { GameProvider } from "../game/GameProvider";
 import Hand from "../game/Hand";
+import KitaDisplay from "../game/KitaDisplay";
 import PlayerSlot from "../game/PlayerSlot";
-import type { RiverTileData, SlotContent, TileData } from "../game/types";
+import type {
+  RiverTileData,
+  SeatPosition,
+  SeatWind,
+  SlotContent,
+  TileData,
+} from "../game/types";
 import { DesignLinkButton, DesignPageShell } from "../layout/DesignSurface";
 
 const FIXED_SEED = 828;
@@ -54,9 +65,11 @@ const ASSERTION_LABEL: Record<string, string> = {
   benchCount: "抜け番数",
   benchHasNoSeatWind: "抜け番に席風を付けない",
   pointsRemainWithPlayer: "持ち点をプレイヤーに保持",
+  unityOnlyKinds: "Unity側で新規実装が必要な演出",
+  unityOnlyKindsReason: "Unity専用演出とする理由",
 };
 
-const EFFECT_PREVIEWS: readonly Pick<
+type EffectPreview = Pick<
   ActiveGameEffect,
   | "kind"
   | "icon"
@@ -65,8 +78,16 @@ const EFFECT_PREVIEWS: readonly Pick<
   | "announcement"
   | "assertive"
   | "playerId"
->[] = [
-  {
+>;
+
+/**
+ * Web側 `gameEffect` が実際に発火できる演出の見本。キーは `GameEffectKind` と同じ集合で、
+ * 表示するボタン列は契約fixtureの `kinds` から導く(勝手な独自リストにしない)。
+ */
+const EFFECT_PREVIEW_BY_KIND: Readonly<
+  Record<ActiveGameEffect["kind"], EffectPreview>
+> = {
+  discard: {
     kind: "discard",
     icon: "切",
     title: "打牌",
@@ -75,7 +96,7 @@ const EFFECT_PREVIEWS: readonly Pick<
     assertive: false,
     playerId: "p0",
   },
-  {
+  riichi: {
     kind: "riichi",
     icon: "宣",
     title: "リーチ",
@@ -84,7 +105,7 @@ const EFFECT_PREVIEWS: readonly Pick<
     assertive: false,
     playerId: "p1",
   },
-  {
+  pon: {
     kind: "pon",
     icon: "碰",
     title: "ポン",
@@ -93,7 +114,7 @@ const EFFECT_PREVIEWS: readonly Pick<
     assertive: false,
     playerId: "p2",
   },
-  {
+  kan: {
     kind: "kan",
     icon: "槓",
     title: "カン",
@@ -102,7 +123,7 @@ const EFFECT_PREVIEWS: readonly Pick<
     assertive: false,
     playerId: "p3",
   },
-  {
+  tsumo: {
     kind: "tsumo",
     icon: "自",
     title: "ツモ",
@@ -111,7 +132,7 @@ const EFFECT_PREVIEWS: readonly Pick<
     assertive: true,
     playerId: "p0",
   },
-  {
+  ron: {
     kind: "ron",
     icon: "栄",
     title: "ロン",
@@ -120,7 +141,7 @@ const EFFECT_PREVIEWS: readonly Pick<
     assertive: true,
     playerId: "p1",
   },
-  {
+  draw: {
     kind: "draw",
     icon: "流",
     title: "流局",
@@ -128,7 +149,7 @@ const EFFECT_PREVIEWS: readonly Pick<
     announcement: "流局。九種九牌で流局しました。",
     assertive: true,
   },
-  {
+  roundEnd: {
     kind: "roundEnd",
     icon: "局",
     title: "局終了",
@@ -136,7 +157,45 @@ const EFFECT_PREVIEWS: readonly Pick<
     announcement: "局が終了しました。",
     assertive: true,
   },
-];
+};
+
+type MajorEffectAssertions = {
+  readonly kinds?: readonly string[];
+  readonly unityOnlyKinds?: readonly string[];
+};
+
+function majorEffectAssertions(): MajorEffectAssertions {
+  const visualCase = contract.visualCases.find(
+    (item) => item.id === "major-effects",
+  );
+  return (visualCase?.assertions ?? {}) as MajorEffectAssertions;
+}
+
+function isWebEffectKind(value: string): value is ActiveGameEffect["kind"] {
+  return Object.hasOwn(EFFECT_PREVIEW_BY_KIND, value);
+}
+
+/** 契約fixtureが宣言するWeb演出の順序どおりに見本を並べる。 */
+const WEB_EFFECT_PREVIEWS: readonly EffectPreview[] = (
+  majorEffectAssertions().kinds ?? []
+)
+  .filter(isWebEffectKind)
+  .map((kind) => EFFECT_PREVIEW_BY_KIND[kind]);
+
+/** Web側に演出実装が無く、Unity表示クライアントで新規実装が要る演出。 */
+const UNITY_ONLY_EFFECT_KINDS: readonly string[] =
+  majorEffectAssertions().unityOnlyKinds ?? [];
+
+const UNITY_ONLY_EFFECT_COPY: Record<
+  string,
+  { readonly title: string; readonly description: string }
+> = {
+  kita: {
+    title: "北抜き(ガリ)",
+    description:
+      "抜いた北の枚数は `KitaDisplay` が常時表示するが、抜いた瞬間の演出はWeb側に無い。Unity側は表示契約のeffect種別 kita を受けて新規に演出を実装する。",
+  },
+};
 
 const SAMPLE_DISCARDS: readonly RiverTileData[] = [
   { suit: "man", rank: 1 },
@@ -151,6 +210,16 @@ const SAMPLE_DISCARDS: readonly RiverTileData[] = [
   { suit: "pin", rank: 8 },
   { suit: "sou", rank: 2 },
   { suit: "honor", rank: 7 },
+];
+
+/**
+ * 席ローテーション表示の河サンプル。12状態を1画面で見比べるため短くし、
+ * リーチ宣言牌の横置きだけは席方向と一緒に確認できるよう残す。
+ */
+const ROTATION_DISCARDS: readonly RiverTileData[] = [
+  { suit: "man", rank: 1 },
+  { suit: "sou", rank: 5, isRed: true, isRiichi: true },
+  { suit: "honor", rank: 4 },
 ];
 
 const SAMPLE_HAND: readonly TileData[] = [
@@ -178,6 +247,174 @@ const SAMPLE_BENCH: SlotContent = {
     points: 35000,
   },
 };
+
+/**
+ * 4物理スロット → プレイヤーIDの固定割り当て。契約fixtureの `slotShape` をSSOTにして、
+ * 席が回っても物理位置(自家/上家/対面/下家)は動かないことを見た目で確かめられるようにする。
+ */
+const PHYSICAL_PLAYERS: Readonly<Record<SeatPosition, CharacterPlayerId>> =
+  (() => {
+    const shape = contract.visualCases.find(
+      (item) => item.id === "bench-warmers",
+    )?.assertions as
+      | { slotShape?: Record<string, { playerId: string; points: number }> }
+      | undefined;
+    const slotShape = shape?.slotShape;
+    const pick = (position: SeatPosition): CharacterPlayerId =>
+      (slotShape?.[position]?.playerId ?? "p0") as CharacterPlayerId;
+    return {
+      self: pick("self"),
+      left: pick("left"),
+      across: pick("across"),
+      right: pick("right"),
+    };
+  })();
+
+const FIXTURE_BASE_POINTS = 35000;
+
+type FixtureSeatMap = Readonly<Record<string, string>>;
+
+interface RotationDisplayState {
+  readonly key: string;
+  readonly caseName: string;
+  /** `east-4-to-south-1` は席回転と局替わりの双方にあるため、群を分けて一意にする。 */
+  readonly group: "rotation" | "progression";
+  readonly phase: "before" | "after";
+  readonly heading: string;
+  readonly roundLabel: string;
+  readonly seats: FixtureSeatMap;
+  readonly points: Readonly<Record<string, number>> | null;
+}
+
+function roundLabelOf(round: {
+  readonly wind: string;
+  readonly handNumber: number;
+  readonly honba: number;
+}): string {
+  const wind = round.wind === "south" ? "南" : "東";
+  return `${wind}${round.handNumber}局 ${round.honba}本場`;
+}
+
+/**
+ * fixtureの4回転(前後)と局替わり2件(前後)= 12状態。席割り・持ち点はfixtureの値をそのまま読み、
+ * ここで親流れや点数を計算しない(ルールSSOTはdomain/サーバー側)。
+ */
+const ROTATION_DISPLAY_STATES: readonly RotationDisplayState[] = [
+  ...contract.rotationCases.flatMap((rotationCase): RotationDisplayState[] => [
+    {
+      key: `rotation-${rotationCase.name}-before`,
+      caseName: rotationCase.name,
+      group: "rotation",
+      phase: "before",
+      heading: `${rotationCase.name} / 適用前`,
+      roundLabel: "席回転fixture",
+      seats: rotationCase.before,
+      points: null,
+    },
+    {
+      key: `rotation-${rotationCase.name}-after`,
+      caseName: rotationCase.name,
+      group: "rotation",
+      phase: "after",
+      heading: `${rotationCase.name} / 適用後`,
+      roundLabel: "席回転fixture",
+      seats: rotationCase.after,
+      points: null,
+    },
+  ]),
+  ...contract.progressionCases.flatMap(
+    (progression): RotationDisplayState[] => [
+      {
+        key: `progression-${progression.name}-before`,
+        caseName: progression.name,
+        group: "progression",
+        phase: "before",
+        heading: `${progression.name} / 適用前`,
+        roundLabel: roundLabelOf(progression.beforeRound),
+        seats: progression.beforeSeats,
+        points: progression.beforePoints,
+      },
+      {
+        key: `progression-${progression.name}-after`,
+        caseName: progression.name,
+        group: "progression",
+        phase: "after",
+        heading: `${progression.name} / 適用後`,
+        roundLabel: roundLabelOf(progression.afterRound),
+        seats: progression.afterSeats,
+        points: progression.afterPoints,
+      },
+    ],
+  ),
+];
+
+function seatWindOf(
+  seats: FixtureSeatMap,
+  playerId: CharacterPlayerId,
+): SeatWind | null {
+  for (const wind of ["east", "south", "west"] as const) {
+    if (seats[wind] === playerId) return wind;
+  }
+  return null;
+}
+
+function rotationSlotContent(
+  state: RotationDisplayState,
+  playerId: CharacterPlayerId,
+): SlotContent {
+  const name = CHARACTER_PROFILES[playerId].defaultName;
+  const points = state.points?.[playerId] ?? FIXTURE_BASE_POINTS;
+  const seatWind = seatWindOf(state.seats, playerId);
+  if (seatWind === null) {
+    return { kind: "bench", player: { playerId, name, points } };
+  }
+  return {
+    kind: "seated",
+    player: {
+      playerId,
+      name,
+      points,
+      seatWind,
+      status: { isDealer: seatWind === "east" },
+      // 北抜き(ガリ)の公開枚数は席が回っても表示され続けることを見せる。
+      kitaCount: seatWind === "east" ? 1 : 0,
+      discards: ROTATION_DISCARDS,
+      handCount: 13,
+    },
+  };
+}
+
+function RotationBoard({ state }: { readonly state: RotationDisplayState }) {
+  return (
+    <article
+      className="unity-display-rotation-board"
+      data-testid={`unity-display-rotation-${state.key}`}
+      data-rotation-case={state.caseName}
+      data-rotation-group={state.group}
+      data-rotation-phase={state.phase}
+    >
+      <header className="unity-display-rotation-board-heading">
+        <h4>{state.heading}</h4>
+        <span className="unity-display-rotation-round">{state.roundLabel}</span>
+      </header>
+      <div className="unity-display-rotation-cross" data-board-layout="cross">
+        {(["across", "left", "right", "self"] as const).map((position) => (
+          <div
+            key={position}
+            className={`unity-display-rotation-cell unity-display-rotation-cell--${position}`}
+            data-slot-position={position}
+          >
+            <PlayerSlot
+              position={position}
+              content={rotationSlotContent(state, PHYSICAL_PLAYERS[position])}
+              compact
+            />
+          </div>
+        ))}
+      </div>
+    </article>
+  );
+}
 
 function formatAssertionValue(value: unknown): string {
   if (Array.isArray(value)) {
@@ -240,7 +477,7 @@ function VisualCasePreview({ caseId }: { readonly caseId: string }) {
 
 function EffectCasePreview() {
   const [effectIndex, setEffectIndex] = useState(0);
-  const selected = EFFECT_PREVIEWS[effectIndex] ?? EFFECT_PREVIEWS[0];
+  const selected = WEB_EFFECT_PREVIEWS[effectIndex] ?? WEB_EFFECT_PREVIEWS[0];
   if (!selected) return null;
 
   const effect: ActiveGameEffect = {
@@ -257,7 +494,7 @@ function EffectCasePreview() {
         role="group"
         aria-label="演出プレビューの種類"
       >
-        {EFFECT_PREVIEWS.map((preview, index) => (
+        {WEB_EFFECT_PREVIEWS.map((preview, index) => (
           <button
             key={preview.kind}
             type="button"
@@ -275,6 +512,33 @@ function EffectCasePreview() {
         <p className="unity-display-preview-caption">
           選択中: {selected.title}（確定表示状態から導出する演出の見本）
         </p>
+      </div>
+      <div
+        className="unity-display-effect-gap"
+        data-testid="unity-display-unity-only-effects"
+      >
+        <p className="unity-display-effect-gap-title">
+          Web側に演出実装が無く、Unityで新規実装が必要な演出
+        </p>
+        <ul>
+          {UNITY_ONLY_EFFECT_KINDS.map((kind) => {
+            const copy = UNITY_ONLY_EFFECT_COPY[kind];
+            return (
+              <li key={kind} data-unity-only-effect={kind}>
+                <span className="unity-display-effect-gap-kind">
+                  {copy?.title ?? kind}
+                </span>
+                <span className="unity-display-effect-gap-sample">
+                  <KitaDisplay count={1} />
+                </span>
+                <span>
+                  {copy?.description ??
+                    "Web側に対応する演出が無いため、見本を表示できない。"}
+                </span>
+              </li>
+            );
+          })}
+        </ul>
       </div>
     </div>
   );
@@ -495,6 +759,23 @@ export default function UnityDisplayReference({
           </div>
           <p className="unity-display-note">
             連荘は席を回さず本場だけを進め、東4→南1でも持ち点はプレイヤーに保持する。
+          </p>
+
+          <div
+            className="unity-display-rotation-grid"
+            data-testid="unity-display-rotation-boards"
+            role="group"
+            aria-label="席ローテーションと局替わりの表示"
+          >
+            {ROTATION_DISPLAY_STATES.map((state) => (
+              <RotationBoard key={state.key} state={state} />
+            ))}
+          </div>
+          <p className="unity-display-note">
+            4物理スロット(自家=下 / 上家=左 / 対面=上 / 下家=右)は
+            <code>slotShape</code>
+            に固定し、席風・親・抜け番・持ち点だけが入力どおり入れ替わる。
+            全12状態でスロットの欠落・重複・崩れが無いことをブラウザ上で確認できる。
           </p>
         </section>
 

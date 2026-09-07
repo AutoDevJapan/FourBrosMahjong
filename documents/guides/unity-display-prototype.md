@@ -77,29 +77,179 @@ git diff --check
 Unityの代用品としてAPIスタブを作ってコンパイル成功とすることも行っていない。
 Web実装を変更していないため、既存WebテストをUnity成果として再掲しない。
 
-## 受け入れ条件の残り
+## 2026-09-08 追記: Unity・.NETなしでの追加検証（基準commit `a1995bb`）
 
-| #818の条件 | 今回の到達点 | 完了に必要な確認 |
+この日の作業環境には **Unity Hub / Unity Editor に加えて .NET SDK も無い**。
+
+```
+$ which dotnet mono csc mcs unity Unity
+dotnet not found / mono not found / csc not found / mcs not found / unity not found / Unity not found
+$ ls /Applications | grep -i unity   # 出力なし
+$ ls -d ~/.dotnet /usr/local/share/dotnet /Library/Frameworks/Mono.framework
+（いずれも存在しない）
+```
+
+したがって 2026-09-07 に記録した **2267 assertions の.NET実行は、この回では再実行していない**。
+過去の実行結果を今回の証跡として再掲もしない。新規に何かをインストールもしていない。
+
+### 見つけた穴: C#表示コアはどのCIでも実行されない
+
+`.github/workflows/ci.yml` に `dotnet` のセットアップ・実行stepは無く、
+`prototypes/unity-display/**` を参照するjobも無い。
+つまり `DisplayContract.cs` の `EffectKinds` / `TransitionKinds` と、
+`documents/fixtures/unity-display-contract.json`、Web実装(`gameEffect.ts` /
+`HandTileAnimation.tsx`)は **無検査で乖離しうる**状態だった。
+
+そこを埋める `src/test/unity-display-csharp-contract.test.ts` を追加した。
+C#を実行せず、C#ソースが宣言している集合をテキストとして読み取り、契約fixtureとWeb実装に突き合わせる。
+Unity Editorも.NET SDKも不要で、`pnpm test`（=CIのqualityゲート）に載る。
+C#のコンパイル・実行・Unity API・描画を検証するものではない。
+
+### 見つけた欠落: 北抜き(ガリ)演出
+
+追加したガードは、書いた直後に **3件失敗した**（`unityOnlyKindsが無い`）。原因は実際の欠落である。
+
+- #818の受け入れ条件は「リーチ/鳴き/**北抜き**/和了/流局」の演出再現を求めている。
+- C#の `DisplayValidation.EffectKinds` は9種（`kita` を含む）。
+- しかし契約fixtureの `major-effects.kinds` は8種で、**`kita` を一度も要求していなかった**。
+- Web側 `GameEffectKind` も8種で、**北抜きの瞬間の演出はWebに実装が無い**
+  （抜いた枚数の常時表示 `KitaDisplay` はある）。
+
+そのため契約に `unityOnlyKinds: ["kita"]` と理由を追加し、
+「Web演出8種 ∪ Unity専用1種 = C#の9種」を上記ガードで固定した。
+Unity側は `kita` を**新規実装**する必要があり、Webリファレンスには比較対象の見本が無い。
+この非対称は工数見積りとGo/No-Goの前提であり、隠さず契約と画面に出す。
+
+### ブラウザ・リファレンスによる席ローテーション/局替わりの画面証跡
+
+`/prototype/unity-display` に、契約fixtureの**全12状態**
+（席回転4件×前後 + 局替わり2件×前後）を、本番の `PlayerSlot` / `PlayerArea` /
+`BenchArea` / `Discards` / `KitaDisplay` でそのまま描く一覧を追加した。
+物理スロット（自家=下 / 上家=左 / 対面=上 / 下家=右）は契約の `slotShape` に固定し、
+席風・親・抜け番・持ち点・ガリ枚数だけが入力どおり入れ替わる。
+親流れ・点数計算はここに無く、fixtureの値をそのまま読む。
+
+これは **Unity Runtimeではない**。Unity画面の代用として扱わないが、
+「席が回っても4物理スロットが崩れない」「局替わりで持ち点がプレイヤーに残る」
+という受け入れ条件を、Unityなしで**実ブラウザのレイアウトとして**確認できる。
+
+### 再現コマンド（このリポジトリだけで完結する分）
+
+```bash
+pnpm install
+# 表示契約fixtureの検証
+pnpm exec vitest run --project unit src/test/unity-display-contract.test.ts
+# C#表示コア × 契約 × Web実装の整合ガード（.NET不要）
+pnpm exec vitest run --project unit src/test/unity-display-csharp-contract.test.ts
+# ブラウザ・リファレンスのコンポーネント検証
+pnpm exec vitest run --project component src/components/prototype/UnityDisplayReference.test.tsx
+# 実ブラウザでの12状態＋演出＋スクリーンショット出力
+pnpm exec playwright test e2e/unity-display-reference.spec.ts --project=chromium
+```
+
+Playwrightは `test-results/<spec>-<test>-chromium/` に次のPNGを出力する
+（`.gitignore` 済みのため、リポジトリへは同梱しない）。
+
+- `unity-818-rotation-boards.png`: 12状態の一覧（4回転＋連荘＋東4→南1）
+- `unity-818-rotation-east-1-before.png` / `-after.png`: 席回転の前後
+- `unity-818-progression-east-4-to-south-1-before.png` / `-after.png`: 局替わり(東4→南1)の前後
+- `unity-818-reference-page.png`: ページ全体
+
+.NET SDKがある環境でのC#実行（この回は未実行）:
+
+```bash
+check_dir="$(mktemp -d /tmp/unity-display-checks.XXXXXX)"
+export DOTNET_CLI_HOME="$check_dir/home"
+dotnet build prototypes/unity-display/Tests/DisplayContractChecks.csproj \
+  -p:BaseIntermediateOutputPath="$check_dir/obj/" -p:BaseOutputPath="$check_dir/bin/"
+dotnet "$check_dir/bin/Debug/net8.0/DisplayContractChecks.dll" documents/fixtures/unity-display-contract.json
+```
+
+Unity Editorがある環境での検証（この回も未実行）:
+
+```bash
+UNITY_EDITOR=/Applications/Unity/Hub/Editor/2022.3.62f2/Unity.app/Contents/MacOS/Unity
+"$UNITY_EDITOR" -batchmode -quit -projectPath "$PWD/prototypes/unity-display" \
+  -executeMethod FourBros.Display.Editor.DisplaySceneBuilder.Validate -logFile /tmp/unity-818-validate.log
+```
+
+## Unityなしで確認できること / Editorが必須なこと
+
+| 観点 | Unityなしで確認済み | Unity Editorが必須（未確認） |
 |---|---|---|
-| プラットフォーム/版/環境/理由 | macOS、2022.3.62f2候補と未実行状態を記録 | 実際に起動した版・OS・ハードウェアを追記 |
-| 河・手牌・向き・演出 | 描画コード・再生成シーン入口・純粋座標テストあり | Unityで起動し12状態と操作表を確認、スクリーンショット/短い録画 |
-| 全席回転・局替わり・復元 | fixtureとC#状態投影/ゲートの実行テスト成功 | 実GameObjectの再配置と過去演出抑止を録画確認 |
-| SSOT維持 | 表示のみ。ルール・点数・席回転計算・通信なし | 本番adapter追加時にも境界を維持 |
-| 権利境界 | 新規コード/プリミティブ/Unity同梱機能に限定、第三者Assetsコピーなし | 任意FBXと本番素材の権利根拠・配布条件を別途レビュー |
-| 証跡・負荷・コスト | 手順、検証結果、未達を記録 | Unity画面証跡、入力遅延、frame time、memory、build size |
-| Go/No-Go | 本番No-Go、実Unity検証へ進める | 上記ゲートを実証してから製品採用を判断 |
+| 河の配置・折り返し・リーチ横置き | Web `Discards` の実装と実ブラウザ描画。C#側は純粋座標計算として設計済み | Unityの実GameObject配置・回転・カメラ越しの見え方 |
+| 手牌のツモ間隔・遷移 | 契約の200msがWeb `HAND_ANIMATION_DURATION_MS` と一致することをテストで固定 | Unityでの補間・入場の実描画とフレーム挙動 |
+| 演出9種 | Web実装8種の発火をE2Eで確認。北抜きはWeb未実装として契約に明示 | UnityでのIMGUI/文字演出の実描画、北抜き演出の新規実装 |
+| 4物理スロット・全席回転・局替わり | 12状態を実ブラウザで描画し、4/3/1の内訳・席風・抜け番・持ち点保持を自動検証 | Unityでの席再配置と過去演出の抑止を録画で確認 |
+| 表示契約・状態所有権 | fixture・C#ソース宣言・Web実装の三者整合を`pnpm test`で固定 | 変更なし（Unity側にルール計算を置かない設計は維持） |
+| JsonUtility / UnityEngineコンパイル | 不可 | 必須 |
+| 実機性能・入力遅延・ビルドサイズ・録画 | 不可 | 必須 |
 
-実機記録にはcommit、Unityの正確な版、OS/CPU/GPU、解像度、使用アセットを含める。
-固定操作表を再生してConsoleの例外ゼロ、河/手牌の欠落・重複・オーバーラップなしを確認し、
-ProfilerでCPU/GPU frame time、GC、メモリを記録する。ボタン入力から次の表示frameまでの
-遅延は録画/計測で測り、ビルドログのサイズと一緒に記録する。推測値は埋めない。
+## 受け入れ条件の現状
 
-既存の8.5–17人日は全スパイクの計画レンジのままで、今回の実績値ではない。
-追加の計画目安は、環境・ライセンス・対象端末が揃った後のUnityコンパイル/描画調整と
-証跡作成1–3人日、性能/入力/ビルド確認1–2人日。今後の表示契約変更1回あたりの
-追随レビュー/fixture更新/Unity再検証は0.5–1人日を仮置きする。実測工数でも確約でもなく、
-不具合規模・端末数・権利確認の待ち時間は含めない。
+| #818の条件 | 現状 | 完了に必要な確認 |
+|---|---|---|
+| 対象プラットフォーム/Unity版/実行環境/採用理由 | **文書のみ確定**。macOS Editor/Standalone、候補版2022.3.62f2(rev `7670c08855a9`)、OSSの2019.1.8f1不採用、外部UPMなしを理由付きで記録 | 実際に起動した版・OS/CPU/GPU・解像度の実測記録 |
+| 最小シーンで河・手牌・主要演出 | **部分**。C#の描画コード・シーン生成入口・純粋座標計算あり。Web側で河/折り返し/リーチ横置き/ツモ間隔を実ブラウザ確認 | Unityで起動し操作表の全項目とスクリーンショット/録画 |
+| 全ローテーション＋局替わりで崩れない | **Unityなしの範囲で達成**。12状態を実ブラウザで描画し自動検証・PNG出力 | Unityの実GameObject再配置を同じ12状態で確認 |
+| ルールSSOTと状態所有権の維持 | **達成**。Unity側にルール・点数・席回転計算・通信は無い。契約とC#宣言とWeb実装の整合を`pnpm test`で固定 | 本番adapter追加時にも同じ境界を維持 |
+| OSS/現行素材/自作素材の境界とライセンス | **今回の成果物については達成**（下記） | 任意FBX・本番素材を入れる場合は個別の権利確認 |
+| スクリーンショット/録画・手順・制約・工数 | **部分**。Web側PNGと再現コマンドを整備、既知の制約を明記 | Unity画面のPNG/録画、Profiler、入力遅延、ビルドサイズ |
+| Go/No-Go と後続Issue分割 | **暫定判断のみ**（下記） | Unity実行証跡と権利確認の後に確定 |
 
-後続の分割は既存計画の`unity/assets-rights`、`unity/performance`、`unity/transport`、
-`unity/release-gate`を維持する。今回#818を完了として閉じず、最初にこのプロジェクトの
-Unity実行・生成シーンの画面証跡を取る。重複する新規Issueは作成していない。
+## ライセンス境界の結論（今回追加分）
+
+- 追加したC#・レイアウト計算・文字列・シーン生成手順は、このIssue向けの**新規実装**である。
+- 指定OSS(`ArcturusZhang/Mahjong`, MIT)の **C#/Prefab/Animation/シーンは1行も取り込んでいない**。
+  参照したのは公開されたテキスト上の設計方針だけで、コピー・改変・再配布はしていない。
+- そのOSSのREADMEはゲーム内リソースをMajsoulから取得すると記載しているため、
+  MIT表記のコードと画像・音声・フォント等の第三者素材は**分離して扱う**。素材は取り込まない。
+- プリミティブ、Unlit/Color、組込みフォント、IMGUI/JSON/Physics/TextRenderingモジュールは
+  Unity同梱機能であり、Unity Editorのライセンス下で利用する（外部UPM/Asset Storeは不使用）。
+- ブラウザ・リファレンスが使うキャラクター画像・牌素材は、既に本リポジトリで管理している
+  自作/権利確認済み資産（`documents/assets/` と `public/`）であり、今回新たな素材は追加していない。
+- 任意FBX(#1165)と本番素材の利用・改変・再配布可否は、**この作業では判定していない**。別途レビューが必要。
+
+## 概算コスト（実測ではなく計画レンジ）
+
+既存の全スパイク計画レンジ 8.5–17人日は据え置く。今回時点での追加内訳は次のとおり。
+
+| 項目 | 目安 | 前提 |
+|---|---|---|
+| Unity Hub/Editor導入・ライセンス有効化・初回コンパイル | 0.5–1人日 | アカウントと承認があること |
+| Unity上の描画調整・シーン生成・12状態の画面証跡 | 1–3人日 | 既存C#がそのままコンパイルできる場合 |
+| 北抜き演出の新規実装（Web側に見本が無い） | 0.5–1人日 | 表示のみ。ルール側の変更を含まない |
+| 性能・入力遅延・メモリ・ビルドサイズ測定 | 1–2人日 | 対象端末が決まっていること |
+| 表示契約の変更1回あたりの追随（fixture更新+Unity再検証） | 0.5–1人日/回 | 保守コストの継続分 |
+
+いずれも実測工数でも確約でもない。不具合規模・端末数・権利確認の待ち時間は含まない。
+
+## 暫定Go/No-Go
+
+**本番移行は条件付きNo-Go、Unity Editorが用意でき次第の最小シーン検証はGo**（従来判断を維持）。
+
+Go/No-Goを確定させる条件:
+
+1. Unity Hub/Editor 2022.3系が導入され、`prototypes/unity-display` が**警告0でコンパイル**する。
+2. `JsonUtility` が `documents/fixtures/unity-display-contract.json` を解析でき、
+   `Four Bros > Validate display contract` がEditor内で通る。
+3. 12状態と操作表の全項目のスクリーンショット/短い録画がConsole例外0で取れる。
+4. 対象端末で frame time / 入力遅延 / メモリ / ビルドサイズが記録される。
+5. 素材を入れる場合、利用・改変・再配布の許諾が独立に確認される。
+
+上記1–3が満たされない、または表示契約の追随コストが 0.5–1人日/回 を大きく超える場合は、
+現行Web実装の継続（Unity不採用）を推す。
+
+## 後続Issue分割案
+
+| 後続Issue案 | 範囲 | 依存 |
+|---|---|---|
+| `unity/editor-bringup` | Unity Hub/Editor導入、コンパイル、`JsonUtility`検証、生成シーンの起動 | 環境・ライセンス |
+| `unity/display-evidence` | 12状態＋操作表のスクリーンショット/録画、Console例外0の確認 | `unity/editor-bringup` |
+| `unity/kita-effect` | 北抜き演出のUnity新規実装（Web側に見本が無い分） | `unity/editor-bringup` |
+| `unity/performance` | frame time・入力遅延・メモリ・ビルドサイズの実測 | 対象端末の確定 |
+| `unity/assets-rights` | 任意FBX・本番素材の利用/改変/再配布の権利確認 | 素材候補の確定 |
+| `unity/transport` | 表示snapshotの配信・認証・resume（#818の対象外） | サーバー側の確定 |
+| `unity/release-gate` | 採用判断と配布形態（Standalone/WebGL）の決定 | 上記すべて |
+
+#818はこのどれも満たしていないため閉じない。Blender側の残条件は#1165で追跡する。

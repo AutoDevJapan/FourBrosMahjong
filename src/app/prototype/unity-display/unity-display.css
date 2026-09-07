@@ -372,6 +372,108 @@
   line-height: 1.55;
 }
 
+/* #818: 全12状態(4回転×前後 + 局替わり2件×前後)の4スロット表示を並べる。 */
+.unity-display-page .unity-display-rotation-grid {
+  display: grid;
+  gap: 0.75rem;
+  margin-top: 1rem;
+  grid-template-columns: repeat(auto-fit, minmax(19rem, 1fr));
+}
+
+.unity-display-page .unity-display-rotation-board {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 0.5rem;
+  padding: 0.6rem;
+  border: 1px solid var(--ui-panel-border, rgb(0 0 0 / 0.15));
+  border-radius: 0.6rem;
+}
+
+.unity-display-page .unity-display-rotation-board-heading {
+  display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.35rem;
+}
+
+.unity-display-page .unity-display-rotation-board-heading h4 {
+  font-family: var(--font-geist-mono), monospace;
+  font-size: 0.74rem;
+  font-weight: 700;
+}
+
+.unity-display-page .unity-display-rotation-round {
+  color: var(--ui-muted);
+  font-size: 0.7rem;
+}
+
+.unity-display-page .unity-display-rotation-cross {
+  display: grid;
+  gap: 0.35rem;
+  grid-template-areas:
+    ". across ."
+    "left . right"
+    ". self .";
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1fr);
+}
+
+.unity-display-page .unity-display-rotation-cell {
+  min-width: 0;
+}
+
+.unity-display-page .unity-display-rotation-cell--across {
+  grid-area: across;
+}
+
+.unity-display-page .unity-display-rotation-cell--left {
+  grid-area: left;
+}
+
+.unity-display-page .unity-display-rotation-cell--right {
+  grid-area: right;
+}
+
+.unity-display-page .unity-display-rotation-cell--self {
+  grid-area: self;
+}
+
+/* Web側に演出実装が無い演出(北抜き)を、見本の代わりに明示する。 */
+.unity-display-page .unity-display-effect-gap {
+  margin-top: 0.6rem;
+  padding-top: 0.6rem;
+  border-top: 1px dashed var(--ui-panel-border, rgb(0 0 0 / 0.2));
+}
+
+.unity-display-page .unity-display-effect-gap-title {
+  color: var(--ui-gold-text);
+  font-size: 0.72rem;
+  font-weight: 800;
+}
+
+.unity-display-page .unity-display-effect-gap ul {
+  display: grid;
+  gap: 0.4rem;
+  margin-top: 0.4rem;
+}
+
+.unity-display-page .unity-display-effect-gap li {
+  display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.4rem;
+  color: var(--ui-muted);
+  font-size: 0.72rem;
+  line-height: 1.55;
+}
+
+.unity-display-page .unity-display-effect-gap-kind {
+  font-weight: 700;
+}
+
 .unity-display-page .unity-display-note {
   margin-top: 0.75rem;
   color: var(--ui-muted);
