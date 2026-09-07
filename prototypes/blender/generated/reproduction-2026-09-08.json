@@ -1,0 +1,117 @@
+{
+  "schemaVersion": 1,
+  "recordedOn": "2026-09-08",
+  "issue": 1165,
+  "purpose": "third-party reproduction of the committed Blender artefacts; Unity Editor still unavailable",
+  "environment": {
+    "os": "macOS 26.2 (build 25C56)",
+    "cpuArch": "arm64",
+    "blender": "5.2.0 LTS (hash fbe6228777e7, built 2026-07-14 01:31:22)",
+    "blenderExecutable": "/Applications/Blender.app/Contents/MacOS/Blender",
+    "unityEditor": "not-installed",
+    "unityHub": "not-installed",
+    "unityCheck": "ls /Applications | grep -i unity -> no match on 2026-09-08"
+  },
+  "runs": [
+    {
+      "script": "build_assets.py",
+      "output": "validation-local/baseline",
+      "wallClockSeconds": 20.57,
+      "scriptElapsedSeconds": 16.465,
+      "exitCode": 0,
+      "note": "includes the 1200x1000 Cycles CPU hero render"
+    },
+    {
+      "script": "revise_assets.py",
+      "output": "validation-local/revision",
+      "wallClockSeconds": 15.05,
+      "scriptElapsedSeconds": 13.733,
+      "exitCode": 0
+    },
+    {
+      "script": "verify_fbx.py",
+      "input": "validation-local baseline+revision",
+      "wallClockSeconds": 1.0,
+      "exitCode": 0,
+      "result": "PASS: 3 assets"
+    },
+    {
+      "script": "verify_fbx.py",
+      "input": "committed generated/ + generated/revision/",
+      "exitCode": 0,
+      "result": "PASS: 3 assets",
+      "reportEqualsCommittedReport": true
+    },
+    {
+      "script": "compare_builds.py",
+      "input": "generated/ vs validation-local/baseline",
+      "exitCode": 0,
+      "result": "PASS: 3 assets geometrically identical across builds"
+    },
+    {
+      "script": "compare_builds.py",
+      "input": "generated/revision vs validation-local/revision",
+      "exitCode": 0,
+      "result": "PASS: 3 assets geometrically identical across builds"
+    },
+    {
+      "script": "render_unity_parity.py",
+      "output": "generated/unity-camera-parity.png",
+      "exitCode": 0,
+      "wallClockSeconds": 28.9
+    }
+  ],
+  "reproducibility": {
+    "vertexPositionsAndOrder": "identical for all 6 FBX files",
+    "faceStorageOrder": "NOT stable; TilePin5/PipDot_* and SoakuhinStudy meshes come back reordered",
+    "faceSetWindingAndBounds": "identical (canonical multiset comparison)",
+    "materialPalette": "identical",
+    "fbxSha256": "differs between builds; the exporter embeds a creation timestamp and the absolute source path",
+    "fbxByteDeltas": {
+      "MahjongTable": {
+        "committed": 90572,
+        "reproduced": 90572
+      },
+      "TilePin5": {
+        "committed": 85884,
+        "reproduced": 85900
+      },
+      "SoakuhinStudy": {
+        "committed": 470924,
+        "reproduced": 470860
+      }
+    },
+    "conclusion": "manifest sha256 verifies a manifest against the FBX beside it, not reproducibility; use compare_builds.py for that"
+  },
+  "negativeControls": {
+    "perAssetMutationsRejected": [
+      "changed-face-set",
+      "internal-geometry-change",
+      "material-colour-change",
+      "reversed-face-winding",
+      "translated-bounds"
+    ],
+    "realFileControl": "generated/ vs generated/revision with the variant field forced to baseline -> AssertionError: Base colour differs: MahjongTable/Felt"
+  },
+  "unityParityRender": {
+    "cameraMatches": "BlenderStudyCamera.SetInitialView (pivot 0,.8,0 / yaw 25 / pitch 25 / distance 3.1) with Unity's default 60 deg vertical FOV",
+    "resolution": [960, 540],
+    "notMatched": "lighting and colour management; Blender keeps its Cycles studio rig",
+    "cameraToTileMeters": 2.8544,
+    "tileFacePixelsAt960x540": {
+      "height": 5.9,
+      "width": 4.26,
+      "pipDotDiameter": 0.229
+    },
+    "tileFacePixelsAt1920x1080": {
+      "height": 11.8,
+      "pipDotDiameter": 0.459
+    },
+    "tileFacePixelsAtMinimumZoom0_6mAt1920x1080": {
+      "height": 56.12,
+      "pipDotDiameter": 2.182
+    },
+    "finding": "at the default preview distance the pin-5 face is a few pixels tall and unreadable; legibility must be judged at the 0.6 m zoom clamp and >=1080p"
+  },
+  "unityValidation": "not-run-editor-unavailable"
+}

@@ -12,6 +12,10 @@ namespace FourBros.BlenderStudy
     {
         private const string Destination = "Assets/FourBrosBlenderStudy";
         private static readonly string[] AssetNames = { "MahjongTable", "TilePin5", "SoakuhinStudy" };
+        // Kept in sync with prototypes/blender/render_unity_parity.py defaults.
+        private const int ParityWidth = 960;
+        private const int ParityHeight = 540;
+        private const float ParityVerticalFov = 60;
 
         [Serializable] private sealed class PaletteEntry
         {
@@ -150,6 +154,54 @@ namespace FourBros.BlenderStudy
             if (!EditorSceneManager.SaveScene(scene, path)) throw new IOException("Could not save preview scene.");
             Selection.activeGameObject = table;
             Debug.Log("Blender preview saved: " + path + ". Enter Play; drag RMB / wheel / Space.");
+        }
+
+        // Matches prototypes/blender/render_unity_parity.py so the two PNGs share framing.
+        [MenuItem("FourBros/Blender Study/4 Capture Unity parity screenshot")]
+        public static void CaptureParityScreenshot()
+        {
+            if (EditorApplication.isPlayingOrWillChangePlaymode)
+                throw new InvalidOperationException("Exit Play mode before capturing so the tile is at its original position.");
+            var cameraObject = GameObject.Find("Preview camera");
+            if (cameraObject == null)
+                throw new InvalidOperationException("Open the preview scene from step 2 before capturing.");
+            var camera = cameraObject.GetComponent<Camera>();
+            if (camera == null) throw new InvalidOperationException("Preview camera has no Camera component.");
+            var controller = cameraObject.GetComponent<BlenderStudyCamera>();
+            if (controller == null) throw new InvalidOperationException("Preview camera has no BlenderStudyCamera component.");
+            controller.ResetInitialView();
+            var previousFov = camera.fieldOfView;
+            var previousTarget = camera.targetTexture;
+            var previousActive = RenderTexture.active;
+            camera.fieldOfView = ParityVerticalFov;
+            camera.aspect = (float)ParityWidth / ParityHeight;
+            var texture = new RenderTexture(ParityWidth, ParityHeight, 24, RenderTextureFormat.ARGB32);
+            var image = new Texture2D(ParityWidth, ParityHeight, TextureFormat.RGB24, false);
+            try
+            {
+                camera.targetTexture = texture;
+                camera.Render();
+                RenderTexture.active = texture;
+                image.ReadPixels(new Rect(0, 0, ParityWidth, ParityHeight), 0, 0);
+                image.Apply();
+                Directory.CreateDirectory(Destination + "/Captures");
+                var path = Destination + "/Captures/unity-camera-parity.png";
+                File.WriteAllBytes(path, image.EncodeToPNG());
+                AssetDatabase.Refresh();
+                Debug.Log("Unity parity capture written: " + path +
+                    ". Compare with prototypes/blender/generated/unity-camera-parity.png " +
+                    "(same camera transform and FOV; lighting is deliberately not matched).");
+            }
+            finally
+            {
+                camera.targetTexture = previousTarget;
+                camera.fieldOfView = previousFov;
+                camera.ResetAspect();
+                RenderTexture.active = previousActive;
+                UnityEngine.Object.DestroyImmediate(image);
+                texture.Release();
+                UnityEngine.Object.DestroyImmediate(texture);
+            }
         }
 
         private static GameObject InstantiateModel(string name, Vector3 position)

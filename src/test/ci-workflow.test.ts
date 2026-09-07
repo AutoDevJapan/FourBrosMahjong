@@ -98,6 +98,8 @@ const PRODUCTION_E2E_EXCLUDED_SPECS = [
   "e2e/unity-display-reference.spec.ts",
   // settingsのproduction/offline parityはpwa-offline.spec.tsが担い、platform別VRTはdev E2Eで行う。
   "e2e/settings.spec.ts",
+  // 44px判定ヘルパの許容幅を固定するメタスペック(#1168)。production成果物固有の差分は無い。
+  "e2e/touch-target-tolerance.spec.ts",
 ] as const;
 
 function readPackageJson(): { scripts?: Record<string, string> } {
