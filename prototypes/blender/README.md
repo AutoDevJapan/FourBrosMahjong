@@ -16,7 +16,7 @@ Blender 5.2.0 LTSで制作・保存・FBX書き出し・再読み込みまで実
 | `generated/revision/` | 保存済み`.blend`を開き、フェルトだけ緑→青に変更した再書き出し版 |
 | `generated/fbx-validation.json` | 基準版＋改訂版の計6FBXをBlenderへ実際に再読み込みした検証結果 |
 | `generated/tile-detail.png` | 五筒の牌面の実レンダー |
-| `unity/` | Unity用取り込み・材質再適用・シーン作成・カメラ／牌移動スクリプト。未実行 |
+| `../unity-display/Assets/FourBrosBlenderStudy/` | Unity用取り込み・材質再適用・シーン作成・カメラ／牌移動スクリプト。未実行 |
 
 ## 再生成
 
@@ -50,8 +50,8 @@ Blender 5.2.0 LTSで制作・保存・FBX書き出し・再読み込みまで実
 
 対象候補はmacOS Editor、Built-in Render Pipeline、Unity 2022.3.62f2（#818と共通）。実行後にEditorの正確な版を記録する。URP/HDRPのシェーダー変換は対象外。FBXはUnityが主にサポートするモデル形式のため採用した（[Unity公式](https://docs.unity3d.com/2022.3/Documentation/Manual/ImportingModelFiles.html)）。
 
-1. Unity Editorのインストールとライセンス認証を済ませる。空の3D Built-inプロジェクト、または#818の試作プロジェクトを開く。
-2. このフォルダーの`unity/BlenderStudyCamera.cs`を`Assets/FourBrosBlenderStudy/`へ、`unity/Editor/BlenderAssetStudy.cs`をその`Editor/`へコピーする。
+1. Unity Editorのインストールとライセンス認証を済ませる。#818と#1165の両変更を含むcheckoutで`prototypes/unity-display`を開く（Unityプロジェクト設定は#818側で追加）。
+2. `Assets/FourBrosBlenderStudy/`のスクリプトがコンパイルされ、`FourBros > Blender Study`メニューが現れることを確認する。#1165単独の場合は空の3D Built-inプロジェクトへこのAssetsサブフォルダーをコピーしてもよい。
 3. `Edit > Project Settings > Player > Active Input Handling`を`Input Manager (Old)`または`Both`にする。
 4. `FourBros > Blender Study > 1 Import baseline`を実行する。リポジトリ配下のUnityプロジェクトなら`prototypes/blender/generated`を自動検出する。外部プロジェクトならフォルダーを選ぶ。
 5. `2 Build asset preview scene`を実行する。既存の開いているシーンは保持し、追加シーンを固有名で保存する。プレビューシーンだけを開いてPlayし、右ドラッグで周回、ホイールでズーム、Spaceで牌を200msで移動させる。
