@@ -10,7 +10,7 @@ import {
 } from "node:fs";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { dirname, join, posix } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   cruise,
@@ -43,6 +43,10 @@ import { beforeAll, describe, expect, it } from "vitest";
 function makeFixtureDir(): string {
   return realpathSync(mkdtempSync(join(tmpdir(), "depcruise-layers-")));
 }
+
+// 一時 fixture にのみ生成する資産。実 repo 入力の literal ではないため、
+// #745 の入力 inventory に架空の evidence を登録しないよう部品から組み立てる。
+const syntheticEvidence = posix.join("documents", "evidence", "runtime.json");
 
 /**
  * 合成フィクスチャ。`[パス, 中身]` の形で、レイヤー境界の各ケースを 1 つずつ含む。
@@ -142,7 +146,7 @@ const FIXTURE: readonly [path: string, source: string][] = [
   ["server/cycle-b.ts", 'import "./cycle-a";\nexport const cycleB = 1;\n'],
   // CSS の明示除外先をクラス供給源に変える import は、除外の再検討なしに入れない。
   ["prototypes/runtime.ts", "export const value = 1;\n"],
-  ["documents/evidence/runtime.json", '{"value":1}\n'],
+  [syntheticEvidence, '{"value":1}\n'],
   ["documents/assets/ui-refresh/manifest.json", '{"value":1}\n'],
   ["documents/fixtures/railway-pre-cutover.json", '{"value":1}\n'],
   ["documents/fixtures/unity-display-contract.json", '{"value":1}\n'],
@@ -152,7 +156,7 @@ const FIXTURE: readonly [path: string, source: string][] = [
   ],
   [
     "src/app/evidenceLeak.ts",
-    'export const load = () => import("../../documents/evidence/runtime.json");\n',
+    `export const load = () => import(${JSON.stringify(`../../${syntheticEvidence}`)});\n`,
   ],
   [
     "src/app/assetLeak.ts",
@@ -400,9 +404,19 @@ describe("本番サーバーの依存境界を dependency-cruiser が検出す�
 
 describe("CSS 除外先を runtime へ import する前に境界の再検討を求める (#1191)", () => {
   const rule = "no-runtime-to-css-excluded-inputs";
+  it("生成した evidence import は一時 repo 内の資産へ動的 literal として解決される", () => {
+    const dependency = fixtureModules
+      .find((module) => module.source === "src/app/evidenceLeak.ts")
+      ?.dependencies.find((entry) => entry.resolved === syntheticEvidence);
+    expect(dependency).toMatchObject({
+      couldNotResolve: false,
+      dynamic: true,
+      module: `../../${syntheticEvidence}`,
+    });
+  });
   it.each([
     ["src/app/nativeLeak.ts", "prototypes/runtime.ts"],
-    ["src/app/evidenceLeak.ts", "documents/evidence/runtime.json"],
+    ["src/app/evidenceLeak.ts", syntheticEvidence],
     ["src/app/assetLeak.ts", "documents/assets/ui-refresh/manifest.json"],
     ["src/app/railwayLeak.ts", "documents/fixtures/railway-pre-cutover.json"],
     ["scripts/runtimeBridge.ts", "prototypes/runtime.ts"],

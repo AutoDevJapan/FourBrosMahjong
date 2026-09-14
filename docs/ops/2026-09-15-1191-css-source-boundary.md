@@ -61,3 +61,37 @@ pnpm exec eslint .dependency-cruiser.cjs src/app/tailwind-content-scan.regressio
 `pnpm knip` が監査ヘルパの内部定数 `ROOT` の不要な export を1件検出したため export だけを外した。
 修正後の knip、上記40 tests、型検査、ヘルパ ESLint/Biome、監査スクリプト再実行はすべて pass。
 full build / 画面検証は引き続き別途調整し、この軽量検証の完了に含めない。
+
+## PR #1193 の入力 inventory 干渉修正
+
+head `295bd7577912d0f86482eb13c849fac94a7567ff` の
+[CI run 34895196439](https://github.com/AutoDevJapan/FourBrosMahjong/actions/runs/34895196439)
+では unit/component 全体が2,825 pass / 1 fail（208 files）だった。
+唯一の失敗は `ci-workflow.test.ts` の #745 入力 inventory：追加した一時 repo 用の
+架空 evidence パスを実 repository の入力として抽出し、`documentation` を
+`unit-test` と比較して失敗した。実在しない類似名 canary も同じ原因を持つ。
+対象1件だけをローカルで実行して同じ assertion failure を再現した。
+
+tmp-only のパスだけを POSIX segment から組み立て、保存先・生成 import・検証先で共有する。
+生成される fixture のパスと literal dynamic import は従来と同じであり、追加回帰でも
+`couldNotResolve: false` / `dynamic: true` を確認する。Tailwind の4除外・4保持 canary、
+除外削除の正対照、実 repository の Unity fixture 参照は維持した。
+CI 分類、#745 の走査・assertion、入力 allowlist、production CSS は変更しない。
+架空資産を検証対象へ登録して不要な CI を増やす修正ではない。
+
+分割した修正後検証は #745 describe 11 tests pass、Tailwind / dependency boundary
+41 tests pass。同 run の既存 E2E job は成功で完了したが、quality job の失敗により
+run 全体は failure のまま。修正後 CI の成功とは報告しない。追加の全 suite / build / E2E、
+CI 再実行はこの修正では行わない。
+
+独立 reviewer は全3変更ファイル、両 fixture 全体、既存 #745 inventory を読み、
+追加指摘なし。さらに `ci-workflow.test.ts` 全体169件と boundary 41件を独立実行し、
+合計210 tests pass（6.53秒）を確認した。
+
+現在の検証範囲として、修正前 checkpoint `295bd757` は別担当で local production build と
+production E2E 14件を完了済み。認証済み Preview も6 routes、320/1440px、打牌とCPU進行、
+全体盤面の Escape/focus 復帰、テーマ切替、reference の12盤面とロン表示を確認し、
+console/page errors は0件だった。上の「full build / 画面検証未実施」は初期 source
+checkpoint 時点の履歴であり、これらの後続結果を含まない。
+今回の追加修正は2テストと本文だけで production code/CSS は不変のため、
+重い検証を重複実行していない。既存 CI のquality失敗と、local/Preview成功は区別する。

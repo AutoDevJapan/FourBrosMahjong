@@ -8,7 +8,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { dirname, join, posix } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { BOUNDARY_SOURCES, scanCss } from "../test/tailwind-source-audit.mjs";
@@ -127,9 +127,11 @@ describe("Tailwind コンテンツ走査の除外(#329 / #333)", () => {
 
 describe("実 Tailwind compiler が非 runtime 境界を適用する (#1191)", () => {
   const css = readFileSync(join(SRC, "app/globals.css"), "utf8");
+  // 存在しない canary は一時 repo 内の出力。実 repo のテスト入力 literal と
+  // 区別して組み立てる（#745 の入力 inventory を架空の資産で汚染しない）。
   const excluded = [
     ["prototypes/unity-display/Assets/Canary.cs", 9011],
-    ["documents/evidence/unity/runtime.json", 9012],
+    [posix.join("documents", "evidence", "unity", "runtime.json"), 9012],
     ["documents/assets/ui-refresh/manifest.json", 9013],
     ["documents/fixtures/railway-pre-cutover.json", 9014],
   ] as const;
@@ -137,8 +139,8 @@ describe("実 Tailwind compiler が非 runtime 境界を適用する (#1191)", (
     ["src/components/Runtime.tsx", 9015],
     ["documents/fixtures/unity-display-contract.json", 9016],
     // 類似名まで広く消すパターンへの退行も検出する。
-    ["documents/assets-runtime/contract.json", 9017],
-    ["documents/fixtures/other-runtime.json", 9018],
+    [posix.join("documents", "assets-runtime", "contract.json"), 9017],
+    [posix.join("documents", "fixtures", "other-runtime.json"), 9018],
   ] as const;
 
   it("実リポジトリの依存 graph から境界内だけを外し、本番 src / Unity fixture を保持する", async () => {
