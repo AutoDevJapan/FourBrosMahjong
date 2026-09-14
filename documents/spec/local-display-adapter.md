@@ -67,6 +67,35 @@ ankanTiles、kakanTiles、forbiddenDiscards、locked。最終採用・副作用�
 controls は void のため receipt は `dispatched` であり `accepted` ではない。
 採用済みの盤面は次の確定 snapshot でのみ表示する。
 
+## React host の接続順序・失敗境界
+
+React 側の正式な窓口は `useLocalDisplayPort(createPort, onError)`。
+Provider 配下の host が使う契約であり、既存 `GameBoard` はまだこの hook や renderer を
+mount しない。`connectDisplayPort` を子の layout effect から直接接続・refresh すると、
+StrictMode の再 setup では子が先、Provider の活性化が後になるため初期配信を失う。
+hook は確定した context と最新の error handler を layout effect で保持し、全 layout
+setup の後の passive effect で port を生成・接続・refresh する。初回と StrictMode の
+再 setup はそれぞれ fresh port へ `restore` を一度送り、以後は確定 context 更新を反映する。
+同版や history 保存だけの更新では port を作り直さず、snapshot も再送しない。
+
+`createPort` は安定した関数（必要なら `useCallback`）で、呼ばれるたびに新しい所有 port を
+返す。render 中に作った単一 port や、すでに dispose した port を factory から再利用しない。
+factory が port を返す前に失敗した場合の部分リソース解放は factory の責務。
+`null` は表示接続を無効化する。factory の変更・無効化・host の取り外し時は layout cleanup
+で binding を同期 close する。Provider が残っていても、passive cleanup までの隙間に
+古い listener から操作できない。既存の binding は close を先に確定し、unsubscribe と
+port dispose を行う。非同期 dispose の完了待ちや二重 cleanup で旧 listener を復活させない。
+Provider 自身の同期 source 失効は遅延せず、そのまま維持する。
+
+factory・subscribe・publish の例外ではその接続を閉じ、取得済み port を解放して
+`onError({stage, error})` へ通知する。unsubscribe と dispose の失敗も別々に通知し、
+後の解放失敗で先の例外を隠さない。自動 retry はせず、host の明示的な factory 変更または
+再 mount が再接続の境界。`onError` の変更自体は再接続理由にせず最新の確定 handler を使う。
+非同期 dispose の失敗は host の取り外し後にも通知し得るため、handler はその状態でも
+報告できること。handler は例外を投げない契約だが、壊れた handler の例外も元の失敗と共に
+console error へ残し、表示 transport の失敗で既存 2D Provider を取り外さない。
+controls 自体の例外を呼び出し元へ伝える既存 intent 契約は変えない。
+
 ## オンライン・未対応時の境界
 
 先行版はローカルだけ。OnlineGameProvider は displaySource を持たず、アダプターは
@@ -79,6 +108,7 @@ WebSocket、server version、再接続・resume・secret の処理を追加・�
 - 純粋 unit: 深い allowlist、他家/抜け番の秘匿、席順保持、公開河/副露/結果、合法候補の写像。
 - transport unit: 同版/古い版、session 変更、restore、unknown/malformed intent、重複、選択確認、破棄、fake controls。
 - Provider component: 実操作と revision、同 tick 二重入力、no-op、history 更新、復元、新半荘、古い metadata の同期失効。
+- React host component: 実 Provider + StrictMode の両 setup、fresh port、同版無再送、2D との同 tick 競合、host だけの解除/無効化、Provider unmount、transport/reporting 失敗とリソース解放。
 - 既存関連 unit/component、対象 lint/format、typecheck を分割実行する。
 
 この先行実装だけで #1177 全体、#1179 runtime、#1180 素材、#1181 受け入れ、
