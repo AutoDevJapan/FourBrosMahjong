@@ -11,6 +11,14 @@ updates:
     labels:
       - "dependencies"
     groups:
+      # React and its renderer require identical runtime versions. Keep their
+      # types with them, before the broader groups, for every SemVer level.
+      react:
+        patterns:
+          - "react"
+          - "react-dom"
+          - "@types/react"
+          - "@types/react-dom"
       dev-dependencies:
         dependency-type: "development"
         update-types:
