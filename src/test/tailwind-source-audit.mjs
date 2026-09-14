@@ -15,7 +15,7 @@ const require = createRequire(import.meta.url);
 // Resolve the plugin's own locked PostCSS, not an accidentally hoisted version.
 const pluginRequire = createRequire(require.resolve("@tailwindcss/postcss"));
 const postcss = pluginRequire("postcss");
-export const ROOT = fileURLToPath(new URL("../../", import.meta.url));
+const ROOT = fileURLToPath(new URL("../../", import.meta.url));
 export const BOUNDARY_SOURCES = [
   "../../prototypes",
   "../../documents/evidence",

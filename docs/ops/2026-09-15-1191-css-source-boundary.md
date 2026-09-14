@@ -56,3 +56,8 @@ pnpm exec eslint .dependency-cruiser.cjs src/app/tailwind-content-scan.regressio
 ```
 
 順に40 tests pass、88 tests pass、441 modules / 1,443 dependencies 違反なし、型検査 pass、変更ファイル ESLint pass。これらは native アプリのビルド／実描画や本番ブラウザの視覚検証を代替しない。#1192 の入力分類修正は別変更のまま保持し、この変更だけを根拠に native / mixed 変更の検証省略を許可しない。
+
+独立 source review 後、`pnpm lint` は全体 pass、`pnpm check` は489 files pass。
+`pnpm knip` が監査ヘルパの内部定数 `ROOT` の不要な export を1件検出したため export だけを外した。
+修正後の knip、上記40 tests、型検査、ヘルパ ESLint/Biome、監査スクリプト再実行はすべて pass。
+full build / 画面検証は引き続き別途調整し、この軽量検証の完了に含めない。
