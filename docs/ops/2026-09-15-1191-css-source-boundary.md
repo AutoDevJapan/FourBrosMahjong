@@ -96,3 +96,28 @@ captured console errors は0件だった（pageerror stream は別途監視し�
 checkpoint 時点の履歴であり、これらの後続結果を含まない。
 今回の追加修正は2テストと本文だけで production code/CSS は不変のため、
 重い検証を重複実行していない。既存 CI のquality失敗と、local/Preview成功は区別する。
+
+## CodeQL の fixture コード生成指摘
+
+`a9393cad` の CI run34897007502 は品質・E2E とも成功したが、別の
+[CodeQL alert1](https://github.com/AutoDevJapan/FourBrosMahjong/security/code-scanning/1)
+（`js/bad-code-sanitization`、`dependency-layers.test.ts`）が open だった。
+固定パスの `JSON.stringify` 結果をコード文字列へ埋める構造が対象である。
+[公式 query help](https://codeql.github.com/codeql-query-help/javascript/js-bad-code-sanitization/)
+が説明する通り、JSON の符号化だけでは HTML 内に埋め込む JavaScript の安全性を保証しない。
+
+この fixture は固定パス部品だけを使い、生成コードを一時ディレクトリへ書いて静的解析する。
+外部入力、HTML sink、fixture の動的実行は見つからなかったが、自動 dismiss はしない。
+値からのコード生成をなくし、引数を受け取らない固定2文字列の連結に置き換えた。
+実入力 inventory と区別する分割を維持し、生成後の import は従来と同じである。
+既存の literal dynamic import 実解決と forbidden-edge の回帰が出力先との一致を検証する。
+sanitizer、検査抑制、CI 分類例外、production code の変更は加えない。
+
+変更前後の実 initializer を固定式として読み、生成 JS が75 bytesで完全一致することを確認した。
+既存 #745 全169件と boundary41件の合計210 tests、変更ファイル ESLint/Biome、
+型検査、全体 knip は pass。独立 reviewer も差分・一次資料・生成比較を読み、
+210 tests を別途実行して pass、追加指摘なしだった。
+
+ローカルの CodeQL CLI は未導入で、修正後の実 scan／alert 再判定はまだ未確認。
+旧 head の成功 CI を再実行せず、独立レビュー後の通常 push に伴う新 head の解析結果を
+確認するまでは「alert 解決」と報告しない。

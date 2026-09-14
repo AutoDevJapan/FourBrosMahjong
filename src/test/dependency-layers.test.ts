@@ -156,7 +156,10 @@ const FIXTURE: readonly [path: string, source: string][] = [
   ],
   [
     "src/app/evidenceLeak.ts",
-    `export const load = () => import(${JSON.stringify(`../../${syntheticEvidence}`)});\n`,
+    // 固定コードだけを使い、値の埋め込みや JSON sanitizer を必要としない。
+    // 分割は tmp-only パスを実入力 literal と区別するため。解決先は回帰で照合する。
+    'export const load = () => import("../../documents' +
+      '/evidence/runtime.json");\n',
   ],
   [
     "src/app/assetLeak.ts",
