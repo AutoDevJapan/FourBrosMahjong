@@ -50,6 +50,17 @@ function makeFixtureDir(): string {
  * リポジトリの `tsconfig.json` が無いため `cruise()` 呼び出しで `tsConfig` を外している)。
  */
 const FIXTURE: readonly [path: string, source: string][] = [
+  // exports-only packages have no legacy main/index.js fallback.
+  [
+    "node_modules/css-compiler/package.json",
+    '{"name":"css-compiler","exports":{".":{"import":"./compiler.mjs","require":"./compiler.cjs"}}}\n',
+  ],
+  ["node_modules/css-compiler/compiler.mjs", "export const compile = 1;\n"],
+  ["node_modules/css-compiler/compiler.cjs", "exports.compile = 1;\n"],
+  [
+    "src/app/exportsConsumer.ts",
+    'import { compile } from "css-compiler";\nexport const value = compile;\n',
+  ],
   ["src/app/_lib/securityHeaders.ts", "export const csp = 1;\n"],
   ["src/components/common/Modal.ts", "export const Modal = 1;\n"],
   ["src/domain/tiles/tile.ts", "export const tile = 1;\n"],
@@ -129,6 +140,48 @@ const FIXTURE: readonly [path: string, source: string][] = [
   ],
   ["server/cycle-a.ts", 'import "./cycle-b";\nexport const cycleA = 1;\n'],
   ["server/cycle-b.ts", 'import "./cycle-a";\nexport const cycleB = 1;\n'],
+  // CSS の明示除外先をクラス供給源に変える import は、除外の再検討なしに入れない。
+  ["prototypes/runtime.ts", "export const value = 1;\n"],
+  ["documents/evidence/runtime.json", '{"value":1}\n'],
+  ["documents/assets/ui-refresh/manifest.json", '{"value":1}\n'],
+  ["documents/fixtures/railway-pre-cutover.json", '{"value":1}\n'],
+  ["documents/fixtures/unity-display-contract.json", '{"value":1}\n'],
+  [
+    "src/app/nativeLeak.ts",
+    'export { value } from "../../prototypes/runtime";\n',
+  ],
+  [
+    "src/app/evidenceLeak.ts",
+    'export const load = () => import("../../documents/evidence/runtime.json");\n',
+  ],
+  [
+    "src/app/assetLeak.ts",
+    'import manifest from "../../documents/assets/ui-refresh/manifest.json";\nexport const value = manifest.value;\n',
+  ],
+  [
+    "src/app/railwayLeak.ts",
+    'import fixture from "../../documents/fixtures/railway-pre-cutover.json";\nexport const value = fixture.value;\n',
+  ],
+  [
+    "src/app/indirectLeak.ts",
+    'export { value } from "../../scripts/runtimeBridge";\n',
+  ],
+  [
+    "scripts/runtimeBridge.ts",
+    'export { value } from "../prototypes/runtime";\n',
+  ],
+  [
+    "src/app/unityConsumer.ts",
+    'import fixture from "../../documents/fixtures/unity-display-contract.json";\nexport const value = fixture.value;\n',
+  ],
+  [
+    "src/app/native.test.ts",
+    'export { value } from "../../prototypes/runtime";\n',
+  ],
+  [
+    "src/test/nativeConsumer.ts",
+    'export { value } from "../../prototypes/runtime";\n',
+  ],
 ];
 
 /** 解決できない import の specifier(上記フィクスチャと対応)。 */
@@ -155,6 +208,7 @@ const depcruiseConfig = require_(
 ) as IConfiguration;
 
 let violations: IViolation[] = [];
+let fixtureModules: ICruiseResult["modules"] = [];
 
 // フィクスチャ書き出しと `cruise()` は `beforeAll` にまとめる(全テストで同一の
 // 判定結果を共有するため)。`vitest.config.ts` の `testTimeout: 30_000` は hook には
@@ -178,6 +232,7 @@ beforeAll(async () => {
       validate: true,
     });
     violations = (result.output as ICruiseResult).summary.violations;
+    fixtureModules = (result.output as ICruiseResult).modules;
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -343,6 +398,38 @@ describe("本番サーバーの依存境界を dependency-cruiser が検出す�
   });
 });
 
+describe("CSS 除外先を runtime へ import する前に境界の再検討を求める (#1191)", () => {
+  const rule = "no-runtime-to-css-excluded-inputs";
+  it.each([
+    ["src/app/nativeLeak.ts", "prototypes/runtime.ts"],
+    ["src/app/evidenceLeak.ts", "documents/evidence/runtime.json"],
+    ["src/app/assetLeak.ts", "documents/assets/ui-refresh/manifest.json"],
+    ["src/app/railwayLeak.ts", "documents/fixtures/railway-pre-cutover.json"],
+    ["scripts/runtimeBridge.ts", "prototypes/runtime.ts"],
+  ])(
+    "%s → %s は error（静的 import・re-export・動的 literal import・中継）",
+    (from, to) => {
+      expect(
+        violations.find(
+          (entry) =>
+            entry.from === from && entry.to === to && entry.rule.name === rule,
+        )?.rule.severity,
+      ).toBe("error");
+    },
+  );
+  it.each([
+    "src/app/unityConsumer.ts",
+    "src/app/native.test.ts",
+    "src/test/nativeConsumer.ts",
+  ])("%s の正当な runtime fixture / test consumer は許可", (from) => {
+    expect(
+      violations.filter(
+        (entry) => entry.from === from && entry.rule.name === rule,
+      ),
+    ).toEqual([]);
+  });
+});
+
 /**
  * 上の 2 つは合成パスを使うため、ルールの正規表現が**実在しない**フォルダを指すように
  * 書き換えられても(例: `^src/core/`)、フィクスチャ側を同じ名前にすれば緑のままになる。
@@ -401,6 +488,13 @@ describe("ルールが指すレイヤーが実リポジトリに存在する (#3
  * `no-unresolvable-in-src` がその失敗モードを error として顕在化させる。
  */
 describe("レイヤールールが機能する前提条件 (#382)", () => {
+  it("exports-only パッケージを実際に解決し、未解決 import の例外を作らない (#1191)", () => {
+    const dependency = fixtureModules
+      .find((module) => module.source === "src/app/exportsConsumer.ts")
+      ?.dependencies.find((entry) => entry.module === "css-compiler");
+    expect(dependency?.couldNotResolve).toBe(false);
+    expect(dependency?.resolved).toBe("node_modules/css-compiler/compiler.mjs");
+  });
   it("解決できない import が error として報告される", () => {
     const violation = violations.find(
       (candidate) =>

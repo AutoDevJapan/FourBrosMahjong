@@ -32,6 +32,16 @@
 @source not "../../**/*.{test,spec}.{ts,tsx}";
 @source not "../../e2e";
 @source not "../test";
+/*
+ * #1191: native 試作物・検証証跡・素材監査・Railway 移行 fixture は Web のクラス供給源ではない。
+ * CSS 走査だけを除外する。これらを読む単体テストや native build/render gate は省略しない。
+ * documents 全体は除外しない: fixtures/unity-display-contract.json は本番 Web も import する。
+ * 除外先を実行時に使い始める場合は no-runtime-to-css-excluded-inputs と本境界を再検討する。
+ */
+@source not "../../prototypes";
+@source not "../../documents/evidence";
+@source not "../../documents/assets";
+@source not "../../documents/fixtures/railway-pre-cutover.json";
 
 /*
  * ダークモード: OS 追従を既定にしつつ手動トグルを併用する(スペック5 5.4.1)。
