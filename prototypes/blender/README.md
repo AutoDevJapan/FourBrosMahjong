@@ -3,6 +3,7 @@
 Blender 5.2.0 LTSで制作した卓／五筒／粗悪品の簡略静止モデル。2026-09-08にUnity 2022.3.62f2／Apple M2／Metalで、FBX取り込み・再取り込み・GPU描画・カメラと牌移動の共通処理を実行した。#818の表示試作とは独立したアセット供給側の検証。物理マウス／キーボード入力とPlayerのFPSは未検証。
 
 2026-09-08に、全スクリプトを別実行で再走させた追試記録を「[第三者による追試記録](#第三者による追試記録2026-09-08)」に追加した。
+保存修正の取り込み順・既存証跡の再利用・後続Issueとの境界は [再利用前レビュー](../../documents/guides/unity-prototype-reuse-review.md) を参照。
 
 ![Blenderでレンダリングした卓・牌・人物](generated/blender-preview.png)
 
@@ -85,7 +86,9 @@ Unityプレビューカメラと同じ視点のBlenderレンダーは`render_uni
   --report prototypes/blender/validation-local/unity-camera-parity.json
 ```
 
-## 第三者による追試記録（2026-09-08、Unity検証前の履歴）
+## 第三者による追試記録（2026-09-08）
+
+この節はUnity検証前の履歴であり、その後のUnity実測は別節に記録している。
 
 コミット済み成果物とスクリプトを、生成時とは別の実行で追試した。証跡は`generated/reproduction-2026-09-08.json`。
 
