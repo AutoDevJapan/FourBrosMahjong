@@ -91,7 +91,8 @@ CI 再実行はこの修正では行わない。
 現在の検証範囲として、修正前 checkpoint `295bd757` は別担当で local production build と
 production E2E 14件を完了済み。認証済み Preview も6 routes、320/1440px、打牌とCPU進行、
 全体盤面の Escape/focus 復帰、テーマ切替、reference の12盤面とロン表示を確認し、
-console/page errors は0件だった。上の「full build / 画面検証未実施」は初期 source
+captured console errors は0件だった（pageerror stream は別途監視していない）。
+上の「full build / 画面検証未実施」は初期 source
 checkpoint 時点の履歴であり、これらの後続結果を含まない。
 今回の追加修正は2テストと本文だけで production code/CSS は不変のため、
 重い検証を重複実行していない。既存 CI のquality失敗と、local/Preview成功は区別する。
