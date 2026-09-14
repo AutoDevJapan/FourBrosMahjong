@@ -25,7 +25,7 @@
 | 証跡 | 確認できる範囲 | 引き継ぐ制約 |
 |---|---|---|
 | [Unity表示の実行記録](unity-display-prototype.md)と[Playerレポート・PNG](../evidence/unity-display-20260908/) | 2026-09-08、Unity 2022.3.62f2／macOS／M2／Metal。実JsonUtilityの2,267 assertions、2解像度のPlayer各6,954 assertions・errors 0、各44枚生成のうち9枚収録 | 固定fixture、Developmentビルド。物理入力・GPU完了・画面走査の遅延、WebGL、実対局接続、対象端末全体の性能を保証しない |
-| [Blender→Unityの検証記録](../../prototypes/blender/README.md#unity実測2026-09-08)と[測定JSON](../../prototypes/blender/generated/unity-validation-2026-09-08/unity-validation.json) | 6FBXのSHA-256、取込・再取込時のGUID／配置／参照／幾何／材質、4枚のGPU描画、共通コントローラー処理 | 3資産のみ。物理入力、Player FPS、表示試作と合算した負荷、全牌種、製品キャラクター品質は未検証 |
+| [Blender→Unityの検証記録](../../prototypes/blender/README.md#unity実測2026-09-08)と[測定JSON](../../prototypes/blender/generated/unity-validation-2026-09-08/unity-validation.json) | 6FBXのSHA-256、取込・再取込時のGUID／配置／Prefab参照／幾何／モデル単位の材質パス集合、4枚のGPU描画、共通コントローラー処理 | 材質は重複を除いてソートした集合までで、Renderer／material-slotごとの割当対応は未検証（#1180）。3資産のみ。物理入力、Player FPS、表示試作と合算した負荷、全牌種、製品キャラクター品質は未検証 |
 
 2026-09-15には保存画像13枚を目視し、2件のPlayerレポートの件数・errors・解像度・
 測定値の形式、収録PNG9枚の寸法を読み直した。Blender側のPNG4枚とFBX6本は
@@ -60,7 +60,7 @@ TypeScriptの検査をC#コンパイルや実描画の代用とはしない。
 | FBX・材質・インポーター・カメラの変更 | [Blender README](../../prototypes/blender/README.md)の再取込／寸法／参照／実描画検証。生成器変更時はBlender再生成・幾何比較も実行 |
 | 実対局の状態・合法操作・復元との接続 | #1177。固定fixtureを実エンジンの結果へ置き換え、秘匿境界・操作・再接続対象範囲を確認 |
 | ブラウザ向け方式・本番ルートへの組み込み | #1179。対象ブラウザ／端末、起動・解放・失敗時復帰、ビルドと配布を検証。macOS Standaloneの成功を流用して完了にしない |
-| 製品素材と軽量化 | #1180。必要牌種、可読性、メッシュ／材質、権利証跡を確認。物理入力と端末負荷は#1181と連携 |
+| 製品素材と軽量化 | #1180。必要牌種、可読性、メッシュ／材質（Renderer／slotごとの割当対応を含む）、権利証跡を確認。物理入力と端末負荷は#1181と連携 |
 | 公開前の統合受け入れ | #1181、#725／ADR-0006。認証済みexact-head Previewと正確なProduction deployment／canonical URLの検証、#1175の素材権利判断を維持 |
 
 #818／#1165の旧い「Unity未導入」を新たな導入タスクとして繰り返さず、上記の未達条件へ進む。

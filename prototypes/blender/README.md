@@ -128,7 +128,7 @@ Blender/Unityを持たないCIでも壊れを検出できるよう、`src/test/b
 
 ## Unity実測（2026-09-08）
 
-`generated/unity-validation-2026-09-08/unity-validation.json`と4枚のPNGは、Unity EditorのC#を実際に実行して生成した。6FBXのSHA-256が元のmanifestと一致し、Unity側の116メッシュ／14,940三角形、UV・法線、m単位の寸法を確認した。再取り込み前後でFBXのGUID・Prefab参照・3インスタンスのTransform・幾何／UV／法線ハッシュ・材質参照を維持し、Feltの色だけ緑→青に変わった。鼻と左右非対称の胸章の座標も確認した。
+`generated/unity-validation-2026-09-08/unity-validation.json`と4枚のPNGは、Unity EditorのC#を実際に実行して生成した。6FBXのSHA-256が元のmanifestと一致し、Unity側の116メッシュ／14,940三角形、UV・法線、m単位の寸法を確認した。再取り込み前後でFBXのGUID・Prefab参照・3インスタンスのTransform・幾何／UV／法線ハッシュ・モデル単位の材質パス集合を維持し、Feltの色だけ緑→青に変わった。材質パスは重複を除いてソートした集合の比較であり、Renderer／material-slotごとの割当対応やその入れ替わりは未検証（#1180）。鼻と左右非対称の胸章の座標も確認した。
 
 | Blender（既存の同一視点） | Unity（今回のGPU描画） |
 |---|---|
@@ -221,7 +221,7 @@ Blenderで基準／改訂FBXを各3種読み込み、バウンディングボッ
 | 利用環境・操作方法と第三者が追試できる手順 | 済 | 本README「再生成」「第三者による追試記録」、`generated/reproduction-2026-09-08.json` |
 | 卓・代表牌・キャラクター1体の編集元とUnity用データの保存場所 | 済 | `generated/fourbros-study.blend`＋FBX3本、`generated/revision/` |
 | Unity上での表示・カメラ操作・牌移動 | 部分達成 | GPU描画、Update共通処理による周回・ズーム・牌移動は実測。物理入力／Playモード入力配送は未検証 |
-| Blenderでの変更→書き出し→Unity再取り込みを1回以上 | 済 | 既存改訂FBXをUnityへ再取り込み、GUID・配置・参照・材質・幾何を検証 |
+| Blenderでの変更→書き出し→Unity再取り込みを1回以上 | 済 | 既存改訂FBXをUnityへ再取り込み、GUID・配置・Prefab参照・モデル単位の材質パス集合・幾何を検証。Renderer／slotごとの対応は未検証 |
 | スクリーンショット／録画でBlenderとUnityの見た目比較 | 済 | 前掲のBlender／Unity基準版・改訂版、Unity牌面／移動画像 |
 | 表示品質・負荷・手動調整・制作コスト・既知の制約の記録 | 済（測定範囲を限定） | 品質比較・CPU描画時間・Editorメモリ・未測定範囲を前掲。Player性能の合格を意味しない |
 | アニメーションの結果または残課題 | 済 | 未実装であることと残課題を上表に明記 |
@@ -240,7 +240,7 @@ Blenderで基準／改訂FBXを各3種読み込み、バウンディングボッ
 - [x] Unityプレビューカメラと同一視点のBlenderレンダーを用意し、Unity側に同じ画角で撮るメニューを追加した。
 - [x] Blender成果物の整合性をBlender非依存のVitestで固定した。
 - [x] Unityのコンパイル、取り込み、GPU描画、カメラと牌の共通処理を検証した。
-- [x] Unityで再取り込み時の配置・参照・材質を検証した。
+- [x] Unityで再取り込み時の配置・Prefab参照・モデル単位の材質パス集合を検証した（Renderer／slotごとの対応は未検証）。
 - [x] UnityパリティキャプチャとCPU描画／メモリ実測を保存した。
 - [ ] Playモードの物理入力と、#818シーンを含むPlayer性能を確認する。
 - [ ] リグと待機動作を検証する。
