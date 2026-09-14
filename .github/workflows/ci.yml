@@ -245,7 +245,7 @@ jobs:
     # @playwright/test in pnpm-lock.yaml and pinned to the amd64 manifest used by
     # the standard GitHub-hosted Ubuntu runner.
     container:
-      image: mcr.microsoft.com/playwright:v1.62.1-noble@sha256:c091b21d9fae78c76e85cd4356431e9b018402f172a214fc7d7a5e9a7e29d8ac
+      image: mcr.microsoft.com/playwright:v1.63.0-noble@sha256:bc6ab0d6d44ff4826e4cb8c1e6d801e185bfc42bb0753f8e2a30efc70db054c7
       options: --init --ipc=host
     # 既存の ci ジョブ (lint/typecheck/format/test/build) とは独立に並列実行する。
     # playwright.config.ts の webServer は `pnpm dev` を自前で起動するためビルド成果物に依存せず、
@@ -341,13 +341,19 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       # The image provisions the exact Chromium/WebKit pair and their host
-      # dependencies. Check the expected launchers before the test command so a
-      # future image update cannot silently turn browser coverage into a no-op.
+      # dependencies. Launch through the installed package so a stale image or
+      # missing headless shell fails once, before hundreds of test retries.
       - name: Verify Playwright browsers are provisioned
         if: steps.scope.outputs.verify == 'true'
         run: |
-          test -x /ms-playwright/chromium-*/chrome-linux64/chrome
-          test -x /ms-playwright/webkit-*/pw_run.sh
+          node --input-type=module <<'NODE'
+          import { chromium, webkit } from '@playwright/test';
+          for (const browserType of [chromium, webkit]) {
+            const browser = await browserType.launch();
+            console.log(`${browserType.name()}: ${browser.version()}`);
+            await browser.close();
+          }
+          NODE
 
       - name: Test (playwright e2e)
         if: steps.scope.outputs.verify == 'true'

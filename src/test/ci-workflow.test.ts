@@ -1002,14 +1002,31 @@ describe("production E2E parity gate (#432)", () => {
 });
 
 describe("Playwright E2E provisioned environment (#557)", () => {
+  it("matches the image tag to the exact locked Playwright version", () => {
+    const lockfile = parse(
+      readFileSync(resolve(process.cwd(), "pnpm-lock.yaml"), "utf8"),
+    );
+    const version =
+      lockfile.importers["."].devDependencies["@playwright/test"].version;
+    const image = readWorkflow().jobs?.e2e?.container?.image ?? "";
+    const match = image.match(
+      /^mcr\.microsoft\.com\/playwright:v(\d+\.\d+\.\d+)-noble@sha256:[a-f0-9]{64}$/,
+    );
+
+    expect(
+      match,
+      "Pin the official Playwright image by version and digest",
+    ).not.toBeNull();
+    expect(
+      match?.[1],
+      "Update the Playwright image together with the locked @playwright/test version",
+    ).toBe(version);
+  });
+
   it("uses a pinned Playwright image with Chromium and WebKit already provisioned", () => {
     const job = readWorkflow().jobs?.e2e;
-    const image = job?.container?.image ?? "";
     const steps = job?.steps ?? [];
 
-    expect(image).toBe(
-      "mcr.microsoft.com/playwright:v1.62.1-noble@sha256:c091b21d9fae78c76e85cd4356431e9b018402f172a214fc7d7a5e9a7e29d8ac",
-    );
     expect(job?.container?.options).toContain("--ipc=host");
     expect(job?.container?.options).toContain("--init");
     expect(steps.some((step) => step.run?.includes("playwright install"))).toBe(
@@ -1023,10 +1040,10 @@ describe("Playwright E2E provisioned environment (#557)", () => {
       (step) => step.name === "Verify Playwright browsers are provisioned",
     );
     expect(provisionCheck?.if).toBe("steps.scope.outputs.verify == 'true'");
-    expect(provisionCheck?.run).toContain(
-      "/ms-playwright/chromium-*/chrome-linux64/chrome",
-    );
-    expect(provisionCheck?.run).toContain("/ms-playwright/webkit-*/pw_run.sh");
+    expect(provisionCheck?.run).toContain("from '@playwright/test'");
+    expect(provisionCheck?.run).toContain("[chromium, webkit]");
+    expect(provisionCheck?.run).toContain("await browserType.launch()");
+    expect(provisionCheck?.run).toContain("await browser.close()");
   });
 });
 
