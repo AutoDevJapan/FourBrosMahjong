@@ -90,7 +90,7 @@ export default function LobbyPage({ fontVariableClassName }: LobbyPageProps) {
           Channel「ギャンブル四兄弟」を題材にした非公式ファンメイド作品です
           <p>
             運営事業者: AutoDevJapan · お問い合わせ:{" "}
-            <a href="mailto:contact@autodevjapan.com">
+            <a className="underline" href="mailto:contact@autodevjapan.com">
               contact@autodevjapan.com
             </a>
           </p>
