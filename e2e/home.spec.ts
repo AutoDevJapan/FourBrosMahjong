@@ -222,6 +222,19 @@ test.describe("トップページ(ロビー)", () => {
         await expectMinimumTarget(link);
         await expectInsideViewport(link);
       }
+      const footer = page.locator(".lobby-footer");
+      await expect(footer).toContainText("運営事業者: AutoDevJapan");
+      const contact = footer.getByRole("link", {
+        name: "contact@autodevjapan.com",
+        exact: true,
+      });
+      await expect(contact).toBeVisible();
+      await expect(contact).toHaveAttribute(
+        "href",
+        "mailto:contact@autodevjapan.com",
+      );
+      await expect(contact).toHaveCSS("text-decoration-line", "underline");
+      await expectInsideViewport(contact);
       await expectNoHorizontalOverflow(page);
 
       await waitForLobbyVisuals(page);
