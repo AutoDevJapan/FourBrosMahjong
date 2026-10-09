@@ -93,6 +93,13 @@ export default function LobbyPage({ fontVariableClassName }: LobbyPageProps) {
             <a className="underline" href="mailto:contact@autodevjapan.com">
               contact@autodevjapan.com
             </a>
+            {" · "}
+            <a
+              className="underline"
+              href="https://autodevjapan.com/api/disclosure"
+            >
+              事業者情報の開示請求
+            </a>
           </p>
         </footer>
       </main>
