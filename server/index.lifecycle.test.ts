@@ -384,13 +384,15 @@ describe("createOnlineServer lifecycle", () => {
       );
       const { reset: resetAfterResponse } = await response;
       const answered = Buffer.concat(responseChunks).toString("utf8");
-      expect(answered).toContain("\r\n\r\n");
-      expect(answered).toMatch(/^HTTP\/1\.1 400 Bad Request\r\n/);
-      expect(answered).toMatch(/\r\nconnection: close\r\n/i);
+      const headerEnd = answered.indexOf("\r\n\r\n");
+      expect(headerEnd).toBeGreaterThanOrEqual(0);
+      const headers = answered.slice(0, headerEnd + 2);
+      expect(headers).toMatch(/^HTTP\/1\.1 400 Bad Request\r\n/);
+      expect(headers).toMatch(/\r\nconnection: close\r\n/i);
       if (resetAfterResponse) {
         // Node may report a reset after delivering the complete response. Do
         // not accept an empty or partial status/header block as a response.
-        expect(answered).toMatch(/^HTTP\/1\.1 400 Bad Request\r\n/);
+        expect(headers).toMatch(/^HTTP\/1\.1 400 Bad Request\r\n/);
       }
     } finally {
       if (!socket.destroyed) socket.destroy();
@@ -425,8 +427,11 @@ describe("createOnlineServer lifecycle", () => {
           "Content-Length: 5\r\nConnection: keep-alive\r\n\r\n",
       );
       const answered = await response;
-      expect(answered).toMatch(/^HTTP\/1\.1 404 Not Found\r\n/);
-      expect(answered).toMatch(/\r\nconnection: close\r\n/i);
+      const headerEnd = answered.indexOf("\r\n\r\n");
+      expect(headerEnd).toBeGreaterThanOrEqual(0);
+      const headers = answered.slice(0, headerEnd + 2);
+      expect(headers).toMatch(/^HTTP\/1\.1 404 Not Found\r\n/);
+      expect(headers).toMatch(/\r\nconnection: close\r\n/i);
       expect(answered).toContain('"error":"not_found"');
 
       // Leave the body incomplete. The server must have resumed the stream
