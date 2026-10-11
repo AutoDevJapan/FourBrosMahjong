@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted
+Partially superseded by [ADR-0006](./0006-prd-only-deployment.md) (2026-10-11). Preview/dev/stgの方針は廃止。Vercelフロントと既存Railwayバックエンドの配置先は維持する。
 
 ## Date
 
@@ -37,7 +37,7 @@ Vercel CLI(`vercel project ls` / `project inspect` / `domains ls` / `alias ls`)�
 - `four-bros-mahjong` に紐づく**カスタムドメインは未割当**(`*.vercel.app` のみ)。team は他プロジェクト用に独自ドメインを保有するが、本プロジェクト向けの割当はまだない。
 - **Railway 側のリソースは本リポジトリからは確認できない**(リポジトリに Railway 設定ファイルは無く、Railway CLI は未認証)。現時点で Railway 上に本プロジェクトのサービスは疎通していないと判断する。
 
-## Decision
+## Decision（2026-07-17当時の決定）
 
 以下を決定する。
 
@@ -71,7 +71,7 @@ Vercel CLI(`vercel project ls` / `project inspect` / `domains ls` / `alias ls`)�
 - **Cons**: 動かすバックエンドコードが無いため、空のサービスに対する課金・運用が発生する。「新たな課金要因を増やさない」方針に反する。
 - **Risk**: 中。無駄なリソース・コストと、実装確定前の構成が陳腐化するリスク。
 
-## Rationale
+## Rationale（2026-07-17当時の理由）
 
 Option A を採用する。理由は次の通り。
 
