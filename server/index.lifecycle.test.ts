@@ -26,6 +26,77 @@ function environment(notices: boolean): NodeJS.ProcessEnv {
   };
 }
 
+// Raw TCP replies may be split across chunks or reset after an HTTP rejection.
+// Return only at peer EOF/close; callers must validate complete framing and body.
+function readSocketReply(
+  socket: ReturnType<typeof createConnection>,
+  description: string,
+): Promise<string> {
+  const chunks: Buffer[] = [];
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(
+      () => reject(new Error(`${description} did not finish`)),
+      1_000,
+    );
+    const finish = () => {
+      clearTimeout(timer);
+      resolve(Buffer.concat(chunks).toString("utf8"));
+    };
+    socket.on("data", (chunk: Buffer) => chunks.push(chunk));
+    socket.once("end", finish);
+    socket.once("close", finish);
+    socket.on("error", (error: NodeJS.ErrnoException) => {
+      if (error.code !== "ECONNRESET") {
+        clearTimeout(timer);
+        reject(error);
+      }
+    });
+  });
+}
+
+function decodeChunkedReply(raw: string): string {
+  let remaining = Buffer.from(raw);
+  const chunks: Buffer[] = [];
+  for (;;) {
+    const lineEnd = remaining.indexOf("\r\n");
+    expect(lineEnd).toBeGreaterThanOrEqual(0);
+    const sizeLine = remaining.subarray(0, lineEnd).toString("ascii");
+    expect(sizeLine).toMatch(/^[0-9a-f]+$/i);
+    const size = Number.parseInt(sizeLine, 16);
+    expect(Number.isSafeInteger(size)).toBe(true);
+    remaining = remaining.subarray(lineEnd + 2);
+    if (size === 0) {
+      expect(remaining.toString()).toBe("\r\n");
+      return Buffer.concat(chunks).toString("utf8");
+    }
+    expect(remaining.length).toBeGreaterThanOrEqual(size + 2);
+    expect(remaining.subarray(size, size + 2).toString()).toBe("\r\n");
+    chunks.push(remaining.subarray(0, size));
+    remaining = remaining.subarray(size + 2);
+  }
+}
+
+function assertHttpReply(
+  reply: string,
+  status: string,
+  expectedBody?: Readonly<Record<string, unknown>>,
+): void {
+  const headerEnd = reply.indexOf("\r\n\r\n");
+  expect(headerEnd).toBeGreaterThanOrEqual(0);
+  const headers = reply.slice(0, headerEnd + 2);
+  const rawBody = reply.slice(headerEnd + 4);
+  expect(headers.split("\r\n")[0]).toBe(`HTTP/1.1 ${status}`);
+  expect(headers).toMatch(/\r\nconnection: close\r\n/i);
+  const length = headers.match(/\r\ncontent-length: (\d+)\r\n/i);
+  const chunked = /\r\ntransfer-encoding: chunked\r\n/i.test(headers);
+  if (length) {
+    expect(chunked).toBe(false);
+    expect(Buffer.byteLength(rawBody)).toBe(Number(length[1]));
+  }
+  const body = chunked ? decodeChunkedReply(rawBody) : rawBody;
+  if (expectedBody) expect(JSON.parse(body)).toEqual(expectedBody);
+}
+
 async function listen(server: ReturnType<typeof createOnlineServer>) {
   await server.listen(0, "127.0.0.1");
   const address = server.httpServer.address();
@@ -305,42 +376,16 @@ describe("createOnlineServer lifecycle", () => {
     const server = createOnlineServer({ environment: environment(false) });
     const port = await listen(server);
     const socket = createConnection({ host: "127.0.0.1", port });
-    const responseChunks: Buffer[] = [];
     try {
-      const response = new Promise<string>((resolve, reject) => {
-        const timer = setTimeout(
-          () => reject(new Error("unframed HTTP/1.0 request was not answered")),
-          1_000,
-        );
-        socket.once("error", reject);
-        socket.once("data", (chunk: Buffer) => {
-          clearTimeout(timer);
-          responseChunks.push(chunk);
-          resolve(Buffer.concat(responseChunks).toString("utf8"));
-        });
-      });
-      const closed = new Promise<void>((resolve, reject) => {
-        const timer = setTimeout(
-          () => reject(new Error("unframed HTTP/1.0 socket stayed open")),
-          1_000,
-        );
-        socket.once("close", () => {
-          clearTimeout(timer);
-          resolve();
-        });
-        socket.once("error", reject);
-      });
-
+      const response = readSocketReply(socket, "unframed HTTP/1.0 request");
       socket.write(
         `GET /healthz HTTP/1.0\r\nHost: 127.0.0.1:${port}\r\n` +
           "Connection: keep-alive\r\n\r\nunframed-body",
       );
-      const answered = await response;
-      expect(answered).toMatch(/^HTTP\/1\.1 400 Bad Request\r\n/);
-      expect(answered).toMatch(/\r\nconnection: close\r\n/i);
-      expect(answered).toContain('"error":"body_not_allowed"');
-
-      await closed;
+      assertHttpReply(await response, "400 Bad Request", {
+        ok: false,
+        error: "body_not_allowed",
+      });
     } finally {
       if (!socket.destroyed) socket.destroy();
       await server.handleSignal("SIGTERM");
@@ -351,49 +396,13 @@ describe("createOnlineServer lifecycle", () => {
     const server = createOnlineServer({ environment: environment(false) });
     const port = await listen(server);
     const socket = createConnection({ host: "127.0.0.1", port });
-    const responseChunks: Buffer[] = [];
     try {
-      let reset = false;
-      const response = new Promise<{ readonly reset: boolean }>(
-        (resolve, reject) => {
-          const timer = setTimeout(
-            () => reject(new Error("malformed request was not answered")),
-            1_000,
-          );
-          socket.on("data", (chunk: Buffer) => {
-            responseChunks.push(chunk);
-          });
-          socket.once("error", (error: NodeJS.ErrnoException) => {
-            if (error.code === "ECONNRESET") {
-              reset = true;
-            } else {
-              clearTimeout(timer);
-              reject(error);
-            }
-          });
-          socket.once("close", () => {
-            clearTimeout(timer);
-            resolve({ reset });
-          });
-        },
-      );
-
+      const response = readSocketReply(socket, "malformed request");
       socket.end(
         `GET http://[ HTTP/1.1\r\nHost: 127.0.0.1:${port}\r\n` +
           "Content-Length: 5\r\nConnection: keep-alive\r\n\r\nabcde",
       );
-      const { reset: resetAfterResponse } = await response;
-      const answered = Buffer.concat(responseChunks).toString("utf8");
-      const headerEnd = answered.indexOf("\r\n\r\n");
-      expect(headerEnd).toBeGreaterThanOrEqual(0);
-      const headers = answered.slice(0, headerEnd + 2);
-      expect(headers).toMatch(/^HTTP\/1\.1 400 Bad Request\r\n/);
-      expect(headers).toMatch(/\r\nconnection: close\r\n/i);
-      if (resetAfterResponse) {
-        // Node may report a reset after delivering the complete response. Do
-        // not accept an empty or partial status/header block as a response.
-        expect(headers).toMatch(/^HTTP\/1\.1 400 Bad Request\r\n/);
-      }
+      assertHttpReply(await response, "400 Bad Request");
     } finally {
       if (!socket.destroyed) socket.destroy();
       await server.handleSignal("SIGTERM");
@@ -408,39 +417,68 @@ describe("createOnlineServer lifecycle", () => {
       port,
       allowHalfOpen: true,
     });
-    const responseChunks: Buffer[] = [];
     try {
-      const response = new Promise<string>((resolve, reject) => {
-        const timer = setTimeout(
-          () => reject(new Error("unknown route was not answered")),
-          1_000,
-        );
-        socket.once("error", reject);
-        socket.once("data", (chunk: Buffer) => {
-          clearTimeout(timer);
-          responseChunks.push(chunk);
-          resolve(Buffer.concat(responseChunks).toString("utf8"));
-        });
-      });
+      const response = readSocketReply(socket, "unknown route");
       socket.write(
         `POST /unknown HTTP/1.1\r\nHost: 127.0.0.1:${port}\r\n` +
           "Content-Length: 5\r\nConnection: keep-alive\r\n\r\n",
       );
-      const answered = await response;
-      const headerEnd = answered.indexOf("\r\n\r\n");
-      expect(headerEnd).toBeGreaterThanOrEqual(0);
-      const headers = answered.slice(0, headerEnd + 2);
-      expect(headers).toMatch(/^HTTP\/1\.1 404 Not Found\r\n/);
-      expect(headers).toMatch(/\r\nconnection: close\r\n/i);
-      expect(answered).toContain('"error":"not_found"');
-
-      // Leave the body incomplete. The server must have resumed the stream
-      // and released the transport instead of leaving it in the parser.
+      assertHttpReply(await response, "404 Not Found", {
+        ok: false,
+        error: "not_found",
+      });
+      // The body stays incomplete; the server must release its transport.
       await waitForNoHttpConnections(server);
     } finally {
       if (!socket.destroyed) socket.destroy();
       await server.handleSignal("SIGTERM");
     }
+  });
+
+  it("accepts a complete expected raw response as a positive control", () => {
+    expect(() =>
+      assertHttpReply(
+        'HTTP/1.1 404 Not Found\r\nConnection: close\r\n\r\n{"ok":false,"error":"not_found"}',
+        "404 Not Found",
+        { ok: false, error: "not_found" },
+      ),
+    ).not.toThrow();
+  });
+
+  it.each([
+    ["empty response", ""],
+    ["unfinished headers", "HTTP/1.1 404 Not Found\r\nConnection: close\r\n"],
+    [
+      "wrong status",
+      'HTTP/1.1 200 OK\r\nConnection: close\r\n\r\n{"ok":false,"error":"not_found"}',
+    ],
+    [
+      "connection header in body",
+      'HTTP/1.1 404 Not Found\r\n\r\nconnection: close\r\n{"ok":false,"error":"not_found"}',
+    ],
+    [
+      "body marker in header only",
+      'HTTP/1.1 404 Not Found\r\nConnection: close\r\nX-Test: "error":"not_found"\r\n\r\n',
+    ],
+    [
+      "unfinished body",
+      'HTTP/1.1 404 Not Found\r\nConnection: close\r\nContent-Length: 99\r\n\r\n{"ok":false,"error":"not_found"}',
+    ],
+    [
+      "unfinished chunk",
+      'HTTP/1.1 404 Not Found\r\nConnection: close\r\nTransfer-Encoding: chunked\r\n\r\n21\r\n{"ok":false,"error":"not_found"}\r\n0\r\n\r\n',
+    ],
+    [
+      "missing chunked terminator",
+      'HTTP/1.1 404 Not Found\r\nConnection: close\r\nTransfer-Encoding: chunked\r\n\r\n20\r\n{"ok":false,"error":"not_found"}\r\n',
+    ],
+  ])("rejects %s in raw-response validation", (_name, reply) => {
+    expect(() =>
+      assertHttpReply(reply, "404 Not Found", {
+        ok: false,
+        error: "not_found",
+      }),
+    ).toThrow();
   });
 
   it("uses the injected Railway marker for per-source ops rate limiting", async () => {
