@@ -50,7 +50,7 @@ permissions:
 # 数日で予算が一巡して「保存はするが復元前に消える」恒常ミス状態になる。
 #
 # したがって本ワークフローでは **保存は既定ブランチ (main) の push 実行のみ** に限定し、
-# PR / dev / stg は復元専用とする。既定ブランチのキャッシュは全ブランチ・全 PR から
+# PR は復元専用とする。既定ブランチのキャッシュは全ブランチ・全 PR から
 # 復元できるため、ヒット率を落とさずに複製だけを止められる。
 # この不変条件は `src/test/ci-workflow.test.ts` が回帰テストとして固定している。
 
@@ -94,7 +94,7 @@ jobs:
           SCOPE_REF: ${{ github.ref }}
           SCOPE_BASE_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
           SCOPE_HEAD_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
-          # main / dev / stg へのマージ後 push のスキップ前提を実行時に検証するための入力 (#496)。
+          # main へのマージ後 push のスキップ前提を実行時に検証するための入力 (#496)。
           # `SCOPE_CHECK_NAME` は **この job 自身の name**。PR 側で「この job が緑だった」
           # ことを確認するため、job の name を変えたらここも必ず追随させる
           # (src/test/ci-workflow.test.ts が一致を固定する)。
@@ -130,7 +130,7 @@ jobs:
         id: pnpm-store
         run: echo "path=$(pnpm store path --silent)" >> "$GITHUB_OUTPUT"
 
-      # main で保存したキャッシュは既定ブランチ由来のため PR / dev / stg からも復元できる。
+      # main で保存したキャッシュは既定ブランチ由来のため PR からも復元できる。
       # PR 側は復元専用にして、ref ごとの複製を作らない (#380)。
       - name: Restore pnpm store
         if: steps.scope.outputs.setup == 'true'
@@ -284,7 +284,7 @@ jobs:
           SCOPE_REF: ${{ github.ref }}
           SCOPE_BASE_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
           SCOPE_HEAD_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
-          # main / dev / stg へのマージ後 push のスキップ前提を実行時に検証するための入力 (#496)。
+          # main へのマージ後 push のスキップ前提を実行時に検証するための入力 (#496)。
           # `SCOPE_CHECK_NAME` は **この job 自身の name**。PR 側で「この job が緑だった」
           # ことを確認するため、job の name を変えたらここも必ず追随させる
           # (src/test/ci-workflow.test.ts が一致を固定する)。
