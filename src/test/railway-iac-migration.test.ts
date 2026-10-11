@@ -351,18 +351,22 @@ describe("Railway IaC parity snapshot contract (#742)", () => {
       writeFileSync(join(fixtureDirectory, "target"), outsideSentinel);
       symlinkSync(outsideDirectory, join(rootDirectory, "link"));
 
-      // Keep `link/..` in the path passed to the filesystem. `join()` and
-      // `resolve()` would normalize it to the inside sentinel instead.
+      // Keep `link/..` in the path passed to the filesystem. The operating
+      // system decides whether it resolves the symlink before processing `..`:
+      // Windows may read the inside sentinel while POSIX reads the outside one.
       const traversalPath = `${rootDirectory}/link/../target`;
       expect(readFileSync(join(rootDirectory, "target"))).toEqual(
         insideSentinel,
       );
-      // This is what the vulnerable raw read would observe.
-      expect(readFileSync(traversalPath)).toEqual(outsideSentinel);
+      const rawRead = readFileSync(traversalPath);
+      expect([insideSentinel, outsideSentinel]).toContainEqual(rawRead);
       // The hardened helper rejects the escape and reads only the normalized
-      // path within the root.
+      // path within the root, regardless of the operating system's raw read.
       expect(readBoundedFile(traversalPath, 64, rootDirectory)).toEqual(
         insideSentinel,
+      );
+      expect(readBoundedFile(traversalPath, 64, rootDirectory)).not.toEqual(
+        outsideSentinel,
       );
       expect(readBoundedTextFile(traversalPath, 64, rootDirectory)).toBe(
         insideSentinel.toString("utf8"),

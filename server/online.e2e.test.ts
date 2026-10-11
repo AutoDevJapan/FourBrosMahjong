@@ -145,11 +145,20 @@ async function startLocalOnlineServer(
 ): Promise<LocalOnlineServer> {
   const port = await freePort();
   const output: string[] = [];
+  const windowsSignalBridge =
+    "data:text/javascript,process.on(%22message%22,(signal)%3D%3Eprocess.emit(signal));process.channel.unref()";
   // Spawn the actual Node entrypoint so SIGTERM reaches the handler directly;
   // pnpm/sh wrapper forwarding is a separate production-container contract.
   const child = spawn(
     process.execPath,
-    ["--import", "tsx", "server/start.ts"],
+    [
+      "--import",
+      "tsx",
+      ...(process.platform === "win32"
+        ? ["--import", windowsSignalBridge]
+        : []),
+      "server/start.ts",
+    ],
     {
       cwd: process.cwd(),
       env: {
@@ -169,7 +178,10 @@ async function startLocalOnlineServer(
         ALLOWED_ORIGINS: allowedOrigins,
         PORT: String(port),
       },
-      stdio: ["ignore", "pipe", "pipe"],
+      stdio:
+        process.platform === "win32"
+          ? ["ignore", "pipe", "pipe", "ipc"]
+          : ["ignore", "pipe", "pipe"],
     },
   );
   child.stdout?.on("data", (chunk: Buffer) => output.push(chunk.toString()));
@@ -186,6 +198,20 @@ async function startLocalOnlineServer(
 
 async function stopLocalOnlineServer(server: LocalOnlineServer): Promise<void> {
   await terminateChild(server.child);
+}
+
+function signalLocalOnlineServer(
+  server: LocalOnlineServer,
+  signal: NodeJS.Signals,
+): void {
+  if (process.platform === "win32") {
+    if (server.child.send === undefined || !server.child.connected) {
+      throw new Error("オンラインテスト用signal bridgeが接続されていません。");
+    }
+    server.child.send(signal);
+    return;
+  }
+  server.child.kill(signal);
 }
 
 async function waitForChildExit(
@@ -2145,7 +2171,7 @@ describe("online graceful process shutdown (#726)", () => {
         host.send({ type: "create", name: "終了待機ホスト" });
         const session = await host.waitForSession();
 
-        server.child.kill("SIGTERM");
+        signalLocalOnlineServer(server, "SIGTERM");
         const terminating = await host.waitForMaintenance("terminating");
         if (!("deadline" in terminating)) {
           throw new Error("terminating notice did not include its deadline");
@@ -2182,7 +2208,7 @@ describe("online graceful process shutdown (#726)", () => {
           code: "maintenance",
         });
 
-        server.child.kill("SIGINT");
+        signalLocalOnlineServer(server, "SIGINT");
         await host.waitForClose();
         await waitForChildExit(server.child);
         expect(server.child.exitCode).toBe(0);
