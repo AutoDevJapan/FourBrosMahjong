@@ -79,7 +79,7 @@ function decodeChunkedReply(raw: string): string {
 function assertHttpReply(
   reply: string,
   status: string,
-  expectedBody?: Readonly<Record<string, unknown>>,
+  expectedBody: Readonly<Record<string, unknown>>,
 ): void {
   const headerEnd = reply.indexOf("\r\n\r\n");
   expect(headerEnd).toBeGreaterThanOrEqual(0);
@@ -94,7 +94,7 @@ function assertHttpReply(
     expect(Buffer.byteLength(rawBody)).toBe(Number(length[1]));
   }
   const body = chunked ? decodeChunkedReply(rawBody) : rawBody;
-  if (expectedBody) expect(JSON.parse(body)).toEqual(expectedBody);
+  expect(JSON.parse(body)).toEqual(expectedBody);
 }
 
 async function listen(server: ReturnType<typeof createOnlineServer>) {
@@ -402,7 +402,10 @@ describe("createOnlineServer lifecycle", () => {
         `GET http://[ HTTP/1.1\r\nHost: 127.0.0.1:${port}\r\n` +
           "Content-Length: 5\r\nConnection: keep-alive\r\n\r\nabcde",
       );
-      assertHttpReply(await response, "400 Bad Request");
+      assertHttpReply(await response, "400 Bad Request", {
+        ok: false,
+        error: "bad_request",
+      });
     } finally {
       if (!socket.destroyed) socket.destroy();
       await server.handleSignal("SIGTERM");
@@ -443,6 +446,16 @@ describe("createOnlineServer lifecycle", () => {
         { ok: false, error: "not_found" },
       ),
     ).not.toThrow();
+  });
+
+  it("rejects an incomplete malformed-request response body", () => {
+    expect(() =>
+      assertHttpReply(
+        'HTTP/1.1 400 Bad Request\r\nConnection: close\r\n\r\n{"ok":false,"error":',
+        "400 Bad Request",
+        { ok: false, error: "bad_request" },
+      ),
+    ).toThrow();
   });
 
   it.each([
