@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted
+Partially superseded by [ADR-0006](./0006-prd-only-deployment.md) (2026-10-11). Preview/dev/stgの方針は廃止。Vercelフロントと既存Railwayバックエンドの配置先は維持する。
 
 ## Date
 
