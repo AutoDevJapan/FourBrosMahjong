@@ -50,9 +50,9 @@ validatorの`pass`はauthorized cutover後のparity証拠が内部整合した�
 | immutable pre-cutover legacy file | checked-in [`documents/fixtures/railway-pre-cutover.json`](../fixtures/railway-pre-cutover.json)のexact content（`/healthz`）・SHA-256とcutover監査証跡のexact一致 |
 | pre-cutover/effective source and config | 同じtargetのcutover直前・直後effective read-back。repository/branch/root/full deployment revisionを含む |
 | parity plan | setting clear後のfresh redacted plan、exact target/file hash、detailed exit code |
-| source secret safety | ASTによる保守的scanとhuman reviewの両方 |
+| source secret safety | ASTによる保守的scanと別モデルによる独立レビューの両方 |
 
-normalized JSONは64KiB以下とし、raw variables、token、Authorization、cookie、full environment dumpをschema外にする。JSON object nameはnative parserへ渡す前に検査し、同一名（escape表現で同じdecoded nameになる場合を含む）の重複をrejectする。static source scanは`env`/`variables` objectのliteral値と、secret-likeな変数名へ直接代入された未承認の値を拒否するが、secret不存在の完全な証明ではない。manual review完了を別fieldで要求し、どちらか一方だけではpassしない。
+normalized JSONは64KiB以下とし、raw variables、token、Authorization、cookie、full environment dumpをschema外にする。JSON object nameはnative parserへ渡す前に検査し、同一名（escape表現で同じdecoded nameになる場合を含む）の重複をrejectする。static source scanは`env`/`variables` objectのliteral値と、secret-likeな変数名へ直接代入された未承認の値を拒否するが、secret不存在の完全な証明ではない。manual review完了を別fieldで要求し、どちらか一方だけではpassしない。ここでmanual reviewは、2026-10-12のオーナー直接指示に基づく別モデルの独立レビューを担当が実施・記録する工程を指す。validatorのfield名・判定契約は変更せず、[ADR-0006](../adr/0006-prd-only-deployment.md)の人とAIの役割に従う。
 
 `--out`のpinned plan artifactはrepository外へ保存し、review evidenceへSHA-256だけを記録する。`--json`のstdoutを別途保存する場合もredacted outputだけを扱う。validatorはnormalized hash、外部保存、生成sourceとの証拠上の結合を確認するが、artifactの真正性や内容を独立取得して証明しない。artifact pathはsecret・token・個人パスを反映しない`<outside-repository>/railway-plan.json`へ正規化する。
 
