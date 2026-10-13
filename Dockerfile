@@ -1,4 +1,4 @@
-FROM node:26.8.1-slim@sha256:c0753125a3789977aefe869cbebccf70e3cfd7ea84ca48547458f02e4f1d7146 AS dependencies
+FROM node:26.11.1-slim@sha256:193fe51b64e77981119c98c2002c9e32a70e2f006fb4d25068ce0558998917f0 AS dependencies
 
 ENV NODE_ENV=production
 
@@ -11,7 +11,7 @@ COPY container/online/package.json ./container/online/package.json
 RUN pnpm --filter @four-bros-mahjong/online-runtime --fail-if-no-match install --prod --frozen-lockfile \
     && pnpm --filter @four-bros-mahjong/online-runtime --fail-if-no-match deploy --prod /runtime
 
-FROM node:26.8.1-slim@sha256:c0753125a3789977aefe869cbebccf70e3cfd7ea84ca48547458f02e4f1d7146
+FROM node:26.11.1-slim@sha256:193fe51b64e77981119c98c2002c9e32a70e2f006fb4d25068ce0558998917f0
 
 ENV NODE_ENV=production
 
