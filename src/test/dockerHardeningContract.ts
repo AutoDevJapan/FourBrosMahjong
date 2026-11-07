@@ -548,8 +548,7 @@ export function runtimeWorkspaceViolations(
       Object.keys(runtime)
         .filter((key) => key !== "license")
         .sort(),
-    ) !==
-    JSON.stringify(["dependencies", "name", "private", "type"])
+    ) !== JSON.stringify(["dependencies", "name", "private", "type"])
   ) {
     violations.push("runtime package must contain only runtime metadata");
   }
