@@ -188,7 +188,7 @@ WebSocket の接続数・接続元ごとの作成/参加/再接続試行・メ�
 AutoDevJapanが権利を持つ自作コードは [MIT License](LICENSE) で提供します。依存ライブラリ、第三者素材、人物の氏名・肖像・キャラクター、番組名や商標の権利をMITで許諾するものではありません。
 
 - `public/tiles/` の牌素材は、同梱の [CREDITS](public/tiles/CREDITS.md) に記載する FluffyStuff/riichi-mahjong-tiles のCC0表記を維持します。
-- `public/characters/p0-soakuhin-portrait.avif`、`p1-ryuji-portrait.avif`、`p2-masaki-portrait.avif`、`p3-hechima-portrait.avif` と、それらに関連する原画・試作画像は、肖像・キャラクター等の公開許諾を確認できていません。MITの対象外です。
-- キャラクター以外の画像、3Dモデル、音声、試作素材も、自作コードのライセンスだけで再配布可能とは扱いません。
+- 提供されたキャラクターデザイン画像4点・UIデザイン画像6点と派生画像は、提供者の2026-11-07の許可により一般公開・再配布できます。適用範囲は [キャラクター画像](documents/assets/characters/CREDITS.md) と [UI画像](documents/assets/ui-refresh/CREDITS.md) を参照してください。画像の許諾は自作コードのMIT Licenseと区別します。
+- 牌素材など第三者素材と依存ライブラリは、それぞれの既存の利用条件を維持します。
 
-リポジトリ全体の公開は素材と過去履歴の権利・秘密情報の確認が済むまで保留します。素材の削除やGit履歴の書換えは行っていません。自作コードのMIT化は、製品名・番組・出演者による公認や素材の利用許諾を意味しません。
+自作コードや提供画像の公開は、製品名・番組・出演者による公認を意味しません。
