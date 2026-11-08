@@ -1,4 +1,4 @@
-import { once } from "node:events";
+import { EventEmitter, once } from "node:events";
 import { createConnection } from "node:net";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { WebSocket } from "ws";
@@ -28,11 +28,19 @@ function environment(notices: boolean): NodeJS.ProcessEnv {
 
 // Raw TCP replies may be split across chunks or reset after an HTTP rejection.
 // Return only at peer EOF/close; callers must validate complete framing and body.
+interface SocketReply {
+  raw: string;
+  ended: boolean;
+  reset: boolean;
+}
+
 function readSocketReply(
   socket: ReturnType<typeof createConnection>,
   description: string,
-): Promise<string> {
+): Promise<SocketReply> {
   const chunks: Buffer[] = [];
+  let ended = false;
+  let reset = false;
   return new Promise((resolve, reject) => {
     const timer = setTimeout(
       () => reject(new Error(`${description} did not finish`)),
@@ -40,13 +48,18 @@ function readSocketReply(
     );
     const finish = () => {
       clearTimeout(timer);
-      resolve(Buffer.concat(chunks).toString("utf8"));
+      resolve({ raw: Buffer.concat(chunks).toString("utf8"), ended, reset });
     };
     socket.on("data", (chunk: Buffer) => chunks.push(chunk));
-    socket.once("end", finish);
+    socket.once("end", () => {
+      ended = true;
+      finish();
+    });
     socket.once("close", finish);
     socket.on("error", (error: NodeJS.ErrnoException) => {
-      if (error.code !== "ECONNRESET") {
+      if (error.code === "ECONNRESET") {
+        reset = true;
+      } else {
         clearTimeout(timer);
         reject(error);
       }
@@ -77,7 +90,7 @@ function decodeChunkedReply(raw: string): string {
 }
 
 function assertHttpReply(
-  reply: string,
+  { raw: reply, ended, reset }: SocketReply,
   status: string,
   expectedBody: Readonly<Record<string, unknown>>,
 ): void {
@@ -92,6 +105,10 @@ function assertHttpReply(
   if (length) {
     expect(chunked).toBe(false);
     expect(Buffer.byteLength(rawBody)).toBe(Number(length[1]));
+  } else if (!chunked) {
+    // Close-delimited messages require a normal EOF (RFC 9112, section 8).
+    expect(ended).toBe(true);
+    expect(reset).toBe(false);
   }
   const body = chunked ? decodeChunkedReply(rawBody) : rawBody;
   expect(JSON.parse(body)).toEqual(expectedBody);
@@ -438,10 +455,69 @@ describe("createOnlineServer lifecycle", () => {
     }
   });
 
+  it.each([
+    ["close-delimited EOF", "", "end", true],
+    ["close-delimited reset", "", "reset", false],
+    ["close without EOF", "", "close", false],
+    [
+      "complete content-length after reset",
+      "Content-Length: 32\r\n",
+      "reset",
+      true,
+    ],
+    [
+      "short content-length after reset",
+      "Content-Length: 99\r\n",
+      "reset",
+      false,
+    ],
+    [
+      "complete chunked after reset",
+      "Transfer-Encoding: chunked\r\n",
+      "reset",
+      true,
+    ],
+  ] as const)(
+    "validates fragmented %s replies",
+    async (_name, framing, terminal, valid) => {
+      const socket = new EventEmitter() as ReturnType<typeof createConnection>;
+      const body = '{"ok":false,"error":"not_found"}';
+      const reply =
+        `HTTP/1.1 404 Not Found\r\nConnection: close\r\n${framing}\r\n` +
+        (framing.startsWith("Transfer-Encoding")
+          ? `20\r\n${body}\r\n0\r\n\r\n`
+          : body);
+      const response = readSocketReply(socket, "fragmented response fixture");
+      socket.emit("data", Buffer.from(reply.slice(0, 20)));
+      socket.emit("data", Buffer.from(reply.slice(20)));
+      if (terminal === "reset") {
+        socket.emit(
+          "error",
+          Object.assign(new Error("reset"), { code: "ECONNRESET" }),
+        );
+      } else if (terminal === "end") {
+        socket.emit("end");
+      }
+      socket.emit("close");
+      const received = await response;
+      const check = () =>
+        assertHttpReply(received, "404 Not Found", {
+          ok: false,
+          error: "not_found",
+        });
+      if (valid) expect(check).not.toThrow();
+      else expect(check).toThrow();
+    },
+  );
+
   it("accepts a complete expected raw response as a positive control", () => {
     expect(() =>
       assertHttpReply(
-        'HTTP/1.1 404 Not Found\r\nConnection: close\r\n\r\n{"ok":false,"error":"not_found"}',
+        {
+          raw: 'HTTP/1.1 404 Not Found\r\nConnection: close\r\n\r\n{"ok":false,"error":"not_found"}',
+          ended: true,
+          reset: false,
+        },
         "404 Not Found",
         { ok: false, error: "not_found" },
       ),
@@ -451,7 +527,11 @@ describe("createOnlineServer lifecycle", () => {
   it("rejects an incomplete malformed-request response body", () => {
     expect(() =>
       assertHttpReply(
-        'HTTP/1.1 400 Bad Request\r\nConnection: close\r\n\r\n{"ok":false,"error":',
+        {
+          raw: 'HTTP/1.1 400 Bad Request\r\nConnection: close\r\n\r\n{"ok":false,"error":',
+          ended: true,
+          reset: false,
+        },
         "400 Bad Request",
         { ok: false, error: "bad_request" },
       ),
@@ -487,10 +567,11 @@ describe("createOnlineServer lifecycle", () => {
     ],
   ])("rejects %s in raw-response validation", (_name, reply) => {
     expect(() =>
-      assertHttpReply(reply, "404 Not Found", {
-        ok: false,
-        error: "not_found",
-      }),
+      assertHttpReply(
+        { raw: reply, ended: true, reset: false },
+        "404 Not Found",
+        { ok: false, error: "not_found" },
+      ),
     ).toThrow();
   });
 
