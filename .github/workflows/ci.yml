@@ -188,6 +188,10 @@ jobs:
         if: steps.scope.outputs.production == 'true'
         run: pnpm depcruise
 
+      - name: TypeDoc conversion
+        if: steps.scope.outputs.production == 'true'
+        run: pnpm run docs --emit none
+
       - name: Build (next build)
         if: steps.scope.outputs.production == 'true'
         env:
