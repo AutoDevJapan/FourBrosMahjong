@@ -90,6 +90,9 @@
       "minimatch@^10.0.0": "11.0.5",
       "undici@^8.0.0": "8.12.4",
       "zod@^4.0.0": "4.6.7"
+    },
+    "patchedDependencies": {
+      "typedoc@0.28.20": "patches/typedoc@0.28.20.patch"
     }
   }
 }

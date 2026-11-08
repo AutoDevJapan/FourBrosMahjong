@@ -16,6 +16,11 @@ overrides:
   undici@^8.0.0: 8.12.4
   zod@^4.0.0: 4.6.7
 
+patchedDependencies:
+  typedoc@0.28.20:
+    hash: c135e976dcc0aee294353c9f971545c43cdcbd86a403cadea39a871653f1a303
+    path: patches/typedoc@0.28.20.patch
+
 importers:
 
   .:
@@ -98,7 +103,7 @@ importers:
         version: 4.3.3
       typedoc:
         specifier: ^0.28.20
-        version: 0.28.20(typescript@6.0.3)
+        version: 0.28.20(patch_hash=c135e976dcc0aee294353c9f971545c43cdcbd86a403cadea39a871653f1a303)(typescript@6.0.3)
       typescript:
         specifier: ^6
         version: 6.0.3
@@ -6530,7 +6535,7 @@ snapshots:
       possible-typed-array-names: 1.1.0
       reflect.getprototypeof: 1.0.10
 
-  typedoc@0.28.20(typescript@6.0.3):
+  typedoc@0.28.20(patch_hash=c135e976dcc0aee294353c9f971545c43cdcbd86a403cadea39a871653f1a303)(typescript@6.0.3):
     dependencies:
       '@gerrit0/mini-shiki': 3.23.0
       lunr: 2.3.9
