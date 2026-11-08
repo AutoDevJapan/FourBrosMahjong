@@ -182,3 +182,13 @@ pnpm dev              # http://localhost:3000
 Vercel では `NEXT_PUBLIC_ONLINE_WS_URL` に Railway の公開 URL(`https://...` または `wss://...`)を設定します。Railway の `ALLOWED_ORIGINS` には、接続を許可するVercelのOriginをカンマ区切りで必ず明示してください。未設定・空の場合はWebSocket handshakeをfail-closedで拒否します。ルームは匿名トークンで再接続できますが、認証・永続化・観戦・途中参加者の座席予約はまだ対象外です。
 
 WebSocket の接続数・接続元ごとの作成/参加/再接続試行・メッセージ/対局操作レートには、4人対局を妨げない固定上限を設けています。上限値と再試行エラーの契約は [`docs/デプロイ環境運用.md`](./docs/デプロイ環境運用.md#websocket-の-abuse-control-641) を参照してください。
+
+## ライセンスと公開範囲
+
+AutoDevJapanが権利を持つ自作コードは [MIT License](LICENSE) で提供します。依存ライブラリ、第三者素材、人物の氏名・肖像・キャラクター、番組名や商標の権利をMITで許諾するものではありません。
+
+- `public/tiles/` の牌素材は、同梱の [CREDITS](public/tiles/CREDITS.md) に記載する FluffyStuff/riichi-mahjong-tiles のCC0表記を維持します。
+- 提供されたキャラクターデザイン画像4点・UIデザイン画像6点と派生画像は、提供者の2026-11-07の許可により一般公開・再配布できます。適用範囲は [キャラクター画像](documents/assets/characters/CREDITS.md) と [UI画像](documents/assets/ui-refresh/CREDITS.md) を参照してください。画像の許諾は自作コードのMIT Licenseと区別します。
+- 牌素材など第三者素材と依存ライブラリは、それぞれの既存の利用条件を維持します。
+
+自作コードや提供画像の公開は、製品名・番組・出演者による公認を意味しません。
