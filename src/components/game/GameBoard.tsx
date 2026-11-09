@@ -35,6 +35,7 @@ import { clearTimeoutSafely, trySetTimeout } from "../common/browserTimer";
 import Modal from "../common/Modal";
 import { tileLabel } from "../common/tileLabel";
 import ActionPanel, { type ActionItem } from "./ActionPanel";
+import CharacterPortrait from "./CharacterPortrait";
 import EffectOverlay from "./effects/EffectOverlay";
 import { useGameEffects } from "./effects/useGameEffects";
 import {
@@ -42,6 +43,7 @@ import {
   SECURE_RANDOM_UNAVAILABLE_MESSAGE,
   useGame,
 } from "./GameProvider";
+import GameTable3D, { type TableDisplayStatus } from "./GameTable3D";
 import { formatGameInteger } from "./gameNumberFormat";
 import type { HandProps, HandTileState } from "./Hand";
 import LiveRegion from "./LiveRegion";
@@ -146,6 +148,8 @@ export function residualSticksNote(
 }
 
 export interface GameBoardProps {
+  /** Mount the local live renderer on the production game route. */
+  readonly render3D?: boolean;
   /** 結果ボタンの遷移先。onResultを指定した画面では使わない。 */
   readonly resultHref?: string;
   /** 結果ボタンの動作。オンライン対局の結果表示など、画面内遷移を差し替える。 */
@@ -161,6 +165,7 @@ export interface GameBoardProps {
 }
 
 export default function GameBoard({
+  render3D = false,
   resultHref = "/game/result",
   onResult,
   resultButtonRef,
@@ -177,6 +182,7 @@ export default function GameBoard({
     isHost,
     sessionSaveStatus,
     seedGenerationError,
+    displaySource,
   } = useGame();
   const { slots, tableInfo, dora } = view;
   const router = useRouter();
@@ -260,6 +266,8 @@ export default function GameBoard({
   }, [kitaAnnouncement]);
   // リーチ宣言モード: オンのとき、次に選んだ手牌が「リーチ宣言牌」として切られる。
   const [riichiArmed, setRiichiArmed] = useState(false);
+  const [tableDisplayStatus, setTableDisplayStatus] =
+    useState<TableDisplayStatus>("loading");
   const [tileFeedback, setTileFeedback] = useState({
     message: "",
     eventId: 0,
@@ -746,7 +754,54 @@ export default function GameBoard({
       data-phase={phase}
       data-pending={pending?.kind ?? "none"}
       data-round-kind={roundSummary?.kind ?? "none"}
+      data-3d-status={
+        render3D && displaySource ? tableDisplayStatus : "unsupported"
+      }
     >
+      {render3D && displaySource ? (
+        <div className="game-live-table">
+          <GameTable3D
+            riichiArmed={riichiArmed}
+            interactionDisabled={interactionDisabled}
+            onStatusChange={setTableDisplayStatus}
+          />
+          {tableDisplayStatus === "ready" ? (
+            <div className="game-table-3d-labels" aria-hidden="true">
+              {(["left", "across", "right"] as const).map((position) => {
+                const slot = slots[position];
+                return (
+                  <div
+                    key={position}
+                    className={`game-table-3d-player game-table-3d-player--${position}`}
+                  >
+                    <CharacterPortrait playerId={slot.player.playerId} />
+                    <span className="character-name">{slot.player.name}</span>
+                    <span>
+                      {slot.kind === "bench"
+                        ? "抜け番"
+                        : slot.player.seatWind === "east"
+                          ? "東家"
+                          : slot.player.seatWind === "south"
+                            ? "南家"
+                            : "西家"}
+                    </span>
+                    <strong>{formatGameInteger(slot.player.points)}点</strong>
+                  </div>
+                );
+              })}
+              <div className="game-table-3d-info">
+                <span>
+                  {tableInfo.roundWind === "east" ? "東" : "南"}
+                  {tableInfo.handNumber}局
+                </span>
+                <span>本場 {tableInfo.honba}</span>
+                <span>供託 {tableInfo.riichiSticks}</span>
+                <span>残り山 {tableInfo.remainingLiveTiles}</span>
+              </div>
+            </div>
+          ) : null}
+        </div>
+      ) : null}
       {/*
        * 盤面本体(段階①/段階②)。いずれか一方だけがコンテナクエリの display:none で
        * 可視化されるため、AT・E2E のロール照会には常に1側だけが露出する(非表示側は
@@ -754,7 +809,7 @@ export default function GameBoard({
        * 全体盤面モーダル(段階②の補完)を開いている間の背景隔離は、Portal 外のページヘッダーも
        * 含めて Modal が一括して所有する。
        */}
-      <div>
+      <div className="game-legacy-board">
         {/* 段階①: 卓幅 >= 360px はクロス配置。牌・隙間は .board-cross の clamp()/cqi で流体縮小。 */}
         {crossBoard(
           "hidden @min-[360px]:grid",
