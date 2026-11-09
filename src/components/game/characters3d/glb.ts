@@ -31,11 +31,15 @@ export function exportCharacterGlb(
   image: Uint8Array,
 ): Uint8Array {
   const chunks: Uint8Array[] = [],
-    bufferViews: { buffer: number; byteOffset: number; byteLength: number }[] =
-      [],
+    bufferViews: {
+      buffer: number;
+      byteOffset: number;
+      byteLength: number;
+      target?: 34962;
+    }[] = [],
     accessors: Accessor[] = [];
   let offset = 0;
-  const bytes = (value: Uint8Array) => {
+  const bytes = (value: Uint8Array, target?: 34962) => {
     const pad = (4 - (offset % 4)) % 4;
     if (pad) {
       chunks.push(new Uint8Array(pad));
@@ -46,6 +50,7 @@ export function exportCharacterGlb(
       buffer: 0,
       byteOffset: offset,
       byteLength: value.byteLength,
+      ...(target === undefined ? {} : { target }),
     });
     chunks.push(value);
     offset += value.byteLength;
@@ -56,10 +61,12 @@ export function exportCharacterGlb(
     type: string,
     components: number,
     bounds = false,
+    target?: 34962,
   ) => {
     const accessor: Accessor = {
       bufferView: bytes(
         new Uint8Array(value.buffer, value.byteOffset, value.byteLength),
+        target,
       ),
       componentType: value instanceof Uint16Array ? 5123 : 5126,
       count: value.length / components,
@@ -82,16 +89,19 @@ export function exportCharacterGlb(
     accessors.push(accessor);
     return accessors.length - 1;
   };
-  const nodes: Record<string, unknown>[] = model.bones.map((bone, index) => ({
-    name: bone.name,
-    translation:
-      bone.parent < 0
-        ? [0, 0, 0]
-        : sub(bone.pivot, model.bones[bone.parent].pivot),
-    children: model.bones
+  const nodes: Record<string, unknown>[] = model.bones.map((bone, index) => {
+    const children = model.bones
       .map((b, i) => (b.parent === index ? i : -1))
-      .filter((i) => i >= 0),
-  }));
+      .filter((i) => i >= 0);
+    return {
+      name: bone.name,
+      translation:
+        bone.parent < 0
+          ? [0, 0, 0]
+          : sub(bone.pivot, model.bones[bone.parent].pivot),
+      ...(children.length ? { children } : {}),
+    };
+  });
   const materials = model.materials.map((mat) => ({
     name: mat.id,
     doubleSided: true,
@@ -112,13 +122,18 @@ export function exportCharacterGlb(
       normal.set(mesh.vertices.subarray(i * 8 + 3, i * 8 + 6), i * 3);
       uv.set(mesh.vertices.subarray(i * 8 + 6, i * 8 + 8), i * 2);
     }
+    // Padding joints have no influence; canonicalize only the exported copy.
+    // Geometry/UV/weights and the model's authored joint array stay intact.
+    const joints = Uint16Array.from(mesh.joints, (joint, i) =>
+      mesh.weights[i] === 0 ? 0 : joint,
+    );
     return {
       attributes: {
-        POSITION: attr(pos, "VEC3", 3, true),
-        NORMAL: attr(normal, "VEC3", 3),
-        TEXCOORD_0: attr(uv, "VEC2", 2),
-        JOINTS_0: attr(mesh.joints, "VEC4", 4),
-        WEIGHTS_0: attr(mesh.weights, "VEC4", 4),
+        POSITION: attr(pos, "VEC3", 3, true, 34962),
+        NORMAL: attr(normal, "VEC3", 3, false, 34962),
+        TEXCOORD_0: attr(uv, "VEC2", 2, false, 34962),
+        JOINTS_0: attr(joints, "VEC4", 4, false, 34962),
+        WEIGHTS_0: attr(mesh.weights, "VEC4", 4, false, 34962),
       },
       material: model.materials.findIndex((mat) => mat.id === mesh.materialId),
       mode: 4,

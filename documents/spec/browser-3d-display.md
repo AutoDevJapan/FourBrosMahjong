@@ -27,7 +27,9 @@ canvasの牌は選択の後、ネイティブbuttonで打牌を確定する。�
 人物表示を有効にするhostは時計を一つだけ所有し、最大24fpsで確定actor cueと待機姿勢を描く。
 非表示のdocumentでは描画を止め、reduced motionでは動作を抑えた姿勢を状態更新時だけ描く。
 復元・初回の過去cueを再生せず、新revisionは以前の動作を破棄して最新状態へ収束する。
-canvas backing bufferはDPR2、4096pxとdriver上限の小さい方まで。CSSサイズは制限しない。
+canvas backing bufferはDPR2、4096pxとdriver上限に加え、64MiBのtexture/backing予算内へ収める。
+RGBA・深度・実MSAA sample数・全mipmapを含めて縮小し、CSSサイズとhit座標は制限しない。
+人物の配信原本は保持し、GPU uploadだけ各体1024px以下へ揃える。
 hostはResizeObserverとwindow resizeを所有し、画面遷移・StrictMode・失敗時に購読と
 GPU資源、画像callback、期限timer、人物の時計とvisibility/media購読を一度だけ解放する。
 人物geometryは同じGPU bufferを再利用し、原本由来textureのcontent hash付きURLをPWAにも共有する。

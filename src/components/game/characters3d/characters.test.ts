@@ -493,6 +493,107 @@ describe("portable model supply", () => {
     },
   );
   it.each(models)(
+    "$id emits valid leaf nodes and typed vertex buffer views without changing authored data",
+    (model) => {
+      const jointCopies = model.meshes.map((mesh) => mesh.joints.slice());
+      const glb = exportCharacterGlb(
+        model,
+        readFileSync(model.materials.find((m) => m.texture)!.texture!),
+      );
+      const header = new DataView(glb.buffer),
+        jsonLength = header.getUint32(12, true);
+      const json = JSON.parse(
+        new TextDecoder().decode(glb.subarray(20, 20 + jsonLength)),
+      );
+      const bin = 20 + jsonLength + 8;
+      const values = (index: number): Float32Array | Uint16Array => {
+        const a = json.accessors[index],
+          v = json.bufferViews[a.bufferView],
+          components = (
+            { SCALAR: 1, VEC2: 2, VEC3: 3, VEC4: 4, MAT4: 16 } as Record<
+              string,
+              number
+            >
+          )[a.type];
+        const start = glb.byteOffset + bin + v.byteOffset + (a.byteOffset ?? 0);
+        return a.componentType === 5123
+          ? new Uint16Array(glb.buffer, start, a.count * components)
+          : new Float32Array(glb.buffer, start, a.count * components);
+      };
+      for (let i = 0; i < model.bones.length; i++) {
+        const expected = model.bones
+          .map((b, j) => (b.parent === i ? j : -1))
+          .filter((j) => j >= 0);
+        if (expected.length) expect(json.nodes[i].children).toEqual(expected);
+        else expect(json.nodes[i]).not.toHaveProperty("children");
+      }
+      for (let i = 0; i < model.meshes.length; i++) {
+        const mesh = model.meshes[i],
+          attributes = json.meshes[0].primitives[i].attributes;
+        for (const attribute of Object.values(attributes) as number[])
+          expect(
+            json.bufferViews[json.accessors[attribute].bufferView].target,
+          ).toBe(34962);
+        const positions = values(attributes.POSITION),
+          normals = values(attributes.NORMAL),
+          uv = values(attributes.TEXCOORD_0),
+          weights = values(attributes.WEIGHTS_0),
+          joints = values(attributes.JOINTS_0);
+        let posError = 0,
+          normalError = 0,
+          uvError = 0;
+        for (let vertex = 0; vertex < mesh.vertices.length / 8; vertex++) {
+          for (let k = 0; k < 3; k++) {
+            posError = Math.max(
+              posError,
+              Math.abs(
+                positions[vertex * 3 + k] - mesh.vertices[vertex * 8 + k],
+              ),
+            );
+            normalError = Math.max(
+              normalError,
+              Math.abs(
+                normals[vertex * 3 + k] - mesh.vertices[vertex * 8 + 3 + k],
+              ),
+            );
+          }
+          for (let k = 0; k < 2; k++)
+            uvError = Math.max(
+              uvError,
+              Math.abs(uv[vertex * 2 + k] - mesh.vertices[vertex * 8 + 6 + k]),
+            );
+        }
+        expect(posError).toBe(0);
+        expect(normalError).toBe(0);
+        expect(uvError).toBe(0);
+        expect(weights).toEqual(mesh.weights);
+        let mismatches = 0;
+        for (let k = 0; k < joints.length; k++)
+          if (joints[k] !== (mesh.weights[k] === 0 ? 0 : mesh.joints[k]))
+            mismatches++;
+        expect(mismatches).toBe(0);
+        expect(mesh.joints).toEqual(jointCopies[i]);
+      }
+      for (const animation of json.animations)
+        for (const sampler of animation.samplers) {
+          expect(
+            json.bufferViews[json.accessors[sampler.input].bufferView],
+          ).not.toHaveProperty("target");
+          expect(
+            json.bufferViews[json.accessors[sampler.output].bufferView],
+          ).not.toHaveProperty("target");
+        }
+      expect(
+        json.bufferViews[
+          json.accessors[json.skins[0].inverseBindMatrices].bufferView
+        ],
+      ).not.toHaveProperty("target");
+      expect(json.bufferViews[json.images[0].bufferView]).not.toHaveProperty(
+        "target",
+      );
+    },
+  );
+  it.each(models)(
     "$id connected clothing has one topological component and finite posed edges",
     (model) => {
       const mesh = model.meshes.find((m) => m.id === "connected-clothing")!;

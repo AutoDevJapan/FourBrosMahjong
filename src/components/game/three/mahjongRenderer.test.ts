@@ -19,7 +19,9 @@ function driver() {
     getShaderParameter: vi.fn(() => true),
     getProgramParameter: vi.fn(() => true),
     getUniformLocation: vi.fn(() => ({ id: ++next })),
-    getParameter: vi.fn(() => 4096),
+    MAX_RENDERBUFFER_SIZE: 0x84e8,
+    SAMPLES: 0x80a9,
+    getParameter: vi.fn((key: number) => (key === 0x80a9 ? 4 : 4096)),
     getError: vi.fn(() => 0),
     isContextLost: vi.fn(() => false),
     drawArrays: vi.fn(),
@@ -81,7 +83,7 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
-function controlledImages() {
+function controlledImages(width = 300, height = 400) {
   const images: HTMLImageElement[] = [];
   const OriginalImage = window.Image;
   vi.stubGlobal(
@@ -89,8 +91,8 @@ function controlledImages() {
     class {
       constructor() {
         const image = new OriginalImage();
-        Object.defineProperty(image, "naturalWidth", { value: 300 });
-        Object.defineProperty(image, "naturalHeight", { value: 400 });
+        Object.defineProperty(image, "naturalWidth", { value: width });
+        Object.defineProperty(image, "naturalHeight", { value: height });
         images.push(image);
         return image;
       }
@@ -100,6 +102,57 @@ function controlledImages() {
 }
 
 describe("WebGL2 renderer boundaries", () => {
+  it("keeps multisampled high-DPI backing storage and tile mipmaps within 64 MiB", () => {
+    const gl = driver(),
+      canvas = setup(gl),
+      images = controlledImages(),
+      renderer = createMahjongRenderer(canvas, { onError: vi.fn() });
+    renderer.publish(frame());
+    for (const image of images) image.dispatchEvent(new Event("load"));
+    renderer.resize(1280, 900, 2);
+    const tileMipmaps = TILE_TEXTURE_URLS.length * 192 * 256 * 4 * (4 / 3);
+    const resolvedAndMultisampledPixel = 4 + 4 * 8;
+    expect(
+      canvas.width * canvas.height * resolvedAndMultisampledPixel + tileMipmaps,
+    ).toBeLessThanOrEqual(64 * 1024 * 1024);
+    expect(canvas.width / canvas.height).toBeCloseTo(1280 / 900, 2);
+    expect(canvas.width).toBeGreaterThanOrEqual(1280);
+    renderer.dispose();
+  });
+
+  it("reserves four character mip chains and preserves CSS coordinates at large sizes", () => {
+    const gl = driver(),
+      canvas = setup(gl),
+      images = controlledImages(1536, 1536),
+      renderer = createMahjongRenderer(canvas, {
+        onError: vi.fn(),
+        characterTextures: Object.fromEntries(
+          ["p0", "p1", "p2", "p3"].map((id) => [id, `/${id}.jpg`]),
+        ),
+      });
+    renderer.publish(frame());
+    for (const image of images) image.dispatchEvent(new Event("load"));
+    expect(images).toHaveLength(34);
+    const raster = gl.texImage2D.mock.calls.at(-1)?.[5] as HTMLCanvasElement;
+    expect([raster.width, raster.height]).toEqual([1024, 1024]);
+    const textureMipmaps =
+      (TILE_TEXTURE_URLS.length * 192 * 256 + 4 * 1024 * 1024) * 4 * (4 / 3);
+    for (const [width, height, dpr] of [
+      [320, 800, 3],
+      [1280, 900, 2],
+      [10000, 8000, 4],
+    ]) {
+      renderer.resize(width, height, dpr);
+      expect(
+        canvas.width * canvas.height * (4 + 4 * 8) + textureMipmaps,
+      ).toBeLessThanOrEqual(64 * 1024 * 1024);
+      expect(canvas.width / canvas.height).toBeCloseTo(width / height, 2);
+      expect(canvas.style.width).toBe("");
+      expect(canvas.style.height).toBe("");
+    }
+    renderer.dispose();
+  });
+
   const characterSurface = (): CharacterSurface => ({
     id: "p0/body",
     position: "self",

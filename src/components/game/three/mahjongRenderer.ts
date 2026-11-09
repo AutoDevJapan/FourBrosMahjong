@@ -126,6 +126,9 @@ interface PickFace {
   readonly depth: number;
 }
 
+const GPU_STORAGE_BUDGET = 64 * 1024 * 1024;
+const CHARACTER_TEXTURE_EDGE = 1024;
+
 /** Native WebGL2, one owned context, shared solid meshes, on-demand drawing. */
 export function createMahjongRenderer(
   canvas: HTMLCanvasElement,
@@ -424,9 +427,27 @@ export function createMahjongRenderer(
       4096,
       gl.getParameter(gl.MAX_RENDERBUFFER_SIZE) as number,
     );
-    const scale = Math.min(ratio, max / width, max / height);
-    canvas.width = Math.max(1, Math.round(width * scale));
-    canvas.height = Math.max(1, Math.round(height * scale));
+    // Reserve complete mip chains before allocating the drawing buffer. Include
+    // the resolved RGBA target and every multisampled color/depth attachment.
+    const textureBytes = Math.ceil(
+      (TILE_TEXTURE_URLS.length * 192 * 256 +
+        Object.keys(options.characterTextures ?? {}).length *
+          CHARACTER_TEXTURE_EDGE ** 2) *
+        4 *
+        (4 / 3),
+    );
+    const available = GPU_STORAGE_BUDGET - textureBytes;
+    if (available <= 0) throw new Error("Texture storage exceeds GPU budget");
+    const samples = Math.max(1, gl.getParameter(gl.SAMPLES) as number);
+    const maxPixels = Math.floor(available / (4 + samples * 8));
+    const scale = Math.min(
+      ratio,
+      max / width,
+      max / height,
+      Math.sqrt(maxPixels / (width * height)),
+    );
+    canvas.width = Math.max(1, Math.floor(width * scale));
+    canvas.height = Math.max(1, Math.floor(height * scale));
     vp = camera(width / height, options.characterTextures !== undefined);
     draw();
   }
@@ -688,10 +709,10 @@ export function createMahjongRenderer(
             key,
           );
           raster.width = characterTexture
-            ? Math.min(2048, img.naturalWidth)
+            ? Math.min(CHARACTER_TEXTURE_EDGE, img.naturalWidth)
             : 192;
           raster.height = characterTexture
-            ? Math.min(2048, img.naturalHeight)
+            ? Math.min(CHARACTER_TEXTURE_EDGE, img.naturalHeight)
             : 256;
           context.clearRect(0, 0, raster.width, raster.height);
           context.fillStyle = characterTexture
