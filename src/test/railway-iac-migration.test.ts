@@ -1371,7 +1371,7 @@ export default defineRailway(() => project("fixture", {}));`,
     expect([...observed].sort()).toEqual([...RAILWAY_IAC_MIGRATION_REASONS]);
   });
 
-  it("CLI is non-reflective and holds the current repository", () => {
+  it("CLI rejects obsolete full-project evidence for the current named partial without reflection", () => {
     const secret = "SECRET_SENTINEL";
     const currentEvidence = validEvidence(Date.now());
     currentEvidence.ownershipCutover.legacyFileSha256 = CURRENT_REPOSITORY_SHA;
@@ -1393,11 +1393,7 @@ export default defineRailway(() => project("fixture", {}));`,
       authorizesApply: false,
       authorizesDeployment: false,
       externalMutationPerformed: false,
-      reasons: [
-        "generated-iac-missing",
-        "ownership-cutover-unverified",
-        "secret-safety-unverified",
-      ],
+      reasons: ["generated-iac-invalid", "ownership-cutover-unverified"],
     });
 
     const duplicateKeys = JSON.stringify(currentEvidence).replace(
