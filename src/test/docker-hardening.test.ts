@@ -300,6 +300,7 @@ WORKDIR /app
 RUN npm install --global pnpm@10.33.0
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 COPY container/online/package.json ./container/online/package.json
+COPY patches ./patches
 RUN pnpm --filter ${runtimePackageName} --fail-if-no-match install --prod --frozen-lockfile \
     && pnpm --filter=${runtimePackageName} --fail-if-no-match deploy --prod /runtime
 FROM node:26.8.1-slim@sha256:${digest}
@@ -448,8 +449,8 @@ CMD ["node", "--import", "tsx", "server/start.ts"]`;
       "dependencies stage must contain only the ordered runtime install and deploy contract";
     expectViolation(
       valid.replace(
-        `COPY container/online/package.json ./container/online/package.json\nRUN pnpm --filter ${runtimePackageName}`,
-        `COPY container/online/package.json ./container/online/package.json\nRUN echo poisoned >> /runtime/package.json\nRUN pnpm --filter ${runtimePackageName}`,
+        `COPY patches ./patches\nRUN pnpm --filter ${runtimePackageName}`,
+        `COPY patches ./patches\nRUN echo poisoned >> /runtime/package.json\nRUN pnpm --filter ${runtimePackageName}`,
       ),
       exactDependenciesContract,
     );

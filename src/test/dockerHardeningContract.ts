@@ -431,6 +431,7 @@ export function dockerfileViolations(
     "RUN",
     "COPY",
     "COPY",
+    "COPY",
     "RUN",
   ];
   const deployCopies =
@@ -466,7 +467,8 @@ export function dockerfileViolations(
     !sameCopy(deployCopies[1] as DockerInstruction, [
       "container/online/package.json",
       "./container/online/package.json",
-    ])
+    ]) ||
+    !sameCopy(deployCopies[2] as DockerInstruction, ["patches", "./patches"])
   ) {
     violations.push(
       "the dependencies stage must contain only the ordered runtime install and deploy contract",

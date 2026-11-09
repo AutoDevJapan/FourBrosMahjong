@@ -8,6 +8,7 @@ RUN npm install --global pnpm@10.33.0
 
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 COPY container/online/package.json ./container/online/package.json
+COPY patches ./patches
 RUN pnpm --filter @four-bros-mahjong/online-runtime --fail-if-no-match install --prod --frozen-lockfile \
     && pnpm --filter @four-bros-mahjong/online-runtime --fail-if-no-match deploy --prod /runtime
 

@@ -138,6 +138,112 @@ function readPngDimensions(buffer) {
   };
 }
 
+/** Check the recorded provider permission without claiming independent title verification. */
+export function verifyUiRefreshProvenance(provenance) {
+  if (!isRecord(provenance)) {
+    throw new Error("manifest provenance is missing");
+  }
+  const provenanceFields = new Set([
+    "providedBy",
+    "sourceAtIngest",
+    "inclusionRequestRecord",
+    "legalRightsHolderVerified",
+    "providerAuthorityToLicenseVerified",
+    "redistributionPermissionVerifiedIndependently",
+    "requestIsRightsOrLicenseEvidence",
+    "sha256IsPermissionEvidence",
+    "providerPermission",
+    "rightsNotice",
+    "license",
+  ]);
+  if (
+    Object.keys(provenance).some(
+      (field) =>
+        !provenanceFields.has(field) &&
+        ![
+          "publicDistributionRequiresWrittenRightsConfirmation",
+          "commercialUseRequiresWrittenRightsConfirmation",
+          "removeOriginalsAndDerivativesIfRightsRemainUnverified",
+        ].includes(field),
+    )
+  )
+    throw new Error("provenance contains unknown fields");
+  for (const field of [
+    "legalRightsHolderVerified",
+    "providerAuthorityToLicenseVerified",
+    "redistributionPermissionVerifiedIndependently",
+    "requestIsRightsOrLicenseEvidence",
+    "sha256IsPermissionEvidence",
+  ]) {
+    if (provenance[field] !== false) {
+      throw new Error(`provenance.${field} must explicitly be false`);
+    }
+  }
+  for (const field of [
+    "publicDistributionRequiresWrittenRightsConfirmation",
+    "commercialUseRequiresWrittenRightsConfirmation",
+    "removeOriginalsAndDerivativesIfRightsRemainUnverified",
+  ]) {
+    if (field in provenance) {
+      throw new Error(
+        `provenance.${field} is superseded by provider permission`,
+      );
+    }
+  }
+  const permission = provenance.providerPermission;
+  if (!isRecord(permission)) {
+    throw new Error("provenance.providerPermission is missing");
+  }
+  const permissionFields = {
+    grantedBy: "Project provider",
+    grantedOn: "2026-11-07",
+    scope: "six UI design-reference images and their derived images",
+    publicDistribution: true,
+    redistribution: true,
+    commercialUse: "not-recorded",
+    evidence:
+      "https://github.com/AutoDevJapan/FourBrosMahjong/issues/1175#issuecomment-6701099933",
+    terms: "CREDITS.md#提供元・公開条件",
+    coversCodeMitLicense: false,
+    transfersRights: false,
+    impliesOfficialEndorsement: false,
+  };
+  if (
+    Object.keys(permission).length !== Object.keys(permissionFields).length ||
+    Object.keys(permission).some(
+      (field) => !Object.hasOwn(permissionFields, field),
+    )
+  )
+    throw new Error("provenance.providerPermission contains unknown fields");
+  for (const [field, value] of Object.entries(permissionFields)) {
+    if (permission[field] !== value) {
+      throw new Error(`provenance.providerPermission.${field} is inconsistent`);
+    }
+  }
+  if (
+    provenance.license !==
+    "Provider permission for public distribution and redistribution"
+  ) {
+    throw new Error("provenance.license must describe the provider permission");
+  }
+  const recordedEvidence = {
+    providedBy: "Project owner",
+    sourceAtIngest: "Project owner's local Downloads directory",
+    inclusionRequestRecord:
+      "The project owner explicitly requested repository inclusion; this records the inclusion decision only and is not evidence of ownership or a redistribution license",
+  };
+  for (const [field, value] of Object.entries(recordedEvidence)) {
+    if (provenance[field] !== value)
+      throw new Error(`provenance.${field} must match the recorded evidence`);
+  }
+  const expectedNotice =
+    "The project provider permitted public distribution and redistribution of these six images and their derived images on 2026-11-07. See CREDITS.md for the provider's terms. This permission is separate from the code's MIT License and does not establish independently verified ownership, a transfer of rights, or official endorsement by any person, programme, or trademark holder.";
+  if (provenance.rightsNotice !== expectedNotice)
+    throw new Error(
+      "provenance.rightsNotice must match the recorded permission scope",
+    );
+}
+
 export function verifyUiRefreshAssets(manifestPath = DEFAULT_MANIFEST) {
   const manifestStats = lstatSync(manifestPath);
   if (manifestStats.isSymbolicLink() || !manifestStats.isFile()) {
@@ -159,37 +265,7 @@ export function verifyUiRefreshAssets(manifestPath = DEFAULT_MANIFEST) {
   if (!isRecord(manifest) || manifest.version !== 1) {
     throw new Error("manifest version must be 1");
   }
-  if (!isRecord(manifest.provenance)) {
-    throw new Error("manifest provenance is missing");
-  }
-  for (const field of [
-    "legalRightsHolderVerified",
-    "providerAuthorityToLicenseVerified",
-    "redistributionPermissionVerifiedIndependently",
-    "requestIsRightsOrLicenseEvidence",
-    "sha256IsPermissionEvidence",
-  ]) {
-    if (manifest.provenance[field] !== false) {
-      throw new Error(`provenance.${field} must explicitly be false`);
-    }
-  }
-  for (const field of [
-    "publicDistributionRequiresWrittenRightsConfirmation",
-    "commercialUseRequiresWrittenRightsConfirmation",
-    "removeOriginalsAndDerivativesIfRightsRemainUnverified",
-  ]) {
-    if (manifest.provenance[field] !== true) {
-      throw new Error(`provenance.${field} must explicitly be true`);
-    }
-  }
-  for (const field of ["inclusionRequestRecord", "rightsNotice"]) {
-    if (
-      typeof manifest.provenance[field] !== "string" ||
-      manifest.provenance[field].trim() === ""
-    ) {
-      throw new Error(`provenance.${field} must be documented`);
-    }
-  }
+  verifyUiRefreshProvenance(manifest.provenance);
   if (!isRecord(manifest.usage)) throw new Error("manifest usage is missing");
   for (const field of [
     "runtimeAsset",
