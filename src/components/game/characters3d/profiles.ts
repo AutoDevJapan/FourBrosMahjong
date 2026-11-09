@@ -70,6 +70,29 @@ export const MODEL_PROFILES: Readonly<Record<CharacterPlayerId, ModelProfile>> =
         left: 1240,
       },
       source: "p0-soakuhin-character-sheet.png",
+      // Registered against the existing source image; no new texture pixels.
+      headViews: {
+        front: { center: 105, halfWidth: 36, top: 126, bottom: 225 },
+        right: {
+          center: 496,
+          halfWidth: 38,
+          top: 126,
+          bottom: 218,
+        },
+        back: {
+          center: 872,
+          halfWidth: 36,
+          top: 126,
+          bottom: 212,
+        },
+        left: {
+          center: 1253,
+          halfWidth: 39,
+          top: 130,
+          bottom: 218,
+          mirror: true,
+        },
+      },
       sha256:
         "ef6c81eb0ce02dbc5227d3320f61c760527214eea1ecd8e7e42cd88dbb4aebbf",
     },
@@ -97,6 +120,29 @@ export const MODEL_PROFILES: Readonly<Record<CharacterPlayerId, ModelProfile>> =
         left: 1240,
       },
       source: "p1-ryuji-character-sheet.png",
+      // Registered against the existing source image; no new texture pixels.
+      headViews: {
+        front: { center: 106, halfWidth: 35, top: 126, bottom: 225 },
+        right: {
+          center: 494,
+          halfWidth: 38,
+          top: 125,
+          bottom: 225,
+        },
+        back: {
+          center: 872,
+          halfWidth: 36,
+          top: 126,
+          bottom: 212,
+        },
+        left: {
+          center: 1254,
+          halfWidth: 40,
+          top: 129,
+          bottom: 225,
+          mirror: true,
+        },
+      },
       sha256:
         "5a02f954603f5b211fd8f670e2f8e503bccc3a8d7a926be58ed46015514101bf",
     },
@@ -165,13 +211,37 @@ export const MODEL_PROFILES: Readonly<Record<CharacterPlayerId, ModelProfile>> =
         left: 1242,
       },
       source: "p3-hechima-character-sheet.png",
+      // Registered against the existing source image; no new texture pixels.
+      headViews: {
+        front: { center: 114, halfWidth: 46, top: 130, bottom: 250 },
+        right: {
+          center: 498,
+          halfWidth: 44,
+          top: 135,
+          bottom: 238,
+        },
+        back: {
+          center: 868,
+          halfWidth: 40,
+          top: 130,
+          bottom: 218,
+        },
+        left: {
+          center: 1253,
+          halfWidth: 44,
+          top: 134,
+          bottom: 238,
+          mirror: true,
+        },
+      },
       sha256:
         "bcdad1e1faf55e6aab426d7b372e947d13d45c30de887f6d7956eaa6dd78aca5",
     },
   };
-/** Only p2 needs new registrations; other three atlases remain byte-identical. */
+/** Keep the existing p2-only padded atlas; registration does not rebake textures. */
 export function headTextureRegions(p: ModelProfile) {
-  if (!p.headViews) return [];
+  // Only crop-style p2 has the padded head atlas in the existing texture.
+  if (!p.headViews || p.hairStyle !== "crop") return [];
   return (["right", "back", "left"] as const).map((view, i) => {
     const q = p.headViews![view];
     return {

@@ -5,7 +5,7 @@ import type { Bone, BoneName, SkinMesh, V3 } from "./types";
 type Influence = readonly (readonly [number, number])[];
 type Weight = (v: V3) => Influence;
 type Surface = (u: number, v: number) => V3;
-type UvProjector = (p: V3, view: View) => readonly [number, number];
+type UvProjector = (p: V3, view: View, center: V3) => readonly [number, number];
 type View = "front" | "right" | "back" | "left";
 
 /** Fixed source projection in rest space. Never re-project UV after posing. */
@@ -32,24 +32,47 @@ export function sourceUv(
   return [x / 1536, (p.photo.floor - v[1] * ppm) / 1536];
 }
 
-function headUv(p: ModelProfile, v: V3, view: View): readonly [number, number] {
-  if (!p.headViews || view === "front") return sourceUv(p, v, view);
-  const chin = p.height - p.headLength - 0.025;
-  if (v[1] < chin + 0.018) return sourceUv(p, v, view);
+function headUv(
+  p: ModelProfile,
+  v: V3,
+  view: View,
+  center: V3 = v,
+): readonly [number, number] {
+  const chin = p.height - p.headLength - 0.025,
+    ppm = (p.photo.floor - p.photo.top) / p.height;
+  if (!p.headViews) return sourceUv(p, v, view);
   const q = p.headViews[view],
-    region = headTextureRegions(p).find((r) => r.view === view)!;
+    front = p.headViews.front,
+    frontY = p.photo.floor - v[1] * ppm;
+  if (view === "front")
+    return [(front.center + v[0] * ppm) / 1536, frontY / 1536];
+  const region = headTextureRegions(p).find((r) => r.view === view);
+  // The existing p2 scalp patch stays in its original atlas coordinates.
+  if (region && center[1] < chin + 0.018) return sourceUv(p, v, view);
+  const lower = Math.max(0, Math.min(1, (chin + 0.055 - v[1]) / 0.055));
   const x =
     view === "back"
       ? q.center - (v[0] / p.headWidth) * q.halfWidth
       : q.center +
+        lower * 7 +
         (((view === "right" || q.mirror ? -1 : 1) * v[2]) /
           (p.headDepth + 0.025)) *
-          q.halfWidth;
+          q.halfWidth *
+          (v[2] > 0 ? 0.85 : 1) *
+          (1 - 0.55 * lower);
   const t = Math.max(
       0,
       Math.min(1, (v[1] - chin - 0.018) / (p.height - chin - 0.018)),
     ),
-    y = q.bottom - t * (q.bottom - q.top);
+    y = region
+      ? q.bottom - t * (q.bottom - q.top)
+      : Math.min(
+          q.bottom - (view === "back" ? 0 : 5),
+          q.top +
+            ((frontY - front.top) * (q.bottom - q.top)) /
+              (front.bottom - front.top),
+        );
+  if (!region) return [x / 1536, y / 1536];
   return [
     (region.atlas.left +
       Math.max(
@@ -151,6 +174,7 @@ class CharacterMeshBuilder {
               ? (uvProjector ?? ((p, view) => sourceUv(this.profile, p, view)))(
                   vertex.p,
                   view,
+                  center,
                 )
               : [0, 0];
             g.v.push(...vertex.p, ...vertex.n, ...tex);
@@ -359,41 +383,79 @@ export function buildCharacterMeshes(
       b.blend(`hand.${side}`, `forearm.${side}`, 0.914 * s, wristY),
       false,
     );
+    // The metacarpals end above the finger tips. A shorter, flatter palm
+    // leaves the four distal silhouettes visible instead of swallowing them.
     b.ellipsoid(
       `hand-${side}`,
-      [sx + sign * 0.068, 0.906 * s, 0.03],
-      [0.038 * s, 0.069 * s, 0.027 * s],
+      [wristX, 0.911 * s, 0.028],
+      [0.035 * s, 0.043 * s, 0.019 * s],
       "skin",
       rigid(`hand.${side}`),
       16,
       10,
       false,
     );
-    // Five attached finger silhouettes. They follow the hand, not world space.
-    for (let f = 0; f < 4; f++)
-      b.ellipsoid(
-        `finger-${side}-${f}`,
-        [
-          sx + sign * 0.068 + (f - 1.5) * 0.015 * s,
-          0.863 * s + (f === 0 || f === 3 ? 0.008 : 0),
-          0.031,
-        ],
-        [0.009 * s, 0.028 * s, 0.011 * s],
+    // Rounded, slightly cupped digits. Both hands mirror across the body;
+    // index/middle/ring/little keep distinct lengths and a common knuckle arc.
+    const digit = (
+      id: string,
+      from: V3,
+      to: V3,
+      radius: number,
+      segments: number,
+      curl: number,
+    ) => {
+      const axis = unit(sub(to, from)),
+        across = unit(cross(axis, [0, 0, 1])),
+        depth = cross(across, axis);
+      b.surface(
+        id,
         "skin",
-        rigid(`hand.${side}`),
-        8,
+        (u, v) => {
+          const angle = u * Math.PI * 2,
+            cap = Math.sin(v * Math.PI),
+            t = (1 - Math.cos(v * Math.PI)) / 2,
+            r = radius * cap * (1 - 0.18 * t),
+            center = add(add(from, scale(sub(to, from), t)), [
+              0,
+              0,
+              curl * Math.sin((t * Math.PI) / 2),
+            ]);
+          return add(
+            center,
+            add(
+              scale(across, Math.cos(angle) * r),
+              scale(depth, Math.sin(angle) * r),
+            ),
+          );
+        },
+        segments,
         6,
+        rigid(`hand.${side}`),
         false,
       );
-    b.ellipsoid(
+    };
+    const lengths = [0.057, 0.064, 0.06, 0.048];
+    for (let f = 0; f < 4; f++) {
+      const x = wristX + sign * (f - 1.5) * 0.016 * s,
+        y = (0.892 - Math.abs(f - 1) * 0.002) * s;
+      digit(
+        `finger-${side}-${f}`,
+        [x, y, 0.028],
+        [x + sign * (f - 1.5) * 0.0015 * s, y - lengths[f] * s, 0.028],
+        (f === 3 ? 0.007 : 0.0077) * s,
+        8,
+        0.01 * s,
+      );
+    }
+    // Oblique opposition from the radial edge, with its root inside the palm.
+    digit(
       `thumb-${side}`,
-      [sx + sign * 0.036, 0.909 * s, 0.045],
-      [0.014, 0.032, 0.015],
-      "skin",
-      rigid(`hand.${side}`),
+      [wristX - sign * 0.023 * s, 0.925 * s, 0.031],
+      [wristX - sign * 0.049 * s, 0.876 * s, 0.037],
+      0.012 * s,
       10,
-      6,
-      false,
+      0.009 * s,
     );
     if (p.shoe === "cargo-shoe") {
       b.ellipsoid(
@@ -471,13 +533,19 @@ export function buildCharacterMeshes(
     headTop = p.height - 0.028;
   const neckRings: readonly Ring[] = [
     [1.43 * s, 0.06 * s, 0.053 * s],
-    [1.475 * s, 0.058 * s, 0.053 * s],
-    [chin + 0.018, p.jawWidth * 0.78, p.headDepth * 0.67, 0.014],
+    [
+      1.475 * s,
+      Math.max(0.049 * s, p.jawWidth * 0.62),
+      Math.max(0.044 * s, p.headDepth * 0.5),
+      -0.006 * s,
+    ],
+    [chin + 0.008, p.jawWidth * 0.68, p.headDepth * 0.55, -0.006],
+    [chin + 0.03, p.jawWidth * 0.84, p.headDepth * 0.78, 0.003],
   ];
   const head = loft([
     ...neckRings,
-    [chin + 0.046, p.jawWidth, p.headDepth * 0.83, 0.003],
-    [chin + 0.083, p.headWidth * 0.96, p.headDepth * 0.94],
+    [chin + 0.046, p.jawWidth * 0.9, p.headDepth * 0.83, 0.003],
+    [chin + 0.083, p.headWidth * 0.87, p.headDepth * 0.94],
     [chin + 0.121, p.headWidth, p.headDepth],
     [chin + 0.16, p.headWidth * 0.96, p.headDepth * 0.98],
     [headTop - 0.025, p.headWidth * 0.76, p.headDepth * 0.83],
@@ -517,7 +585,7 @@ export function buildCharacterMeshes(
       const headIndex = bones.findIndex((q) => q.name === "head"),
         jawIndex = bones.findIndex((q) => q.name === "jaw");
       if (v[1] < chin + 0.025)
-        return b.blend("neck", "head", 1.46 * s, chin + 0.018)(v);
+        return b.blend("neck", "head", 1.46 * s, chin + 0.012)(v);
       const jaw =
         v[2] > 0.04
           ? Math.max(0, 0.28 * (1 - Math.abs(v[1] - (chin + 0.05)) / 0.035))
@@ -528,9 +596,8 @@ export function buildCharacterMeshes(
       ];
     },
     true,
-    (v, view) => headUv(p, v, view),
-    // Neck uses the same source projection as the face, avoiding a broad
-    // solid-color band below the jaw. Side/rear mapping remains per-view.
+    (v, view, center) => headUv(p, v, view, center),
+    // Registration stays in rest space and is uniform within each triangle.
   );
   // A shaped cap has a high forehead, clipped/swept sides and a low nape.
   const bottom = (u: number) => {
@@ -567,12 +634,13 @@ export function buildCharacterMeshes(
     12,
     rigid("head"),
     true,
-    (v, view) => {
-      if (p.headViews) return headUv(p, v, view);
-      const back = v[2] < 0,
-        center = back ? p.photo.back : p.photo.front;
+    (v, view, center) => {
+      if (p.headViews && (p.hairStyle === "crop" || view !== "front"))
+        return headUv(p, v, view, center);
+      const back = view === "back",
+        textureCenter = back ? p.photo.back : p.photo.front;
       return [
-        (center + (v[0] / p.headWidth) * 26 * (back ? -1 : 1)) / 1536,
+        (textureCenter + (v[0] / p.headWidth) * 26 * (back ? -1 : 1)) / 1536,
         (p.photo.top +
           5 +
           Math.min(0.14, p.height - v[1]) * (back ? 280 : 80)) /
