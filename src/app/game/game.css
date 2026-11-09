@@ -119,6 +119,12 @@
   background: none;
 }
 
+.game-page
+  .game-board[data-3d-status="ready"]
+  .game-board-cross.game-board-inline::before {
+  content: none;
+}
+
 @media (max-width: 480px) {
   .game-page .game-table-3d-canvas {
     aspect-ratio: 1 / 1;

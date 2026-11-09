@@ -21,12 +21,7 @@ export type TableDisplayStatus = "loading" | "ready" | "failed";
 
 interface Selection {
   readonly frame: DisplayEnvelope;
-  readonly option: DisplayOption & {
-    readonly tile: {
-      readonly suit: "man" | "pin" | "sou" | "honor";
-      readonly rank: number;
-    };
-  };
+  readonly option: Extract<DisplayOption, { readonly tile: unknown }>;
 }
 
 interface Props {
@@ -312,8 +307,12 @@ export default function GameTable3D({
             className="game-action-button"
             onClick={() => confirmRef.current?.()}
           >
-            {tileLabel(selection.option.tile)}を
-            {selection.option.action === "riichi" ? "リーチ宣言" : "打牌"}
+            {tileLabel({
+              suit: selection.option.tile.suit,
+              rank: selection.option.tile.rank,
+              isRed: selection.option.tile.red,
+            })}
+            を{selection.option.action === "riichi" ? "リーチ宣言" : "打牌"}
           </button>
         </div>
       ) : null}

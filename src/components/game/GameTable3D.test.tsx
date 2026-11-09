@@ -8,6 +8,7 @@ import {
 import { StrictMode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { DisplayEnvelope } from "@/domain/display/displaySnapshot";
+import { createGame } from "@/domain/game/engine";
 import GameBoard from "./GameBoard";
 import { GameProvider } from "./GameProvider";
 import GameTable3D from "./GameTable3D";
@@ -83,6 +84,33 @@ beforeEach(() => {
 });
 
 describe("live 3D display host", () => {
+  it.each([
+    ["pin", "五筒"],
+    ["sou", "五索"],
+  ] as const)(
+    "preserves the red indicator when confirming %s five",
+    (suit, name) => {
+      render(
+        <GameProvider initialGame={createGame({ seed: 2 })}>
+          <GameTable3D />
+        </GameProvider>,
+      );
+      const current = renderer.instances[0];
+      const option = current.frames[0].snapshot.options.find(
+        (candidate) =>
+          candidate.action === "discard" &&
+          candidate.tile.suit === suit &&
+          candidate.tile.rank === 5 &&
+          candidate.tile.red,
+      );
+      expect(option).toBeDefined();
+      act(() => current.pick(option!.id));
+      expect(
+        screen.getByRole("button", { name: `${name}(赤ドラ)を打牌` }),
+      ).toBeInTheDocument();
+    },
+  );
+
   it("samples the current clock when the first RAF timestamp precedes publication", () => {
     let callback: FrameRequestCallback | undefined;
     const clock = vi.spyOn(performance, "now").mockReturnValue(2000);

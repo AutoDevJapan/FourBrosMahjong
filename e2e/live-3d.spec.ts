@@ -12,6 +12,15 @@ test("通常対局でWebGL盤面が起動し、打牌・復元・context lossを
     "data-3d-status",
     "ready",
   );
+  const legacyFelt = page.locator(
+    ".game-board .game-board-cross.game-board-inline",
+  );
+  await expect(legacyFelt).toHaveCount(1);
+  expect(
+    await legacyFelt.evaluate(
+      (element) => getComputedStyle(element, "::before").content,
+    ),
+  ).toBe("none");
   const pixels = await canvas.evaluate((element: HTMLCanvasElement) => {
     const gl = element.getContext("webgl2");
     if (!gl) throw new Error("No WebGL2 rendering context");
@@ -61,6 +70,11 @@ test("通常対局でWebGL盤面が起動し、打牌・復元・context lossを
   await expect(
     page.getByRole("status").filter({ hasText: "2D" }),
   ).toBeVisible();
+  expect(
+    await legacyFelt.evaluate(
+      (element) => getComputedStyle(element, "::before").content,
+    ),
+  ).not.toBe("none");
   await expect(
     page.getByRole("list", { name: "自家の手牌", exact: true }),
   ).toBeVisible();
