@@ -5,12 +5,12 @@ import {
   fstatSync,
   lstatSync,
   openSync,
-  readSync,
   readdirSync,
+  readSync,
   realpathSync,
 } from "node:fs";
-import { dirname, resolve } from "node:path";
 import { createRequire } from "node:module";
+import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { TextDecoder } from "node:util";
 import {
@@ -19,8 +19,8 @@ import {
   type RailwayIacFilesystemEvidence,
   validateRailwayIacMigrationEvidence,
 } from "./railway-iac-migration-contract";
-import { parseStrictJson } from "./strictJson";
 import { iacSha256, singleFileIacTree } from "./railway-iac-named-partial";
+import { parseStrictJson } from "./strictJson";
 
 const MAX_INPUT_BYTES = 64 * 1_024;
 export const MAX_GENERATED_IAC_BYTES = 64 * 1_024;
