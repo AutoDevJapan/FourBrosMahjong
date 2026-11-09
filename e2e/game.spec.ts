@@ -194,15 +194,16 @@ test.describe("対局画面(/game)", () => {
       page.getByRole("heading", { level: 1, name: "対局画面" }),
     ).toBeVisible();
 
-    // 卓中央: 場風/局/本場/供託(TableInfo)。2レイアウト分 DOM にあるため可視側に限定。
+    // TableInfoのsemantic readoutを検証する。3D ready時の表示用footerは
+    // aria-hiddenなので、textの可視判定ではなくroleで読み上げ側を特定する。
     await expect(
-      page.getByText("東1局").filter({ visible: true }),
+      page.getByRole("definition").filter({ hasText: /^東1局$/ }),
     ).toBeVisible();
     await expect(
-      page.getByText("本場", { exact: true }).filter({ visible: true }),
+      page.getByRole("term").filter({ hasText: /^本場$/ }),
     ).toBeVisible();
     await expect(
-      page.getByText("供託", { exact: true }).filter({ visible: true }),
+      page.getByRole("term").filter({ hasText: /^供託$/ }),
     ).toBeVisible();
 
     // ドラ表示。
