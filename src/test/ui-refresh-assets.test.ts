@@ -290,6 +290,19 @@ describe("Issue #712 design-reference originals", () => {
     ).toThrow("provenance contains unknown fields");
   });
 
+  it.each(["providedBy", "sourceAtIngest", "inclusionRequestRecord"])(
+    "rejects rewritten provenance evidence in %s",
+    (field) => {
+      expect(() =>
+        verifyUiRefreshProvenance({
+          ...manifest.provenance,
+          [field]:
+            "The provider confirmed commercial rights for all future assets.",
+        }),
+      ).toThrow(`provenance.${field} must match the recorded evidence`);
+    },
+  );
+
   it("rejects a manifest symlink", () => {
     withFixture(
       ({ manifestPath }) => {
