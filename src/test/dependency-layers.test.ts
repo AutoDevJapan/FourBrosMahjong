@@ -65,6 +65,17 @@ const FIXTURE: readonly [path: string, source: string][] = [
     "src/app/exportsConsumer.ts",
     'import { compile } from "css-compiler";\nexport const value = compile;\n',
   ],
+  // Keep the independently reviewed SDK fixture alongside the CSS compiler case.
+  [
+    "node_modules/exported-sdk/package.json",
+    '{"name":"exported-sdk","exports":{".":{"import":"./sdk.mjs","require":"./sdk.cjs"}}}\n',
+  ],
+  ["node_modules/exported-sdk/sdk.mjs", "export const value = 1;\n"],
+  ["node_modules/exported-sdk/sdk.cjs", "exports.value = 1;\n"],
+  [
+    "src/app/sdkConsumer.ts",
+    'import { value } from "exported-sdk";\nexport const current = value;\n',
+  ],
   ["src/app/_lib/securityHeaders.ts", "export const csp = 1;\n"],
   ["src/components/common/Modal.ts", "export const Modal = 1;\n"],
   ["src/domain/tiles/tile.ts", "export const tile = 1;\n"],
@@ -584,5 +595,15 @@ describe("レイヤールールの適用スコープ (#382)", () => {
       workflow,
       "CI から depcruise ステップが消えるとレイヤー境界は強制されない",
     ).toContain("pnpm depcruise");
+  });
+});
+
+describe("exports-only SDK module resolution", () => {
+  it("resolves a real package export while preserving unresolved-import errors", () => {
+    const dependency = fixtureModules
+      .find((module) => module.source === "src/app/sdkConsumer.ts")
+      ?.dependencies.find((entry) => entry.module === "exported-sdk");
+    expect(dependency?.couldNotResolve).toBe(false);
+    expect(dependency?.resolved).toBe("node_modules/exported-sdk/sdk.mjs");
   });
 });
