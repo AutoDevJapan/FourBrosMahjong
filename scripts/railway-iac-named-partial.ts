@@ -13,7 +13,7 @@ export const FOURBROS_IAC_TARGET = Object.freeze({
 });
 export const FOURBROS_IAC_PARTIAL = "four-bros-mahjong-online";
 export const FOURBROS_IAC_ADDRESS = `service.${FOURBROS_IAC_TARGET.serviceName}`;
-export const FOURBROS_IAC_SDK_VERSION = "3.16.0";
+const FOURBROS_IAC_SDK_VERSION = "3.16.0";
 // SHA-256 of dist/iac/index.d.ts + NUL + its exported shared declaration file.
 export const FOURBROS_IAC_SDK_SCHEMA_SHA256 =
   "e154a2beae34557bdfb456b40dc5810bc07739d7ed46cfc498b1079da5a4f3ce";
