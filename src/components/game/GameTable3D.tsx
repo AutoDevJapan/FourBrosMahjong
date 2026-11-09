@@ -116,7 +116,9 @@ export default function GameTable3D({
         return;
       if (nowMs - previousDraw >= 1000 / 24) {
         previousDraw = nowMs;
-        sampleCharacters(nowMs / 1000);
+        // RAF timestamps describe the frame start and may precede a newer
+        // provider publication. Sample the same monotonic clock as publish.
+        sampleCharacters(performance.now() / 1000);
       }
       if (!closed && !failed) animation = requestAnimationFrame(animate);
     };

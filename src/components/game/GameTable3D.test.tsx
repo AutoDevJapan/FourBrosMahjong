@@ -83,6 +83,46 @@ beforeEach(() => {
 });
 
 describe("live 3D display host", () => {
+  it("samples the current clock when the first RAF timestamp precedes publication", () => {
+    let callback: FrameRequestCallback | undefined;
+    const clock = vi.spyOn(performance, "now").mockReturnValue(2000);
+    const raf = vi
+      .spyOn(window, "requestAnimationFrame")
+      .mockImplementation((next) => {
+        callback = next;
+        return 73;
+      });
+    const cancel = vi
+      .spyOn(window, "cancelAnimationFrame")
+      .mockImplementation(() => {});
+    const ui = render(
+      <GameProvider>
+        <GameTable3D renderCharacters />
+      </GameProvider>,
+    );
+    try {
+      const controller = characters.instances[0];
+      controller.sample.mockImplementation((now: number) => {
+        if (now < 2)
+          throw new Error("Character clock must be monotonic seconds");
+        return [];
+      });
+      if (!callback) throw new Error("Missing owned animation callback");
+      act(() => callback?.(1990));
+      expect(renderer.instances[0].dispose).not.toHaveBeenCalled();
+      expect(controller.sample.mock.calls.at(-1)?.[0]).toBe(2);
+      expect(ui.container.querySelector(".game-table-3d")).toHaveAttribute(
+        "data-3d-status",
+        "ready",
+      );
+    } finally {
+      ui.unmount();
+      clock.mockRestore();
+      raf.mockRestore();
+      cancel.mockRestore();
+    }
+  });
+
   it("places the single live glossary outside the clipped semantic table", async () => {
     const ui = render(
       <GameProvider>
