@@ -8,6 +8,7 @@ export interface CharacterSurface {
   readonly id: string;
   readonly position: "self" | "left" | "across" | "right";
   readonly vertices: Float32Array;
+  readonly colors?: Float32Array;
   readonly material: CharacterMaterial;
 }
 
@@ -33,6 +34,7 @@ export function projectCharacterSurfaces(
         id: `${actor.playerId}/${batch.id}`,
         position: actor.position,
         vertices: batch.vertices,
+        ...(batch.colors ? { colors: batch.colors } : {}),
         material,
       };
     }),

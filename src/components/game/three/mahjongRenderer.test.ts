@@ -442,4 +442,51 @@ describe("WebGL2 renderer boundaries", () => {
       gl.createBuffer.mock.calls.length,
     );
   });
+  it("validates, reuses and releases the optional character color buffer", () => {
+    const gl = driver(),
+      onError = vi.fn(),
+      images = controlledImages(),
+      renderer = createMahjongRenderer(setup(gl), { onError });
+    renderer.publish(frame());
+    for (const image of images) image.dispatchEvent(new Event("load"));
+    const surface = {
+      ...characterSurface(),
+      colors: new Float32Array(9).fill(0.8),
+    };
+    const before = gl.createBuffer.mock.calls.length;
+    renderer.setCharacters([surface]);
+    expect(gl.createBuffer.mock.calls.length - before).toBe(2);
+    renderer.setCharacters([surface]);
+    expect(gl.createBuffer.mock.calls.length - before).toBe(2);
+    renderer.setCharacters([characterSurface()]);
+    expect(gl.deleteBuffer.mock.calls.length).toBe(1);
+    renderer.setCharacters([]);
+    expect(gl.deleteBuffer.mock.calls.length).toBe(2);
+    renderer.dispose();
+    expect(gl.deleteBuffer.mock.calls.length).toBe(
+      gl.createBuffer.mock.calls.length,
+    );
+    expect(onError).not.toHaveBeenCalled();
+  });
+  it.each([
+    ["short", new Float32Array(8)],
+    ["not finite", new Float32Array(9).fill(Number.NaN)],
+    ["out of range", new Float32Array(9).fill(-0.1)],
+  ])(
+    "rejects a %s character color stream before GPU allocation",
+    (_name, colors) => {
+      const gl = driver(),
+        images = controlledImages(),
+        onError = vi.fn(),
+        renderer = createMahjongRenderer(setup(gl), { onError });
+      renderer.publish(frame());
+      for (const image of images) image.dispatchEvent(new Event("load"));
+      const before = gl.createBuffer.mock.calls.length;
+      renderer.setCharacters([{ ...characterSurface(), colors }]);
+      expect(gl.createBuffer.mock.calls.length).toBe(before);
+      expect(onError).toHaveBeenCalledOnce();
+      expect(onError.mock.calls[0][0]).toMatchObject({ code: "draw" });
+      renderer.dispose();
+    },
+  );
 });

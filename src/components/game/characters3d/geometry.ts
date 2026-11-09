@@ -44,8 +44,17 @@ function headUv(
   const q = p.headViews[view],
     front = p.headViews.front,
     frontY = p.photo.floor - v[1] * ppm;
-  if (view === "front")
-    return [(front.center + v[0] * ppm) / 1536, frontY / 1536];
+  if (view === "front") {
+    const x = v[0] * ppm * (v[1] < chin + 0.012 ? 0.45 : 1),
+      edge = p.headWidth * ppm * 0.5;
+    const compressed =
+      Math.abs(x) <= edge
+        ? x
+        : Math.sign(x) * (edge + (Math.abs(x) - edge) * 0.62);
+    const y =
+      center[1] < chin + 0.012 ? Math.min(frontY, front.bottom + 15) : frontY;
+    return [(front.center + compressed) / 1536, y / 1536];
+  }
   const region = headTextureRegions(p).find((r) => r.view === view);
   // The existing p2 scalp patch stays in its original atlas coordinates.
   if (region && center[1] < chin + 0.018) return sourceUv(p, v, view);
@@ -67,7 +76,7 @@ function headUv(
     y = region
       ? q.bottom - t * (q.bottom - q.top)
       : Math.min(
-          q.bottom - (view === "back" ? 0 : 5),
+          q.bottom - (view === "back" ? 0 : p.hairStyle === "fringe" ? 18 : 10),
           q.top +
             ((frontY - front.top) * (q.bottom - q.top)) /
               (front.bottom - front.top),
@@ -93,7 +102,10 @@ function headUv(
 
 /** Expanded triangles make independent view projection seams explicit. */
 class CharacterMeshBuilder {
-  private groups = new Map<string, { v: number[]; j: number[]; w: number[] }>();
+  private groups = new Map<
+    string,
+    { v: number[]; j: number[]; w: number[]; p: number[]; n: number[] }
+  >();
   constructor(
     private readonly profile: ModelProfile,
     private readonly bones: readonly Bone[],
@@ -123,16 +135,22 @@ class CharacterMeshBuilder {
     uv = true,
     uvProjector?: UvProjector,
     materialFor?: (p: V3) => string,
+    closed?: Surface,
   ) {
-    const vertex = (u: number, v: number): { p: V3; n: V3 } => {
-      const p = fn(u, v),
-        du = sub(fn(u + 0.0001, v), fn(u - 0.0001, v)),
+    const vertex = (
+      u: number,
+      v: number,
+      surface = fn,
+    ): { p: V3; n: V3; u: number; v: number } => {
+      const p = surface(u, v),
+        du = sub(surface(u + 0.0001, v), surface(u - 0.0001, v)),
         dv = sub(
-          fn(u, Math.min(1, v + 0.0001)),
-          fn(u, Math.max(0, v - 0.0001)),
+          surface(u, Math.min(1, v + 0.0001)),
+          surface(u, Math.max(0, v - 0.0001)),
         );
-      return { p, n: unit(cross(du, dv)) };
+      return { p, n: unit(cross(du, dv)), u, v };
     };
+    const vertexAt = vertex;
     for (let y = 0; y < vs; y++)
       for (let x = 0; x < us; x++) {
         const a = vertex(x / us, y / vs),
@@ -153,7 +171,13 @@ class CharacterMeshBuilder {
             (k) => tri.reduce((sum, v) => sum + v.p[k], 0) / 3,
           ) as unknown as V3;
           const key = materialFor?.(center) ?? material;
-          const g = this.groups.get(key) ?? { v: [], j: [], w: [] };
+          const g = this.groups.get(key) ?? {
+            v: [],
+            j: [],
+            w: [],
+            p: [],
+            n: [],
+          };
           this.groups.set(key, g);
           // Use the authored circumferential direction, not wrinkle normals:
           // otherwise each little fold would switch between sheet views.
@@ -178,6 +202,11 @@ class CharacterMeshBuilder {
                 )
               : [0, 0];
             g.v.push(...vertex.p, ...vertex.n, ...tex);
+            const target = closed
+              ? vertexAt(vertex.u, vertex.v, closed)
+              : vertex;
+            g.p.push(...sub(target.p, vertex.p));
+            g.n.push(...sub(target.n, vertex.n));
             const influences = weight(vertex.p).filter(([, w]) => w > 0);
             for (let k = 0; k < 4; k++) {
               g.j.push(influences[k]?.[0] ?? 0);
@@ -274,6 +303,14 @@ class CharacterMeshBuilder {
       vertices: new Float32Array(g.v),
       joints: new Uint16Array(g.j),
       weights: new Float32Array(g.w),
+      ...(g.p.some((n) => n !== 0)
+        ? {
+            handClosure: {
+              positions: new Float32Array(g.p),
+              normals: new Float32Array(g.n),
+            },
+          }
+        : {}),
     }));
   }
 }
@@ -296,6 +333,52 @@ function loft(rings: readonly Ring[], centerX = 0, fold = 0): Surface {
       Math.cos(angle) * lerp(2) * ripple + lerp(3),
     ];
   };
+}
+
+function applyHeadSeamColors(mesh: SkinMesh, p: ModelProfile): SkinMesh {
+  if (mesh.id !== "surface-reference") return mesh;
+  const table = p.seamColors;
+  if (!table?.length) return mesh;
+  const v = mesh.vertices,
+    colors = new Float32Array((v.length / 8) * 3).fill(1);
+  for (let k = 0; k < v.length; k += 8) {
+    if (
+      v[k + 2] < 0.015 ||
+      v[k + 1] < p.height - p.headLength ||
+      v[k + 1] > p.height - 0.07
+    )
+      continue;
+    const nearest = table
+      .filter((row) => row.xyz[0] * v[k] >= 0)
+      .reduce<(typeof table)[number] | undefined>(
+        (best, row) =>
+          !best ||
+          Math.hypot(
+            v[k] - row.xyz[0],
+            v[k + 1] - row.xyz[1],
+            v[k + 2] - row.xyz[2],
+          ) <
+            Math.hypot(
+              v[k] - best.xyz[0],
+              v[k + 1] - best.xyz[1],
+              v[k + 2] - best.xyz[2],
+            )
+            ? row
+            : best,
+        undefined,
+      );
+    if (!nearest) continue;
+    const distance = Math.hypot(
+        v[k] - nearest.xyz[0],
+        v[k + 2] - nearest.xyz[2],
+      ),
+      t = Math.max(0, 1 - distance / 0.032),
+      fade = t * t * (3 - 2 * t),
+      factor = v[k + 6] < 0.2 ? nearest.front : nearest.side;
+    for (let c = 0; c < 3; c++)
+      colors[(k / 8) * 3 + c] = 1 + (factor[c] - 1) * fade;
+  }
+  return { ...mesh, colors };
 }
 
 export function buildCharacterMeshes(
@@ -408,31 +491,56 @@ export function buildCharacterMeshes(
       const axis = unit(sub(to, from)),
         across = unit(cross(axis, [0, 0, 1])),
         depth = cross(across, axis);
-      b.surface(
-        id,
-        "skin",
+      const surface =
+        (closed: boolean): Surface =>
         (u, v) => {
           const angle = u * Math.PI * 2,
             cap = Math.sin(v * Math.PI),
             t = (1 - Math.cos(v * Math.PI)) / 2,
             r = radius * cap * (1 - 0.18 * t),
-            center = add(add(from, scale(sub(to, from), t)), [
-              0,
-              0,
-              curl * Math.sin((t * Math.PI) / 2),
-            ]);
+            length = Math.hypot(...sub(to, from)),
+            theta = t * Math.PI * 0.87,
+            thumb = id.startsWith("thumb"),
+            center = closed
+              ? thumb
+                ? add(from, [
+                    sign * 0.028 * s * t,
+                    -0.027 * s * t,
+                    0.021 * s * Math.sin((t * Math.PI) / 2),
+                  ])
+                : add(from, [
+                    (to[0] - from[0]) * t * 0.3,
+                    (-length * Math.sin(theta)) / 2.65,
+                    (length * (1 - Math.cos(theta))) / 2.65,
+                  ])
+              : add(add(from, scale(sub(to, from), t)), [
+                  0,
+                  0,
+                  curl * Math.sin((t * Math.PI) / 2),
+                ]),
+            tangent: V3 =
+              closed && !thumb ? [0, -Math.cos(theta), Math.sin(theta)] : axis,
+            localAcross = across,
+            localDepth = closed && !thumb ? cross(localAcross, tangent) : depth;
           return add(
             center,
             add(
-              scale(across, Math.cos(angle) * r),
-              scale(depth, Math.sin(angle) * r),
+              scale(localAcross, Math.cos(angle) * r),
+              scale(localDepth, Math.sin(angle) * r),
             ),
           );
-        },
+        };
+      b.surface(
+        id,
+        "skin",
+        surface(false),
         segments,
         6,
         rigid(`hand.${side}`),
         false,
+        undefined,
+        undefined,
+        p.hairStyle === "crop" ? surface(true) : undefined,
       );
     };
     const lengths = [0.057, 0.064, 0.06, 0.048];
@@ -445,7 +553,7 @@ export function buildCharacterMeshes(
         [x + sign * (f - 1.5) * 0.0015 * s, y - lengths[f] * s, 0.028],
         (f === 3 ? 0.007 : 0.0077) * s,
         8,
-        0.01 * s,
+        (p.hairStyle === "crop" ? 0.023 : 0.01) * s,
       );
     }
     // Oblique opposition from the radial edge, with its root inside the palm.
@@ -455,7 +563,7 @@ export function buildCharacterMeshes(
       [wristX - sign * 0.049 * s, 0.876 * s, 0.037],
       0.012 * s,
       10,
-      0.009 * s,
+      (p.hairStyle === "crop" ? 0.016 : 0.009) * s,
     );
     if (p.shoe === "cargo-shoe") {
       b.ellipsoid(
@@ -500,8 +608,12 @@ export function buildCharacterMeshes(
       const q = collarProfile(u, v);
       return [
         q[0],
-        q[1] - 0.021 * s * Math.max(0, Math.cos(u * 2 * Math.PI)) ** 4,
-        q[2],
+        q[1] -
+          Math.min(
+            (0.032 * s * (1 + Math.cos(u * 2 * Math.PI))) / 2,
+            Math.max(0, q[1] - 1.414 * s),
+          ),
+        q[2] - 0.016 * s * Math.max(0, Math.cos(u * 2 * Math.PI)) ** 2,
       ];
     },
     32,
@@ -520,8 +632,12 @@ export function buildCharacterMeshes(
         ])(u, v);
         return [
           q[0],
-          q[1] - 0.021 * s * Math.max(0, Math.cos(u * 2 * Math.PI)) ** 4,
-          q[2],
+          q[1] -
+            Math.min(
+              (0.032 * s * (1 + Math.cos(u * 2 * Math.PI))) / 2,
+              Math.max(0, q[1] - 1.414 * s),
+            ),
+          q[2] - 0.016 * s * Math.max(0, Math.cos(u * 2 * Math.PI)) ** 2,
         ];
       },
       20,
@@ -672,7 +788,7 @@ export function buildCharacterMeshes(
     } else {
       const wave = p.hairStyle === "wave" ? 0.017 : 0.004;
       path = [
-        [x, chin + 0.177, 0.081],
+        [x, chin + (p.hairStyle === "swept" ? 0.205 : 0.177), 0.081],
         [x - 0.017, p.height - 0.01 + wave - crownDrop, 0.072],
         [x - 0.024, p.height - 0.01 + wave - crownDrop, -0.01],
         [x - 0.009, p.height - 0.064, -0.085],
@@ -743,5 +859,5 @@ export function buildCharacterMeshes(
     6,
     16,
   );
-  return b.meshes();
+  return b.meshes().map((mesh) => applyHeadSeamColors(mesh, p));
 }

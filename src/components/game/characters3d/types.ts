@@ -37,6 +37,12 @@ export interface SkinMesh {
   readonly vertices: Float32Array;
   readonly joints: Uint16Array;
   readonly weights: Float32Array;
+  /** Optional linear RGB multipliers; glTF COLOR_0, one per expanded vertex. */
+  readonly colors?: Float32Array;
+  readonly handClosure?: {
+    readonly positions: Float32Array;
+    readonly normals: Float32Array;
+  };
 }
 export interface CharacterMaterial {
   readonly id: string;
@@ -91,9 +97,11 @@ export interface CharacterPose {
   readonly rootOffset: V3;
   readonly clipId: CharacterClipId;
   readonly finished: boolean;
+  readonly handClosure?: number;
 }
 export interface ProjectedCharacterBatch {
   readonly id: string;
   readonly materialId: string;
   readonly vertices: Float32Array;
+  readonly colors?: Float32Array;
 }

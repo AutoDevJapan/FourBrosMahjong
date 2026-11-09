@@ -132,9 +132,34 @@ export function exportCharacterGlb(
         POSITION: attr(pos, "VEC3", 3, true, 34962),
         NORMAL: attr(normal, "VEC3", 3, false, 34962),
         TEXCOORD_0: attr(uv, "VEC2", 2, false, 34962),
+        ...(mesh.colors
+          ? { COLOR_0: attr(mesh.colors, "VEC3", 3, false, 34962) }
+          : {}),
         JOINTS_0: attr(joints, "VEC4", 4, false, 34962),
         WEIGHTS_0: attr(mesh.weights, "VEC4", 4, false, 34962),
       },
+      ...(model.meshes.some((m) => m.handClosure)
+        ? {
+            targets: [
+              {
+                POSITION: attr(
+                  mesh.handClosure?.positions ?? new Float32Array(n * 3),
+                  "VEC3",
+                  3,
+                  true,
+                  34962,
+                ),
+                NORMAL: attr(
+                  mesh.handClosure?.normals ?? new Float32Array(n * 3),
+                  "VEC3",
+                  3,
+                  false,
+                  34962,
+                ),
+              },
+            ],
+          }
+        : {}),
       material: model.materials.findIndex((mat) => mat.id === mesh.materialId),
       mode: 4,
     };
@@ -173,6 +198,21 @@ export function exportCharacterGlb(
         target: { node: b, path: "rotation" },
       });
     }
+    if (model.meshes.some((m) => m.handClosure)) {
+      const values = Float32Array.from(
+        times,
+        (t) => sampleCharacterPose(model, clip.id, t).handClosure ?? 0,
+      );
+      samplers.push({
+        input: time,
+        output: attr(values, "SCALAR", 1),
+        interpolation: "LINEAR",
+      });
+      channels.push({
+        sampler: samplers.length - 1,
+        target: { node: model.bones.length, path: "weights" },
+      });
+    }
     const positions = new Float32Array(count * 3);
     for (let i = 0; i < count; i++)
       positions.set(
@@ -205,7 +245,15 @@ export function exportCharacterGlb(
     scene: 0,
     scenes: [{ nodes: [0, nodes.length - 1] }],
     nodes,
-    meshes: [{ name: model.name, primitives }],
+    meshes: [
+      {
+        name: model.name,
+        primitives,
+        ...(model.meshes.some((m) => m.handClosure)
+          ? { weights: [0], extras: { targetNames: ["hand-closure"] } }
+          : {}),
+      },
+    ],
     materials,
     skins: [
       {

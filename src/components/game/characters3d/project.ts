@@ -17,12 +17,14 @@ export function projectCharacterGeometry(
     for (let i = 0; i < v.length / 8; i++) {
       const offset = i * 8,
         skin = i * 4;
-      const x = v[offset],
-        y = v[offset + 1],
-        z = v[offset + 2];
-      const nx = v[offset + 3],
-        ny = v[offset + 4],
-        nz = v[offset + 5];
+      const closure = pose.handClosure ?? 0,
+        morph = mesh.handClosure;
+      const x = v[offset] + (morph?.positions[i * 3] ?? 0) * closure,
+        y = v[offset + 1] + (morph?.positions[i * 3 + 1] ?? 0) * closure,
+        z = v[offset + 2] + (morph?.positions[i * 3 + 2] ?? 0) * closure;
+      const nx = v[offset + 3] + (morph?.normals[i * 3] ?? 0) * closure,
+        ny = v[offset + 4] + (morph?.normals[i * 3 + 1] ?? 0) * closure,
+        nz = v[offset + 5] + (morph?.normals[i * 3 + 2] ?? 0) * closure;
       let px = 0,
         py = 0,
         pz = 0,
@@ -50,6 +52,11 @@ export function projectCharacterGeometry(
       out[offset + 6] = v[offset + 6];
       out[offset + 7] = v[offset + 7];
     }
-    return { id: mesh.id, materialId: mesh.materialId, vertices: out };
+    return {
+      id: mesh.id,
+      materialId: mesh.materialId,
+      vertices: out,
+      ...(mesh.colors ? { colors: mesh.colors } : {}),
+    };
   });
 }

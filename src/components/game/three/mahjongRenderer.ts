@@ -73,12 +73,14 @@ const VERTEX = `#version 300 es
 layout(location=0) in vec3 aPosition;
 layout(location=1) in vec3 aNormal;
 layout(location=2) in vec2 aUv;
+layout(location=3) in vec3 aColor;
 uniform mat4 uModel;
 uniform mat4 uCamera;
 out vec3 vNormal;
 out vec3 vWorld;
 out vec3 vLocal;
 out vec2 vUv;
+out vec3 vColor;
 void main() {
   vec4 world = uModel * vec4(aPosition, 1.0);
   vWorld = world.xyz;
@@ -86,6 +88,7 @@ void main() {
   mat3 m = mat3(uModel);
   vNormal = normalize(m * (aNormal / vec3(dot(m[0],m[0]),dot(m[1],m[1]),dot(m[2],m[2]))));
   vUv = aUv;
+  vColor = aColor;
   gl_Position = uCamera * world;
 }`;
 const FRAGMENT = `#version 300 es
@@ -94,6 +97,7 @@ in vec3 vNormal;
 in vec3 vWorld;
 in vec3 vLocal;
 in vec2 vUv;
+in vec3 vColor;
 uniform vec3 uColor;
 uniform int uMaterial;
 uniform bool uTextured;
@@ -104,6 +108,7 @@ out vec4 outColor;
 void main() {
   vec3 color = uColor;
   if (uTextured) color = texture(uTexture, vUv).rgb;
+  color *= pow(vColor,vec3(1.0/2.2));
   if (uMaterial == 1) {
     float grain = fract(sin(dot(floor(vWorld.xz * 170.0), vec2(12.9898,78.233))) * 43758.5453);
     color *= 0.94 + grain * 0.12;
@@ -148,9 +153,10 @@ export function createMahjongRenderer(
   let picks: PickFace[] = [];
   let highestGeneration = 0;
   let characterSurfaces: readonly CharacterSurface[] = [];
+  let characterBufferBytes = 0;
   const characterMeshes = new Map<
     string,
-    { mesh: Mesh; buffer: WebGLBuffer; vertices: number }
+    { mesh: Mesh; buffer: WebGLBuffer; colors?: WebGLBuffer; vertices: number }
   >();
   const shaders: WebGLShader[] = [],
     programs: WebGLProgram[] = [],
@@ -196,6 +202,7 @@ export function createMahjongRenderer(
     selected = null;
     highestGeneration = 0;
     characterSurfaces = [];
+    characterBufferBytes = 0;
     characterMeshes.clear();
   };
   const fail = (
@@ -292,8 +299,16 @@ export function createMahjongRenderer(
         material: number,
         texture: WebGLTexture | undefined,
         highlight = false,
+        colors?: WebGLBuffer,
       ) => {
         gl!.bindVertexArray(geometry.vao);
+        gl!.disableVertexAttribArray(3);
+        gl!.vertexAttrib3f(3, 1, 1, 1);
+        if (colors) {
+          gl!.bindBuffer(gl!.ARRAY_BUFFER, colors);
+          gl!.enableVertexAttribArray(3);
+          gl!.vertexAttribPointer(3, 3, gl!.FLOAT, false, 12, 0);
+        }
         gl!.uniformMatrix4fv(uniforms.uModel, false, model);
         gl!.uniform3fv(uniforms.uColor, color);
         gl!.uniform1i(uniforms.uMaterial, material);
@@ -350,6 +365,8 @@ export function createMahjongRenderer(
           surface.material.texture
             ? textures.get(surface.material.texture)
             : undefined,
+          false,
+          item.colors,
         );
       }
       gl.depthMask(true);
@@ -437,7 +454,8 @@ export function createMahjongRenderer(
           4 *
           (4 / 3),
       );
-      const available = GPU_STORAGE_BUDGET - textureBytes;
+      const available =
+        GPU_STORAGE_BUDGET - textureBytes - characterBufferBytes;
       if (available <= 0) throw new Error("Texture storage exceeds GPU budget");
       const samples = Math.max(1, gl.getParameter(gl.SAMPLES) as number);
       const maxPixels = Math.floor(available / (4 + samples * 8));
@@ -531,6 +549,14 @@ export function createMahjongRenderer(
             !options.characterTextures?.[surface.material.texture]
           )
             throw new Error("Unregistered character texture");
+          if (
+            surface.colors &&
+            (surface.colors.length !== (surface.vertices.length / 8) * 3 ||
+              !surface.colors.every(
+                (c) => Number.isFinite(c) && c >= 0 && c <= 1,
+              ))
+          )
+            throw new Error("Invalid character color stream");
           let item = characterMeshes.get(surface.id);
           if (!item) {
             const vao = gl.createVertexArray();
@@ -565,6 +591,21 @@ export function createMahjongRenderer(
           }
           if (item.vertices !== surface.vertices.length)
             throw new Error("Character topology changed inside one runtime");
+          if (!surface.colors && item.colors) {
+            gl.deleteBuffer(item.colors);
+            buffers.splice(buffers.indexOf(item.colors), 1);
+            item.colors = undefined;
+          }
+          if (surface.colors) {
+            if (!item.colors) {
+              const c = gl.createBuffer();
+              if (!c) throw new Error("Cannot allocate character colors");
+              buffers.push(c);
+              item.colors = c;
+            }
+            gl.bindBuffer(gl.ARRAY_BUFFER, item.colors);
+            gl.bufferData(gl.ARRAY_BUFFER, surface.colors, gl.STATIC_DRAW);
+          }
           gl.bindBuffer(gl.ARRAY_BUFFER, item.buffer);
           gl.bufferData(gl.ARRAY_BUFFER, surface.vertices, gl.DYNAMIC_DRAW);
         }
@@ -572,15 +613,27 @@ export function createMahjongRenderer(
           if (ids.has(id)) continue;
           gl.deleteVertexArray(item.mesh.vao);
           gl.deleteBuffer(item.buffer);
+          if (item.colors) {
+            gl.deleteBuffer(item.colors);
+            buffers.splice(buffers.indexOf(item.colors), 1);
+          }
           vaos.splice(vaos.indexOf(item.mesh.vao), 1);
           buffers.splice(buffers.indexOf(item.buffer), 1);
           characterMeshes.delete(id);
         }
         gl.bindVertexArray(null);
         gl.bindBuffer(gl.ARRAY_BUFFER, null);
+        const bytes = surfaces.reduce(
+            (sum, s) =>
+              sum + s.vertices.byteLength + (s.colors?.byteLength ?? 0),
+            0,
+          ),
+          budgetChanged = bytes !== characterBufferBytes;
+        characterBufferBytes = bytes;
         characterSurfaces = surfaces;
         checked();
-        draw();
+        if (budgetChanged) resize();
+        else draw();
       } catch (error) {
         fail("draw", "Character geometry update failed", error);
       }

@@ -63,6 +63,7 @@ export function sampleCharacterPose(
     return { rotations, rootOffset: [0, 0, 0], clipId: id, finished: false };
   const s = model.height / 1.75,
     bench = id === "bench-idle";
+  let handClosure = 0;
   const finished = !spec.loop && seconds >= spec.duration;
   const phase = spec.loop
     ? (seconds % spec.duration) / spec.duration
@@ -103,6 +104,16 @@ export function sampleCharacterPose(
         base[2] + z * a * v,
       ];
     };
+    if (model.id === "p2")
+      handClosure =
+        a *
+        (id === "win-tsumo" || id === "win-ron"
+          ? 0.9
+          : id === "declare" || id === "call"
+            ? 0.55
+            : id === "kita"
+              ? 0.32
+              : 0);
     switch (id) {
       case "deal":
         set("head", 0.1);
@@ -147,7 +158,9 @@ export function sampleCharacterPose(
         set("hand.R", -0.25);
         if (model.id === "p2") {
           set("upperArm.L", -0.12, 0, 0.24);
-          set("forearm.L", -0.82);
+          set("forearm.L", -0.66);
+          set("hand.L", 0.08, -0.18, -0.13);
+          set("hand.R", 0.06, 0.18, 0.13);
         }
         if (model.id === "p3") {
           set("upperArm.L", -0.03, 0, 0.23);
@@ -168,5 +181,11 @@ export function sampleCharacterPose(
         break;
     }
   }
-  return { rotations, rootOffset: [0, -0.39 * s, 0], clipId: id, finished };
+  return {
+    rotations,
+    rootOffset: [0, -0.39 * s, 0],
+    clipId: id,
+    finished,
+    ...(model.id === "p2" ? { handClosure } : {}),
+  };
 }

@@ -43,7 +43,8 @@ export function renderCharacterReview(
   const light = unit([-0.35, 0.8, 0.6]);
   for (const mesh of batches) {
     const mat = model.materials.find((m) => m.id === mesh.materialId)!;
-    const vs = mesh.vertices;
+    const vs = mesh.vertices,
+      colors = mesh.colors;
     for (let i = 0; i < vs.length; i += 24) {
       const a = proj([vs[i], vs[i + 1], vs[i + 2]]),
         b = proj([vs[i + 8], vs[i + 9], vs[i + 10]]),
@@ -95,8 +96,25 @@ export function renderCharacterReview(
             color = [texture.data[t], texture.data[t + 1], texture.data[t + 2]];
           }
           pixels.set(
-            color.map((n) =>
-              Math.max(0, Math.min(255, Math.round(n * illumination))),
+            color.map((n, channel) =>
+              Math.max(
+                0,
+                Math.min(
+                  255,
+                  Math.round(
+                    n *
+                      illumination *
+                      (colors
+                        ? Math.pow(
+                            colors![(i / 8) * 3 + channel] * aa +
+                              colors![(i / 8 + 1) * 3 + channel] * bb +
+                              colors![(i / 8 + 2) * 3 + channel] * cc,
+                            1 / 2.2,
+                          )
+                        : 1),
+                  ),
+                ),
+              ),
             ),
             offset * 4,
           );

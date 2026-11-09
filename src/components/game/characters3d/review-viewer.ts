@@ -14,12 +14,12 @@ import {
 
 type View = "front" | "side" | "back" | "table";
 const VERTEX = `#version 300 es
-layout(location=0) in vec3 p;layout(location=1) in vec3 n;layout(location=2) in vec2 uv;
-uniform mat4 camera;out vec3 normal;out vec2 texcoord;
-void main(){gl_Position=camera*vec4(p,1.);normal=n;texcoord=uv;}`;
+layout(location=0) in vec3 p;layout(location=1) in vec3 n;layout(location=2) in vec2 uv;layout(location=3) in vec3 tint;
+uniform mat4 camera;out vec3 normal;out vec2 texcoord;out vec3 vertexTint;
+void main(){gl_Position=camera*vec4(p,1.);normal=n;texcoord=uv;vertexTint=tint;}`;
 const FRAGMENT = `#version 300 es
-precision highp float;in vec3 normal;in vec2 texcoord;uniform vec3 color;uniform bool textured;uniform sampler2D image;out vec4 frag;
-void main(){vec3 c=color;if(textured)c*=texture(image,texcoord).rgb;float light=.75+.27*max(dot(normalize(normal),normalize(vec3(-.35,.8,.6))),0.);frag=vec4(c*light,1.);}`;
+precision highp float;in vec3 normal;in vec2 texcoord;in vec3 vertexTint;uniform vec3 color;uniform bool textured;uniform sampler2D image;out vec4 frag;
+void main(){vec3 c=color;if(textured)c*=texture(image,texcoord).rgb;float light=.75+.27*max(dot(normalize(normal),normalize(vec3(-.35,.8,.6))),0.);frag=vec4(c*pow(vertexTint,vec3(1./2.2))*light,1.);}`;
 function camera(
   eye: V3,
   target: V3,
@@ -133,7 +133,11 @@ const actors = new Map<
   {
     model: CharacterModel;
     texture: WebGLTexture;
-    meshes: { vao: WebGLVertexArrayObject; buffer: WebGLBuffer }[];
+    meshes: {
+      vao: WebGLVertexArrayObject;
+      buffer: WebGLBuffer;
+      colorBuffer?: WebGLBuffer;
+    }[];
   }
 >();
 let modelId: CharacterPlayerId = "p0",
@@ -207,6 +211,8 @@ function reviewBox(center: V3, size: V3, color: V3) {
       }
     }
   gpu.bindVertexArray(propVao);
+  gpu.disableVertexAttribArray(3);
+  gpu.vertexAttrib3f(3, 1, 1, 1);
   gpu.bindBuffer(gpu.ARRAY_BUFFER, propBuffer);
   gpu.bufferData(
     gpu.ARRAY_BUFFER,
@@ -252,7 +258,16 @@ async function load(id: CharacterPlayerId) {
       gpu.enableVertexAttribArray(location);
       gpu.vertexAttribPointer(location, size, gpu.FLOAT, false, 32, offset);
     }
-    return { vao, buffer };
+    let colorBuffer: WebGLBuffer | undefined;
+    if (mesh.colors) {
+      colorBuffer = gpu.createBuffer()!;
+      buffers.push(colorBuffer);
+      gpu.bindBuffer(gpu.ARRAY_BUFFER, colorBuffer);
+      gpu.bufferData(gpu.ARRAY_BUFFER, mesh.colors, gpu.STATIC_DRAW);
+      gpu.enableVertexAttribArray(3);
+      gpu.vertexAttribPointer(3, 3, gpu.FLOAT, false, 12, 0);
+    }
+    return { vao, buffer, colorBuffer };
   });
   const actor = { model, texture, meshes };
   actors.set(id, actor);
@@ -308,6 +323,10 @@ function draw() {
         mat = actor.model.materials.find((m) => m.id === batch.materialId)!,
         mesh = actor.meshes[k];
       gpu.bindVertexArray(mesh.vao);
+      if (!mesh.colorBuffer) {
+        gpu.disableVertexAttribArray(3);
+        gpu.vertexAttrib3f(3, 1, 1, 1);
+      }
       gpu.bindBuffer(gpu.ARRAY_BUFFER, mesh.buffer);
       gpu.bufferSubData(gpu.ARRAY_BUFFER, 0, batch.vertices);
       gpu.uniform3fv(uniforms.color, mat.color);
