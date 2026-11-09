@@ -13,6 +13,8 @@
 | [0003](./0003-engine-state-ownership.md) | engine 公開アクションの state 所有権契約(入力は使い捨て) | Accepted | 2026-08-03 |
 | [0004](./0004-history-exclusion-policy.md) | 戦績の排他制御方針(追記は fail-closed、全件削除は「排他APIが無い環境だけ」fail-open) | Accepted | 2026-08-06 |
 | [0005](./0005-online-multiplayer-transport.md) | オンライン対戦の Vercel + Railway WebSocket 構成 | Accepted | 2026-08-15 |
+| [0006](./0006-prd-only-deployment.md) | 稼働配備を既存Prdだけに統一する | Accepted | 2026-10-11 |
+| [0007](./0007-railway-named-partial.md) | 共有Railway環境の対象サービスだけをnamed partialで管理する | Accepted | 2026-11-09 |
 
 ## 運用方針
 

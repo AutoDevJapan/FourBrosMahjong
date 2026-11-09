@@ -11,7 +11,7 @@
 | [custom-domain-setup.md](./custom-domain-setup.md) | Vercel prd へのカスタムドメイン公開(DNS 設定・環境紐付け・検証)手順 |
 | [railway-online-deploy-runbook.md](./railway-online-deploy-runbook.md) | Railway オンラインサーバーの production deploy、Origin boundary probe、証跡、rollback 手順 |
 | [railway-production-readback.md](./railway-production-readback.md) | #980 の Railway Production identity/config/probe read-back を offline で fail-closed 検証する手順 |
-| [railway-iac-migration.md](./railway-iac-migration.md) | Config as Code ownership cutover直後のparity証拠、HOLD、legacy contingency |
+| [railway-iac-migration.md](./railway-iac-migration.md) | named partialの対象限定移行候補、SDK/CLI差、native pinned plan、parityとruntime変更の分離 |
 | [release-tag-protection-runbook.md](./release-tag-protection-runbook.md) | `v*` Release tag の担当ロール・GitHub Ruleset・拒否検証・break-glass・新 version rollback 手順 |
 | [unity-display-feasibility.md](./unity-display-feasibility.md) | Unity版の表示専用契約、固定ローテーションfixture、実行前のGo/No-Go境界 |
 | [unity-display-reference.md](./unity-display-reference.md) | #828のUnity導入前ブラウザ・リファレンスと確認手順 |

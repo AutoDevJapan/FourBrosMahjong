@@ -1,5 +1,10 @@
 import { createHash } from "node:crypto";
 import ts from "typescript";
+import {
+  inspectNamedPartialSource,
+  type NamedPartialReason,
+  validateNamedPartialEvidence,
+} from "./railway-iac-named-partial";
 import { parseStrictJson } from "./strictJson";
 
 const RAILWAY_IAC_EVIDENCE_SCHEMA_VERSION = 1 as const;
@@ -62,19 +67,23 @@ export const RAILWAY_IAC_MIGRATION_REASONS = [
 type RailwayIacMigrationReason = (typeof RAILWAY_IAC_MIGRATION_REASONS)[number];
 
 export interface RailwayIacMigrationResult {
-  schemaVersion: typeof RAILWAY_IAC_EVIDENCE_SCHEMA_VERSION;
+  schemaVersion: typeof RAILWAY_IAC_EVIDENCE_SCHEMA_VERSION | 2;
   migrationEvidence: "pass" | "hold";
   authorizesMigration: false;
   authorizesApply: false;
   authorizesDeployment: false;
   externalMutationPerformed: false;
-  reasons: RailwayIacMigrationReason[];
+  reasons: (RailwayIacMigrationReason | NamedPartialReason)[];
 }
 
 export interface RailwayIacFilesystemEvidence {
   generatedIacPath: string | null;
   generatedIacSha256: string | null;
   generatedIacSecretSafe: boolean | null;
+  generatedIacSource?: string | null;
+  generatedIacTreeSha1?: string | null;
+  sdkPackageVersion?: string | null;
+  sdkSchemaSha256?: string | null;
   currentRepositoryFilePresent: boolean;
   currentRepositoryFileSha256: string | null;
   currentRepositoryFileContent: string | null;
@@ -515,6 +524,10 @@ export function generatedIacSourceIsSecretSafe(source: string): boolean {
   ) {
     return false;
   }
+  // The current CLI emits a project variable-policy extension absent from the
+  // SDK declaration. Its local binding is safe only in the exact literal,
+  // target-only authoring shape; general aliases remain rejected below.
+  const strictTargetPartial = inspectNamedPartialSource(source) !== null;
   const sourceFile = ts.createSourceFile(
     "railway.ts",
     source,
@@ -1098,6 +1111,16 @@ export function generatedIacSourceIsSecretSafe(source: string): boolean {
       return true;
     }
     if (
+      strictTargetPartial &&
+      ts.isCallExpression(parent) &&
+      ts.isIdentifier(parent.expression) &&
+      parent.expression.text === "project" &&
+      resolveBinding(parent.expression)?.kind === "import" &&
+      parent.arguments[1] === node &&
+      resolveBinding(node)?.kind === "non-resource"
+    )
+      return true;
+    if (
       ts.isCallExpression(parent) &&
       parent.expression !== node &&
       parent.arguments[0] === node &&
@@ -1310,11 +1333,28 @@ export function generatedIacSourceIsSecretSafe(source: string): boolean {
         safe = false;
         return;
       }
-      safe = node.initializer.properties.every(
-        (property) =>
-          ts.isPropertyAssignment(property) &&
-          isAllowedVariableValue(property.initializer),
-      );
+      const unmanaged =
+        propertyNameText(node.name) === "variables" &&
+        ((ts.isCallExpression(node.parent.parent) &&
+          ts.isIdentifier(node.parent.parent.expression) &&
+          node.parent.parent.expression.text === "project" &&
+          resolveBinding(node.parent.parent.expression)?.kind === "import" &&
+          node.parent.parent.arguments[1] === node.parent) ||
+          strictTargetPartial) &&
+        node.initializer.properties.length === 1 &&
+        node.initializer.properties.every(
+          (property) =>
+            ts.isPropertyAssignment(property) &&
+            propertyNameText(property.name) === "managed" &&
+            property.initializer.kind === ts.SyntaxKind.FalseKeyword,
+        );
+      safe =
+        unmanaged ||
+        node.initializer.properties.every(
+          (property) =>
+            ts.isPropertyAssignment(property) &&
+            isAllowedVariableValue(property.initializer),
+        );
       if (!safe) return;
     }
     if (
@@ -1351,6 +1391,29 @@ export function validateRailwayIacMigrationEvidence(
   filesystem: RailwayIacFilesystemEvidence,
   nowMs = Date.now(),
 ): RailwayIacMigrationResult {
+  if (isRecord(input) && input.schemaVersion === 2) {
+    const result = validateNamedPartialEvidence(
+      input,
+      filesystem,
+      RAILWAY_LEGACY_FIXTURE_SHA256,
+      generatedIacSourceIsSecretSafe,
+      nowMs,
+    );
+    if (
+      !currentRepositoryFileContentIsKnown(
+        filesystem.currentRepositoryFileContent,
+      )
+    ) {
+      return {
+        ...result,
+        migrationEvidence: "hold",
+        reasons: [
+          ...new Set([...result.reasons, "legacy-config-missing" as const]),
+        ].sort(),
+      };
+    }
+    return result;
+  }
   const reasons: RailwayIacMigrationReason[] = [];
   const finish = (): RailwayIacMigrationResult => ({
     schemaVersion: RAILWAY_IAC_EVIDENCE_SCHEMA_VERSION,
