@@ -8,6 +8,10 @@
 
 ## 現行構成の制約
 
+2026-11-09にreview済みsourceを既存Productionへ反映し、認証済みops集計とdirect Node起動を確認した。
+[移行時の受入記録](../evidence/production-online-20261109.md)を現在のbaselineとして読み、以下の旧runtimeの未観測事項と区別する。
+次回更新のpreflightと、default-offのmaintenance通知を有効化する条件は引き続き適用する。
+
 - ルーム、座席、対局状態は `RoomManager` のプロセスメモリだけに存在する。restart、redeploy、rollback のいずれでも進行中のルームは復元されない。
 - `/healthz` はプロセスの起動を示すだけで、active room 数、接続数、drain 状態、source SHA を返さない。現行ログにも active room 数の集計はない。Railway の CPU / network graph や一般ログだけから「active room が 0」とは証明できない。
 - `GET /` は endpoint discovery として `liveness: "/healthz"`、`readiness: "/readyz"`、`websocket: "/ws"` を返す。旧 `health: "/healthz"` は liveness の互換 alias であり、readiness の意味には使わない。
