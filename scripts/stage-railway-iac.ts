@@ -14,8 +14,8 @@ import { dirname, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { TextDecoder } from "node:util";
 import ts from "typescript";
-import { inspectNamedPartialSource } from "./railway-iac-named-partial";
 import { generatedIacSourceIsSecretSafe } from "./railway-iac-migration-contract";
+import { inspectNamedPartialSource } from "./railway-iac-named-partial";
 import {
   isDirectEntrypoint,
   MAX_GENERATED_IAC_BYTES,

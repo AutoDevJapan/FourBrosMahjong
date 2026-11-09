@@ -10,10 +10,10 @@ import {
   FOURBROS_IAC_ADDRESS as ADDRESS,
   FOURBROS_IAC_PARTIAL,
   FOURBROS_IAC_SDK_SCHEMA_SHA256,
-  FOURBROS_IAC_TARGET as TARGET,
   iacSha256,
   inspectNamedPartialSource,
   singleFileIacTree,
+  FOURBROS_IAC_TARGET as TARGET,
 } from "../../scripts/railway-iac-named-partial";
 import { localFilesystemEvidence } from "../../scripts/verify-railway-iac-migration";
 
