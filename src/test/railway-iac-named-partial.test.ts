@@ -19,6 +19,10 @@ import { localFilesystemEvidence } from "../../scripts/verify-railway-iac-migrat
 
 const NOW = Date.parse("2026-11-09T03:00:00.000Z");
 const SOURCE = readFileSync(".railway/railway.ts", "utf8");
+const ARCHIVED_READY_CONFIG = readFileSync(
+  "documents/fixtures/railway-readyz-before-iac.json",
+  "utf8",
+);
 const FILESYSTEM = localFilesystemEvidence();
 const CONFIG_ETAG = "a".repeat(64);
 const OTHER = "service.untouched-fixture";
@@ -225,6 +229,58 @@ function checked(
 }
 
 describe("#742 named partial native plan contract", () => {
+  it("rejects a root Config as Code file even with an empty service setting", () => {
+    expect(
+      checked(validEvidence(), {
+        ...FILESYSTEM,
+        legacyJsonFilePresent: true,
+      }).reasons,
+    ).toContain("alternate-legacy-config-present");
+  });
+
+  it("accepts the named partial without root Config as Code files", () => {
+    expect(
+      checked(validEvidence(), {
+        ...FILESYSTEM,
+        legacyJsonFilePresent: false,
+        currentRepositoryFilePresent: false,
+        currentRepositoryFileContent: null,
+        currentRepositoryFileSha256: null,
+      }).migrationEvidence,
+    ).toBe("pass");
+    expect(FILESYSTEM).toMatchObject({
+      legacyJsonFilePresent: false,
+      legacyTomlFilePresent: false,
+      currentRepositoryFilePresent: false,
+      currentRepositoryFileContent: null,
+      currentRepositoryFileSha256: null,
+    });
+  });
+
+  it.each([undefined, true])(
+    "rejects unverified or unreadable root JSON absence: %s",
+    (presence) => {
+      expect(
+        checked(validEvidence(), {
+          ...FILESYSTEM,
+          legacyJsonFilePresent: presence,
+        }).reasons,
+      ).toContain("alternate-legacy-config-present");
+    },
+  );
+
+  it("rejects contradictory readable content with a claimed absent root JSON", () => {
+    expect(
+      checked(validEvidence(), {
+        ...FILESYSTEM,
+        legacyJsonFilePresent: false,
+        currentRepositoryFilePresent: true,
+        currentRepositoryFileContent: ARCHIVED_READY_CONFIG,
+        currentRepositoryFileSha256: iacSha256(ARCHIVED_READY_CONFIG),
+      }).reasons,
+    ).toContain("alternate-legacy-config-present");
+  });
+
   it("accepts only an explicit empty Config File setting after ownership cutover", () => {
     const disabled = validEvidence();
     disabled.evidence.inventory.configFileSetting = "";
@@ -432,22 +488,21 @@ describe("#742 named partial native plan contract", () => {
     f.output.diff = "another plan";
     expect(checked(f).reasons).toContain("native-plan-invalid");
   });
-  it("keeps strict and duplicate-key legacy config checks in the named contract", () => {
+  it("rejects root JSON regardless of its valid, duplicate-key or stale contents", () => {
     for (const source of [
-      FILESYSTEM.currentRepositoryFileContent!.replace(
-        '"deploy": {',
-        '"deploy": {},"deploy": {',
-      ),
-      FILESYSTEM.currentRepositoryFileContent!.replace("/readyz", "/healthz"),
+      ARCHIVED_READY_CONFIG,
+      ARCHIVED_READY_CONFIG.replace('"deploy": {', '"deploy": {},"deploy": {'),
+      ARCHIVED_READY_CONFIG.replace("/readyz", "/healthz"),
     ]) {
-      expect(source).not.toBe(FILESYSTEM.currentRepositoryFileContent);
       expect(
         checked(validEvidence(), {
           ...FILESYSTEM,
+          legacyJsonFilePresent: true,
+          currentRepositoryFilePresent: true,
           currentRepositoryFileContent: source,
           currentRepositoryFileSha256: iacSha256(source),
         }).reasons,
-      ).toContain("legacy-config-missing");
+      ).toContain("alternate-legacy-config-present");
     }
   });
   it("rejects duplicate native JSON names before parsing silently overwrites them", () => {
