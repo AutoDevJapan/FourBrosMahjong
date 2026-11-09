@@ -88,6 +88,19 @@ export default function LobbyPage({ fontVariableClassName }: LobbyPageProps) {
         <footer className="lobby-footer">
           本作は粗品 Official
           Channel「ギャンブル四兄弟」を題材にした非公式ファンメイド作品です
+          <p>
+            運営事業者: AutoDevJapan · お問い合わせ:{" "}
+            <a className="underline" href="mailto:contact@autodevjapan.com">
+              contact@autodevjapan.com
+            </a>
+            {" · "}
+            <a
+              className="underline"
+              href="https://autodevjapan.com/api/disclosure"
+            >
+              事業者情報の開示請求
+            </a>
+          </p>
         </footer>
       </main>
     </DesignPageShell>

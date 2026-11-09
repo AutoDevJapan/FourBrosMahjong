@@ -1,5 +1,11 @@
 # AGENTS.md
 
+## 配備方針
+
+公開・稼働する環境はPrdだけとする。Preview、dev、stg、stagingの配備を作成・昇格しない。
+Vercelは既存プロジェクトのmain→Productionを維持する。localhostとCI内の隔離検査は継続する。
+詳細と実操作の達成状況は `docs/デプロイ環境運用.md` を参照する。
+
 <!-- GoDD:start -->
 ### GoDD stack snapshot
 

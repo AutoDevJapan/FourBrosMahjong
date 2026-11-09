@@ -71,6 +71,10 @@ export const TEST_INPUT_PATHS = [
   "documents/fixtures/railway-pre-cutover.json",
   // src/test/blender-asset-study.test.ts がREADMEの実測表とmanifestを照合する。
   "prototypes/blender/README.md",
+  // Schema v1 regression tests retain the later /readyz CaC artifact.
+  "documents/fixtures/railway-readyz-before-iac.json",
+  // src/test/unity-display-contract.test.ts がUnity表示契約と席回転を検証する。
+  "documents/fixtures/unity-display-contract.json",
 ];
 
 /** テストがディレクトリ単位で列挙する入力資産。追加・削除も同じ分類にする。 */

@@ -11,11 +11,21 @@
     "redistributionPermissionVerifiedIndependently": false,
     "requestIsRightsOrLicenseEvidence": false,
     "sha256IsPermissionEvidence": false,
-    "publicDistributionRequiresWrittenRightsConfirmation": true,
-    "commercialUseRequiresWrittenRightsConfirmation": true,
-    "removeOriginalsAndDerivativesIfRightsRemainUnverified": true,
-    "rightsNotice": "Before public distribution or commercial use, maintainers must obtain written confirmation of the rights holder and redistribution terms; if that cannot be confirmed, remove the originals and derivatives from the repository and distributions",
-    "license": "Not independently identified"
+    "providerPermission": {
+      "grantedBy": "Project provider",
+      "grantedOn": "2026-11-07",
+      "scope": "six UI design-reference images and their derived images",
+      "publicDistribution": true,
+      "redistribution": true,
+      "commercialUse": "not-recorded",
+      "evidence": "https://github.com/AutoDevJapan/FourBrosMahjong/issues/1175#issuecomment-6701099933",
+      "terms": "CREDITS.md#提供元・公開条件",
+      "coversCodeMitLicense": false,
+      "transfersRights": false,
+      "impliesOfficialEndorsement": false
+    },
+    "rightsNotice": "The project provider permitted public distribution and redistribution of these six images and their derived images on 2026-11-07. See CREDITS.md for the provider's terms. This permission is separate from the code's MIT License and does not establish independently verified ownership, a transfer of rights, or official endorsement by any person, programme, or trademark holder.",
+    "license": "Provider permission for public distribution and redistribution"
   },
   "usage": {
     "runtimeAsset": false,

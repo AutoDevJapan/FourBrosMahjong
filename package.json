@@ -2,6 +2,7 @@
   "name": "soshina-majong",
   "version": "0.1.0",
   "private": true,
+  "license": "MIT",
   "packageManager": "pnpm@10.33.0",
   "engines": {
     "node": "^22.22.2 || ^24.15.0 || >=26",
@@ -46,7 +47,7 @@
     "docs": "typedoc"
   },
   "dependencies": {
-    "next": "16.3.4",
+    "next": "16.4.5",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
     "tsx": "^4.23.13",
@@ -65,25 +66,37 @@
     "@types/react-dom": "^19",
     "@types/ws": "^8.18.1",
     "@vitejs/plugin-react": "^6.1.1",
-    "@vitest/coverage-v8": "^4.1.11",
+    "@vitest/coverage-v8": "^4.1.12",
     "dependency-cruiser": "^18.2.0",
     "eslint": "^9",
     "eslint-config-next": "16.3.4",
     "jsdom": "^30.0.1",
     "knip": "^6.34.0",
+    "railway": "3.16.0",
     "semver": "^7.8.5",
     "tailwindcss": "^4",
     "typedoc": "^0.28.20",
     "typescript": "^6",
-    "vitest": "^4.1.11",
+    "vitest": "^4.1.12",
     "yaml": "^2.9.0"
   },
   "pnpm": {
     "overrides": {
-      "brace-expansion@^1.0.0": "1.1.18",
-      "brace-expansion@^5.0.0": "5.0.9",
+      "brace-expansion@^1.0.0": "1.1.21",
+      "brace-expansion@^5.0.0": "5.0.12",
       "postcss@^8.0.0": "8.5.25",
-      "sharp": ">=0.35.3"
+      "markdown-it@^14.0.0": "14.3.3",
+      "js-yaml@^4.0.0": "4.3.2",
+      "vite@^8.0.0": "8.1.6",
+      "sharp": ">=0.35.5",
+      "source-map-js": "1.2.2",
+      "smol-toml": "1.9.1",
+      "minimatch@^10.0.0": "11.0.5",
+      "undici@^8.0.0": "8.12.4",
+      "zod@^4.0.0": "4.6.7"
+    },
+    "patchedDependencies": {
+      "typedoc@0.28.20": "patches/typedoc@0.28.20.patch"
     }
   }
 }

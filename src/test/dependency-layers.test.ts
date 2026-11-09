@@ -50,6 +50,17 @@ function makeFixtureDir(): string {
  * リポジトリの `tsconfig.json` が無いため `cruise()` 呼び出しで `tsConfig` を外している)。
  */
 const FIXTURE: readonly [path: string, source: string][] = [
+  // An exports-only SDK has no main/index.js fallback.
+  [
+    "node_modules/exported-sdk/package.json",
+    '{"name":"exported-sdk","exports":{".":{"import":"./sdk.mjs","require":"./sdk.cjs"}}}\n',
+  ],
+  ["node_modules/exported-sdk/sdk.mjs", "export const value = 1;\n"],
+  ["node_modules/exported-sdk/sdk.cjs", "exports.value = 1;\n"],
+  [
+    "src/app/sdkConsumer.ts",
+    'import { value } from "exported-sdk";\nexport const current = value;\n',
+  ],
   ["src/app/_lib/securityHeaders.ts", "export const csp = 1;\n"],
   ["src/components/common/Modal.ts", "export const Modal = 1;\n"],
   ["src/domain/tiles/tile.ts", "export const tile = 1;\n"],
@@ -155,6 +166,7 @@ const depcruiseConfig = require_(
 ) as IConfiguration;
 
 let violations: IViolation[] = [];
+let fixtureModules: ICruiseResult["modules"] = [];
 
 // フィクスチャ書き出しと `cruise()` は `beforeAll` にまとめる(全テストで同一の
 // 判定結果を共有するため)。`vitest.config.ts` の `testTimeout: 30_000` は hook には
@@ -178,6 +190,7 @@ beforeAll(async () => {
       validate: true,
     });
     violations = (result.output as ICruiseResult).summary.violations;
+    fixtureModules = (result.output as ICruiseResult).modules;
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -449,5 +462,15 @@ describe("レイヤールールの適用スコープ (#382)", () => {
       workflow,
       "CI から depcruise ステップが消えるとレイヤー境界は強制されない",
     ).toContain("pnpm depcruise");
+  });
+});
+
+describe("exports-only SDK module resolution", () => {
+  it("resolves a real package export while preserving unresolved-import errors", () => {
+    const dependency = fixtureModules
+      .find((module) => module.source === "src/app/sdkConsumer.ts")
+      ?.dependencies.find((entry) => entry.module === "exported-sdk");
+    expect(dependency?.couldNotResolve).toBe(false);
+    expect(dependency?.resolved).toBe("node_modules/exported-sdk/sdk.mjs");
   });
 });

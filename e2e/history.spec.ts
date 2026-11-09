@@ -111,6 +111,15 @@ test.describe("戦績のローカル保存・閲覧(#293)", () => {
     const second = await context.newPage();
     const journals = [walkToGameEnd(1).journal, walkToGameEnd(2).journal];
 
+    // Load the route before measuring the two simultaneous restore effects.
+    // Cold development compilation/hydration belongs to route-startup coverage;
+    // this regression exercises competing history writes through Web Locks.
+    await Promise.all([first.goto("/game"), second.goto("/game")]);
+    await Promise.all(
+      [first, second].map((tab) =>
+        expect(tab.getByRole("group", { name: "対局盤面" })).toBeVisible(),
+      ),
+    );
     await Promise.all(
       [first, second].map((tab, index) =>
         tab.addInitScript(
@@ -122,7 +131,7 @@ test.describe("戦績のローカル保存・閲覧(#293)", () => {
 
     // localStorage は同一 context で共有、sessionStorage はタブごとに独立する。
     // 2つの復元効果を同時に起動し、Web Locks が read-modify-write を直列化する。
-    await Promise.all([first.goto("/game"), second.goto("/game")]);
+    await Promise.all([first.reload(), second.reload()]);
     // goto は document load までなので、CI の CPU 競合時も両タブの復元完了を待つ。
     await Promise.all(
       [first, second].map((tab) =>

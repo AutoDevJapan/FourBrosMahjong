@@ -36,4 +36,5 @@ Accepted
 
 - [ADR-0001](./0001-deploy-architecture-and-preview-policy.md) — Vercel フロントエンド + Railway バックエンドの配置方針
 - [`docs/デプロイ環境運用.md`](../../docs/デプロイ環境運用.md) — 環境変数、起動、ヘルスチェック、運用手順
-- [`railway.json`](../../railway.json) — Railway の build/deploy 定義
+- [旧root設定の保存先](../fixtures/railway-readyz-before-iac.json) — 2026-11-09に履歴fixtureへ移動した旧build/deploy定義
+- [`.railway/railway.ts`](../../.railway/railway.ts) — 現在の対象サービスだけを管理するbuild/deploy定義
