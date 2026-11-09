@@ -940,6 +940,7 @@ describe("CI が必須ゲートを実際に実行している (#418)", () => {
     "pnpm test",
     "pnpm knip",
     "pnpm depcruise",
+    "pnpm run docs --emit none",
     "pnpm build",
   ] as const;
 
@@ -1258,6 +1259,7 @@ describe("変更パスによる実行範囲の絞り込み (#491)", () => {
       [
         "pnpm knip",
         "pnpm depcruise",
+        "pnpm run docs --emit none",
         "pnpm build",
         "pnpm test:e2e:prod:prebuilt",
       ],

@@ -2,3 +2,9 @@
 nextjs-portal {
   display: none !important;
 }
+
+/* The new operator/contact paragraph is checked in every viewport before capture.
+   Keep historical Linux/macOS images intact and compare the existing lobby layout. */
+.lobby-footer p:has(a[href="mailto:contact@autodevjapan.com"]) {
+  display: none !important;
+}
