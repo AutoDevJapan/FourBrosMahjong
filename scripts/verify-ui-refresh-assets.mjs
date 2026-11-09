@@ -226,13 +226,15 @@ export function verifyUiRefreshProvenance(provenance) {
   ) {
     throw new Error("provenance.license must describe the provider permission");
   }
-  for (const field of ["inclusionRequestRecord", "rightsNotice"]) {
-    if (
-      typeof provenance[field] !== "string" ||
-      provenance[field].trim() === ""
-    ) {
-      throw new Error(`provenance.${field} must be documented`);
-    }
+  const recordedEvidence = {
+    providedBy: "Project owner",
+    sourceAtIngest: "Project owner's local Downloads directory",
+    inclusionRequestRecord:
+      "The project owner explicitly requested repository inclusion; this records the inclusion decision only and is not evidence of ownership or a redistribution license",
+  };
+  for (const [field, value] of Object.entries(recordedEvidence)) {
+    if (provenance[field] !== value)
+      throw new Error(`provenance.${field} must match the recorded evidence`);
   }
   const expectedNotice =
     "The project provider permitted public distribution and redistribution of these six images and their derived images on 2026-11-07. See CREDITS.md for the provider's terms. This permission is separate from the code's MIT License and does not establish independently verified ownership, a transfer of rights, or official endorsement by any person, programme, or trademark holder.";
