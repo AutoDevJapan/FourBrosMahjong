@@ -816,7 +816,7 @@ export default function GameBoard({
       <div className="game-legacy-board">
         {/* 段階①: 卓幅 >= 360px はクロス配置。牌・隙間は .board-cross の clamp()/cqi で流体縮小。 */}
         {crossBoard(
-          "hidden @min-[360px]:grid",
+          "game-board-inline hidden @min-[360px]:grid",
           handleSelectTile,
           true,
           !handInteractive,

@@ -89,10 +89,20 @@
   padding: 0.5rem;
 }
 
-.game-page .game-board[data-3d-status="ready"] .game-board-cross {
+.game-page
+  .game-board[data-3d-status="ready"]
+  .game-board-cross.game-board-inline {
   display: flex;
   max-width: none;
   flex-direction: column;
+}
+
+@container (max-width: 359px) {
+  .game-page
+    .game-board[data-3d-status="ready"]
+    .game-board-cross.game-board-inline {
+    display: none;
+  }
 }
 
 .game-page .game-board[data-3d-status="ready"] .game-slot--self {
