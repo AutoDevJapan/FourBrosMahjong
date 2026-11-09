@@ -675,6 +675,7 @@ export function createMahjongRenderer(
     }
     checked();
     resize();
+    if (stopped) return runtime;
   } catch (error) {
     fail("initialization", "WebGL2 renderer initialization failed", error);
     return runtime;

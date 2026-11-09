@@ -102,6 +102,21 @@ function controlledImages(width = 300, height = 400) {
 }
 
 describe("WebGL2 renderer boundaries", () => {
+  it("does not start texture work after an initial resize failure", () => {
+    const gl = driver(),
+      canvas = setup(gl),
+      images = controlledImages(),
+      onError = vi.fn();
+    gl.getParameter.mockImplementation(() => {
+      throw new Error("initial driver failure");
+    });
+    const renderer = createMahjongRenderer(canvas, { onError });
+    expect(onError).toHaveBeenCalledOnce();
+    expect(images).toHaveLength(0);
+    expect(gl.deleteBuffer).toHaveBeenCalled();
+    renderer.dispose();
+  });
+
   it("reports resize allocation failures and releases the owned GPU context", () => {
     const gl = driver(),
       canvas = setup(gl),
