@@ -8,12 +8,16 @@
 
 ## 現行構成の制約
 
+2026-11-09にreview済みsourceを既存Productionへ反映し、認証済みops集計とdirect Node起動を確認した。
+[移行時の受入記録](../evidence/production-online-20261109.md)を現在のbaselineとして読み、以下の旧runtimeの未観測事項と区別する。
+次回更新のpreflightと、default-offのmaintenance通知を有効化する条件は引き続き適用する。
+
 - ルーム、座席、対局状態は `RoomManager` のプロセスメモリだけに存在する。restart、redeploy、rollback のいずれでも進行中のルームは復元されない。
-- `/healthz` はプロセスの起動を示すだけで、active room 数、接続数、drain 状態、source SHA を返さない。現行ログにも active room 数の集計はない。Railway の CPU / network graph や一般ログだけから「active room が 0」とは証明できない。
+- `/healthz`はプロセスの起動を示すだけで、room数やsourceを返さない。現在のruntimeでは認証済み`GET /ops/status`の集計とsource/deployment/replica identityを使う。CPU/network graphやWebSocket接続0だけでroomが0とは判定しない。
 - `GET /` は endpoint discovery として `liveness: "/healthz"`、`readiness: "/readyz"`、`websocket: "/ws"` を返す。旧 `health: "/healthz"` は liveness の互換 alias であり、readiness の意味には使わない。
 - `GET /healthz` は liveness、`GET /readyz` は readiness / Railway healthcheck である。プロセスが起動していても、drain 中または必須設定が不正なら前者は `200` のまま後者は `503` になり得る。
 - `ALLOWED_ORIGINS` は canonical な完全一致 HTTP(S) Origin のカンマ区切りだけを受け付ける。`*`、wildcard subdomain、path（`/path`）、query（`?x=1`）、HTTP(S) 以外、または valid entry と invalid entry の混在は不可である。1件でも不正なら allowlist 全体を fail-closed とし、`/readyz` は `503`、許可されているように見える Origin を含む全 WebSocket upgrade は `403` になる。空・未設定も同じ扱いである。
-- リポジトリ上のサーバーにはdefault-offのmaintenance drainと利用者通知、bounded graceful shutdownを段階実装している。ただし、現在のRailway productionへ反映・有効化した証拠はない。Railway の overlap / draining time を設定するだけでもこれらを補えない。特に、プロセスメモリを共有しない旧・新 deployment の overlap は既存ルームへの `resume` を保証しない。
+- maintenance drainと通知は現在のProduction sourceにも含まれるが、通知flagとdrain mutationはdefault-offを保持する。bounded shutdownは同sourceのproduction相当imageで確認した。本番の通知有効化とdrain操作は別の受入である。プロセスメモリを共有しない旧・新deploymentのoverlapは既存ルームへの`resume`を保証しない。
 - rollback はサービスの稼働コードと変数を戻す障害復旧であり、消失したルームを戻す操作ではない。既知の古い deployment へ戻すと、missing-Origin を受け入れる既存の drift も戻り得る。
 
 Docker imageの既定 `CMD` と `railway.json` の `startCommand` はともに `node --import tsx server/start.ts` とし、production相当imageのPID 1とsignal/shutdown契約をlocal containerで自動検証する。Railwayでは `startCommand` がimage commandを上書きするため、repository上の設定が一致していても、productionの実効commandとread-backが一致するまではlocal Docker証拠をRailway productionのsignal forwarding証拠へ読み替えてはならない。
@@ -28,7 +32,7 @@ active room観測、maintenance drain、アプリ内告知、graceful shutdown�
 - reviewed source の full SHA、clean tree、同じ SHA の CI 成功を確認できない。
 - 現在の deployment ID、source marker / image digest、`ALLOWED_ORIGINS`、直前の known-good rollback target を記録できない。
 - rollback target が Railway の保持期間内にあり、実際に rollback 可能であることを確認できず、かつ代替として以前の正確な source/config を redeploy する手段もない。
-- active room 数を観測できないという現行制約を関係者へ伝えていない、または全ルーム消失を伴うメンテナンスの承認がない。
+- 認証済みops/loadの集計を取得できない、またはroomが残る状態で停止・切替する保護条件や、消失を伴うメンテナンスの本人判断がない。集計0と切替の間には新規受付の競合も確認する。
 - メンテナンス時刻と既存の外部告知手段が決まっていない。アプリ内告知が存在するかのように扱ってはならない。
 - deploy 前の health / Origin baseline、deploy 後の検証担当、rollback 判断者のいずれかが未定である。
 - Railwayの実効start commandがdirect Nodeであること、NodeがPID 1としてSIGTERMを一度受信すること、期限内にport/process treeが消滅することをproduction相当の検証とdeploy read-backで確認できない。repositoryのDockerfileと`railway.json`がdirect Nodeを宣言していても、productionの実効設定をsignal-safeと仮定してはならない。
