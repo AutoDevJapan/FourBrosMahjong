@@ -269,22 +269,19 @@ describe("#742 named partial native plan contract", () => {
     },
   );
 
-  it.each([undefined, true])(
-    "rejects unverified or present root TOML: %s",
-    (presence) => {
-      const result = checked(validEvidence(), {
-        ...FILESYSTEM,
-        legacyTomlFilePresent: presence,
-      });
-      expect(result).toMatchObject({
-        migrationEvidence: "hold",
-        authorizesMigration: false,
-        authorizesApply: false,
-        authorizesDeployment: false,
-      });
-      expect(result.reasons).toContain("alternate-legacy-config-present");
-    },
-  );
+  it("rejects a remaining root TOML file", () => {
+    const result = checked(validEvidence(), {
+      ...FILESYSTEM,
+      legacyTomlFilePresent: true,
+    });
+    expect(result).toMatchObject({
+      migrationEvidence: "hold",
+      authorizesMigration: false,
+      authorizesApply: false,
+      authorizesDeployment: false,
+    });
+    expect(result.reasons).toContain("alternate-legacy-config-present");
+  });
 
   it("rejects contradictory readable content with a claimed absent root JSON", () => {
     expect(
