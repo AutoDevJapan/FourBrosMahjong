@@ -101,7 +101,75 @@ function cloneEvidence(
   return structuredClone(evidence(phase));
 }
 
+function cliUploadEvidence(
+  phase: "drained" | "pre-drain" | "pre-enable" = "pre-enable",
+) {
+  const base = cloneEvidence(phase);
+  return {
+    ...base,
+    rollback: {
+      ...base.rollback,
+      sourceProvenance: {
+        kind: "railway-cli-upload",
+        fullRevision: SERVER_REVISION,
+        deploymentId: base.target.activeDeploymentId,
+        imageDigest: `sha256:${"c".repeat(64)}`,
+        snapshotId: "snapshot-fixture",
+        sourceReceiptSha256: "d".repeat(64),
+      },
+    },
+  };
+}
+
 describe("online rollout preflight", () => {
+  it("accepts a CLI upload bound to its deployment, image, snapshot and private source receipt", () => {
+    for (const phase of ["pre-enable", "pre-drain", "drained"] as const) {
+      expect(
+        validateOnlineRolloutPreflight(cliUploadEvidence(phase), NOW),
+      ).toEqual({
+        schemaVersion: 1,
+        repoPreflight: "pass",
+        authorizesDeployment: false,
+        externalMutationPerformed: false,
+        reasons: [],
+      });
+    }
+  });
+
+  it("rejects incomplete CLI upload provenance without reflecting its values", () => {
+    for (const [field, value] of [
+      ["kind", "operator-claim"],
+      ["fullRevision", "unknown"],
+      ["imageDigest", "sha256:short"],
+      ["imageDigest", undefined],
+      ["deploymentId", undefined],
+      ["snapshotId", "unknown"],
+      ["snapshotId", undefined],
+      ["sourceReceiptSha256", "not-a-hash"],
+      ["sourceReceiptSha256", undefined],
+    ] as const) {
+      const candidate = cliUploadEvidence();
+      (candidate.rollback.sourceProvenance as Record<string, unknown>)[field] =
+        value;
+      const result = validateOnlineRolloutPreflight(candidate, NOW);
+      expect(result.repoPreflight).toBe("hold");
+      if (typeof value === "string")
+        expect(JSON.stringify(result)).not.toContain(value);
+    }
+  });
+
+  it("rejects CLI upload evidence belonging to another deployment or revision", () => {
+    const wrongDeployment = cliUploadEvidence();
+    wrongDeployment.rollback.sourceProvenance.deploymentId = "other-deployment";
+    expect(
+      validateOnlineRolloutPreflight(wrongDeployment, NOW).reasons,
+    ).toContain("rollback-not-available");
+    const wrongSource = cliUploadEvidence();
+    wrongSource.rollback.sourceProvenance.fullRevision = "e".repeat(40);
+    expect(validateOnlineRolloutPreflight(wrongSource, NOW).repoPreflight).toBe(
+      "hold",
+    );
+  });
   it("passes normalized pre-enable, pre-drain, and drained evidence without granting authority", () => {
     for (const phase of ["pre-enable", "pre-drain", "drained"] as const) {
       expect(validateOnlineRolloutPreflight(evidence(phase), NOW)).toEqual({

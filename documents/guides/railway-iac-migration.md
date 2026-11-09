@@ -33,6 +33,9 @@ railway config migrate --service four-bros-mahjong-online --variables unmanaged 
 原生成source、生成時help/log、原生成SHA-256をrepository外へ保持し、draining 30秒、overlap 0、restart方針の追加と型互換化後のsourceは別SHAで照合する。
 CLI 5.71.0の`migrate --help`では、この`--apply`はlocal filesystemだけを変更する。
 外部Config File変更と再配備は別の`config migrate cutover`である。
+切替後のConfig File設定は、対象serviceの明示的な空文字列をread-backする。`null`は未指定であり、rootの`railway.json`をbuilderが自動検出する可能性を排除しない。
+[CLI 5.71.0の実装](https://github.com/railwayapp/cli/blob/v5.71.0/src/commands/config/migrate.rs)では、statusの一覧作成が`null`を空文字列と同様に除外する一方、cutoverが書く値は空文字列である。`No services ... read Config as Code`という表示だけで移行済みと判断しない。
+暗黙のroot設定が一覧に出ない場合も、正規の対象限定APIで同じConfig File設定を変更し、元の値とrollback用source/image/snapshotを保持する。切替後は新deploymentのconfig-file metadata、実効start/healthcheck/replica/draining、sourceとOrigin境界を再取得する。過去deploymentの`meta.configFile`と現在のservice設定も区別する。対象外のserviceは変更しない。
 [WebのCLI説明](https://docs.railway.com/cli/config#migrate-config-as-code)には旧動作が残るため、実行する版のhelpと区別する。
 `--force`、`--delete-files`、cutover、applyをplan作成へ混ぜない。
 
@@ -63,7 +66,7 @@ source repo/image、networking、variables、volume、scale増加を更新しな
 既存のCLI upload serviceへ推測の`github(...)`を追加しない。
 
 所有権移行とruntime更新は別に扱う。
-Config File settingが既にnullでも、古いactive deploymentのfileManifestに旧`railway.json`が残ることはある。
+Config File settingを明示的な空文字列へ変更した後でも、変更前に起動したdeploymentのfileManifestには旧`railway.json`が残ることがある。現在の設定と過去のbuild metadataを混同しない。
 `config migrate status`の表示やローカルsourceの一致を、active image・room・healthのread-backへ代用しない。
 古いstart commandと`/healthz`が動くdeploymentに対して、desired `/readyz`との実効parity成功と報告しない。
 
@@ -105,7 +108,7 @@ PowerShellでは`Get-Content -Raw`のpipeまたはprocessのstdinを使う。
 
 schemaVersion 2のrootは`schemaVersion, phase, capturedAt, cliEvidence, target, source, inventory, ownership, ownershipObservedAt, plan`をexactに持つ。
 `source`はpath/SHA/tree、原生成source/SHA/command、unmanaged、local生成、secret review、危険flags不使用を保持する。
-`inventory`は対象ID・address・全address集合・membership原証拠のhash・configFileSetting nullを保持する。
+`inventory`は対象ID・address・全address集合・membership原証拠のhash・明示的な空文字列のconfigFileSettingを保持する。
 `plan`はpin/stdout双方のtextとSHA、source SHA、時刻、exit code、native engine、外部保存・flags条件を保持する。
 詳細なexact fieldは[`railway-iac-named-partial.ts`](../../scripts/railway-iac-named-partial.ts)を正本とする。
 

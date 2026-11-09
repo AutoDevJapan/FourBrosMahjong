@@ -694,7 +694,9 @@ export function validateNamedPartialEvidence(
     !inventory.resourceAddresses.includes(FOURBROS_IAC_ADDRESS)
   )
     reasons.add("resource-inventory-mismatch");
-  if (!record(inventory) || inventory.configFileSetting !== null)
+  // null leaves the Config File setting unspecified. The builder may still
+  // discover a root railway.json; the CLI's cutover explicitly writes "".
+  if (!record(inventory) || inventory.configFileSetting !== "")
     reasons.add("ownership-cutover-unverified");
   const ownership = input.ownership;
   if (
