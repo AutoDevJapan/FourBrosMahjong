@@ -1379,6 +1379,13 @@ export default defineRailway(() => project("fixture", {}));`,
 
   it("CLI rejects obsolete full-project evidence for the current named partial without reflection", () => {
     const secret = "SECRET_SENTINEL";
+    // The real CLI reads the active repository, not the archived v1 fixture.
+    expect(localFilesystemEvidence()).toMatchObject({
+      legacyJsonFilePresent: false,
+      currentRepositoryFilePresent: false,
+      currentRepositoryFileContent: null,
+      currentRepositoryFileSha256: null,
+    });
     const currentEvidence = validEvidence(Date.now());
     currentEvidence.ownershipCutover.legacyFileSha256 = CURRENT_REPOSITORY_SHA;
     const currentResult = spawnSync(
@@ -1399,7 +1406,11 @@ export default defineRailway(() => project("fixture", {}));`,
       authorizesApply: false,
       authorizesDeployment: false,
       externalMutationPerformed: false,
-      reasons: ["generated-iac-invalid", "ownership-cutover-unverified"],
+      reasons: [
+        "generated-iac-invalid",
+        "legacy-config-missing",
+        "ownership-cutover-unverified",
+      ],
     });
 
     const duplicateKeys = JSON.stringify(currentEvidence).replace(
