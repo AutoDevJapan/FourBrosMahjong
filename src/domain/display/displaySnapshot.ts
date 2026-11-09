@@ -219,6 +219,7 @@ export interface DisplayEnvelope {
   readonly protocol: typeof DISPLAY_PROTOCOL;
   readonly version: typeof DISPLAY_PROTOCOL_VERSION;
   readonly sessionId: string;
+  readonly generation: number;
   readonly revision: number;
   readonly mode: "restore" | "live";
   readonly snapshot: ReturnType<typeof projectDisplaySnapshot>;
@@ -242,6 +243,8 @@ export function createDisplayEnvelope(
   if (
     !source.sessionId ||
     source.sessionId.length > 96 ||
+    !Number.isSafeInteger(source.generation) ||
+    source.generation < 1 ||
     !Number.isSafeInteger(source.revision) ||
     source.revision < 0
   ) {
@@ -251,6 +254,7 @@ export function createDisplayEnvelope(
     protocol: DISPLAY_PROTOCOL,
     version: DISPLAY_PROTOCOL_VERSION,
     sessionId: source.sessionId,
+    generation: source.generation,
     revision: source.revision,
     mode,
     snapshot: projectDisplaySnapshot(input),

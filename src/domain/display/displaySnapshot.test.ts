@@ -311,7 +311,12 @@ describe("local display projection (#1177)", () => {
         createDisplayEnvelope(
           {
             ...source,
-            displaySource: { kind: "local", sessionId: "local-test", revision },
+            displaySource: {
+              kind: "local",
+              sessionId: "local-test",
+              generation: 1,
+              revision,
+            },
           },
           "live",
         ),

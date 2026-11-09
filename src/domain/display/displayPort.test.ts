@@ -262,7 +262,7 @@ describe("fake display port contract (#1177)", () => {
     expect(test.context().controls.discard).not.toHaveBeenCalled();
   });
 
-  it("uses only the published simple option and bounded request storage", () => {
+  it("rejected intents cannot exhaust the revision's valid input budget", () => {
     const test = setup();
     test.update({ phase: "roundEnd" });
     test.binding.refresh();
@@ -291,8 +291,21 @@ describe("fake display port contract (#1177)", () => {
       ).toMatchObject({ reason: "unknown-option" });
     }
     expect(
-      test.port.emit({ ...request, revision: 1, requestId: "overflow" }),
-    ).toMatchObject({ reason: "limit" });
+      test.port.emit({ ...request, revision: 1, requestId: "valid" }),
+    ).toEqual({ status: "dispatched" });
+    expect(test.context().controls.nextRound).toHaveBeenCalledTimes(2);
+  });
+
+  it("repeated valid selection remains bounded and always permits its confirmation", () => {
+    const test = setup();
+    test.binding.refresh();
+    for (let index = 0; index < 1024; index++) {
+      expect(test.port.emit(test.intent())).toEqual({ status: "selected" });
+    }
+    expect(test.port.emit(test.intent("confirm"))).toEqual({
+      status: "dispatched",
+    });
+    expect(test.context().controls.discard).toHaveBeenCalledOnce();
   });
 
   it("unsupported provider publishes nothing and never invokes controls", () => {

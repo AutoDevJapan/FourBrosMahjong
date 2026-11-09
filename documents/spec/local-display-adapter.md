@@ -31,6 +31,8 @@ Unity/C# renderer、WebGL、CSP、Editor 導入、公開 3D 化は変更しな�
 sessionId はこの JavaScript realm の生存中だけ一意な非秘密の識別子で、seed・時刻・
 プレイヤー名から作らず、永続化・認可・オンラインの roomId に使用しない。
 ページ破棄で transport も破棄することを前提とする。
+同じrealmで単調増加するgenerationも保持し、過去sessionのIDを全件保存せず、
+最後に採用したgenerationだけで退役済みsessionを拒否する。
 
 `applyGameAction` が新しい engine を返して採用された箇所で revision を 1 増やし、
 engine/journal と同じ `sessionRef` 更新へ載せる。CPU の同期進行を含め、既存 UI に
@@ -54,6 +56,9 @@ intent は protocol/version・requestId・sessionId・revision（期待する確
 生の GameAction・任意牌・playerId・メソッド名を実行しない。optionId は同 snapshot 内
 でのみ有効。牌を使う操作は select → confirm、他の操作は action とし、版更新で選択を捨てる。
 各版の requestId 重複、古い session/版、未知 option、選択なし confirm、追加フィールドを拒否する。
+無効な要求は履歴枠を消費しない。選択は直近128件のrequestIdを保持し、
+何度選び直しても確認操作が締め出されない。選択自体は対局を進めず、
+実操作の二重実行は確定版・同期source・送信待機の検査で拒否する。
 一度 controls を呼んだ版からの追加操作は拒否し、次の確定 snapshot を待つ。
 ただしローカル controls は同期確定なので、呼び出し後も版が変わらなければ
 `not-committed` として待機を解除する。history 再描画で旧 controls が拒否された場合も

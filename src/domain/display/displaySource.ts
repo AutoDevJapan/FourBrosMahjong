@@ -2,6 +2,8 @@
 export interface LocalDisplaySource {
   readonly kind: "local";
   readonly sessionId: string;
+  /** Monotonic within the provider realm; permits constant-space retirement. */
+  readonly generation: number;
   readonly revision: number;
 }
 
@@ -16,6 +18,7 @@ export function newLocalDisplaySource(): LocalDisplaySource {
   return Object.freeze({
     kind: "local",
     sessionId: `local-display-${nextSession}`,
+    generation: nextSession,
     revision: 0,
   });
 }
@@ -36,6 +39,7 @@ export function sameDisplaySource(
   return (
     b?.kind === "local" &&
     a.sessionId === b.sessionId &&
+    a.generation === b.generation &&
     a.revision === b.revision
   );
 }

@@ -96,10 +96,11 @@ export function connectDisplayPort(
 ) {
   let closed = false;
   let current: DisplayEnvelope | null = null;
+  let currentSource: LocalDisplaySource | null = null;
   let selected: string | null = null;
   let dispatched = false;
   const seen = new Set<string>();
-  const retiredSessions = new Set<string>();
+  let highestGeneration = 0;
 
   const reject = (
     reason: Extract<IntentReceipt, { status: "rejected" }>["reason"],
@@ -109,14 +110,15 @@ export function connectDisplayPort(
     if (closed) return reject("closed");
     if (!isIntent(value)) return reject("malformed");
     const input = read();
-    if (!current || !input.displaySource || !input.readDisplaySource) {
+    if (
+      !current ||
+      !currentSource ||
+      !input.displaySource ||
+      !input.readDisplaySource
+    ) {
       return reject("unsupported");
     }
-    const expected: LocalDisplaySource = {
-      kind: "local",
-      sessionId: current.sessionId,
-      revision: current.revision,
-    };
+    const expected = currentSource;
     if (
       value.sessionId !== expected.sessionId ||
       value.revision !== expected.revision ||
@@ -126,15 +128,19 @@ export function connectDisplayPort(
       return reject("stale");
     }
     if (seen.has(value.requestId)) return reject("duplicate");
-    if (seen.size >= MAX_REQUESTS_PER_REVISION) return reject("limit");
     if (dispatched) return reject("pending-commit");
-    seen.add(value.requestId);
     const option = current.snapshot.options.find(
       (candidate) => candidate.id === value.optionId,
     );
     if (!option) return reject("unknown-option");
     if ("tile" in option) {
       if (value.kind === "select") {
+        // Recent selections need bounded replay protection, not a lifetime
+        // quota that can strand a user before confirmation. Committed actions
+        // remain protected by the synchronous source and dispatched guards.
+        if (seen.size >= MAX_REQUESTS_PER_REVISION)
+          seen.delete(seen.values().next().value!);
+        seen.add(value.requestId);
         selected = option.id;
         return { status: "selected" };
       }
@@ -143,6 +149,9 @@ export function connectDisplayPort(
     } else {
       if (value.kind !== "action") return reject("wrong-kind");
     }
+    if (seen.size >= MAX_REQUESTS_PER_REVISION)
+      seen.delete(seen.values().next().value!);
+    seen.add(value.requestId);
     dispatched = true;
     try {
       if ("tile" in option) {
@@ -185,12 +194,19 @@ export function connectDisplayPort(
       const source = input.displaySource;
       if (!source || !input.readDisplaySource) {
         current = null;
+        currentSource = null;
         selected = null;
         seen.clear();
         return "unsupported";
       }
       if (!sameDisplaySource(source, input.readDisplaySource())) return "stale";
-      if (retiredSessions.has(source.sessionId)) return "stale";
+      if (
+        source.generation < highestGeneration ||
+        (source.generation === highestGeneration &&
+          current &&
+          current.sessionId !== source.sessionId)
+      )
+        return "stale";
       if (current?.sessionId === source.sessionId) {
         if (source.revision === current.revision) return "unchanged";
         if (source.revision < current.revision) return "stale";
@@ -200,12 +216,11 @@ export function connectDisplayPort(
         current?.sessionId === source.sessionId ? "live" : "restore",
       );
       if (!envelope) return "unsupported";
-      if (current && current.sessionId !== envelope.sessionId) {
-        retiredSessions.add(current.sessionId);
-      }
       // Publish first. A failed transport must not claim to have sent a frame.
       port.publish(envelope);
       current = envelope;
+      currentSource = source;
+      highestGeneration = source.generation;
       selected = null;
       dispatched = false;
       seen.clear();
@@ -215,9 +230,10 @@ export function connectDisplayPort(
       if (closed) return;
       closed = true;
       current = null;
+      currentSource = null;
       selected = null;
       seen.clear();
-      retiredSessions.clear();
+      highestGeneration = 0;
       try {
         unsubscribe();
       } finally {
