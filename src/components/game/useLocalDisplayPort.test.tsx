@@ -10,7 +10,12 @@ import type { DisplayEnvelope } from "@/domain/display/displaySnapshot";
 import { createDisplayEnvelope } from "@/domain/display/displaySnapshot";
 import { restoreWebLocks, stubWebLocks } from "@/test/webLocksStub";
 import { walkToGameEnd } from "./finishedGameFixture";
-import { type GameContextValue, GameProvider, useGame } from "./GameProvider";
+import {
+  GameContext,
+  type GameContextValue,
+  GameProvider,
+  useGame,
+} from "./GameProvider";
 import { loadJournal, saveJournal } from "./gamePersistence";
 import {
   type DisplayHostFailure,
@@ -108,6 +113,32 @@ describe("React local display host (#1177)", () => {
     vi.restoreAllMocks();
     restoreWebLocks(originalLocks);
     window.history.replaceState(null, "", "/");
+  });
+
+  it("does not allocate or subscribe a renderer for an unsupported provider", () => {
+    function UnsupportedHost() {
+      const context = useGame();
+      return (
+        <GameContext.Provider
+          value={{
+            ...context,
+            displaySource: undefined,
+            readDisplaySource: undefined,
+          }}
+        >
+          <Probe factory={factory} onError={onError} />
+        </GameContext.Provider>
+      );
+    }
+    const { factory } = transportFactory();
+    const onError = vi.fn();
+    render(
+      <GameProvider>
+        <UnsupportedHost />
+      </GameProvider>,
+    );
+    expect(factory).not.toHaveBeenCalled();
+    expect(onError).not.toHaveBeenCalled();
   });
 
   it("publishes restore on both StrictMode setups using fresh ports, with no same-revision replay", () => {

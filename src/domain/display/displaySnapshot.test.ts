@@ -158,6 +158,12 @@ describe("local display projection (#1177)", () => {
       { suit: "pin", rank: 5, red: true, isRiichi: true },
     ]);
     expect(projected.melds[0].tiles).toHaveLength(4);
+    expect(projected.melds[0].tiles).toEqual([
+      null,
+      { suit: "honor", rank: 1, red: false },
+      { suit: "honor", rank: 1, red: false },
+      null,
+    ]);
     expect(projected.kitaCount).toBe(2);
     // Called tiles are already absent in view; the adapter does not reconstruct history.
     const compressed = {
@@ -170,6 +176,47 @@ describe("local display projection (#1177)", () => {
     expect(
       projectDisplaySnapshot({ ...source, view: compressed }).slots[0],
     ).toMatchObject({ discards: [{ isRiichi: true }] });
+  });
+
+  it("does not serialize the face-down end tiles of an opponent's concealed kan", () => {
+    const source = input();
+    const position = (["left", "across", "right"] as const).find(
+      (p) => source.view.slots[p].kind === "seated",
+    )!;
+    const slot = source.view.slots[position];
+    if (slot.kind !== "seated") throw new Error("Expected opponent");
+    const canary = { suit: "honor" as const, rank: 98765 };
+    const face = { suit: "pin" as const, rank: 1 };
+    const view = {
+      ...source.view,
+      slots: {
+        ...source.view.slots,
+        [position]: {
+          ...slot,
+          player: {
+            ...slot.player,
+            melds: [
+              {
+                type: "kan" as const,
+                concealed: true,
+                tiles: [canary, face, face, canary],
+              },
+            ],
+          },
+        },
+      },
+    };
+    const projected = projectDisplaySnapshot({ ...source, view });
+    expect(JSON.stringify(projected)).not.toContain("98765");
+    const opponent = projected.slots.find((p) => p.position === position)!;
+    if (opponent.kind !== "seated")
+      throw new Error("Expected projected opponent");
+    expect(opponent.melds[0].tiles).toEqual([
+      null,
+      { suit: "pin", rank: 1, red: false },
+      { suit: "pin", rank: 1, red: false },
+      null,
+    ]);
   });
 
   it("withholds playing ura/result and only copies a committed result", () => {

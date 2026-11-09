@@ -23,6 +23,7 @@ Unity/C# renderer、WebGL、CSP、Editor 導入、公開 3D 化は変更しな�
 牌値は既存表示を写し、得点・リーチ・副露・赤牌等のルールを renderer 側へ移さない。
 牌 DTO は domain Tile ではなく `{suit, rank, red}`。`red` は既存 `isRedDora` の
 表示判定結果であり、controls へ戻すのは牌種だけ。既存 controls の factory 正規化を維持する。
+暗槓の両端の伏せ牌はnullとし、表を描く内側2枚だけを牌DTOで渡す。
 
 ## session/revision の正本
 
@@ -105,6 +106,7 @@ controls 自体の例外を呼び出し元へ伝える既存 intent 契約は変
 
 先行版はローカルだけ。OnlineGameProvider は displaySource を持たず、アダプターは
 unsupported として DTO/操作を出さない。既存 2D UI/controls はそのまま残す。
+正式hookはunsupported providerに対してportを生成・購読せず、不要な描画資源を確保しない。
 WebSocket、server version、再接続・resume・secret の処理を追加・変更しない。
 オンライン接続を完了扱いせず、後続で既存 snapshot.version と reconnect 境界を設計する。
 

@@ -88,7 +88,11 @@ function slot(position: SeatPosition, content: SlotContent) {
     melds: (seated.melds ?? []).map((meld) => ({
       type: meld.type,
       concealed: meld.concealed,
-      tiles: meld.tiles.map(tile),
+      tiles: meld.tiles.map((value, index) =>
+        meld.concealed && (index === 0 || index === meld.tiles.length - 1)
+          ? null
+          : tile(value),
+      ),
     })),
     kitaCount: seated.kitaCount,
     discards: seated.discards.map((discard) => ({

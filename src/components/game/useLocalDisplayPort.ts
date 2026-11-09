@@ -25,6 +25,9 @@ export function useLocalDisplayPort(
   onError: (failure: DisplayHostFailure) => void,
 ): void {
   const context = useGame();
+  const supported =
+    context.displaySource !== undefined &&
+    context.readDisplaySource !== undefined;
   const committed = useRef(context);
   const errorHandler = useRef(onError);
   const connection = useRef<Binding | null>(null);
@@ -80,13 +83,13 @@ export function useLocalDisplayPort(
     () => () => {
       if (connection.current) close(connection.current);
     },
-    [createPort, close],
+    [createPort, supported, close],
   );
 
   // Child passive effects run after all Provider layout setups, including
   // StrictMode's cleanup/setup cycle. Never connect from a child layout effect.
   useEffect(() => {
-    if (!createPort) return;
+    if (!createPort || !supported) return;
     let port: DisplayPort;
     try {
       port = createPort();
@@ -131,7 +134,7 @@ export function useLocalDisplayPort(
     connection.current = binding;
     refresh();
     return () => close(binding);
-  }, [createPort, close, refresh, report]);
+  }, [createPort, supported, close, refresh, report]);
 
   useEffect(() => refresh(), [context, refresh]);
 }
