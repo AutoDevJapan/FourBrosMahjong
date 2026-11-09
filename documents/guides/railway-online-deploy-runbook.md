@@ -147,7 +147,7 @@ authorized enable後、POST前は `phase: "pre-drain"` とし、notice enabled�
 
 | evidence | authority source |
 |---|---|
-| project / service / environment、active deployment、active status、prospective rollback retention eligibility、deployment source、deployment set | Railway deployment metadataとread-only retention/全deployment情報 |
+| project / service / environment、active deployment、active status、prospective rollback retention eligibility、deployment source、deployment set | Railway deployment metadataとread-only retention/全deployment情報。CLI uploadのfull revisionは非公開upload receiptと認証済みopsのsourceを照合する |
 | effective start command / healthcheck / draining、全regionとreplica IDs | Railway deploymentのeffective settings / topology read-back |
 | shutdown grace、ops required、notices enabled | 対象deploymentのeffective runtime variable read-back。tokenや変数一覧全体は保存しない |
 | drain phase / blocker counts / deploymentId / replicaId / source revision / observedAt | 同一のauthenticated `GET /ops/status` response。`acceptingReadiness`は同一deployment/sourceのaccepting時 `/readyz=200` |
@@ -283,7 +283,7 @@ test "$OPS_RELEASE_CODE" = 200
 
 - GitHub source integration から deploy する場合は、対象がレビュー済み `main` SHA であることを確認し、deployment ID と `RAILWAY_GIT_COMMIT_SHA` を証拠に残す。
 - CLI upload を使う場合は、上で確認した detached clean worktree から実行し、deployment message に full SHA を含める。CLI upload では Railway metadata の commit SHA が空になる場合があるため、deployment ID、image digest、full-SHA message、deploy 元の `HEAD` と clean tree を一組の証拠として残す。
-- offline preflightのsource provenanceは、GitHub source integrationの`kind="railway-git-commit"`とmetadataのfull revisionだけを受理する。CLI uploadはmetadataだけで同じprovenanceを機械検証できないためvalidatorでは明示的に`hold`となる。CLI uploadを別途承認する場合も、deployment ID、image digest、full-SHA-only message、deploy元clean HEADをmanual evidenceとして扱い、validatorの`pass`へ読み替えない。
+- offline preflightのsource provenanceは、GitHub source integrationの`kind="railway-git-commit"`と、上の必須項目を持つCLI uploadの`kind="railway-cli-upload"`を受理する。validatorが検査するのは形式と入力間の対応だけで、receiptやRailway応答の真正性は証明しない。CLI uploadではdeployment ID、image digest、snapshot ID、full-SHA-only message、deploy元clean HEADを非公開receiptに保持し、認証済みopsのsourceと照合する。validatorの`pass`を外部証拠の代わりにしない。
 - deploy command を実行する直前に、CLI が示す project / service / environment が保存済み target と完全一致することを再確認する。
 - command の再実行や細かな追加 deploy をしない。失敗時は原因を確認し、下記の rollback 判断へ進む。
 

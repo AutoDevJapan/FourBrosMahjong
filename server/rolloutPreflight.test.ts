@@ -122,7 +122,7 @@ function cliUploadEvidence(
 }
 
 describe("online rollout preflight", () => {
-  it("accepts a CLI upload bound to its deployment, image, snapshot and private source receipt", () => {
+  it("accepts well-formed CLI upload evidence for the active deployment and revision", () => {
     for (const phase of ["pre-enable", "pre-drain", "drained"] as const) {
       expect(
         validateOnlineRolloutPreflight(cliUploadEvidence(phase), NOW),
@@ -134,6 +134,25 @@ describe("online rollout preflight", () => {
         reasons: [],
       });
     }
+  });
+
+  it("rejects unknown or missing CLI upload keys and uppercase image digests", () => {
+    const extra = cliUploadEvidence();
+    (extra.rollback.sourceProvenance as Record<string, unknown>).extra = "x";
+    expect(validateOnlineRolloutPreflight(extra, NOW).reasons).toEqual([
+      "invalid-schema",
+    ]);
+    const missing = cliUploadEvidence();
+    delete (missing.rollback.sourceProvenance as Record<string, unknown>)
+      .snapshotId;
+    expect(validateOnlineRolloutPreflight(missing, NOW).reasons).toEqual([
+      "invalid-schema",
+    ]);
+    const uppercase = cliUploadEvidence();
+    uppercase.rollback.sourceProvenance.imageDigest = `sha256:${"C".repeat(64)}`;
+    expect(validateOnlineRolloutPreflight(uppercase, NOW).reasons).toEqual([
+      "invalid-schema",
+    ]);
   });
 
   it("rejects incomplete CLI upload provenance without reflecting its values", () => {
