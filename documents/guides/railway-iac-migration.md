@@ -134,3 +134,6 @@ room消失を伴う本人だけの判断は具体的な対象・影響を集約�
 runtime変更のrollbackは記録したknown-good設定へのforward applyとdeploymentの再確認であり、メモリ上のroomを復元しない。
 Config as Codeは[公式のhard cutoff](https://docs.railway.com/config-as-code)（2026-12-01）以後のrollback手段にしない。
 `railway.json`削除は実効read-back・Prd health・rollback確認後の変更として扱い、この候補作成では削除しない。
+
+2026-11-09のtarget-only applyと実runtime更新の結果は[Production受入記録](../evidence/production-online-20261109.md)に記録した。
+この履歴を、次回のfresh plan・直前load・source照合の代わりに使わない。
