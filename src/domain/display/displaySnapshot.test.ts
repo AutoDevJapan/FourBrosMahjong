@@ -123,6 +123,16 @@ describe("local display projection (#1177)", () => {
         Object.assign(content.player, { seatWind: "east" });
     }
     expect(() => projectDisplaySnapshot(winds)).toThrow(/ownership/);
+    const missing = structuredClone(source);
+    Object.assign(missing.view.slots, { right: undefined });
+    expect(() => projectDisplaySnapshot(missing)).toThrow(/ownership/);
+    const noCount = structuredClone(source);
+    for (const [position, content] of Object.entries(noCount.view.slots)) {
+      if (position !== "self" && content.kind === "seated") {
+        Object.assign(content.player, { handCount: undefined });
+      }
+    }
+    expect(() => projectDisplaySnapshot(noCount)).toThrow(/hand count/);
   });
 
   it("retains current river order/riichi, public melds, red meaning and kita", () => {

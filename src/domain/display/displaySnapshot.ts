@@ -104,9 +104,10 @@ function slot(position: SeatPosition, content: SlotContent) {
 
 function validateOwners(input: DisplayInput) {
   const slots = POSITIONS.map((position) => input.view.slots[position]);
+  if (slots.some((content) => !content))
+    throw new TypeError("Invalid display ownership/seat boundary");
   const seats = slots.filter((content) => content.kind === "seated");
   if (
-    slots.some((content) => !content) ||
     input.view.slots.self.player.playerId !== input.playerId ||
     new Set(slots.map((content) => content.player.playerId)).size !== 4 ||
     seats.length !== 3 ||
@@ -114,6 +115,18 @@ function validateOwners(input: DisplayInput) {
     new Set(seats.map((content) => content.player.seatWind)).size !== 3
   ) {
     throw new TypeError("Invalid display ownership/seat boundary");
+  }
+  for (const position of POSITIONS) {
+    const content = input.view.slots[position];
+    if (
+      content.kind === "seated" &&
+      position !== "self" &&
+      (!Number.isSafeInteger(content.player.handCount) ||
+        content.player.handCount! < 0 ||
+        content.player.handCount! > 14)
+    ) {
+      throw new TypeError("Invalid display hand count");
+    }
   }
 }
 

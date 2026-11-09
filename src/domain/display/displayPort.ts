@@ -30,6 +30,7 @@ export type IntentReceipt =
         | "duplicate"
         | "limit"
         | "pending-commit"
+        | "publishing"
         | "not-committed"
         | "unknown-option"
         | "selection-required"
@@ -99,6 +100,7 @@ export function connectDisplayPort(
   let currentSource: LocalDisplaySource | null = null;
   let selected: string | null = null;
   let dispatched = false;
+  let publishing = false;
   const seen = new Set<string>();
   let highestGeneration = 0;
 
@@ -108,6 +110,7 @@ export function connectDisplayPort(
 
   const receive = (value: unknown): IntentReceipt => {
     if (closed) return reject("closed");
+    if (publishing) return reject("publishing");
     if (!isIntent(value)) return reject("malformed");
     const input = read();
     if (
@@ -217,7 +220,14 @@ export function connectDisplayPort(
       );
       if (!envelope) return "unsupported";
       // Publish first. A failed transport must not claim to have sent a frame.
-      port.publish(envelope);
+      // A synchronous listener during publication cannot act on a partially
+      // sent frame. It can retry once publish has returned successfully.
+      publishing = true;
+      try {
+        port.publish(envelope);
+      } finally {
+        publishing = false;
+      }
       current = envelope;
       currentSource = source;
       highestGeneration = source.generation;

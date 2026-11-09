@@ -121,6 +121,7 @@ export function useLocalDisplayPort(
     } catch (error) {
       // A failed subscription may already have allocated transport resources.
       // With no binding returned, ownership still belongs to this host.
+      report("connect", error);
       try {
         void Promise.resolve(port.dispose()).catch((disposeError: unknown) =>
           report("dispose", disposeError),
@@ -128,7 +129,6 @@ export function useLocalDisplayPort(
       } catch (disposeError) {
         report("dispose", disposeError);
       }
-      report("connect", error);
       return;
     }
     connection.current = binding;

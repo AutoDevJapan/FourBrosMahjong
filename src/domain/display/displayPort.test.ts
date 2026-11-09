@@ -348,4 +348,21 @@ describe("fake display port contract (#1177)", () => {
     expect(test.binding.refresh()).toBe("published");
     expect(test.port.frames[0].mode).toBe("restore");
   });
+
+  it("rejects synchronous reentrant input while publishing and accepts it afterwards", () => {
+    const test = setup();
+    const publish = test.port.publish.bind(test.port);
+    let during: IntentReceipt | undefined;
+    vi.spyOn(test.port, "publish").mockImplementationOnce((frame) => {
+      publish(frame);
+      during = test.port.emit(test.intent());
+    });
+    test.binding.refresh();
+    expect(during).toEqual({ status: "rejected", reason: "publishing" });
+    expect(test.port.emit(test.intent())).toEqual({ status: "selected" });
+    expect(test.port.emit(test.intent("confirm"))).toEqual({
+      status: "dispatched",
+    });
+    expect(test.context().controls.discard).toHaveBeenCalledOnce();
+  });
 });
