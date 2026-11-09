@@ -54,7 +54,9 @@ describe("gitleaks binary integrity gate", () => {
       .filter((line) => line.startsWith("curl "));
     expect(downloads).toHaveLength(2);
     for (const download of downloads) {
-      expect(download).toContain("--retry 2 --retry-delay 2 --retry-max-time 120");
+      expect(download).toContain(
+        "--retry 2 --retry-delay 2 --retry-max-time 120",
+      );
     }
     expect(downloads[0]).toContain(
       `--connect-timeout 10 --max-time 60 --max-filesize ${GITLEAKS_CHECKSUM_MANIFEST_MAX_BYTES}`,
