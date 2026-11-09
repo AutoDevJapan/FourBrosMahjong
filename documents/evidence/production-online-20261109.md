@@ -66,3 +66,18 @@ imageは`sha256:4de27349cdd90479cd3d786f4d7c9a6cf487baa8c8a0f4e017357bb369ef868b
 新uploadのservice Config File設定は空文字列だったが、新deploymentにも`/railway.json`のfile metadataが残った。この時点では完全なIaC移行を主張しない。
 rootの旧設定を履歴fixtureへ移した後のレビュー済みsourceを配布し、新snapshotで旧file参照が無いこと、実効設定と既存Prdの正常性を確認する工程を残す。
 この追加受入はhandshake-onlyであり、先の実対局・再接続の記録を新sourceで再実行したという意味ではない。3D・人物の本番有効化も別の未達である。
+
+## 2026-11-10：root Config as Code退役後の受入
+
+既存Prdへmain [`50d731c20241f2cb2ab787e928cb658e28bfcc83`](https://github.com/AutoDevJapan/FourBrosMahjong/commit/50d731c20241f2cb2ab787e928cb658e28bfcc83)を一度uploadし、00:45 JSTにdeployment `f49fda8c-5ae4-4c34-b83c-f66c2c0b54d6`のSUCCESSと受付復帰を確認した。
+新snapshotは`a3808479-ec02-4fb9-8209-5dac54a155e3`。Config File設定は空文字列で、snapshotに`configFile`の旧参照は無く、`fileServiceManifest`と`propertyFileMapping`も空だった。
+
+- 実効builderはDOCKERFILE/V3/Dockerfile、PID 1はNode 26.13.0の`node --import tsx server/start.ts`、PID 1のUID/GIDは1000だった。SSH観測processのUIDとは区別した。
+- image digestは前回と同じ`sha256:4de27349cdd90479cd3d786f4d7c9a6cf487baa8c8a0f4e017357bb369ef868b`。実行中のserver 23 file・src 141 fileのraw bytesも前回のGit由来指紋と一致した。source markerとCLI messageは今回の40桁SHAだった。
+- 切替前の保持roomと接続が0であることを確認後、検証用の1接続に正規drainのmaintenance通知を実送信した。受信payloadは`{"type":"maintenance","phase":"drained","retryAfterMs":60000}`。application frameを送信せず、roomも作らず、その接続を閉じてから全aggregate 0を再確認し、sourceをuploadした。
+- 新runtimeはphase accepting、health/readiness 200/200、保持room・接続・pending upgradeは0。allowed Originは101、disallowedとmissing Originは403だった。ops認証必須とmaintenance notices有効も保持した。
+- 旧deploymentはREMOVEDとなり、activeは新deploymentの1件だけになった。旧processのmanual drainを新runtimeへ持ち越していない。新snapshotは`canRollback:true`だが、実rollbackは行っていない。
+- 対象外5 serviceを含むenvironment configの指紋は前後で一致した。新しい環境・service・replicaは作らず、upload専用の一時filterも削除した。
+
+再起動方針の実効値は`ON_FAILURE`/`10`だったが、環境config JSONでは省略され、native planにはその2項目の差分が残った。保存patchと非同期完了を照合した結果は[既定値の保存表現](../guides/railway-iac-migration.md#再起動設定の既定値と保存表現)にまとめた。差分0や未実施の設定変更を成功したとは扱わない。
+この受入は既存オンラインbackendの設定・source・通知・公開境界の確認であり、3D・人物の本番有効化や外観承認を意味しない。実行imageとruntime sourceが同一である範囲の既存受入を保持し、実対局を再実行したとは記録しない。

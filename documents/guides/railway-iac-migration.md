@@ -123,6 +123,16 @@ pinのkind/version/CLI/source tree/environment/etag/changeSetHash/partial/宣言
 常に`authorizesMigration:false`、`authorizesApply:false`、`authorizesDeployment:false`、`externalMutationPerformed:false`を返し、外部処理は呼ばない。
 これは人への新しい一般承認待ちではなく、validatorと実操作担当を分ける契約である。
 
+### 再起動設定の既定値と保存表現
+
+Railwayの[既定の再起動方針](https://docs.railway.com/deployments/restart-policy)は`ON_FAILURE`、最大10回である。
+2026-11-10の対象Prdでは、この2項目が環境config JSONと保存patchから省略される一方、`serviceInstance`とdeploymentの`serviceManifest.deploy`は宣言どおり`ON_FAILURE`/`10`だった。
+同じ値のtarget-only patchは正常完了しても空patchとなり、config ETagも変わらなかった。以前のnative IaC applyの保存patchでも同じ2項目は省略されていた。
+
+この場合、native planには`restartPolicyType (null → ON_FAILURE)`と`restartPolicyMaxRetries (null → 10)`が残り得る。差分0とは報告せず、同じpatchの再送や不要な再配備で解消しようとしない。
+その2項目だけであること、保存patchと非同期処理が正常終了したこと、実効値が両方のread-backで一致することを確認する。別の差分や実効値の不一致を、この表現差として除外しない。
+`.railway/railway.ts`の明示した意図は保持し、次回配布でも実効値を再確認する。サーバー内部の正規化処理そのものを検証したという意味ではない。
+
 ## immutable履歴と実操作
 
 schemaVersion 1は旧full-project parity証拠の回帰検証として保持する。
@@ -138,7 +148,7 @@ room消失を伴う本人だけの判断は具体的な対象・影響を集約�
 
 runtime変更のrollbackは記録したknown-good設定へのforward applyとdeploymentの再確認であり、メモリ上のroomを復元しない。
 Config as Codeは[公式のhard cutoff](https://docs.railway.com/config-as-code)（2026-12-01）以後のrollback手段にしない。
-旧設定のrootからの撤去は実効read-back・Prd health・rollback確認後に行う。次のレビュー済みsourceの配布後、新deploymentの`configFile`・`fileServiceManifest`・`propertyFileMapping`に旧参照が残らないことと、IaCの実効設定を再確認するまで移行完了としない。
+旧設定をrootから撤去したレビュー済みsourceを配布した後、新deploymentの`configFile`・`fileServiceManifest`・`propertyFileMapping`に旧参照が残らないことと、IaCの実効設定・Prd health・復旧用snapshotを確認するまで移行完了としない。
 
 2026-11-09のtarget-only applyと実runtime更新の結果は[Production受入記録](../evidence/production-online-20261109.md)に記録した。
 この履歴を、次回のfresh plan・直前load・source照合の代わりに使わない。
