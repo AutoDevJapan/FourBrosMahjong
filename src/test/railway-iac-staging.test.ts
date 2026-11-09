@@ -16,9 +16,16 @@ import {
 } from "../../scripts/stage-railway-iac";
 
 const SAFE_SOURCE = `
-import { defineRailway, preserve, project, service } from "railway/iac";
-const web = service("online", { env: { ONLINE_OPS_TOKEN: preserve() } });
-export default defineRailway(() => project("four-bros", { resources: [web] }));
+import { defineRailway, project, service } from "railway/iac";
+export const partial = "four-bros-mahjong-online";
+export default defineRailway(() => {
+  const web = service("four-bros-mahjong-online", {
+    build: { buildEnvironment: "V3", builder: "DOCKERFILE", dockerfilePath: "Dockerfile" },
+    start: "node --import tsx server/start.ts", healthcheck: "/readyz", healthcheckTimeout: 60,
+    replicas: { "us-west2": 1 },
+  });
+  return project("godd-genesis", { variables: { managed: false }, resources: [web] });
+});
 `;
 
 const temporaryDirectories: string[] = [];
@@ -95,9 +102,7 @@ describe("stageRailwayIacSource", () => {
   it("never overwrites an already staged file", () => {
     const repository = createRepository();
     const firstSource = createSource();
-    const secondSource = createSource(
-      SAFE_SOURCE.replace("four-bros", "other"),
-    );
+    const secondSource = createSource(`${SAFE_SOURCE}\n`);
 
     expect(
       stageRailwayIacSource({
@@ -172,12 +177,12 @@ describe("stageRailwayIacSource", () => {
 
   it("accepts defineRailway when railway imports are split across declarations", () => {
     const repository = createRepository();
-    const source = createSource(`
-import { defineRailway } from "railway/iac";
-import { preserve, project, service } from "railway/iac";
-const web = service("online", { env: { ONLINE_OPS_TOKEN: preserve() } });
-export default defineRailway(() => project("four-bros", { resources: [web] }));
-`);
+    const source = createSource(
+      SAFE_SOURCE.replace(
+        'import { defineRailway, project, service } from "railway/iac";',
+        'import { defineRailway } from "railway/iac";\nimport { project, service } from "railway/iac";',
+      ),
+    );
 
     const result = stageRailwayIacSource({
       sourcePath: source.path,

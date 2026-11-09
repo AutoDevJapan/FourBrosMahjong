@@ -5,9 +5,11 @@ import {
   fstatSync,
   lstatSync,
   openSync,
+  readdirSync,
   readSync,
   realpathSync,
 } from "node:fs";
+import { createRequire } from "node:module";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { TextDecoder } from "node:util";
@@ -17,6 +19,7 @@ import {
   type RailwayIacFilesystemEvidence,
   validateRailwayIacMigrationEvidence,
 } from "./railway-iac-migration-contract";
+import { iacSha256, singleFileIacTree } from "./railway-iac-named-partial";
 import { parseStrictJson } from "./strictJson";
 
 const MAX_INPUT_BYTES = 64 * 1_024;
@@ -265,6 +268,54 @@ export function localFilesystemEvidence(
     MAX_LEGACY_CONFIG_BYTES,
     rootDirectory,
   );
+  let sdkPackageVersion: string | null = null;
+  let sdkSchemaSha256: string | null = null;
+  let generatedIacTreeSha1: string | null = null;
+  try {
+    const entries = readdirSync(resolve(rootDirectory, ".railway"));
+    if (
+      generatedSource !== null &&
+      entries.length === 1 &&
+      entries[0] === "railway.ts"
+    )
+      generatedIacTreeSha1 = singleFileIacTree(generatedSource);
+    const require = createRequire(import.meta.url);
+    const sdkRoot = realpathSync(
+      resolve(dirname(require.resolve("railway/iac")), "../.."),
+    );
+    const packageText = readBoundedTextFile(
+      resolve(sdkRoot, "package.json"),
+      64 * 1024,
+      sdkRoot,
+    );
+    const schema = readBoundedTextFile(
+      resolve(sdkRoot, "dist/iac/index.d.ts"),
+      256 * 1024,
+      sdkRoot,
+    );
+    const dependency = schema?.match(
+      /from ['"]\.\.\/(index-[A-Za-z0-9_-]+)\.js['"]/,
+    );
+    const shared = dependency
+      ? readBoundedTextFile(
+          resolve(sdkRoot, `dist/${dependency[1]}.d.ts`),
+          512 * 1024,
+          sdkRoot,
+        )
+      : null;
+    const pkg = packageText === null ? null : parseStrictJson(packageText);
+    if (
+      typeof pkg === "object" &&
+      pkg !== null &&
+      "version" in pkg &&
+      typeof pkg.version === "string"
+    )
+      sdkPackageVersion = pkg.version;
+    if (schema !== null && shared !== null)
+      sdkSchemaSha256 = iacSha256(`${schema}\0${shared}`);
+  } catch {
+    // Missing/unsafe SDK files never establish native-schema compatibility.
+  }
   return {
     generatedIacPath: generatedSource === null ? null : ".railway/railway.ts",
     generatedIacSha256:
@@ -275,6 +326,10 @@ export function localFilesystemEvidence(
       generatedSource === null
         ? null
         : generatedIacSourceIsSecretSafe(generatedSource),
+    generatedIacSource: generatedSource,
+    generatedIacTreeSha1,
+    sdkPackageVersion,
+    sdkSchemaSha256,
     currentRepositoryFilePresent: currentRepositorySource !== null,
     currentRepositoryFileSha256:
       currentRepositorySource === null

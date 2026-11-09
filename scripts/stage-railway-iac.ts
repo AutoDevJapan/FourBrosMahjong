@@ -15,6 +15,7 @@ import { fileURLToPath } from "node:url";
 import { TextDecoder } from "node:util";
 import ts from "typescript";
 import { generatedIacSourceIsSecretSafe } from "./railway-iac-migration-contract";
+import { inspectNamedPartialSource } from "./railway-iac-named-partial";
 import {
   isDirectEntrypoint,
   MAX_GENERATED_IAC_BYTES,
@@ -31,6 +32,7 @@ type StageFailureReason =
   | "source-is-not-utf8"
   | "source-failed-secret-safety-check"
   | "source-is-not-railway-iac"
+  | "source-is-not-target-partial"
   | "destination-parent-unsafe"
   | "destination-already-exists"
   | "destination-write-failed";
@@ -236,6 +238,9 @@ export function stageRailwayIacSource(
   }
   if (!hasRailwayIacDefinition(source)) {
     return { ok: false, reason: "source-is-not-railway-iac" };
+  }
+  if (inspectNamedPartialSource(source) === null) {
+    return { ok: false, reason: "source-is-not-target-partial" };
   }
 
   const result = {
