@@ -50,3 +50,19 @@ apply受付とruntimeの稼働成功は別の結果として記録する。
 これはメモリ上のルームを復元する操作ではない。次の更新でも直前のops/loadと受付条件を確認する。
 
 この受入はオンラインbackendの記録である。新しい3D盤面・人物の外観承認、Vercel Productionでの3D表示、実GPUでの性能、maintenance通知の段階有効化まで完了したことを意味しない。
+
+## 追加受入：通知と新source snapshot（同日22:29 JST）
+
+同じProduction serviceへmain [`a976d46ca044efe20241b5d939a98d064b1c1969`](https://github.com/AutoDevJapan/FourBrosMahjong/commit/a976d46ca044efe20241b5d939a98d064b1c1969)を一度uploadし、deployment `92385e7b-0873-4fab-a3e4-1624d13e2dde`のSUCCESSを確認した。
+imageは`sha256:4de27349cdd90479cd3d786f4d7c9a6cf487baa8c8a0f4e017357bb369ef868b`、snapshotは`529220fd-2f6c-4c4c-95e9-35d375389451`。
+
+- Dockerfileのオンライン専用multi-stage buildを実logで確認し、実効builderはDOCKERFILE/V3/Dockerfileだった。legacy APIのBuilder enumとは別の契約として照合した。
+- 認証済みruntimeのsourceと、Git blobから計算したserver 23 file・src 141 fileのraw bytesが一致した。Node 26.13.0、PID 1のdirect Node command、PID 1のUID/GID 1000を確認した。SSH観測processのUIDとは分けた。
+- health/readinessは200/200、WebSocketはallowed Origin 101・disallowed 403・missing 403だった。ops requiredとmaintenance noticesはtrue、phase accepting、保持room・接続・pending upgradeは0だった。
+- 操作前後で対象serviceを除くenvironment configのhashが一致した。新しい環境・service・replicaを作らず、検証roomも作っていない。
+- 新activeを次変更のprospective rollbackとして構成したpreflightはpassだった。source receipt/APIの真正性はoperatorが照合し、validatorの形式検査と分けた。
+
+通常redeployで起動した先行deploymentはRAILPACKによるNext buildへ進んで失敗したため、旧runtimeの受付を復旧した。その失敗を新uploadの成功へ含めない。
+新uploadのservice Config File設定は空文字列だったが、新deploymentにも`/railway.json`のfile metadataが残った。この時点では完全なIaC移行を主張しない。
+rootの旧設定を履歴fixtureへ移した後のレビュー済みsourceを配布し、新snapshotで旧file参照が無いこと、実効設定と既存Prdの正常性を確認する工程を残す。
+この追加受入はhandshake-onlyであり、先の実対局・再接続の記録を新sourceで再実行したという意味ではない。3D・人物の本番有効化も別の未達である。

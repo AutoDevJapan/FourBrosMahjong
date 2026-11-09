@@ -33,9 +33,11 @@ railway config migrate --service four-bros-mahjong-online --variables unmanaged 
 原生成source、生成時help/log、原生成SHA-256をrepository外へ保持し、draining 30秒、overlap 0、restart方針の追加と型互換化後のsourceは別SHAで照合する。
 CLI 5.71.0の`migrate --help`では、この`--apply`はlocal filesystemだけを変更する。
 外部Config File変更と再配備は別の`config migrate cutover`である。
-切替後のConfig File設定は、対象serviceの明示的な空文字列をread-backする。`null`は未指定であり、rootの`railway.json`をbuilderが自動検出する可能性を排除しない。
+切替後のConfig File設定は、対象serviceの明示的な空文字列をread-backする。`null`は未指定である。空文字列だけでも、uploadしたrootの`railway.json`が新deploymentのfile metadataへ残らないことまでは証明しない。
 [CLI 5.71.0の実装](https://github.com/railwayapp/cli/blob/v5.71.0/src/commands/config/migrate.rs)では、statusの一覧作成が`null`を空文字列と同様に除外する一方、cutoverが書く値は空文字列である。`No services ... read Config as Code`という表示だけで移行済みと判断しない。
 暗黙のroot設定が一覧に出ない場合も、正規の対象限定APIで同じConfig File設定を変更し、元の値とrollback用source/image/snapshotを保持する。切替後は新deploymentのconfig-file metadata、実効start/healthcheck/replica/draining、sourceとOrigin境界を再取得する。過去deploymentの`meta.configFile`と現在のservice設定も区別する。対象外のserviceは変更しない。
+現在の実行用正本は`.railway/railway.ts`だけで、rootのJSON/TOMLは置かない。旧`/readyz`版は[`railway-readyz-before-iac.json`](../fixtures/railway-readyz-before-iac.json)へ同じbytesで保存した。これは履歴fixtureであり、再びrootへ戻すrollback手順ではない。
+Config File設定と新deploymentのmetadataが一致しないときは、同じredeployを反復しない。CLI 5.71.0の通常redeployはlatest deploymentを選び、image再利用flagを明示しない。レビュー済みsourceを新snapshotとしてuploadし、Dockerfileの実buildとmetadataを同じdeployment IDで確認する。
 [WebのCLI説明](https://docs.railway.com/cli/config#migrate-config-as-code)には旧動作が残るため、実行する版のhelpと区別する。
 `--force`、`--delete-files`、cutover、applyをplan作成へ混ぜない。
 
@@ -126,8 +128,8 @@ pinのkind/version/CLI/source tree/environment/etag/changeSetHash/partial/宣言
 schemaVersion 1は旧full-project parity証拠の回帰検証として保持する。
 現在のnamed partialへ旧fixtureを当ててpassさせず、旧schemaの正常・異常・lexical secret scanも維持する。
 [`railway-pre-cutover.json`](../fixtures/railway-pre-cutover.json)の`/healthz`とSHA-256 `2d772749d488b99e39f2428d80e9f8301214312835bc3d744250ec9d6742d84d`を変更しない。
-root `railway.json`は別のrepository target `/readyz`で、旧実効baselineの代わりにしない。
-root `railway.toml`の存在・不明は引き続き拒否する。
+旧root `/readyz`版は上記の別fixtureに保存し、schemaVersion 1の回帰テストにだけ使う。旧実効baselineの代わりにしない。
+schemaVersion 2はroot `railway.json`と`railway.toml`の確定した不在を要求する。読取不能・directory・symlink・存在確認の不明を不在へ変換せず、空文字列のservice設定と併せて検証する。
 
 外部cutover/config mutation/apply/deployは同じ対象の単一担当が行う。
 適用するなら検証した同じpinを使い、source tree・etag・所有権が変わった場合はfresh planから再照合する。
@@ -136,7 +138,7 @@ room消失を伴う本人だけの判断は具体的な対象・影響を集約�
 
 runtime変更のrollbackは記録したknown-good設定へのforward applyとdeploymentの再確認であり、メモリ上のroomを復元しない。
 Config as Codeは[公式のhard cutoff](https://docs.railway.com/config-as-code)（2026-12-01）以後のrollback手段にしない。
-`railway.json`削除は実効read-back・Prd health・rollback確認後の変更として扱い、この候補作成では削除しない。
+旧設定のrootからの撤去は実効read-back・Prd health・rollback確認後に行う。次のレビュー済みsourceの配布後、新deploymentの`configFile`・`fileServiceManifest`・`propertyFileMapping`に旧参照が残らないことと、IaCの実効設定を再確認するまで移行完了としない。
 
 2026-11-09のtarget-only applyと実runtime更新の結果は[Production受入記録](../evidence/production-online-20261109.md)に記録した。
 この履歴を、次回のfresh plan・直前load・source照合の代わりに使わない。

@@ -50,6 +50,8 @@ export interface NamedPartialFilesystem {
   currentRepositoryFilePresent: boolean;
   currentRepositoryFileContent: string | null;
   currentRepositoryFileSha256: string | null;
+  /** Required by schema v2; omitted historical v1 snapshots stay compatible. */
+  legacyJsonFilePresent?: boolean;
   legacyTomlFilePresent: boolean;
   legacyFixturePresent: boolean;
   legacyFixtureContent: string | null;
@@ -626,17 +628,19 @@ export function validateNamedPartialEvidence(
     cli.sdkSchemaSha256 !== filesystem.sdkSchemaSha256
   )
     reasons.add("sdk-schema-unverified");
-  if (filesystem.legacyTomlFilePresent !== false)
+  if (
+    filesystem.legacyJsonFilePresent !== false ||
+    filesystem.legacyTomlFilePresent !== false ||
+    filesystem.currentRepositoryFilePresent !== false ||
+    filesystem.currentRepositoryFileContent !== null ||
+    filesystem.currentRepositoryFileSha256 !== null
+  )
     reasons.add("alternate-legacy-config-present");
   if (
     !filesystem.legacyFixturePresent ||
     filesystem.legacyFixtureSha256 !== legacyFixtureHash ||
     typeof filesystem.legacyFixtureContent !== "string" ||
-    iacSha256(filesystem.legacyFixtureContent) !== legacyFixtureHash ||
-    !filesystem.currentRepositoryFilePresent ||
-    typeof filesystem.currentRepositoryFileContent !== "string" ||
-    iacSha256(filesystem.currentRepositoryFileContent) !==
-      filesystem.currentRepositoryFileSha256
+    iacSha256(filesystem.legacyFixtureContent) !== legacyFixtureHash
   )
     reasons.add("legacy-config-missing");
   const source = input.source;

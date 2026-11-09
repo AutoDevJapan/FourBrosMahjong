@@ -1535,6 +1535,11 @@ describe("verification-scope の分類契約 (#491)", () => {
       "unit-test",
     ],
     [
+      "archived readiness Config as Code fixture",
+      "documents/fixtures/railway-readyz-before-iac.json",
+      "unit-test",
+    ],
+    [
       "Unity display contract fixture",
       "documents/fixtures/unity-display-contract.json",
       "code",
@@ -1946,6 +1951,8 @@ describe("テスト入力資産をdocs-onlyで黙殺しない (#745)", () => {
         "documents/assets/ui-refresh",
         "documents/fixtures/railway-pre-cutover.json",
         "prototypes/blender/README.md",
+        "documents/fixtures/railway-readyz-before-iac.json",
+        "documents/fixtures/unity-display-contract.json",
       ]),
     );
 
@@ -1981,6 +1988,7 @@ describe("テスト入力資産をdocs-onlyで黙殺しない (#745)", () => {
     "documents/assets/ui-refresh/originals/lobby.png",
     "documents/assets/ui-refresh/originals/new-reference.png",
     "documents/fixtures/railway-pre-cutover.json",
+    "documents/fixtures/railway-readyz-before-iac.json",
     "README.md",
     "CHANGELOG.md",
     "docs/四兄弟麻雀ルール.md",
