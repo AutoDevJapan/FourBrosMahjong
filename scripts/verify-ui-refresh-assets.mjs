@@ -169,19 +169,28 @@ export function verifyUiRefreshProvenance(provenance) {
   if (!isRecord(permission)) {
     throw new Error("provenance.providerPermission is missing");
   }
-  for (const [field, value] of Object.entries({
+  const permissionFields = {
     grantedBy: "Project provider",
     grantedOn: "2026-11-07",
     scope: "six UI design-reference images and their derived images",
     publicDistribution: true,
     redistribution: true,
+    commercialUse: "not-recorded",
     evidence:
       "https://github.com/AutoDevJapan/FourBrosMahjong/issues/1175#issuecomment-6701099933",
     terms: "CREDITS.md#提供元・公開条件",
     coversCodeMitLicense: false,
     transfersRights: false,
     impliesOfficialEndorsement: false,
-  })) {
+  };
+  if (
+    Object.keys(permission).length !== Object.keys(permissionFields).length ||
+    Object.keys(permission).some(
+      (field) => !Object.hasOwn(permissionFields, field),
+    )
+  )
+    throw new Error("provenance.providerPermission contains unknown fields");
+  for (const [field, value] of Object.entries(permissionFields)) {
     if (permission[field] !== value) {
       throw new Error(`provenance.providerPermission.${field} is inconsistent`);
     }
@@ -200,6 +209,12 @@ export function verifyUiRefreshProvenance(provenance) {
       throw new Error(`provenance.${field} must be documented`);
     }
   }
+  const expectedNotice =
+    "The project provider permitted public distribution and redistribution of these six images and their derived images on 2026-11-07. See CREDITS.md for the provider's terms. This permission is separate from the code's MIT License and does not establish independently verified ownership, a transfer of rights, or official endorsement by any person, programme, or trademark holder.";
+  if (provenance.rightsNotice !== expectedNotice)
+    throw new Error(
+      "provenance.rightsNotice must match the recorded permission scope",
+    );
 }
 
 export function verifyUiRefreshAssets(manifestPath = DEFAULT_MANIFEST) {

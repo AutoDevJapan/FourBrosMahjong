@@ -167,6 +167,7 @@ describe("Issue #712 design-reference originals", () => {
         scope: "six UI design-reference images and their derived images",
         publicDistribution: true,
         redistribution: true,
+        commercialUse: "not-recorded",
         evidence:
           "https://github.com/AutoDevJapan/FourBrosMahjong/issues/1175#issuecomment-6701099933",
         terms: "CREDITS.md#提供元・公開条件",
@@ -227,6 +228,7 @@ describe("Issue #712 design-reference originals", () => {
     ["scope", "all future assets"],
     ["publicDistribution", false],
     ["redistribution", false],
+    ["commercialUse", true],
     ["evidence", ""],
     ["terms", ""],
     ["coversCodeMitLicense", true],
@@ -253,6 +255,30 @@ describe("Issue #712 design-reference originals", () => {
     expect(() =>
       verifyUiRefreshProvenance({ ...manifest.provenance, [field]: true }),
     ).toThrow(`provenance.${field} is superseded by provider permission`);
+  });
+
+  it("rejects a prose notice that expands the recorded permission", () => {
+    expect(() =>
+      verifyUiRefreshProvenance({
+        ...manifest.provenance,
+        rightsNotice:
+          "Commercial use, rights transfer and endorsement are confirmed.",
+      }),
+    ).toThrow(
+      "provenance.rightsNotice must match the recorded permission scope",
+    );
+  });
+
+  it("rejects unknown permission fields without inferring additional grants", () => {
+    expect(() =>
+      verifyUiRefreshProvenance({
+        ...manifest.provenance,
+        providerPermission: {
+          ...manifest.provenance.providerPermission,
+          allFutureAssets: true,
+        },
+      }),
+    ).toThrow("provenance.providerPermission contains unknown fields");
   });
 
   it("rejects a manifest symlink", () => {
