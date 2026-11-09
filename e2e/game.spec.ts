@@ -84,6 +84,9 @@ async function expectVisibleFourSlotBoard(
 }
 
 async function expectGamePageScreenshot(page: Page, name: string) {
+  await expect(
+    page.getByRole("status").filter({ hasText: "2D盤面で対局を続けられます" }),
+  ).toBeVisible();
   await page.addStyleTag({
     content: "nextjs-portal { display: none !important; }",
   });
@@ -709,6 +712,7 @@ test.describe("対局画面(/game)", () => {
   test("リーチ宣言牌を横置きにし、同段の後続牌だけを詰めても横溢れしない(issue #782)", async ({
     page,
   }) => {
+    await emulateTwoDimensionalFallback(page);
     test.setTimeout(60_000);
     await page.setViewportSize({ width: 393, height: 850 });
     await page.goto("/game?seed=1");

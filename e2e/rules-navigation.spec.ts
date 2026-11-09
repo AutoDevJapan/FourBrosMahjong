@@ -68,7 +68,7 @@ test.describe("ルール説明の目次とアンカー(#612)", () => {
     expect(results.violations).toEqual([]);
   });
 
-  test("各目次リンクに一意な安定アンカーがある", async ({ page }) => {
+  test("各目次リンクに一意な安定アンカーがある", async ({ page, context }) => {
     await page.goto("/rules");
 
     const toc = page.getByRole("navigation", { name: "ルールの目次" });
@@ -80,12 +80,21 @@ test.describe("ルール説明の目次とアンカー(#612)", () => {
       await expect(page.locator(`#${RULE_SECTION_IDS[index]}`)).toHaveCount(1);
     }
 
-    // 目次を経由しない共有URLでも、同じ安定アンカーへ直接到達できる。
-    await page.goto("/rules#rule-progress");
-    const directTarget = page.locator("#rule-progress");
-    await expect(page).toHaveURL(/\/rules#rule-progress$/);
-    await expect(directTarget).toBeInViewport();
-    await expect(directTarget).not.toHaveAttribute("open");
+    // Open the shared URL as a fresh document. A second goto on this page only
+    // changes its fragment and can race the first document's router hydration.
+    const directPage = await context.newPage();
+    try {
+      await directPage.goto("/rules#rule-progress");
+      await expect(
+        directPage.getByRole("navigation", { name: "画面メニュー" }),
+      ).toHaveAttribute("data-navigation-hydrated", "true");
+      const directTarget = directPage.locator("#rule-progress");
+      await expect(directPage).toHaveURL(/\/rules#rule-progress$/);
+      await expect(directTarget).toBeInViewport();
+      await expect(directTarget).not.toHaveAttribute("open");
+    } finally {
+      await directPage.close();
+    }
   });
 
   test("閉じたカテゴリ内の項目IDへ直接移動すると内容を開いて表示する", async ({

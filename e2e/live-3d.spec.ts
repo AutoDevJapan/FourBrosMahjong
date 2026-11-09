@@ -155,6 +155,28 @@ test("320pxでも同じ対局状態を描画し、横にはみ出さない", asy
     await page.evaluate(() => document.documentElement.scrollWidth),
   ).toBeLessThanOrEqual(320);
   await expect(page.getByRole("button", { name: "全体盤面" })).toBeVisible();
+  await expect(
+    page.getByRole("listbox", { name: "自家の手牌" }).filter({ visible: true }),
+  ).toHaveCount(1);
+  const glossary = page.getByRole("button", { name: "対局中の用語を見る" });
+  await expect(glossary).toHaveCount(1);
+  await glossary.scrollIntoViewIfNeeded();
+  const hit = await glossary.evaluate((element) => {
+    const rect = element.getBoundingClientRect();
+    return element.contains(
+      document.elementFromPoint(
+        rect.x + rect.width / 2,
+        rect.y + rect.height / 2,
+      ),
+    );
+  });
+  expect(hit).toBe(true);
+  await glossary.click();
+  await expect(
+    page.getByRole("dialog", { name: "対局中の用語" }),
+  ).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(glossary).toBeFocused();
   await page.screenshot({
     path: testInfo.outputPath("live-3d-320px.png"),
     fullPage: true,

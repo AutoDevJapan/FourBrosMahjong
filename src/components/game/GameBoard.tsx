@@ -885,7 +885,11 @@ export default function GameBoard({
         </div>
       </div>
 
-      {render3D && tableDisplayStatus === "ready" ? <GameGlossary /> : null}
+      {render3D && tableDisplayStatus === "ready" ? (
+        <div className="game-live-glossary">
+          <GameGlossary />
+        </div>
+      ) : null}
 
       <EffectOverlay effect={gameEffect} />
 

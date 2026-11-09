@@ -89,6 +89,12 @@
   padding: 0.5rem;
 }
 
+/* This control sits on the page surface rather than the hidden felt table. */
+.game-page .game-live-glossary > button {
+  color: var(--ui-text);
+  border-color: var(--control-border);
+}
+
 .game-page
   .game-board[data-3d-status="ready"]
   .game-board-cross.game-board-inline {

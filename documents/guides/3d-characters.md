@@ -54,4 +54,3 @@ pnpm exec tsc --project documents/guides/3d-characters-tsconfig.json
 4体合計約4.5万三角形・29surfaceで、各体12,000三角形以下、1texture/体を目安とする。材質は顔・髪・衣服・装飾を個別に保持する。
 原本との比較、通常盤面での人物識別・牌面・得点・操作の可読性、全4席回転、320〜393px、reduced motion、関節・衣服の貫通、長時間性能は統合時の受入である。
 隔離したsoftware WebGLの画像・テスト成功を、hardware性能・本人の外見承認・Productionでの受入へ代用しない。
-

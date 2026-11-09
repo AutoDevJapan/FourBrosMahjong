@@ -3,6 +3,11 @@ nextjs-portal {
   display: none !important;
 }
 
+/* The fallback notice is asserted before capture; preserve the existing 2D board baseline. */
+.game-live-table:has(.game-table-3d[data-3d-status="failed"]) {
+  display: none !important;
+}
+
 /* The new operator/contact paragraph is checked in every viewport before capture.
    Keep historical Linux/macOS images intact and compare the existing lobby layout. */
 .lobby-footer p:has(a[href="mailto:contact@autodevjapan.com"]) {
