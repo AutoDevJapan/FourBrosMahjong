@@ -28,12 +28,15 @@ export const MAX_LEGACY_CONFIG_BYTES = 64 * 1_024;
 const repositoryRoot = process.cwd();
 const UTF8_DECODER = new TextDecoder("utf-8", { fatal: true });
 
-function legacyTomlFileIsPresent(rootDirectory: string): boolean {
+function legacyConfigFileIsPresent(
+  rootDirectory: string,
+  fileName: "railway.json" | "railway.toml",
+): boolean {
   try {
-    lstatSync(resolve(rootDirectory, "railway.toml"));
+    lstatSync(resolve(rootDirectory, fileName));
     return true;
   } catch (error) {
-    // A root railway.toml is an alternate Config as Code source. Treat every
+    // A root JSON/TOML is a Config as Code source. Treat every
     // outcome except a definitive ENOENT as present so permission/read races
     // cannot make the migration evidence fail open.
     return !(
@@ -336,7 +339,14 @@ export function localFilesystemEvidence(
         ? null
         : createHash("sha256").update(currentRepositorySource).digest("hex"),
     currentRepositoryFileContent: currentRepositorySource,
-    legacyTomlFilePresent: legacyTomlFileIsPresent(rootDirectory),
+    legacyJsonFilePresent: legacyConfigFileIsPresent(
+      rootDirectory,
+      "railway.json",
+    ),
+    legacyTomlFilePresent: legacyConfigFileIsPresent(
+      rootDirectory,
+      "railway.toml",
+    ),
     legacyFixturePresent: legacyFixtureSource !== null,
     legacyFixtureSha256:
       legacyFixtureSource === null

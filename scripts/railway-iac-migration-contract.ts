@@ -16,7 +16,7 @@ const REVIEWED_RAILWAY_SDK_SCHEMA_REVISION =
 export const RAILWAY_LEGACY_FIXTURE_PATH =
   "documents/fixtures/railway-pre-cutover.json";
 // SHA-256 of RAILWAY_LEGACY_FIXTURE_PATH. The fixture is the immutable
-// pre-cutover artifact; the current root railway.json is a separate target.
+// pre-cutover artifact; the later /readyz CaC file is archived separately.
 export const RAILWAY_LEGACY_FIXTURE_SHA256 =
   "2d772749d488b99e39f2428d80e9f8301214312835bc3d744250ec9d6742d84d";
 // This is the last known pre-cutover effective legacy baseline for #742. The
@@ -87,6 +87,8 @@ export interface RailwayIacFilesystemEvidence {
   currentRepositoryFilePresent: boolean;
   currentRepositoryFileSha256: string | null;
   currentRepositoryFileContent: string | null;
+  /** Schema v2 requires definitive root JSON absence; v1 is historical. */
+  legacyJsonFilePresent?: boolean;
   legacyTomlFilePresent: boolean;
   legacyFixturePresent: boolean;
   legacyFixtureSha256: string | null;
@@ -1392,27 +1394,13 @@ export function validateRailwayIacMigrationEvidence(
   nowMs = Date.now(),
 ): RailwayIacMigrationResult {
   if (isRecord(input) && input.schemaVersion === 2) {
-    const result = validateNamedPartialEvidence(
+    return validateNamedPartialEvidence(
       input,
       filesystem,
       RAILWAY_LEGACY_FIXTURE_SHA256,
       generatedIacSourceIsSecretSafe,
       nowMs,
     );
-    if (
-      !currentRepositoryFileContentIsKnown(
-        filesystem.currentRepositoryFileContent,
-      )
-    ) {
-      return {
-        ...result,
-        migrationEvidence: "hold",
-        reasons: [
-          ...new Set([...result.reasons, "legacy-config-missing" as const]),
-        ].sort(),
-      };
-    }
-    return result;
   }
   const reasons: RailwayIacMigrationReason[] = [];
   const finish = (): RailwayIacMigrationResult => ({

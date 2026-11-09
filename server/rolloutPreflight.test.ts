@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import {
   ONLINE_DIRECT_START_COMMAND,
@@ -434,10 +434,8 @@ describe("online rollout preflight", () => {
     expect(
       readFileSync("scripts/verify-online-container-signal.mjs", "utf8"),
     ).toContain(`const EXPECTED_CMDLINE = "${ONLINE_DIRECT_START_COMMAND}";`);
-    const railway = JSON.parse(readFileSync("railway.json", "utf8")) as {
-      deploy?: { startCommand?: unknown };
-    };
-    expect(railway.deploy?.startCommand).toBe(ONLINE_DIRECT_START_COMMAND);
+    expect(existsSync("railway.json")).toBe(false);
+    expect(existsSync("railway.toml")).toBe(false);
     const runtimePackage = JSON.parse(
       readFileSync("container/online/package.json", "utf8"),
     ) as { scripts?: unknown };
