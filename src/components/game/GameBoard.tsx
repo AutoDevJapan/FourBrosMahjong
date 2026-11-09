@@ -38,6 +38,7 @@ import ActionPanel, { type ActionItem } from "./ActionPanel";
 import CharacterPortrait from "./CharacterPortrait";
 import EffectOverlay from "./effects/EffectOverlay";
 import { useGameEffects } from "./effects/useGameEffects";
+import GameGlossary from "./GameGlossary";
 import {
   type GameContextValue,
   SECURE_RANDOM_UNAVAILABLE_MESSAGE,
@@ -682,7 +683,11 @@ export default function GameBoard({
           {renderSlot("left", false)}
         </div>
         <div className="game-table-cell col-start-2 row-start-2">
-          <Table info={tableInfo} dora={dora} showGlossary={withActions} />
+          <Table
+            info={tableInfo}
+            dora={dora}
+            showGlossary={withActions && tableDisplayStatus !== "ready"}
+          />
         </div>
         <div
           className="game-slot game-slot--right col-start-3 row-start-2"
@@ -728,6 +733,7 @@ export default function GameBoard({
       interactionDisabled,
       phase,
       roundSummary,
+      tableDisplayStatus,
     ],
   );
 
@@ -866,7 +872,11 @@ export default function GameBoard({
             hint={hint}
             disabled={interactionDisabled}
           />
-          <Table info={tableInfo} dora={dora} />
+          <Table
+            info={tableInfo}
+            dora={dora}
+            showGlossary={tableDisplayStatus !== "ready"}
+          />
           <div className="game-focus-opponents grid grid-cols-1 gap-2">
             <div data-slot-position="left">{renderSlot("left", true)}</div>
             <div data-slot-position="across">{renderSlot("across", true)}</div>
@@ -874,6 +884,8 @@ export default function GameBoard({
           </div>
         </div>
       </div>
+
+      {render3D && tableDisplayStatus === "ready" ? <GameGlossary /> : null}
 
       <EffectOverlay effect={gameEffect} />
 

@@ -8,8 +8,13 @@ import {
 import { StrictMode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { DisplayEnvelope } from "@/domain/display/displaySnapshot";
+import GameBoard from "./GameBoard";
 import { GameProvider } from "./GameProvider";
 import GameTable3D from "./GameTable3D";
+
+vi.mock("next/navigation", () => ({
+  useRouter: () => ({ push: vi.fn(), replace: vi.fn() }),
+}));
 
 const renderer = vi.hoisted(() => ({
   instances: [] as Array<{
@@ -78,6 +83,29 @@ beforeEach(() => {
 });
 
 describe("live 3D display host", () => {
+  it("places the single live glossary outside the clipped semantic table", async () => {
+    const ui = render(
+      <GameProvider>
+        <GameBoard render3D />
+      </GameProvider>,
+    );
+    await waitFor(() =>
+      expect(ui.container.querySelector("[data-phase]")).toHaveAttribute(
+        "data-3d-status",
+        "ready",
+      ),
+    );
+    const glossary = screen.getAllByRole("button", {
+      name: "対局中の用語を見る",
+    });
+    expect(glossary).toHaveLength(1);
+    expect(glossary[0].closest(".game-table")).toBeNull();
+    fireEvent.click(glossary[0]);
+    expect(
+      screen.getByRole("dialog", { name: "対局中の用語" }),
+    ).toBeInTheDocument();
+  });
+
   it("uses one owned animation clock and cancels it on context loss", async () => {
     const raf = vi.spyOn(window, "requestAnimationFrame").mockReturnValue(73);
     const cancel = vi.spyOn(window, "cancelAnimationFrame");
