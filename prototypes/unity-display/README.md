@@ -5,16 +5,18 @@
 手牌のツモ間隔、3着席＋1抜け番、局替わり、演出・再表示を確認する。
 ゲームクライアント、サーバー接続、ゲームルールの移植ではない。
 
-**状態:** C#ソース、シーン生成手順、表示コアのテストを用意した段階。
-Unity Hub/Editorはこの環境にインストールされておらず、Unityコンパイル・実行・描画・
-ビルド・性能検証は未実施。Web画面や.NETテストをUnity実行証跡として扱わない。
+**状態（2026-09-08）:** Unity 2022.3.62f2でコンパイル、`JsonUtility`検証、シーン生成、
+macOS/Metalアプリの実描画・全12状態の復元・演出・フレーム時間測定まで実施。
+実行で見つかった復元失敗、牌文字の重なり、左パネルの未描画背景を修正した。
+判定は表示試作の継続Go／製品採用No-Go。物理入力から画面表示までの遅延は未測定。
 最新の実施結果・残条件は [検証記録](../../documents/guides/unity-display-prototype.md) を参照。
+保存修正の取り込み順・既存証跡の再利用・後続Issueとの境界は [再利用前レビュー](../../documents/guides/unity-prototype-reuse-review.md) を参照。
 
 ## 開く・再生する
 
-1. 候補版 **Unity 2022.3.62f2**（revision `7670c08855a9`）でこのディレクトリを開く。
+1. 検証版 **Unity 2022.3.62f2**（revision `7670c08855a9`）でこのディレクトリを開く。
    新規テンプレートを重ねて作成しない。macOS Editor/Standaloneを最初の検証対象にする。
-   このpinは再現用候補であり、実行確認済み版・製品採用・最新版の主張ではない。
+   このpinは実行証跡の再現用であり、製品採用・最新版の主張ではない。
 2. インポート/コンパイルが完了したら `Four Bros > Build display scene` を実行する。
    リポジトリのfixtureを検査・コピーし、`Assets/Generated/DisplayPrototype.unity` と
    単色マテリアルを生成する。初回の空シーンや既存作業シーンは保存確認後に切り替わる。
@@ -26,8 +28,8 @@ Unity Hub/Editorはこの環境にインストールされておらず、Unity�
 
 `Assets/Generated/` は使い捨てで、シーン生成・ビルドごとに再生成される。
 ここでの手編集やFBX割当を残したい場合はシーンを `Assets/Scenes/` などへ別名保存する。
-候補版以外で開く際は、バージョン差と生成されたProjectSettings/package lockをレビューする。
-外部UPM/Asset Storeパッケージは不要。manifestはEditor同梱のIMGUI、JSON、Physics、TextRendering
+検証版以外で開く際は、バージョン差と生成されたProjectSettings/package lockをレビューする。
+外部UPM/Asset Storeパッケージは不要。manifestはEditor同梱のImageConversion、IMGUI、JSON、Physics
 モジュールのみ。TextMeshとIMGUIの英数字ラベルで日本語フォントの追加を避けている。
 
 ## 表示と操作のチェック
@@ -54,6 +56,8 @@ Unity Hub/Editorはこの環境にインストールされておらず、Unity�
 - `DisplayContract.cs`: 表示DTO、入力検査、room/versionゲート、イベント重複抑止、純粋な座標計算。
 - `FixtureScenarios.cs`: 既存fixtureの席・持ち点をそのまま12状態へ投影。席回転・点数・局進行の計算なし。
 - `UnityDisplayPrototype.cs`: プリミティブ描画、200ms位置補間、IMGUI操作、復元。
+- `DisplaySnapshotJson.cs`: メモリ内復元時のJSON往復。Unityがnullを空オブジェクトにするため、任意のeffect/drawn/transitionの有無を別フィールドで保持する。
+- `DisplayRuntimeEvidence.cs`: 明示した起動引数がある場合のみ、実描画・復元・遷移検査、PNG、性能JSONを出力して終了する。
 - `OptionalModelAssets.cs`: 任意のFBX/Prefabを注入する`IDisplayAssetProvider`。
 - `Assets/Editor/DisplaySceneBuilder.cs`: fixture検査、単一シーン生成、macOSビルド。
 - `Assets/Editor/DisplayContractChecks.cs`: 実際のC#表示コアを検証する共通テスト。
@@ -74,13 +78,13 @@ transport、token、合法手、山、向聴、点数、フリテンの責務は
 既存のモデルpivot/scale/向きを変更する必要がある場合は、Prefabの子Transformで補正する。
 ランタイムに`.blend`を読む機構や外部Blender起動は追加していない。
 
-並列作業#1165の予定出力は `prototypes/blender/generated/{MahjongTable,TilePin5,SoakuhinStudy}.fbx`。
+Blender試作#1165の保存済み出力は `prototypes/blender/generated/{MahjongTable,TilePin5,SoakuhinStudy}.fbx`。
 元モデルはメートル単位で、卓の幅約0.94m/高さ0.78m、牌は0.026×0.036×0.018m、
 人物は約1.8m。自動的に単位立方体になるとは限らないため、インポート後のRenderer.boundsを
 確認してPrefab内で寸法・pivotを合わせる。アセットの実寸評価には#1165の専用プレビューを使う。
-#1165はこのプロジェクトの`Assets/FourBrosBlenderStudy/`へ専用プレビューを追加する。
-両変更を取り込むと、`FourBros > Blender Study`メニューでFBXの取り込みと実寸プレビューを
-実行できる。#818単独ではこの追加メニューはなく、表示fixtureの試作は独立して動く。
+#1165の専用プレビューはこのプロジェクトの`Assets/FourBrosBlenderStudy/`にある。
+`FourBros > Blender Study`メニューでFBXの取り込みと実寸プレビューを実行できる。
+表示fixtureの試作はこのプレビューやFBXを使わず独立して動く。
 
 この試作の座標単位は視認性のための任意単位で、実寸卓の物理シミュレーションではない。
 リーチは注入したtileの親Transformを90度回す。文字ラベルはモデルと独立して追加する。
@@ -113,18 +117,27 @@ version sequence、別room、初回/復元/局替わり時の重複effect、入�
 `kita`（北抜き・ガリ）はC#の`EffectKinds`にあるが、Web側`gameEffect`には演出実装が無い。
 契約では `unityOnlyKinds` として分離している。Unity側の `UnityDisplayPrototype` には
 `kita` ボタンと共通の文字演出、`FixtureScenarios` には北枚数の更新が実装済み。
-Editor上の実描画検証と専用表現の検討は未完了で、Web側には比較用の演出見本が無い。
+macOSアプリで文字バナーと北枚数更新を確認済み。専用の演出表現は未実装で、Web側には比較用の演出見本が無い。
 
-インストール済みUnityのCLIでの後続検証例（今回未実行）:
+実行済みのUnity検証・ビルドと、macOSアプリの証跡採取手順:
 
 ```bash
 UNITY_EDITOR=/Applications/Unity/Hub/Editor/2022.3.62f2/Unity.app/Contents/MacOS/Unity
 "$UNITY_EDITOR" -batchmode -quit -projectPath "$PWD/prototypes/unity-display" -executeMethod FourBros.Display.Editor.DisplaySceneBuilder.Validate -logFile /tmp/unity-818-validate.log
 "$UNITY_EDITOR" -batchmode -quit -projectPath "$PWD/prototypes/unity-display" -executeMethod FourBros.Display.Editor.DisplaySceneBuilder.BuildMac -logFile /tmp/unity-818-build.log
+evidence_dir="$(mktemp -d /tmp/unity-818-evidence.XXXXXX)"
+open -n -W "$PWD/prototypes/unity-display/Builds/DisplayPrototype.app" --args \
+  -screen-fullscreen 0 -screen-width 1440 -screen-height 1000 \
+  -displayEvidence "$evidence_dir" -logFile "$evidence_dir.log"
 ```
 
-生成/ビルドの成功だけで視認性・操作遅延・実機負荷を合格扱いしない。
-実機、Unity版、commit、解像度を記録し、上の操作表の画面/録画とProfiler計測を添付する。
+`-displayEvidence`は空の絶対パスを指定する。ログは出力ディレクトリ外に指定すること。
+44枚の実フレームPNGと`runtime-evidence.json`を出力する。レポートの`passed`と`errors`を確認する
+（macOSの`open -W`の終了値はUnity内の検査結果を保証しない）。
+960×640でも同じ検査を実行済み。通常起動時には自動操作・ファイル出力を行わない。
+処理はIMGUIボタンと同じハンドラを呼ぶため、物理クリック・入力機器・ディスプレイ走査を含む遅延測定ではない。
+フレーム時間は180フレーム、状態切替処理とCPUフレーム末尾までの時間は30回測る。
+PNGエンコード中を除外しても、開発ビルド・共有作業端末での短時間測定である点に注意する。
 
 ## 素材と参照
 
