@@ -169,7 +169,7 @@ export function verifyUiRefreshProvenance(provenance) {
   if (!isRecord(permission)) {
     throw new Error("provenance.providerPermission is missing");
   }
-  for (const [field, value] of Object.entries({
+  const permissionFields = {
     grantedBy: "Project provider",
     grantedOn: "2026-11-07",
     scope: "six UI design-reference images and their derived images",
@@ -182,7 +182,15 @@ export function verifyUiRefreshProvenance(provenance) {
     coversCodeMitLicense: false,
     transfersRights: false,
     impliesOfficialEndorsement: false,
-  })) {
+  };
+  if (
+    Object.keys(permission).length !== Object.keys(permissionFields).length ||
+    Object.keys(permission).some(
+      (field) => !Object.hasOwn(permissionFields, field),
+    )
+  )
+    throw new Error("provenance.providerPermission contains unknown fields");
+  for (const [field, value] of Object.entries(permissionFields)) {
     if (permission[field] !== value) {
       throw new Error(`provenance.providerPermission.${field} is inconsistent`);
     }

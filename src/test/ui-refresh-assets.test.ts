@@ -269,6 +269,18 @@ describe("Issue #712 design-reference originals", () => {
     );
   });
 
+  it("rejects unknown permission fields without inferring additional grants", () => {
+    expect(() =>
+      verifyUiRefreshProvenance({
+        ...manifest.provenance,
+        providerPermission: {
+          ...manifest.provenance.providerPermission,
+          allFutureAssets: true,
+        },
+      }),
+    ).toThrow("provenance.providerPermission contains unknown fields");
+  });
+
   it("rejects a manifest symlink", () => {
     withFixture(
       ({ manifestPath }) => {
