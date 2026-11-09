@@ -405,51 +405,55 @@ export function createMahjongRenderer(
     cssHeight?: number,
     dpr = globalThis.devicePixelRatio || 1,
   ) {
-    if (stopped || !gl) return;
-    const rect = canvas.getBoundingClientRect();
-    width = cssWidth ?? rect.width;
-    height = cssHeight ?? rect.height;
-    if (
-      !Number.isFinite(width) ||
-      !Number.isFinite(height) ||
-      width <= 0 ||
-      height <= 0
-    ) {
-      width = 0;
-      height = 0;
-      picks = [];
-      return;
+    try {
+      if (stopped || !gl) return;
+      const rect = canvas.getBoundingClientRect();
+      width = cssWidth ?? rect.width;
+      height = cssHeight ?? rect.height;
+      if (
+        !Number.isFinite(width) ||
+        !Number.isFinite(height) ||
+        width <= 0 ||
+        height <= 0
+      ) {
+        width = 0;
+        height = 0;
+        picks = [];
+        return;
+      }
+      // Bound backing storage, never the CSS layout or scene. Avoid giant DPR
+      // buffers while retaining full scene/pick coordinates on high-DPI devices.
+      const ratio = Number.isFinite(dpr) ? Math.max(0.5, Math.min(2, dpr)) : 1;
+      const max = Math.min(
+        4096,
+        gl.getParameter(gl.MAX_RENDERBUFFER_SIZE) as number,
+      );
+      // Reserve complete mip chains before allocating the drawing buffer. Include
+      // the resolved RGBA target and every multisampled color/depth attachment.
+      const textureBytes = Math.ceil(
+        (TILE_TEXTURE_URLS.length * 192 * 256 +
+          Object.keys(options.characterTextures ?? {}).length *
+            CHARACTER_TEXTURE_EDGE ** 2) *
+          4 *
+          (4 / 3),
+      );
+      const available = GPU_STORAGE_BUDGET - textureBytes;
+      if (available <= 0) throw new Error("Texture storage exceeds GPU budget");
+      const samples = Math.max(1, gl.getParameter(gl.SAMPLES) as number);
+      const maxPixels = Math.floor(available / (4 + samples * 8));
+      const scale = Math.min(
+        ratio,
+        max / width,
+        max / height,
+        Math.sqrt(maxPixels / (width * height)),
+      );
+      canvas.width = Math.max(1, Math.floor(width * scale));
+      canvas.height = Math.max(1, Math.floor(height * scale));
+      vp = camera(width / height, options.characterTextures !== undefined);
+      draw();
+    } catch (error) {
+      fail("draw", "Cannot resize WebGL drawing buffer", error);
     }
-    // Bound backing storage, never the CSS layout or scene. Avoid giant DPR
-    // buffers while retaining full scene/pick coordinates on high-DPI devices.
-    const ratio = Number.isFinite(dpr) ? Math.max(0.5, Math.min(2, dpr)) : 1;
-    const max = Math.min(
-      4096,
-      gl.getParameter(gl.MAX_RENDERBUFFER_SIZE) as number,
-    );
-    // Reserve complete mip chains before allocating the drawing buffer. Include
-    // the resolved RGBA target and every multisampled color/depth attachment.
-    const textureBytes = Math.ceil(
-      (TILE_TEXTURE_URLS.length * 192 * 256 +
-        Object.keys(options.characterTextures ?? {}).length *
-          CHARACTER_TEXTURE_EDGE ** 2) *
-        4 *
-        (4 / 3),
-    );
-    const available = GPU_STORAGE_BUDGET - textureBytes;
-    if (available <= 0) throw new Error("Texture storage exceeds GPU budget");
-    const samples = Math.max(1, gl.getParameter(gl.SAMPLES) as number);
-    const maxPixels = Math.floor(available / (4 + samples * 8));
-    const scale = Math.min(
-      ratio,
-      max / width,
-      max / height,
-      Math.sqrt(maxPixels / (width * height)),
-    );
-    canvas.width = Math.max(1, Math.floor(width * scale));
-    canvas.height = Math.max(1, Math.floor(height * scale));
-    vp = camera(width / height, options.characterTextures !== undefined);
-    draw();
   }
   function select(optionId: string | null) {
     if (stopped) return;

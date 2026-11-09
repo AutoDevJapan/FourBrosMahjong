@@ -102,6 +102,22 @@ function controlledImages(width = 300, height = 400) {
 }
 
 describe("WebGL2 renderer boundaries", () => {
+  it("reports resize allocation failures and releases the owned GPU context", () => {
+    const gl = driver(),
+      canvas = setup(gl),
+      onError = vi.fn(),
+      renderer = createMahjongRenderer(canvas, { onError });
+    gl.getParameter.mockImplementation(() => {
+      throw new Error("driver allocation failure");
+    });
+    expect(() => renderer.resize(1280, 900, 2)).not.toThrow();
+    expect(onError).toHaveBeenCalledOnce();
+    expect(gl.deleteBuffer).toHaveBeenCalled();
+    renderer.resize(320, 800, 1);
+    expect(onError).toHaveBeenCalledOnce();
+    renderer.dispose();
+  });
+
   it("keeps multisampled high-DPI backing storage and tile mipmaps within 64 MiB", () => {
     const gl = driver(),
       canvas = setup(gl),
@@ -132,7 +148,7 @@ describe("WebGL2 renderer boundaries", () => {
       });
     renderer.publish(frame());
     for (const image of images) image.dispatchEvent(new Event("load"));
-    expect(images).toHaveLength(34);
+    expect(images).toHaveLength(TILE_TEXTURE_URLS.length + 4);
     const raster = gl.texImage2D.mock.calls.at(-1)?.[5] as HTMLCanvasElement;
     expect([raster.width, raster.height]).toEqual([1024, 1024]);
     const textureMipmaps =

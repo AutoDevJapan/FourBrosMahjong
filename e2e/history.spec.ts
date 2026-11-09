@@ -132,7 +132,7 @@ test.describe("戦績のローカル保存・閲覧(#293)", () => {
     // localStorage は同一 context で共有、sessionStorage はタブごとに独立する。
     // 2つの復元効果を同時に起動し、Web Locks が read-modify-write を直列化する。
     await Promise.all([first.reload(), second.reload()]);
-    // goto は document load までなので、CI の CPU 競合時も両タブの復元完了を待つ。
+    // reload は document load までなので、CI の CPU 競合時も両タブの復元完了を待つ。
     await Promise.all(
       [first, second].map((tab) =>
         expect(tab.getByRole("group", { name: "対局盤面" })).toHaveAttribute(

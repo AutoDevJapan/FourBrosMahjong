@@ -12,7 +12,7 @@
 上記の40桁SHAと一致することを確認した。image digestは
 `sha256:9221d6bd398d8c995d3d99096c8eb169d5e4a8064664cea61e2e265f3bed59d6`。
 
-- Node 26.8.1がPID 1として`node --import tsx server/start.ts`を直接実行する。
+- Node 26.8.1の実効commandは`node --import tsx server/start.ts`。この時点の記録ではPIDを独立取得していない。
 - healthcheckは`/readyz`、timeout 60秒、replica 1、overlap 0秒、draining 30秒。
 - ops認証を必須化し、source/deployment/replica identityを認証済み`GET /ops/status`と突合した。
 - `ONLINE_MAINTENANCE_NOTICES_ENABLED=false`を保持した。通知の有効化・本番drain試験・実rollbackは実施していない。
