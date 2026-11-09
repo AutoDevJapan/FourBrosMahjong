@@ -10,6 +10,7 @@
  * 最小限のプレーンオブジェクトで表現する。
  */
 import { describe, expect, it, vi } from "vitest";
+import { CHARACTER_TEXTURES } from "@/components/game/three/characterAssets";
 import {
   buildServiceWorkerScript,
   MAX_RUNTIME_ENTRIES,
@@ -17,6 +18,20 @@ import {
   PRECACHE_ROUTES,
   resolveServiceWorkerVersion,
 } from "./serviceWorkerScript";
+
+// Next's static-image loader returns metadata; Vitest's asset loader returns a URL.
+vi.mock("@/components/game/characters3d/textures/p0-reference.jpg", () => ({
+  default: { src: "/_next/static/media/p0-reference.12345678.jpg" },
+}));
+vi.mock("@/components/game/characters3d/textures/p1-reference.jpg", () => ({
+  default: { src: "/_next/static/media/p1-reference.23456789.jpg" },
+}));
+vi.mock("@/components/game/characters3d/textures/p2-reference.jpg", () => ({
+  default: { src: "/_next/static/media/p2-reference.34567890.jpg" },
+}));
+vi.mock("@/components/game/characters3d/textures/p3-reference.jpg", () => ({
+  default: { src: "/_next/static/media/p3-reference.45678901.jpg" },
+}));
 
 const ORIGIN = "https://example.com";
 
@@ -209,9 +224,11 @@ function staticAssetResponse(pathname: string, body = "asset"): Response {
       ? "application/manifest+json"
       : pathname.endsWith(".avif")
         ? "image/avif"
-        : pathname === "/icons/icon-192" || pathname === "/icons/icon-512"
-          ? "image/png"
-          : "image/svg+xml";
+        : pathname.endsWith(".jpg")
+          ? "image/jpeg"
+          : pathname === "/icons/icon-192" || pathname === "/icons/icon-512"
+            ? "image/png"
+            : "image/svg+xml";
   return new Response(body, { headers: { "Content-Type": contentType } });
 }
 
@@ -250,6 +267,12 @@ describe("buildServiceWorkerScript", () => {
     expect(PRECACHE_ASSETS).toContain("/tiles/Back.svg");
     expect(PRECACHE_ASSETS).toContain("/manifest.webmanifest");
     expect(PRECACHE_ASSETS).toContain("/characters/p3-hechima-portrait.avif");
+    const textures = Object.values(CHARACTER_TEXTURES);
+    expect(textures).toHaveLength(4);
+    for (const texture of textures) {
+      expect(texture).toMatch(/^\/_next\/static\/media\/.+\.jpg$/);
+      expect(PRECACHE_ASSETS).toContain(texture);
+    }
   });
 
   it("installでプリキャッシュし、旧タブ保護のため即時activateしない(#349)", async () => {

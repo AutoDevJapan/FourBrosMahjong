@@ -11,6 +11,9 @@ import type {
   DisplayOption,
 } from "@/domain/display/displaySnapshot";
 import { tileLabel } from "../common/tileLabel";
+import { createCharacterController } from "./characters3d/controller";
+import { CHARACTER_TEXTURES } from "./three/characterAssets";
+import { projectCharacterSurfaces } from "./three/characterScene";
 import { createMahjongRenderer } from "./three/mahjongRenderer";
 import { useLocalDisplayPort } from "./useLocalDisplayPort";
 
@@ -30,6 +33,7 @@ interface Props {
   readonly riichiArmed?: boolean;
   readonly interactionDisabled?: boolean;
   readonly onStatusChange?: (status: TableDisplayStatus) => void;
+  readonly renderCharacters?: boolean;
 }
 
 /** The canvas consumes the public adapter; game state and legality stay in the provider. */
@@ -37,6 +41,7 @@ export default function GameTable3D({
   riichiArmed = false,
   interactionDisabled = false,
   onStatusChange,
+  renderCharacters = false,
 }: Props) {
   const canvas = useRef<HTMLCanvasElement>(null);
   const settings = useRef({ riichiArmed, interactionDisabled, onStatusChange });
@@ -68,16 +73,72 @@ export default function GameTable3D({
     let closed = false;
     let failed = false;
     let released = false;
+    let resourcesReleased = false;
     let frame: DisplayEnvelope | null = null;
     let selected: Selection | null = null;
     let listener: ((intent: unknown) => IntentReceipt) | null = null;
     let request = 0;
     let runtime: ReturnType<typeof createMahjongRenderer> | undefined;
     let resizeObserver: ResizeObserver | undefined;
+    const characterController = renderCharacters
+      ? createCharacterController()
+      : null;
+    const media =
+      typeof window.matchMedia === "function"
+        ? window.matchMedia("(prefers-reduced-motion: reduce)")
+        : null;
+    let animation: number | null = null;
+    let previousDraw = 0;
+    const sampleCharacters = (now: number) => {
+      if (!characterController || closed || failed || !runtime) return;
+      try {
+        runtime.setCharacters(
+          projectCharacterSurfaces(
+            characterController.sample(now, media?.matches ?? true),
+          ),
+        );
+      } catch {
+        failed = true;
+        clearSelection();
+        release();
+        fail();
+      }
+    };
+    const animate = (nowMs: number) => {
+      animation = null;
+      if (
+        closed ||
+        failed ||
+        !characterController ||
+        media?.matches ||
+        document.hidden
+      )
+        return;
+      if (nowMs - previousDraw >= 1000 / 24) {
+        previousDraw = nowMs;
+        sampleCharacters(nowMs / 1000);
+      }
+      if (!closed && !failed) animation = requestAnimationFrame(animate);
+    };
+    const updateAnimation = () => {
+      if (animation !== null) cancelAnimationFrame(animation);
+      animation = null;
+      if (!characterController || closed || failed || !frame) return;
+      sampleCharacters(performance.now() / 1000);
+      if (!closed && !failed && !media?.matches && !document.hidden)
+        animation = requestAnimationFrame(animate);
+    };
     const resize = () => {
       if (!closed && !failed) runtime?.resize();
     };
     const release = () => {
+      if (resourcesReleased) return;
+      resourcesReleased = true;
+      if (animation !== null) cancelAnimationFrame(animation);
+      animation = null;
+      media?.removeEventListener?.("change", updateAnimation);
+      document.removeEventListener("visibilitychange", updateAnimation);
+      characterController?.dispose();
       resizeObserver?.disconnect();
       window.removeEventListener("resize", resize);
       if (runtime && !released) {
@@ -108,6 +169,7 @@ export default function GameTable3D({
     clearSelectionRef.current = clearSelection;
     try {
       runtime = createMahjongRenderer(canvas.current, {
+        characterTextures: renderCharacters ? CHARACTER_TEXTURES : undefined,
         onReady: () => {
           if (!closed && !failed) changeStatus("ready");
         },
@@ -185,6 +247,8 @@ export default function GameTable3D({
           resizeObserver = new ResizeObserver(resize);
           resizeObserver.observe(canvas.current);
         }
+        media?.addEventListener?.("change", updateAnimation);
+        document.addEventListener("visibilitychange", updateAnimation);
       }
     } catch (error) {
       release();
@@ -196,6 +260,12 @@ export default function GameTable3D({
         frame = next;
         clearSelection();
         runtime?.publish(next);
+        if (characterController && !failed) {
+          const roundKey = next.roundKey ?? "round-0";
+          const now = performance.now() / 1000;
+          characterController.publish(next, next.cues ?? [], roundKey, now);
+          updateAnimation();
+        }
       },
       onIntent(receive) {
         listener = receive;
@@ -214,7 +284,7 @@ export default function GameTable3D({
         release();
       },
     };
-  }, [changeStatus, fail]);
+  }, [changeStatus, fail, renderCharacters]);
 
   useLocalDisplayPort(status === "failed" ? null : createPort, fail);
 

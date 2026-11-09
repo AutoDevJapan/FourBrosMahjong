@@ -15,6 +15,7 @@ const renderer = vi.hoisted(() => ({
   instances: [] as Array<{
     frames: DisplayEnvelope[];
     dispose: ReturnType<typeof vi.fn>;
+    setCharacters: ReturnType<typeof vi.fn>;
     pick: (id: string) => void;
     fail: (error: unknown) => void;
   }>,
@@ -27,6 +28,7 @@ vi.mock("./three/mahjongRenderer", () => ({
     const instance = {
       frames: [] as DisplayEnvelope[],
       dispose: vi.fn(),
+      setCharacters: vi.fn(),
       pick: options.onPick,
       fail: options.onError,
     };
@@ -39,19 +41,73 @@ vi.mock("./three/mahjongRenderer", () => ({
       resize: vi.fn(),
       dispose: instance.dispose,
       select: vi.fn(),
+      setCharacters: instance.setCharacters,
     };
   }),
+}));
+
+const characters = vi.hoisted(() => ({
+  instances: [] as Array<{
+    publish: ReturnType<typeof vi.fn>;
+    sample: ReturnType<typeof vi.fn>;
+    dispose: ReturnType<typeof vi.fn>;
+  }>,
+}));
+vi.mock("./characters3d/controller", () => ({
+  createCharacterController: () => {
+    const instance = {
+      publish: vi.fn(),
+      sample: vi.fn(() => []),
+      dispose: vi.fn(),
+    };
+    characters.instances.push(instance);
+    return instance;
+  },
+}));
+vi.mock("./three/characterScene", () => ({
+  projectCharacterSurfaces: () => [],
 }));
 
 beforeEach(() => {
   renderer.instances = [];
   renderer.failCreate = false;
+  characters.instances = [];
   window.sessionStorage.clear();
   window.localStorage.clear();
   window.history.replaceState(null, "", "/game?seed=1");
 });
 
 describe("live 3D display host", () => {
+  it("uses one owned animation clock and cancels it on context loss", async () => {
+    const raf = vi.spyOn(window, "requestAnimationFrame").mockReturnValue(73);
+    const cancel = vi.spyOn(window, "cancelAnimationFrame");
+    const ui = render(
+      <GameProvider>
+        <GameTable3D renderCharacters />
+      </GameProvider>,
+    );
+    const controller = characters.instances[0];
+    expect(controller.publish).toHaveBeenCalledWith(
+      renderer.instances[0].frames[0],
+      [],
+      expect.any(String),
+      expect.any(Number),
+    );
+    expect(controller.sample).toHaveBeenCalled();
+    expect(renderer.instances[0].setCharacters).toHaveBeenCalled();
+    expect(raf).toHaveBeenCalledOnce();
+    act(() => renderer.instances[0].fail(new Error("GPU lost")));
+    await waitFor(() =>
+      expect(screen.getByRole("status")).toHaveTextContent("2D"),
+    );
+    expect(cancel).toHaveBeenCalledWith(73);
+    expect(controller.dispose).toHaveBeenCalledOnce();
+    ui.unmount();
+    expect(controller.dispose).toHaveBeenCalledOnce();
+    raf.mockRestore();
+    cancel.mockRestore();
+  });
+
   it("publishes actual provider state, confirms once and disposes both StrictMode resources", async () => {
     const ui = render(
       <StrictMode>

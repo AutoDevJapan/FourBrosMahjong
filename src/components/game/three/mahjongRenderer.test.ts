@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { DisplayEnvelope } from "@/domain/display/displaySnapshot";
+import type { CharacterSurface } from "./characterScene";
 import { createMahjongRenderer } from "./mahjongRenderer";
 import { projectScene, TILE_TEXTURE_URLS } from "./scene";
 import { frame } from "./sceneFixture";
@@ -22,6 +23,7 @@ function driver() {
     getError: vi.fn(() => 0),
     isContextLost: vi.fn(() => false),
     drawArrays: vi.fn(),
+    bufferData: vi.fn(),
     texImage2D: vi.fn(),
     deleteBuffer: vi.fn(),
     deleteVertexArray: vi.fn(),
@@ -98,6 +100,55 @@ function controlledImages() {
 }
 
 describe("WebGL2 renderer boundaries", () => {
+  const characterSurface = (): CharacterSurface => ({
+    id: "p0/body",
+    position: "self",
+    vertices: new Float32Array(24),
+    material: {
+      id: "cloth",
+      color: [0.1, 0.1, 0.1],
+      roughness: 0.8,
+      metallic: 0,
+    },
+  });
+
+  it("reuses a character buffer across poses and releases removed actors exactly once", () => {
+    const gl = driver(),
+      images = controlledImages(),
+      onError = vi.fn(),
+      renderer = createMahjongRenderer(setup(gl), { onError });
+    renderer.publish(frame());
+    for (const image of images) image.dispatchEvent(new Event("load"));
+    renderer.setCharacters([characterSurface()]);
+    const allocations = gl.createBuffer.mock.calls.length;
+    const draws = gl.drawArrays.mock.calls.length;
+    renderer.setCharacters([characterSurface()]);
+    expect(gl.createBuffer).toHaveBeenCalledTimes(allocations);
+    expect(gl.drawArrays.mock.calls.length).toBeGreaterThan(draws);
+    renderer.setCharacters([]);
+    expect(gl.deleteBuffer).toHaveBeenCalledTimes(1);
+    expect(gl.deleteVertexArray).toHaveBeenCalledTimes(1);
+    renderer.dispose();
+    renderer.dispose();
+    expect(gl.deleteBuffer).toHaveBeenCalledTimes(allocations);
+    expect(gl.deleteVertexArray).toHaveBeenCalledTimes(allocations);
+    expect(onError).not.toHaveBeenCalled();
+  });
+
+  it("releases a partial character allocation when the GPU cannot allocate its buffer", () => {
+    const gl = driver(),
+      onError = vi.fn(),
+      renderer = createMahjongRenderer(setup(gl), { onError });
+    gl.createBuffer.mockReturnValueOnce(null as never);
+    renderer.setCharacters([characterSurface()]);
+    expect(onError).toHaveBeenCalledOnce();
+    expect(onError.mock.calls[0][0]).toMatchObject({ code: "draw" });
+    expect(gl.deleteVertexArray).toHaveBeenCalledTimes(
+      gl.createVertexArray.mock.calls.length,
+    );
+    renderer.dispose();
+  });
+
   it("announces ready only after all textures, a public frame and successful nonzero drawing", () => {
     const gl = driver(),
       canvas = setup(gl),

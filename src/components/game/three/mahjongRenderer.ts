@@ -1,4 +1,9 @@
 import type { DisplayEnvelope } from "@/domain/display/displaySnapshot";
+import {
+  CHARACTER_METRES_TO_SCENE,
+  type CharacterSurface,
+  characterPlacement,
+} from "./characterScene";
 import { beveledBox, FACE_VERTICES } from "./geometry";
 import {
   camera,
@@ -24,6 +29,8 @@ export interface MahjongRendererOptions {
   readonly onReady?: () => void;
   readonly onPick?: (optionId: string) => void;
   readonly groups?: readonly SceneGroup[];
+  /** Exact hashed runtime URLs, supplied only by an approved character host. */
+  readonly characterTextures?: Readonly<Record<string, string>>;
 }
 interface MahjongPick {
   readonly sessionId: string;
@@ -42,6 +49,7 @@ export interface MahjongRenderer {
   setGroups(groups: readonly SceneGroup[]): void;
   hitTest(x: number, y: number): MahjongPick | null;
   projectPoint(point: Vec3): ProjectedPoint;
+  setCharacters(surfaces: readonly CharacterSurface[]): void;
 }
 
 class MahjongRendererError extends Error {
@@ -136,6 +144,11 @@ export function createMahjongRenderer(
     vp = camera(1.5);
   let picks: PickFace[] = [];
   let highestGeneration = 0;
+  let characterSurfaces: readonly CharacterSurface[] = [];
+  const characterMeshes = new Map<
+    string,
+    { mesh: Mesh; buffer: WebGLBuffer; vertices: number }
+  >();
   const shaders: WebGLShader[] = [],
     programs: WebGLProgram[] = [],
     buffers: WebGLBuffer[] = [],
@@ -179,6 +192,8 @@ export function createMahjongRenderer(
     frame = null;
     selected = null;
     highestGeneration = 0;
+    characterSurfaces = [];
+    characterMeshes.clear();
   };
   const fail = (
     code: MahjongRendererError["code"],
@@ -310,6 +325,28 @@ export function createMahjongRenderer(
           [0.005, 0.012, 0.008],
           0,
           undefined,
+        );
+      }
+      gl.depthMask(true);
+      gl.disable(gl.BLEND);
+      gl.uniform1f(uniforms.uAlpha, 1);
+      for (const surface of characterSurfaces) {
+        const item = characterMeshes.get(surface.id);
+        if (!item) throw new Error("Character GPU binding is missing");
+        const placement = characterPlacement(surface.position);
+        const scale = CHARACTER_METRES_TO_SCENE;
+        mesh(
+          item.mesh,
+          transform(
+            placement.center,
+            [0, placement.yaw, 0],
+            [scale, scale, scale],
+          ),
+          surface.material.color,
+          0,
+          surface.material.texture
+            ? textures.get(surface.material.texture)
+            : undefined,
         );
       }
       gl.depthMask(true);
@@ -451,6 +488,78 @@ export function createMahjongRenderer(
     projectPoint(point) {
       return project(vp, point, width, height);
     },
+    setCharacters(surfaces) {
+      if (stopped || !gl) return;
+      try {
+        const ids = new Set(surfaces.map((surface) => surface.id));
+        if (ids.size !== surfaces.length || surfaces.length > 64)
+          throw new Error("Invalid character surface set");
+        for (const surface of surfaces) {
+          if (
+            surface.vertices.length % 24 !== 0 ||
+            surface.vertices.length > 12000 * 3 * 8 ||
+            !surface.vertices.every(Number.isFinite)
+          )
+            throw new Error("Invalid character vertex stream");
+          if (
+            surface.material.texture &&
+            !options.characterTextures?.[surface.material.texture]
+          )
+            throw new Error("Unregistered character texture");
+          let item = characterMeshes.get(surface.id);
+          if (!item) {
+            const vao = gl.createVertexArray();
+            if (!vao) throw new Error("Cannot allocate character geometry");
+            vaos.push(vao);
+            const buffer = gl.createBuffer();
+            if (!buffer) throw new Error("Cannot allocate character geometry");
+            buffers.push(buffer);
+            gl.bindVertexArray(vao);
+            gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
+            for (const [location, size, offset] of [
+              [0, 3, 0],
+              [1, 3, 12],
+              [2, 2, 24],
+            ]) {
+              gl.enableVertexAttribArray(location);
+              gl.vertexAttribPointer(
+                location,
+                size,
+                gl.FLOAT,
+                false,
+                32,
+                offset,
+              );
+            }
+            item = {
+              mesh: { vao, count: surface.vertices.length / 8 },
+              buffer,
+              vertices: surface.vertices.length,
+            };
+            characterMeshes.set(surface.id, item);
+          }
+          if (item.vertices !== surface.vertices.length)
+            throw new Error("Character topology changed inside one runtime");
+          gl.bindBuffer(gl.ARRAY_BUFFER, item.buffer);
+          gl.bufferData(gl.ARRAY_BUFFER, surface.vertices, gl.DYNAMIC_DRAW);
+        }
+        for (const [id, item] of characterMeshes) {
+          if (ids.has(id)) continue;
+          gl.deleteVertexArray(item.mesh.vao);
+          gl.deleteBuffer(item.buffer);
+          vaos.splice(vaos.indexOf(item.mesh.vao), 1);
+          buffers.splice(buffers.indexOf(item.buffer), 1);
+          characterMeshes.delete(id);
+        }
+        gl.bindVertexArray(null);
+        gl.bindBuffer(gl.ARRAY_BUFFER, null);
+        characterSurfaces = surfaces;
+        checked();
+        draw();
+      } catch (error) {
+        fail("draw", "Character geometry update failed", error);
+      }
+    },
   };
   canvas.addEventListener("webglcontextlost", contextLost);
   canvas.addEventListener("webglcontextcreationerror", contextCreationError);
@@ -531,7 +640,10 @@ export function createMahjongRenderer(
     face = mesh(FACE_VERTICES);
     gl.bindVertexArray(null);
     gl.bindBuffer(gl.ARRAY_BUFFER, null);
-    for (const url of TILE_TEXTURE_URLS) {
+    for (const url of [
+      ...TILE_TEXTURE_URLS,
+      ...Object.keys(options.characterTextures ?? {}),
+    ]) {
       const texture = gl.createTexture();
       if (!texture) throw new Error("Cannot allocate tile texture");
       textures.set(url, texture);
@@ -551,12 +663,19 @@ export function createMahjongRenderer(
     raster.height = 256;
     const context = raster.getContext("2d");
     if (!context) throw new Error("Tile texture rasterization is unavailable");
-    let remaining = TILE_TEXTURE_URLS.length;
+    const imageInputs = [
+      ...TILE_TEXTURE_URLS.map((url) => ({ key: url, url })),
+      ...Object.entries(options.characterTextures ?? {}).map(([key, url]) => ({
+        key,
+        url,
+      })),
+    ];
+    let remaining = imageInputs.length;
     loadingTimer = setTimeout(
       () => fail("texture", "Bundled tile textures timed out"),
       15000,
     );
-    for (const url of TILE_TEXTURE_URLS) {
+    for (const { key, url } of imageInputs) {
       const img = new Image();
       images.push(img);
       img.onload = () => {
@@ -564,11 +683,25 @@ export function createMahjongRenderer(
         try {
           if (img.naturalWidth <= 0 || img.naturalHeight <= 0)
             throw new Error("Empty tile image");
+          const characterTexture = Object.hasOwn(
+            options.characterTextures ?? {},
+            key,
+          );
+          raster.width = characterTexture
+            ? Math.min(2048, img.naturalWidth)
+            : 192;
+          raster.height = characterTexture
+            ? Math.min(2048, img.naturalHeight)
+            : 256;
           context.clearRect(0, 0, raster.width, raster.height);
-          context.fillStyle = url.endsWith("/Back.svg") ? "#842c1b" : "#f9f7e9";
+          context.fillStyle = characterTexture
+            ? "#181a18"
+            : url.endsWith("/Back.svg")
+              ? "#842c1b"
+              : "#f9f7e9";
           context.fillRect(0, 0, raster.width, raster.height);
           context.drawImage(img, 0, 0, raster.width, raster.height);
-          gl.bindTexture(gl.TEXTURE_2D, textures.get(url)!);
+          gl.bindTexture(gl.TEXTURE_2D, textures.get(key)!);
           gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
           gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, false);
           gl.texImage2D(
