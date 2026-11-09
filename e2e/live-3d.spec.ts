@@ -182,3 +182,22 @@ test("320pxでも同じ対局状態を描画し、横にはみ出さない", asy
     fullPage: true,
   });
 });
+
+for (const width of [320, 393, 700, 1280]) {
+  test(`${width}pxで局情報がドラ牌を覆わない`, async ({ page }) => {
+    await page.setViewportSize({ width, height: 900 });
+    await page.goto("/game?seed=1");
+    await expect(page.locator(".game-table-3d")).toHaveAttribute(
+      "data-3d-status",
+      "ready",
+    );
+    const canvas = await page.locator(".game-table-3d-canvas").boundingBox();
+    const info = await page.locator(".game-table-3d-info").boundingBox();
+    if (!canvas || !info) throw new Error("Missing live table geometry");
+    expect(info.y).toBeGreaterThanOrEqual(canvas.y + canvas.height);
+    expect(info.x).toBeGreaterThanOrEqual(0);
+    expect(info.x + info.width).toBeLessThanOrEqual(width);
+    await expect(page.locator(".game-table-3d-info")).toContainText("東1局");
+    await expect(page.locator(".game-table-3d-info")).toContainText("残り山");
+  });
+}

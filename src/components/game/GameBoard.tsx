@@ -799,15 +799,17 @@ export default function GameBoard({
                   </div>
                 );
               })}
-              <div className="game-table-3d-info">
-                <span>
-                  {tableInfo.roundWind === "east" ? "東" : "南"}
-                  {tableInfo.handNumber}局
-                </span>
-                <span>本場 {tableInfo.honba}</span>
-                <span>供託 {tableInfo.riichiSticks}</span>
-                <span>残り山 {tableInfo.remainingLiveTiles}</span>
-              </div>
+            </div>
+          ) : null}
+          {tableDisplayStatus === "ready" ? (
+            <div className="game-table-3d-info" aria-hidden="true">
+              <span>
+                {tableInfo.roundWind === "east" ? "東" : "南"}
+                {tableInfo.handNumber}局
+              </span>
+              <span>本場 {tableInfo.honba}</span>
+              <span>供託 {tableInfo.riichiSticks}</span>
+              <span>残り山 {tableInfo.remainingLiveTiles}</span>
             </div>
           ) : null}
         </div>
