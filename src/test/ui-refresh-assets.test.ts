@@ -281,6 +281,15 @@ describe("Issue #712 design-reference originals", () => {
     ).toThrow("provenance.providerPermission contains unknown fields");
   });
 
+  it("rejects an unknown top-level provenance grant", () => {
+    expect(() =>
+      verifyUiRefreshProvenance({
+        ...manifest.provenance,
+        commercialUse: "permitted",
+      }),
+    ).toThrow("provenance contains unknown fields");
+  });
+
   it("rejects a manifest symlink", () => {
     withFixture(
       ({ manifestPath }) => {

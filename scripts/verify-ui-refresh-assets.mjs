@@ -143,6 +143,31 @@ export function verifyUiRefreshProvenance(provenance) {
   if (!isRecord(provenance)) {
     throw new Error("manifest provenance is missing");
   }
+  const provenanceFields = new Set([
+    "providedBy",
+    "sourceAtIngest",
+    "inclusionRequestRecord",
+    "legalRightsHolderVerified",
+    "providerAuthorityToLicenseVerified",
+    "redistributionPermissionVerifiedIndependently",
+    "requestIsRightsOrLicenseEvidence",
+    "sha256IsPermissionEvidence",
+    "providerPermission",
+    "rightsNotice",
+    "license",
+  ]);
+  if (
+    Object.keys(provenance).some(
+      (field) =>
+        !provenanceFields.has(field) &&
+        ![
+          "publicDistributionRequiresWrittenRightsConfirmation",
+          "commercialUseRequiresWrittenRightsConfirmation",
+          "removeOriginalsAndDerivativesIfRightsRemainUnverified",
+        ].includes(field),
+    )
+  )
+    throw new Error("provenance contains unknown fields");
   for (const field of [
     "legalRightsHolderVerified",
     "providerAuthorityToLicenseVerified",
