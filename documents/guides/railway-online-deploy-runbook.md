@@ -133,6 +133,8 @@ pnpm verify:server:rollout-preflight < /path/outside/repository/sanitized-readba
 
 `pre-enable` はclient-firstのexact Production revisionを確認し、server noticeがまだdefault-off、ops required、`accepting`、`/readyz=200`である段階だけを表す。`rollback`は現在rollback可能だという自己申告ではなく、承認済みの次変更後にprospective rollbackとなる操作前current activeを表す。そのためactiveと同じdeployment ID / full source / effective start / health / draining / shutdown / ops / noticesをexactに持ち、retention対象であることをread-backする。
 
+Git連携によらずCLIでアップロードしたdeploymentでは、`rollback.sourceProvenance.kind`を`railway-cli-upload`とし、`fullRevision`、`deploymentId`、`imageDigest`、`snapshotId`、`sourceReceiptSha256`を取得して渡す。deployment IDは操作前activeと一致させ、image digestは`sha256:`と64桁の小文字hex、receiptのSHA-256は64桁のhexを用いる。非公開receiptには、cleanなレビュー済みsourceのupload記録、Railwayのimage/snapshot/deployment、認証済みopsのsourceとの照合を保持する。CLIの表示名だけをGit commit由来と記録しない。validatorが検査するのは形式と入力間の対応であり、receiptや外部APIの真正性はoperatorが別途確認する。従来の`railway-git-commit`形式も維持する。
+
 authorized enable後、POST前は `phase: "pre-drain"` とし、notice enabled、`accepting`、`/readyz=200`を必須にする。operator承認後にPOSTし、収束後は `phase: "drained"`、notice enabled、`drained`、`/readyz=503`、`blockingDrainRooms=0`、`reconnectGraceRooms=0`へfresh evidenceを更新して再検査する。`acceptingReadiness`は同一deployment/sourceのaccepting時に`/readyz=200`だった証拠であり、pre-enable/pre-drainではcurrent snapshot、drainedではPOST前snapshotとして使う。これによりconfig invalidによる503をdrain起因と誤認しない。replicaは現在regionだけでなく全regionを列挙し、validatorが`replicaIds`をunique集計する。唯一のreplica IDとauthenticated ops statusの`replicaId`を一致させる。ops statusの`deploymentId`もactive deployment IDと一致させるが、replica IDの存在だけからreplica数1を推測してはならない。deployment setはactive ID exact、in-progress 0、staged changesなしを同時read-backし、overlap/raceがあれば`hold`とする。これらのphase名はcurrent serviceのenable/drain状態だけを示し、upcoming candidateのfull SHA、clean tree、CI、deploy承認を検査・許可しない。それらは別のmanual HOLD gateである。
 
 | phase | notices | current phase / readyz | blocker requirement | acceptingReadiness |
@@ -145,7 +147,7 @@ authorized enable後、POST前は `phase: "pre-drain"` とし、notice enabled�
 
 | evidence | authority source |
 |---|---|
-| project / service / environment、active deployment、active status、prospective rollback retention eligibility、deployment source、deployment set | Railway deployment metadataとread-only retention/全deployment情報 |
+| project / service / environment、active deployment、active status、prospective rollback retention eligibility、deployment source、deployment set | Railway deployment metadataとread-only retention/全deployment情報。CLI uploadのfull revisionは非公開upload receiptと認証済みopsのsourceを照合する |
 | effective start command / healthcheck / draining、全regionとreplica IDs | Railway deploymentのeffective settings / topology read-back |
 | shutdown grace、ops required、notices enabled | 対象deploymentのeffective runtime variable read-back。tokenや変数一覧全体は保存しない |
 | drain phase / blocker counts / deploymentId / replicaId / source revision / observedAt | 同一のauthenticated `GET /ops/status` response。`acceptingReadiness`は同一deployment/sourceのaccepting時 `/readyz=200` |
@@ -281,7 +283,7 @@ test "$OPS_RELEASE_CODE" = 200
 
 - GitHub source integration から deploy する場合は、対象がレビュー済み `main` SHA であることを確認し、deployment ID と `RAILWAY_GIT_COMMIT_SHA` を証拠に残す。
 - CLI upload を使う場合は、上で確認した detached clean worktree から実行し、deployment message に full SHA を含める。CLI upload では Railway metadata の commit SHA が空になる場合があるため、deployment ID、image digest、full-SHA message、deploy 元の `HEAD` と clean tree を一組の証拠として残す。
-- offline preflightのsource provenanceは、GitHub source integrationの`kind="railway-git-commit"`とmetadataのfull revisionだけを受理する。CLI uploadはmetadataだけで同じprovenanceを機械検証できないためvalidatorでは明示的に`hold`となる。CLI uploadを別途承認する場合も、deployment ID、image digest、full-SHA-only message、deploy元clean HEADをmanual evidenceとして扱い、validatorの`pass`へ読み替えない。
+- offline preflightのsource provenanceは、GitHub source integrationの`kind="railway-git-commit"`と、上の必須項目を持つCLI uploadの`kind="railway-cli-upload"`を受理する。validatorが検査するのは形式と入力間の対応だけで、receiptやRailway応答の真正性は証明しない。CLI uploadではdeployment ID、image digest、snapshot ID、full-SHA-only message、deploy元clean HEADを非公開receiptに保持し、認証済みopsのsourceと照合する。validatorの`pass`を外部証拠の代わりにしない。
 - deploy command を実行する直前に、CLI が示す project / service / environment が保存済み target と完全一致することを再確認する。
 - command の再実行や細かな追加 deploy をしない。失敗時は原因を確認し、下記の rollback 判断へ進む。
 

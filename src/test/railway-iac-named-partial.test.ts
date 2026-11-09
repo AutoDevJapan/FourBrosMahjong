@@ -174,7 +174,7 @@ function validEvidence() {
       targetServiceAddress: ADDRESS,
       resourceAddresses: [ADDRESS, OTHER],
       targetMembershipEvidenceSha256: "b".repeat(64),
-      configFileSetting: null as string | null,
+      configFileSetting: "" as string | null,
     },
     ownership: {
       ok: true,
@@ -225,6 +225,16 @@ function checked(
 }
 
 describe("#742 named partial native plan contract", () => {
+  it("accepts only an explicit empty Config File setting after ownership cutover", () => {
+    const disabled = validEvidence();
+    disabled.evidence.inventory.configFileSetting = "";
+    expect(checked(disabled).migrationEvidence).toBe("pass");
+    const unspecified = validEvidence();
+    unspecified.evidence.inventory.configFileSetting = null;
+    expect(checked(unspecified).reasons).toContain(
+      "ownership-cutover-unverified",
+    );
+  });
   it("accepts only the existing service while preserving omitted unowned resources and variables", () => {
     expect(checked()).toEqual({
       schemaVersion: 2,
