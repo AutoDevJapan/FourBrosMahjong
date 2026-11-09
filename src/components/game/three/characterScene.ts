@@ -1,6 +1,8 @@
-import type { CharacterActorFrame } from "../characters3d/controller";
-import { projectCharacterGeometry } from "../characters3d/project";
-import type { CharacterMaterial } from "../characters3d/types";
+import {
+  type CharacterActorFrame,
+  type CharacterMaterial,
+  projectCharacterGeometry,
+} from "../characters3d";
 
 export interface CharacterSurface {
   readonly id: string;

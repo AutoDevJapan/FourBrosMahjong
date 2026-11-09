@@ -11,7 +11,7 @@ import type {
   DisplayOption,
 } from "@/domain/display/displaySnapshot";
 import { tileLabel } from "../common/tileLabel";
-import { createCharacterController } from "./characters3d/controller";
+import { createCharacterController } from "./characters3d";
 import { CHARACTER_TEXTURES } from "./three/characterAssets";
 import { projectCharacterSurfaces } from "./three/characterScene";
 import { createMahjongRenderer } from "./three/mahjongRenderer";

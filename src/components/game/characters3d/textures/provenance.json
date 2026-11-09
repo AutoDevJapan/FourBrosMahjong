@@ -1,0 +1,186 @@
+[
+  {
+    "id": "p0",
+    "source": "p0-soakuhin-character-sheet.png",
+    "sourceSha256": "ef6c81eb0ce02dbc5227d3320f61c760527214eea1ecd8e7e42cd88dbb4aebbf",
+    "path": "src/components/game/characters3d/textures/p0-reference.jpg",
+    "sha256": "3de87deff94db752ff476c94c621bcbf5024d709b7d3e927f0c409f88895d681",
+    "bytes": 376073,
+    "patch": null,
+    "atlas": {
+      "width": 1536,
+      "height": 1536,
+      "sourceRegion": {
+        "x": 0,
+        "y": 0,
+        "width": 1536,
+        "height": 1024
+      },
+      "sleeves": [
+        {
+          "source": [512, 240, 40, 210],
+          "destination": [0, 1024, 224, 400]
+        },
+        {
+          "source": [1215, 240, 40, 210],
+          "destination": [256, 1024, 224, 400]
+        }
+      ],
+      "heads": []
+    },
+    "backgroundFill": "border flood; constant skin/hair/cloth extension; candidate extrapolation",
+    "encoder": "0.35.5"
+  },
+  {
+    "id": "p1",
+    "source": "p1-ryuji-character-sheet.png",
+    "sourceSha256": "5a02f954603f5b211fd8f670e2f8e503bccc3a8d7a926be58ed46015514101bf",
+    "path": "src/components/game/characters3d/textures/p1-reference.jpg",
+    "sha256": "e0dc0a4edc6930862655802967723c528d827a8e6c7f54c3abb58aede4211c52",
+    "bytes": 380591,
+    "patch": null,
+    "atlas": {
+      "width": 1536,
+      "height": 1536,
+      "sourceRegion": {
+        "x": 0,
+        "y": 0,
+        "width": 1535,
+        "height": 1024
+      },
+      "sleeves": [
+        {
+          "source": [512, 240, 40, 210],
+          "destination": [0, 1024, 224, 400]
+        },
+        {
+          "source": [1215, 240, 40, 210],
+          "destination": [256, 1024, 224, 400]
+        }
+      ],
+      "heads": []
+    },
+    "backgroundFill": "border flood; constant skin/hair/cloth extension; candidate extrapolation",
+    "encoder": "0.35.5"
+  },
+  {
+    "id": "p2",
+    "source": "p2-masaki-character-sheet.png",
+    "sourceSha256": "ce218809a3ec175d875228e807332a2190d82f3b76cf81e744a2073759b05b0c",
+    "path": "src/components/game/characters3d/textures/p2-reference.jpg",
+    "sha256": "ae94bc3697973291561ff034ecb261416e19cc42a1846378cd5fe46fe97ec16a",
+    "bytes": 429437,
+    "patch": {
+      "x": 22,
+      "y": 249,
+      "w": 70,
+      "h": 102
+    },
+    "atlas": {
+      "width": 1536,
+      "height": 1536,
+      "sourceRegion": {
+        "x": 0,
+        "y": 0,
+        "width": 1536,
+        "height": 1024
+      },
+      "sleeves": [
+        {
+          "source": [516, 235, 40, 170],
+          "destination": [0, 1024, 224, 400]
+        },
+        {
+          "source": [1215, 235, 40, 170],
+          "destination": [256, 1024, 224, 400]
+        }
+      ],
+      "heads": [
+        {
+          "view": "right",
+          "source": {
+            "left": 452,
+            "top": 126,
+            "width": 98,
+            "height": 95
+          },
+          "atlas": {
+            "left": 512,
+            "top": 1024,
+            "width": 256,
+            "height": 256
+          }
+        },
+        {
+          "view": "back",
+          "source": {
+            "left": 833,
+            "top": 125,
+            "width": 90,
+            "height": 80
+          },
+          "atlas": {
+            "left": 768,
+            "top": 1024,
+            "width": 256,
+            "height": 256
+          }
+        },
+        {
+          "view": "left",
+          "source": {
+            "left": 1207,
+            "top": 126,
+            "width": 98,
+            "height": 95
+          },
+          "atlas": {
+            "left": 1024,
+            "top": 1024,
+            "width": 256,
+            "height": 256
+          }
+        }
+      ]
+    },
+    "backgroundFill": "border flood; constant skin/hair/cloth extension; candidate extrapolation",
+    "encoder": "0.35.5"
+  },
+  {
+    "id": "p3",
+    "source": "p3-hechima-character-sheet.png",
+    "sourceSha256": "bcdad1e1faf55e6aab426d7b372e947d13d45c30de887f6d7956eaa6dd78aca5",
+    "path": "src/components/game/characters3d/textures/p3-reference.jpg",
+    "sha256": "dfa022356a60fa540d5115e8651893060bd6125ec59b38c5f92aca3d48726bb3",
+    "bytes": 384493,
+    "patch": {
+      "x": 22,
+      "y": 297,
+      "w": 74,
+      "h": 90
+    },
+    "atlas": {
+      "width": 1536,
+      "height": 1536,
+      "sourceRegion": {
+        "x": 0,
+        "y": 0,
+        "width": 1536,
+        "height": 1024
+      },
+      "sleeves": [
+        {
+          "source": [512, 240, 40, 225],
+          "destination": [0, 1024, 224, 400]
+        },
+        {
+          "source": [1215, 240, 40, 225],
+          "destination": [256, 1024, 224, 400]
+        }
+      ],
+      "heads": []
+    },
+    "backgroundFill": "border flood; constant skin/hair/cloth extension; candidate extrapolation",
+    "encoder": "0.35.5"
+  }
+]

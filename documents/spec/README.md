@@ -13,6 +13,7 @@
 | 4 | [domain-model.md](./domain-model.md) | ドメインモデル(エンティティ/値オブジェクト、クラス図) |
 | 5 | [ui-accessibility-responsive-darkmode.md](./ui-accessibility-responsive-darkmode.md) | アクセシビリティ・レスポンシブ・ダークモードの横断方針(UI実装issueの前提) |
 | 6 | [screen-design-and-routing.md](./screen-design-and-routing.md) | ゲーム画面のUI設計・App Routerルーティング設計・コンポーネント分割方針(実装は別issue) |
+| 7 | [browser-3d-display.md](./browser-3d-display.md) | 公開DTOからのWebGL盤面・人物表示と入力・寿命・配布の境界 |
 
 ## 用語(基本)
 

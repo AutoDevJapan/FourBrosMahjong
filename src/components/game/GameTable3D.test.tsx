@@ -53,7 +53,7 @@ const characters = vi.hoisted(() => ({
     dispose: ReturnType<typeof vi.fn>;
   }>,
 }));
-vi.mock("./characters3d/controller", () => ({
+vi.mock("./characters3d", () => ({
   createCharacterController: () => {
     const instance = {
       publish: vi.fn(),

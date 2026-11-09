@@ -427,7 +427,7 @@ export function createMahjongRenderer(
     const scale = Math.min(ratio, max / width, max / height);
     canvas.width = Math.max(1, Math.round(width * scale));
     canvas.height = Math.max(1, Math.round(height * scale));
-    vp = camera(width / height);
+    vp = camera(width / height, options.characterTextures !== undefined);
     draw();
   }
   function select(optionId: string | null) {

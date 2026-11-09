@@ -23,10 +23,15 @@ canvasの牌は選択の後、ネイティブbuttonで打牌を確定する。�
 確定版が変われば選択を捨て、古いsession・generation・revisionと二重入力をadapterで拒否する。
 初回・復元では過去の演出を再生しない。
 
-publish、resize、選択と素材読み込み完了のときだけ描画する。静止盤面の常時RAFはない。
+人物表示を使わない盤面はpublish、resize、選択と素材読み込み完了のときだけ描画し、常時RAFを持たない。
+人物表示を有効にするhostは時計を一つだけ所有し、最大24fpsで確定actor cueと待機姿勢を描く。
+非表示のdocumentでは描画を止め、reduced motionでは動作を抑えた姿勢を状態更新時だけ描く。
+復元・初回の過去cueを再生せず、新revisionは以前の動作を破棄して最新状態へ収束する。
 canvas backing bufferはDPR2、4096pxとdriver上限の小さい方まで。CSSサイズは制限しない。
 hostはResizeObserverとwindow resizeを所有し、画面遷移・StrictMode・失敗時に購読と
-GPU資源、画像callback、期限timerを解放する。描画ループを増設しない。
+GPU資源、画像callback、期限timer、人物の時計とvisibility/media購読を一度だけ解放する。
+人物geometryは同じGPU bufferを再利用し、原本由来textureのcontent hash付きURLをPWAにも共有する。
+人物を含める場合だけcameraの余白を広げ、四方向の全身がviewport外へ切れないことを確認する。
 
 ## 受入と配布
 

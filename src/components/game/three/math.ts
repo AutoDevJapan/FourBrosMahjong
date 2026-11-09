@@ -56,9 +56,10 @@ function dot(a: Vec3, b: Vec3) {
 }
 
 /** Fixed tabletop camera; portrait viewports pull back to preserve the whole table. */
-export function camera(aspect: number): Matrix4 {
+export function camera(aspect: number, includeCharacters = false): Matrix4 {
   const fov = (42 * Math.PI) / 180;
-  const distance = Math.max(36, 39 / Math.max(aspect, 0.1));
+  const distance =
+    Math.max(36, 39 / Math.max(aspect, 0.1)) * (includeCharacters ? 1.4 : 1);
   const eye: Vec3 = [0, distance * 0.79, distance * 0.613];
   const z = unit(eye),
     x = unit(cross([0, 1, 0], z)),

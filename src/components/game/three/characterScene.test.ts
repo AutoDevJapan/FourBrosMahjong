@@ -3,7 +3,12 @@ import { createDisplayEnvelope } from "@/domain/display/displaySnapshot";
 import { createGame } from "@/domain/game/engine";
 import { selectView } from "@/domain/game/gameView";
 import { createCharacterController } from "../characters3d/controller";
-import { projectCharacterSurfaces } from "./characterScene";
+import {
+  CHARACTER_METRES_TO_SCENE,
+  characterPlacement,
+  projectCharacterSurfaces,
+} from "./characterScene";
+import { camera, localPoint, project, transform } from "./math";
 
 describe("live character geometry boundary", () => {
   it("keeps four actor identities and material bindings through all observer positions", () => {
@@ -53,6 +58,32 @@ describe("live character geometry boundary", () => {
           expect(surface.vertices.length % 24).toBe(0);
           expect(surface.vertices.every(Number.isFinite)).toBe(true);
           expect(actor.model.materials).toContain(surface.material);
+        }
+      }
+      for (const aspect of [1280 / 810, 393 / 810, 320 / 760]) {
+        const view = camera(aspect, true);
+        for (const surface of surfaces) {
+          const placement = characterPlacement(surface.position);
+          const scale = CHARACTER_METRES_TO_SCENE;
+          const model = transform(
+            placement.center,
+            [0, placement.yaw, 0],
+            [scale, scale, scale],
+          );
+          for (
+            let offset = 0;
+            offset < surface.vertices.length;
+            offset += 8 * 37
+          ) {
+            const point = localPoint(model, [
+              surface.vertices[offset],
+              surface.vertices[offset + 1],
+              surface.vertices[offset + 2],
+            ]);
+            expect(project(view, point, aspect * 1000, 1000).visible).toBe(
+              true,
+            );
+          }
         }
       }
     }

@@ -150,6 +150,8 @@ export function residualSticksNote(
 export interface GameBoardProps {
   /** Mount the local live renderer on the production game route. */
   readonly render3D?: boolean;
+  /** Candidate character rendering is enabled only after appearance acceptance. */
+  readonly renderCharacters?: boolean;
   /** 結果ボタンの遷移先。onResultを指定した画面では使わない。 */
   readonly resultHref?: string;
   /** 結果ボタンの動作。オンライン対局の結果表示など、画面内遷移を差し替える。 */
@@ -166,6 +168,7 @@ export interface GameBoardProps {
 
 export default function GameBoard({
   render3D = false,
+  renderCharacters = false,
   resultHref = "/game/result",
   onResult,
   resultButtonRef,
@@ -761,6 +764,7 @@ export default function GameBoard({
       {render3D && displaySource ? (
         <div className="game-live-table">
           <GameTable3D
+            renderCharacters={renderCharacters}
             riichiArmed={riichiArmed}
             interactionDisabled={interactionDisabled}
             onStatusChange={setTableDisplayStatus}
