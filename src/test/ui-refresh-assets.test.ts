@@ -14,7 +14,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import manifest from "../../documents/assets/ui-refresh/manifest.json";
-import { verifyUiRefreshAssets } from "../../scripts/verify-ui-refresh-assets.mjs";
+import {
+  verifyUiRefreshAssets,
+  verifyUiRefreshProvenance,
+} from "../../scripts/verify-ui-refresh-assets.mjs";
 
 const ASSET_DIRECTORY = new URL(
   "../../documents/assets/ui-refresh/",
@@ -150,7 +153,7 @@ describe("Issue #712 design-reference originals", () => {
     expect(manifest.assets).toEqual(EXPECTED_ASSETS);
   });
 
-  it("records the rights state without treating the request or hashes as permission", () => {
+  it("records the provider's public redistribution permission without claiming independently verified rights", () => {
     expect(manifest.provenance).toMatchObject({
       inclusionRequestRecord: expect.any(String),
       legalRightsHolderVerified: false,
@@ -158,12 +161,98 @@ describe("Issue #712 design-reference originals", () => {
       redistributionPermissionVerifiedIndependently: false,
       requestIsRightsOrLicenseEvidence: false,
       sha256IsPermissionEvidence: false,
-      publicDistributionRequiresWrittenRightsConfirmation: true,
-      commercialUseRequiresWrittenRightsConfirmation: true,
-      removeOriginalsAndDerivativesIfRightsRemainUnverified: true,
+      providerPermission: {
+        grantedBy: "Project provider",
+        grantedOn: "2026-11-07",
+        scope: "six UI design-reference images and their derived images",
+        publicDistribution: true,
+        redistribution: true,
+        evidence:
+          "https://github.com/AutoDevJapan/FourBrosMahjong/issues/1175#issuecomment-6701099933",
+        terms: "CREDITS.md#提供元・公開条件",
+        coversCodeMitLicense: false,
+        transfersRights: false,
+        impliesOfficialEndorsement: false,
+      },
       rightsNotice: expect.any(String),
+      license: "Provider permission for public distribution and redistribution",
     });
-    expect(manifest.provenance).not.toHaveProperty("useAndRedistributionBasis");
+    for (const superseded of [
+      "publicDistributionRequiresWrittenRightsConfirmation",
+      "commercialUseRequiresWrittenRightsConfirmation",
+      "removeOriginalsAndDerivativesIfRightsRemainUnverified",
+    ]) {
+      expect(manifest.provenance).not.toHaveProperty(superseded);
+    }
+  });
+
+  it("accepts the documented provider permission and keeps the public terms aligned", () => {
+    expect(() => verifyUiRefreshProvenance(manifest.provenance)).not.toThrow();
+    const credits = readFileSync(
+      new URL("CREDITS.md", ASSET_DIRECTORY),
+      "utf8",
+    );
+    expect(credits).toContain("2026-11-07");
+    expect(credits).toContain("この6点と派生画像の一般公開・再配布を許可");
+    expect(credits).toContain("自作コードのMIT Licenseとは別");
+    expect(credits).toContain("公認や権利の譲渡を意味しません");
+  });
+
+  it("rejects the old unconfirmed record when the provider permission is absent", () => {
+    const provenance: Record<string, unknown> = structuredClone(
+      manifest.provenance,
+    );
+    delete provenance.providerPermission;
+    expect(() => verifyUiRefreshProvenance(provenance)).toThrow(
+      "provenance.providerPermission is missing",
+    );
+  });
+
+  it.each([
+    "legalRightsHolderVerified",
+    "providerAuthorityToLicenseVerified",
+    "redistributionPermissionVerifiedIndependently",
+    "requestIsRightsOrLicenseEvidence",
+    "sha256IsPermissionEvidence",
+  ])("does not upgrade %s into independent rights verification", (field) => {
+    const provenance = { ...manifest.provenance, [field]: true };
+    expect(() => verifyUiRefreshProvenance(provenance)).toThrow(
+      `provenance.${field} must explicitly be false`,
+    );
+  });
+
+  it.each([
+    ["grantedBy", "Unknown"],
+    ["grantedOn", "2026-11-08"],
+    ["scope", "all future assets"],
+    ["publicDistribution", false],
+    ["redistribution", false],
+    ["evidence", ""],
+    ["terms", ""],
+    ["coversCodeMitLicense", true],
+    ["transfersRights", true],
+    ["impliesOfficialEndorsement", true],
+  ])("rejects an inconsistent provider permission %s", (field, value) => {
+    const provenance = {
+      ...manifest.provenance,
+      providerPermission: {
+        ...manifest.provenance.providerPermission,
+        [field]: value,
+      },
+    };
+    expect(() => verifyUiRefreshProvenance(provenance)).toThrow(
+      `provenance.providerPermission.${field} is inconsistent`,
+    );
+  });
+
+  it.each([
+    "publicDistributionRequiresWrittenRightsConfirmation",
+    "commercialUseRequiresWrittenRightsConfirmation",
+    "removeOriginalsAndDerivativesIfRightsRemainUnverified",
+  ])("rejects the superseded release condition %s", (field) => {
+    expect(() =>
+      verifyUiRefreshProvenance({ ...manifest.provenance, [field]: true }),
+    ).toThrow(`provenance.${field} is superseded by provider permission`);
   });
 
   it("rejects a manifest symlink", () => {
