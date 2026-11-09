@@ -13,6 +13,10 @@ import { describe, expect, it } from "vitest";
 const STUDY_DIR = resolve(process.cwd(), "prototypes/blender");
 const GENERATED_DIR = resolve(STUDY_DIR, "generated");
 const REVISION_DIR = resolve(GENERATED_DIR, "revision");
+const UNITY_VALIDATION_DIR = resolve(
+  GENERATED_DIR,
+  "unity-validation-2026-09-08",
+);
 const UNITY_STUDY_DIR = resolve(
   process.cwd(),
   "prototypes/unity-display/Assets/FourBrosBlenderStudy",
@@ -79,6 +83,34 @@ const editorScript = readText(
   resolve(UNITY_STUDY_DIR, "Editor/BlenderAssetStudy.cs"),
 );
 const parityScript = readText(resolve(STUDY_DIR, "render_unity_parity.py"));
+type UnityModelRecord = {
+  name: (typeof ASSET_NAMES)[number];
+  guid: string;
+  prefabGuid: string;
+  sourceFbxSha256: string;
+  geometrySha256: string;
+  position: Record<string, number>;
+  rotation: Record<string, number>;
+  scale: Record<string, number>;
+  meshes: number;
+  triangles: number;
+  uvMeshes: number;
+  normalMeshes: number;
+  materialPaths: string[];
+};
+const unityValidation = readJson<{
+  unityVersion: string;
+  graphicsApi: string;
+  interaction: string;
+  performanceScope: string;
+  baseline: UnityModelRecord[];
+  revision: UnityModelRecord[];
+  captures: { file: string; sha256: string }[];
+  renderSamples: number;
+  renderCpuMedianMilliseconds: number;
+  renderCpuP95Milliseconds: number;
+  totalAllocatedMemoryBytes: number;
+}>(resolve(UNITY_VALIDATION_DIR, "unity-validation.json"));
 
 describe("Blender study artefacts (#1165)", () => {
   it("keeps every committed FBX byte-identical to the hash recorded in its manifest", () => {
@@ -149,7 +181,7 @@ describe("Blender study artefacts (#1165)", () => {
     }
   });
 
-  it("keeps every artefact explicit that Unity validation has not run", () => {
+  it("preserves the historical pre-Unity records separately from later validation", () => {
     for (const flag of [
       baseline.unityValidation,
       revision.unityValidation,
@@ -160,8 +192,80 @@ describe("Blender study artefacts (#1165)", () => {
     }
     expect(baseline.rigging).toBe("not-implemented-static-study");
     expect(reproduction.environment.unityEditor).toBe("not-installed");
+    expect(readme).toContain("Unity検証前の履歴");
+    expect(readme).toContain("物理マウス／キーボード入力とPlayerのFPSは未検証");
+  });
+
+  it("ties the Unity import and reimport evidence to the committed FBX files", () => {
+    expect(unityValidation.unityVersion).toBe("2022.3.62f2");
+    expect(unityValidation.graphicsApi).toBe("Metal");
+    expect(unityValidation.baseline.map((model) => model.name)).toEqual(
+      ASSET_NAMES,
+    );
+    expect(unityValidation.revision.map((model) => model.name)).toEqual(
+      ASSET_NAMES,
+    );
+    for (const [index, before] of unityValidation.baseline.entries()) {
+      const after = unityValidation.revision[index];
+      expect(before.sourceFbxSha256).toBe(baseline.assets[before.name].sha256);
+      expect(after.sourceFbxSha256).toBe(revision.assets[after.name].sha256);
+      expect(before.guid).toMatch(/^[a-f0-9]{32}$/);
+      expect(before.prefabGuid).toBe(before.guid);
+      for (const key of [
+        "guid",
+        "prefabGuid",
+        "geometrySha256",
+        "position",
+        "rotation",
+        "scale",
+        "materialPaths",
+      ] as const)
+        expect(after[key]).toEqual(before[key]);
+      for (const model of [before, after]) {
+        expect(model.meshes).toBe(baseline.assets[model.name].meshes);
+        expect(model.triangles).toBe(baseline.assets[model.name].triangles);
+        expect(model.uvMeshes).toBe(model.meshes);
+        expect(model.normalMeshes).toBe(model.meshes);
+      }
+    }
+  });
+
+  it("preserves all four actual Unity PNG captures and their measured scope", () => {
+    expect(unityValidation.captures.map((capture) => capture.file)).toEqual([
+      "unity-baseline.png",
+      "unity-revision.png",
+      "unity-tile-detail.png",
+      "unity-tile-moved.png",
+    ]);
+    for (const capture of unityValidation.captures) {
+      const path = resolve(UNITY_VALIDATION_DIR, capture.file);
+      const png = readFileSync(path);
+      expect(sha256(path)).toBe(capture.sha256);
+      expect(png.subarray(0, 8).toString("hex")).toBe("89504e470d0a1a0a");
+      const detail = capture.file.startsWith("unity-tile-");
+      expect([png.readUInt32BE(16), png.readUInt32BE(20)]).toEqual(
+        detail ? [1920, 1080] : [960, 540],
+      );
+    }
+    expect(unityValidation.interaction).toContain(
+      "physical mouse/keyboard input not exercised",
+    );
+    expect(unityValidation.performanceScope).toContain(
+      "excludes presentation, GPU completion and player FPS",
+    );
+    expect(unityValidation.renderSamples).toBe(30);
+    expect(unityValidation.renderCpuMedianMilliseconds).toBeGreaterThan(0);
+    expect(unityValidation.renderCpuP95Milliseconds).toBeGreaterThanOrEqual(
+      unityValidation.renderCpuMedianMilliseconds,
+    );
     expect(readme).toContain(
-      "Unityでのコンパイル・取り込み・実画面確認は未実施",
+      String(Number(unityValidation.renderCpuMedianMilliseconds.toFixed(5))),
+    );
+    expect(readme).toContain(
+      String(Number(unityValidation.renderCpuP95Milliseconds.toFixed(5))),
+    );
+    expect(readme).toContain(
+      unityValidation.totalAllocatedMemoryBytes.toLocaleString("en-US"),
     );
   });
 

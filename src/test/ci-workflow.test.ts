@@ -9,6 +9,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, relative, resolve, sep } from "node:path";
+import ts from "typescript";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { parse } from "yaml";
 import {
@@ -21,6 +22,7 @@ import {
   EVIDENCE_IO_TIMEOUT_MS,
   GITHUB_API_RESPONSE_MAX_BYTES,
   githubApi,
+  PRODUCTION_INPUT_PATHS,
   protectedPushBranch,
   resolveChangedPaths,
   resolvePostMergeEvidence,
@@ -88,6 +90,9 @@ const PRODUCTION_E2E_EXCLUDED_SPECS = [
   "e2e/mobile-touch-targets.spec.ts",
   "e2e/non-text-contrast.spec.ts",
   "e2e/online-host-controls.spec.ts",
+  // The full Chromium suite runs live 3D. The prebuilt parity script currently
+  // selects the explicit six suites above; changing it is a separate CI decision.
+  "e2e/live-3d.spec.ts",
   "e2e/online-host-handoff.spec.ts",
   "e2e/online-room-sharing.spec.ts",
   "e2e/online-lobby.spec.ts",
@@ -1532,7 +1537,7 @@ describe("verification-scope の分類契約 (#491)", () => {
     [
       "Unity display contract fixture",
       "documents/fixtures/unity-display-contract.json",
-      "unit-test",
+      "code",
     ],
     ["単体テスト", "src/domain/game/engine.test.ts", "unit-test"],
     ["コンポーネントテスト", "src/components/game/Board.test.tsx", "unit-test"],
@@ -1644,6 +1649,90 @@ describe("verification-scope の分類契約 (#491)", () => {
  * 誰にも気づかれない。除外一覧が実態と一致していることを機械的に固定する。
  */
 describe("テスト入力資産をdocs-onlyで黙殺しない (#745)", () => {
+  /** Explicit type imports are erased; runtime imports/re-exports stay in scope. */
+  function runtimeSpecifiers(source: ts.SourceFile): readonly string[] {
+    const found = new Set<string>();
+    const visit = (node: ts.Node) => {
+      let specifier: ts.Node | undefined;
+      if (ts.isImportDeclaration(node)) {
+        const clause = node.importClause;
+        const bindings = clause?.namedBindings;
+        if (
+          clause?.isTypeOnly ||
+          (clause &&
+            !clause.name &&
+            bindings &&
+            ts.isNamedImports(bindings) &&
+            bindings.elements.length > 0 &&
+            bindings.elements.every((element) => element.isTypeOnly))
+        )
+          return;
+        specifier = node.moduleSpecifier;
+      } else if (ts.isExportDeclaration(node)) {
+        const clause = node.exportClause;
+        if (
+          node.isTypeOnly ||
+          (clause &&
+            ts.isNamedExports(clause) &&
+            clause.elements.length > 0 &&
+            clause.elements.every((element) => element.isTypeOnly))
+        )
+          return;
+        specifier = node.moduleSpecifier;
+      } else if (
+        ts.isCallExpression(node) &&
+        (node.expression.kind === ts.SyntaxKind.ImportKeyword ||
+          (ts.isIdentifier(node.expression) &&
+            node.expression.text === "require"))
+      ) {
+        specifier = node.arguments[0];
+      }
+      if (specifier && ts.isStringLiteralLike(specifier))
+        found.add(specifier.text);
+      ts.forEachChild(node, visit);
+    };
+    visit(source);
+    return [...found];
+  }
+
+  /** Static imports from shipped modules must never inherit a test-only scope. */
+  function productionDocumentImports(): string[] {
+    const found = new Set<string>();
+    const root = process.cwd();
+    const walk = (directory: string) => {
+      for (const entry of readdirSync(directory, { withFileTypes: true })) {
+        const file = resolve(directory, entry.name);
+        if (entry.isDirectory()) {
+          walk(file);
+          continue;
+        }
+        const path = relative(root, file).replaceAll(sep, "/");
+        if (!/\.[cm]?[jt]sx?$/.test(file) || classifyPath(path) !== "code")
+          continue;
+        const source = ts.createSourceFile(
+          file,
+          readFileSync(file, "utf8"),
+          ts.ScriptTarget.Latest,
+          true,
+        );
+        for (const input of runtimeSpecifiers(source)) {
+          const absolute = input.startsWith(".")
+            ? resolve(dirname(file), input)
+            : input.startsWith("@/")
+              ? resolve(root, "src", input.slice(2))
+              : null;
+          if (absolute) {
+            const inputPath = relative(root, absolute).replaceAll(sep, "/");
+            if (/^(?:docs|documents|prototypes)\//.test(inputPath))
+              found.add(inputPath);
+          }
+        }
+      }
+    };
+    for (const directory of ["src", "server"]) walk(resolve(root, directory));
+    return [...found];
+  }
+
   /**
    * テストコードがどう解決しているかに関係なく、文字列リテラルとして現れる
    * リポジトリ相対の docs/documents/README/CHANGELOG 入力を集める。テストが
@@ -1672,6 +1761,23 @@ describe("テスト入力資産をdocs-onlyで黙殺しない (#745)", () => {
     };
     const collect = (file: string) => {
       const source = readFileSync(file, "utf8");
+      // Blender's test composes README.md from a named repository-root path.
+      // Collect that actual reference instead of hard-coding an unused exception.
+      const roots = new Map(
+        [
+          ...source.matchAll(
+            /\bconst\s+(\w+)\s*=\s*resolve\(\s*process\.cwd\(\)\s*,\s*["']((?:docs|documents|prototypes)\/[^"']+)["']\s*,?\s*\)/g,
+          ),
+        ].map((match) => [match[1], match[2]]),
+      );
+      for (const match of source.matchAll(
+        /\bresolve\(\s*(\w+)\s*,\s*["']([^"']+\.md)["']\s*\)/g,
+      )) {
+        const directory = roots.get(match[1]);
+        if (!directory) continue;
+        const path = sourcePath(file, `${directory}/${match[2]}`);
+        if (path) found.add(path);
+      }
       for (const match of source.matchAll(/(["'])([^"'\\\n]+)\1/g)) {
         const literal = match[2];
         if (
@@ -1705,11 +1811,128 @@ describe("テスト入力資産をdocs-onlyで黙殺しない (#745)", () => {
     collect(
       resolve(repositoryRoot, "scripts/railway-iac-migration-contract.ts"),
     );
+    // The character hash test reads model.source.path, whose directory comes
+    // from the model's template rather than a literal in the test itself.
+    const modelFile = resolve(
+      repositoryRoot,
+      "src/components/game/characters3d/model.ts",
+    );
+    const modelSource = ts.createSourceFile(
+      modelFile,
+      readFileSync(modelFile, "utf8"),
+      ts.ScriptTarget.Latest,
+      true,
+    );
+    const collectModelDirectory = (node: ts.Node) => {
+      if (
+        ts.isTemplateExpression(node) &&
+        /^documents\/assets\/[^`]+\/$/.test(node.head.text)
+      ) {
+        const directory = sourcePath(modelFile, node.head.text);
+        if (directory) found.add(directory);
+      }
+      ts.forEachChild(node, collectModelDirectory);
+    };
+    collectModelDirectory(modelSource);
     return [...found];
   }
 
-  it("server/src/e2eのテスト入力を網羅してunit-test inputに分類する", () => {
+  it("型専用参照をruntime入力にせず、value/re-export/dynamic/requireは取りこぼさない", () => {
+    const source = ts.createSourceFile(
+      "consumer.ts",
+      [
+        'import type { A } from "./type-a";',
+        'import { type B } from "./type-b";',
+        'export type { C } from "./type-c";',
+        'export { type D } from "./type-d";',
+        'import { type E, value } from "./mixed";',
+        'export { value } from "./reexport";',
+        'import "./side-effect";',
+        'const load = () => import("./dynamic");',
+        'const required = require("./required");',
+        'import {} from "./empty-import";',
+        'export {} from "./empty-export";',
+      ].join("\n"),
+      ts.ScriptTarget.Latest,
+      true,
+    );
+    expect(runtimeSpecifiers(source)).toEqual([
+      "./mixed",
+      "./reexport",
+      "./side-effect",
+      "./dynamic",
+      "./required",
+      "./empty-import",
+      "./empty-export",
+    ]);
+  });
+
+  it("production moduleがimportする文書ツリーの資産は全検証する", () => {
+    const inputs = productionDocumentImports();
+    expect(inputs).toContain("documents/fixtures/unity-display-contract.json");
+    expect(new Set(PRODUCTION_INPUT_PATHS)).toEqual(new Set(inputs));
+    for (const path of inputs) {
+      expect(classifyPath(path), `${path}: 出荷moduleの入力を省略しない`).toBe(
+        "code",
+      );
+      expect(
+        resolveScope({ job: "ci", paths: [path], postMergeDuplicate: false }),
+      ).toMatchObject({ quality: true, production: true, browser: true });
+      expect(
+        resolveScope({ job: "e2e", paths: [path], postMergeDuplicate: false })
+          .verify,
+      ).toBe(true);
+    }
+  });
+
+  it.each([
+    "src/components/game/GameTable3D.tsx",
+    "src/components/game/three/scene.ts",
+    "src/components/game/characters3d/index.ts",
+    "src/components/game/characters3d/textures/p0-reference.jpg",
+  ])("runtime source %s の変更はfull検証を維持する", (path) => {
+    expect(classifyPath(path)).toBe("code");
+    expect(
+      resolveScope({ job: "ci", paths: [path], postMergeDuplicate: false }),
+    ).toMatchObject({ quality: true, production: true, browser: true });
+    expect(
+      resolveScope({ job: "e2e", paths: [path], postMergeDuplicate: false })
+        .verify,
+    ).toBe(true);
+  });
+
+  it("キャラ原本はoffline制作とhash検証の入力としてqualityを実行する", () => {
+    const directory = "documents/assets/characters/originals";
+    expect(TEST_INPUT_DIRECTORIES).toContain(directory);
+    for (const name of [
+      "p0-soakuhin-character-sheet.png",
+      "p1-ryuji-character-sheet.png",
+      "p2-masaki-character-sheet.png",
+      "p3-hechima-character-sheet.png",
+    ]) {
+      expect(classifyPath(`${directory}/${name}`)).toBe("unit-test");
+      expect(
+        resolveScope({
+          job: "ci",
+          paths: [`${directory}/${name}`],
+          postMergeDuplicate: false,
+        }),
+      ).toMatchObject({ quality: true, production: false, browser: false });
+    }
+    const consumer = readFileSync(
+      resolve("src/components/game/characters3d/characters.test.ts"),
+      "utf8",
+    );
+    expect(consumer).toContain("readFileSync(model.source.path)");
+    expect(consumer).toContain("model.source.sha256");
+    expect(productionDocumentImports()).not.toEqual(
+      expect.arrayContaining([expect.stringMatching(/^documents\/assets\//)]),
+    );
+  });
+
+  it("server/src/e2eの入力はunit-test、出荷moduleとの共有入力はcodeに分類する", () => {
     const literals = testInputLiterals();
+    const productionInputs = new Set(productionDocumentImports());
     // 走査自体が壊れて 0 件になれば、この検査は何も守らなくなる。
     expect(
       literals.length,
@@ -1722,14 +1945,15 @@ describe("テスト入力資産をdocs-onlyで黙殺しない (#745)", () => {
         "documents/assets/ui-refresh/manifest.json",
         "documents/assets/ui-refresh",
         "documents/fixtures/railway-pre-cutover.json",
+        "prototypes/blender/README.md",
       ]),
     );
 
     for (const path of literals) {
       expect(
         classifyPath(path),
-        `${path}: テストが参照している入力資産なのにunit-testとして扱われていない。`,
-      ).toBe("unit-test");
+        `${path}: 実際のconsumerに必要な検証scopeへ分類されていない。`,
+      ).toBe(productionInputs.has(path) ? "code" : "unit-test");
     }
   });
 
@@ -1760,6 +1984,7 @@ describe("テスト入力資産をdocs-onlyで黙殺しない (#745)", () => {
     "README.md",
     "CHANGELOG.md",
     "docs/四兄弟麻雀ルール.md",
+    "prototypes/blender/README.md",
   ])("%sの変更はqualityだけを実行しE2Eを起動しない", (path) => {
     expect(
       resolveScope({ job: "ci", paths: [path], postMergeDuplicate: false }),
@@ -1807,6 +2032,31 @@ describe("テスト入力資産をdocs-onlyで黙殺しない (#745)", () => {
         ],
         postMergeDuplicate: false,
       }).verify,
+    ).toBe(true);
+  });
+
+  it.each([
+    "documents/fixtures/unity-display-contract.json",
+    "src/app/prototype/unity-display/page.tsx",
+    "public/tiles/CREDITS.md",
+    "e2e/unity-display-reference.spec.ts",
+    "pnpm-lock.yaml",
+    ".github/workflows/ci.yml",
+    "prototypes/unity-display/Assets/Scripts/DisplayContract.cs",
+    "prototypes/unknown-new-input.bin",
+  ])("Blender READMEと%sの混在は全検証を維持する", (path) => {
+    const paths = ["prototypes/blender/README.md", path];
+    expect(
+      resolveScope({ job: "ci", paths, postMergeDuplicate: false }),
+    ).toEqual({
+      setup: true,
+      verify: true,
+      quality: true,
+      production: true,
+      browser: true,
+    });
+    expect(
+      resolveScope({ job: "e2e", paths, postMergeDuplicate: false }).verify,
     ).toBe(true);
   });
 });

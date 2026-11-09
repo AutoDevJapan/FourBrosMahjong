@@ -106,6 +106,23 @@ module.exports = {
       to: { path: PRESENTATION },
     },
     {
+      name: "no-runtime-to-css-excluded-inputs",
+      comment:
+        "CSS source exclusions assume these native/evidence/asset-audit inputs " +
+        "do not supply runtime classes. Review globals.css before importing them " +
+        "into shipped code; the production Unity contract fixture is not excluded.",
+      severity: "error",
+      // Apply to intermediate modules too, so a runtime re-export through scripts/
+      // cannot bypass the boundary. Test consumers remain legitimate.
+      from: { pathNot: [TEST_FILE, "^(src/test|e2e)/"] },
+      to: {
+        path: "^(prototypes/|documents/(evidence/|assets/|fixtures/railway-pre-cutover\\.json$))",
+        // Type-only contracts cannot supply CSS classes or runtime asset bytes.
+        // Layer-direction rules still check type-only dependencies separately.
+        dependencyTypesNot: ["type-only"],
+      },
+    },
+    {
       name: "no-unresolvable-in-src",
       comment:
         "An import under src/ that dependency-cruiser cannot resolve produces no " +
@@ -130,5 +147,12 @@ module.exports = {
     doNotFollow: { path: "node_modules" },
     tsConfig: { fileName: "tsconfig.json" },
     tsPreCompilationDeps: true,
+    // The scanner audit uses an exports-only package (@tailwindcss/postcss).
+    // Match modern Node resolution without waiving no-unresolvable-in-src.
+    // These are dependency-cruiser's own --init defaults for package exports.
+    enhancedResolveOptions: {
+      exportsFields: ["exports"],
+      conditionNames: ["import", "require", "node", "default", "types"],
+    },
   },
 };

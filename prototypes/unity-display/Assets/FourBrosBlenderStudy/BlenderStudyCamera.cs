@@ -10,54 +10,91 @@ namespace FourBros.BlenderStudy
         private Vector3 moveStart, moveTarget;
         private float movement = 1;
         private bool moveOut;
+        private Vector3 pivot = new Vector3(0, .8f, 0);
 
         public void ResetInitialView()
         {
             yaw = 25;
             pitch = 25;
             distance = 3.1f;
+            pivot = new Vector3(0, .8f, 0);
             SetInitialView();
         }
 
         public void SetInitialView()
         {
-            transform.position = new Vector3(0, .8f, 0) +
+            transform.position = pivot +
                 Quaternion.Euler(pitch, yaw, 0) * new Vector3(0, 0, -distance);
-            transform.LookAt(new Vector3(0, .8f, 0));
+            transform.LookAt(pivot);
         }
 
         private void Start()
         {
-            if (tile != null) tileStart = moveStart = moveTarget = tile.position;
+            InitializeTile();
             SetInitialView();
+        }
+
+        public void InitializeTile()
+        {
+            if (tile != null) tileStart = moveStart = moveTarget = tile.position;
+            movement = 1;
+            moveOut = false;
+        }
+
+        public void Orbit(float horizontal, float vertical)
+        {
+            yaw += horizontal * 3;
+            pitch = Mathf.Clamp(pitch - vertical * 3, 5, 80);
+            SetInitialView();
+        }
+
+        public void Zoom(float scroll)
+        {
+            distance = Mathf.Clamp(distance - scroll * .15f, .6f, 6);
+            SetInitialView();
+        }
+
+        public void FocusTile()
+        {
+            if (tile == null) return;
+            pivot = tile.position;
+            distance = .6f;
+            pitch = 65;
+            SetInitialView();
+        }
+
+        public void ToggleTileMovement()
+        {
+            if (tile == null) return;
+            moveOut = !moveOut;
+            moveStart = tile.position;
+            moveTarget = tileStart + (moveOut ? Vector3.right * .16f : Vector3.zero);
+            movement = 0;
+        }
+
+        public void AdvanceTileMovement(float seconds)
+        {
+            if (tile == null) return;
+            movement = Mathf.Min(1, movement + seconds / .2f);
+            var t = Mathf.SmoothStep(0, 1, movement);
+            tile.position = Vector3.Lerp(moveStart, moveTarget, t);
         }
 
         private void Update()
         {
             if (Input.GetMouseButton(1))
-            {
-                yaw += Input.GetAxis("Mouse X") * 3;
-                pitch = Mathf.Clamp(pitch - Input.GetAxis("Mouse Y") * 3, 5, 80);
-            }
-            distance = Mathf.Clamp(distance - Input.mouseScrollDelta.y * .15f, .6f, 6);
-            SetInitialView();
-            if (tile == null) return;
-            if (Input.GetKeyDown(KeyCode.Space))
-            {
-                moveOut = !moveOut;
-                moveStart = tile.position;
-                moveTarget = tileStart + (moveOut ? Vector3.right * .16f : Vector3.zero);
-                movement = 0;
-            }
-            movement = Mathf.Min(1, movement + Time.deltaTime / .2f);
-            var t = Mathf.SmoothStep(0, 1, movement);
-            tile.position = Vector3.Lerp(moveStart, moveTarget, t);
+                Orbit(Input.GetAxis("Mouse X"), Input.GetAxis("Mouse Y"));
+            Zoom(Input.mouseScrollDelta.y);
+            if (Input.GetKeyDown(KeyCode.F)) FocusTile();
+            if (Input.GetKeyDown(KeyCode.Home)) ResetInitialView();
+            if (Input.GetKeyDown(KeyCode.Space)) ToggleTileMovement();
+            AdvanceTileMovement(Time.deltaTime);
         }
 
         private void OnGUI()
         {
-            GUI.Box(new Rect(12, 12, 450, 60),
-                "BLENDER ASSET STUDY / static prototype\nRMB drag: orbit   Wheel: zoom   Space: move tile (200 ms)");
+            GUI.Box(new Rect(12, 12, 520, 70),
+                "BLENDER ASSET STUDY / static prototype\nRMB drag: orbit   Wheel: zoom   Space: move tile (200 ms)\nF: focus tile   Home: reset camera");
         }
     }
 }

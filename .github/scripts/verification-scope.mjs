@@ -33,6 +33,12 @@ import { pathToFileURL } from "node:url";
  */
 const DOCUMENTATION = [/^docs\//, /^documents\//, /\.md$/];
 
+/** 文書ツリーに置かれていても、出荷moduleが読み込む資産は全検証する。 */
+export const PRODUCTION_INPUT_PATHS = [
+  // UnityDisplayReference.tsx がclient bundleへimportし、E2Eも同じfixtureを読む。
+  "documents/fixtures/unity-display-contract.json",
+];
+
 /**
  * 文書ツリーに置かれているが、単体テストが入力として読む資産。
  *
@@ -63,12 +69,17 @@ export const TEST_INPUT_PATHS = [
   "documents/assets/ui-refresh/manifest.json",
   // src/test/railway-iac-migration.test.ts が契約モジュール経由で不変fixtureを検証する。
   "documents/fixtures/railway-pre-cutover.json",
-  // src/test/unity-display-contract.test.ts がUnity表示契約と席回転を検証する。
-  "documents/fixtures/unity-display-contract.json",
+  // src/test/blender-asset-study.test.ts がREADMEの実測表とmanifestを照合する。
+  "prototypes/blender/README.md",
 ];
 
 /** テストがディレクトリ単位で列挙する入力資産。追加・削除も同じ分類にする。 */
-export const TEST_INPUT_DIRECTORIES = ["documents/assets/ui-refresh"];
+export const TEST_INPUT_DIRECTORIES = [
+  "documents/assets/ui-refresh",
+  // characters3d/characters.test.ts verifies each reference image's source hash.
+  // Offline texture production reads these originals; runtime geometry remains in src/.
+  "documents/assets/characters/originals",
+];
 
 /** @deprecated TEST_INPUT_PATHS に改名。既存のimportとの互換性を保つ。 */
 export const DOCUMENTATION_EXCEPTIONS = TEST_INPUT_PATHS;
@@ -113,6 +124,7 @@ const isTestInput = (path) =>
  */
 export function classifyPath(path) {
   if (matches(path, E2E_ASSET)) return "e2e-asset";
+  if (PRODUCTION_INPUT_PATHS.includes(path)) return "code";
   if (isTestInput(path)) return "unit-test";
   // `public/` は定義上そのまま配信される出荷ツリー。拡張子が .md でも文書ではない
   // (例: public/tiles/CREDITS.md は /tiles/CREDITS.md として配信され、

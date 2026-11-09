@@ -1,7 +1,17 @@
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
+import {
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
+import { tmpdir } from "node:os";
+import { dirname, join, posix } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
+import { BOUNDARY_SOURCES, scanCss } from "../test/tailwind-source-audit.mjs";
 
 /**
  * Tailwind v4 のコンテンツ走査除外を守る回帰テスト(#329 / #333)。
@@ -38,6 +48,10 @@ const REQUIRED_EXCLUSIONS: ReadonlyArray<{ label: string; glob: string }> = [
   { label: "E2E ディレクトリ", glob: "../../e2e" },
   // src/test/ はテストしか読まないヘルパ(*.test.ts 以外の名前)を含むためディレクトリごと。
   { label: "テストヘルパディレクトリ", glob: "../test" },
+  ...BOUNDARY_SOURCES.map((glob) => ({
+    label: "非 runtime 入力 (#1191)",
+    glob,
+  })),
 ];
 
 /**
@@ -108,5 +122,103 @@ describe("Tailwind コンテンツ走査の除外(#329 / #333)", () => {
         "含めてください(詳細: spec 5.4.2 / #333)。検出された依存:\n" +
         offenders.join("\n"),
     ).toEqual([]);
+  });
+});
+
+describe("実 Tailwind compiler が非 runtime 境界を適用する (#1191)", () => {
+  const css = readFileSync(join(SRC, "app/globals.css"), "utf8");
+  // 存在しない canary は一時 repo 内の出力。実 repo のテスト入力 literal と
+  // 区別して組み立てる（#745 の入力 inventory を架空の資産で汚染しない）。
+  const excluded = [
+    ["prototypes/unity-display/Assets/Canary.cs", 9011],
+    [posix.join("documents", "evidence", "unity", "runtime.json"), 9012],
+    ["documents/assets/ui-refresh/manifest.json", 9013],
+    ["documents/fixtures/railway-pre-cutover.json", 9014],
+  ] as const;
+  const retained = [
+    ["src/components/Runtime.tsx", 9015],
+    ["documents/fixtures/unity-display-contract.json", 9016],
+    // 類似名まで広く消すパターンへの退行も検出する。
+    [posix.join("documents", "assets-runtime", "contract.json"), 9017],
+    [posix.join("documents", "fixtures", "other-runtime.json"), 9018],
+    ["src/components/game/three/Runtime.tsx", 9019],
+    ["src/components/game/characters3d/Runtime.tsx", 9020],
+  ] as const;
+
+  it("実リポジトリの依存 graph から境界内だけを外し、本番 src / Unity fixture を保持する", async () => {
+    const result = await scanCss(ROOT, css);
+    expect(result.dependencies).toContain(
+      "src/components/prototype/UnityDisplayReference.tsx",
+    );
+    expect(result.dependencies).toContain(
+      "documents/fixtures/unity-display-contract.json",
+    );
+    expect(result.dependencies).toContain("src/components/game/three/scene.ts");
+    expect(result.dependencies).toContain(
+      "src/components/game/characters3d/model.ts",
+    );
+    expect(
+      result.dependencies.filter((path: string) =>
+        /^(prototypes\/|documents\/(evidence\/|assets\/|fixtures\/railway-pre-cutover\.json$))/.test(
+          path,
+        ),
+      ),
+    ).toEqual([]);
+  });
+
+  it("除外先の新規クラスは生成されず、runtime canary は残る（除外削除の正対照も実測）", async () => {
+    // 実際の globals.css の指令だけを使う。既存アプリのクラスとの偶然の重複を避け、
+    // 一時 repo に隔離する。canary 本体は既に除外済みの本テスト以外へ置かない。
+    const directives = css.match(/^@source not .*;$/gm)?.join("\n");
+    expect(directives).toBeDefined();
+    const inputs = `@import "tailwindcss";\n${directives}\n`;
+    const control = BOUNDARY_SOURCES.reduce(
+      (input, source) => input.replace(sourceNotPattern(source), ""),
+      inputs,
+    );
+    // Fresh base per compilation: no candidate/scanner cache from the positive
+    // control can conceal a missing exclusion in the actual case.
+    for (const [input, isControl] of [
+      [inputs, false],
+      [control, true],
+    ] as const) {
+      const dir = realpathSync(
+        mkdtempSync(join(tmpdir(), "tailwind-boundary-")),
+      );
+      try {
+        symlinkSync(
+          join(ROOT, "node_modules"),
+          join(dir, "node_modules"),
+          "dir",
+        );
+        for (const [path, value] of [...excluded, ...retained]) {
+          const absolute = join(dir, path);
+          mkdirSync(dirname(absolute), { recursive: true });
+          writeFileSync(
+            absolute,
+            JSON.stringify({ className: `z-[${value}]` }),
+          );
+        }
+        mkdirSync(join(dir, "src/app"), { recursive: true });
+        writeFileSync(join(dir, "src/app/globals.css"), input);
+        const result = await scanCss(dir, input);
+        for (const [path, value] of excluded) {
+          expect(
+            result.dependencies.includes(path),
+            `${path}: control=${isControl}`,
+          ).toBe(isControl);
+          expect(
+            result.css.includes(`z-index: ${value};`),
+            `${value}: control=${isControl}`,
+          ).toBe(isControl);
+        }
+        for (const [path, value] of retained) {
+          expect(result.dependencies).toContain(path);
+          expect(result.css).toContain(`z-index: ${value};`);
+        }
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    }
   });
 });

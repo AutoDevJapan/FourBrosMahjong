@@ -21,6 +21,12 @@ namespace FourBros.Display
         private Vector2 scroll;
         private bool tilted;
 
+        internal FixtureScenarios Scenarios => scenarios;
+        internal DisplaySnapshot Current => session.Current;
+        internal Transform Board => board;
+        internal string ActiveEffect => effectText;
+        internal string Status => status;
+
         private void Start()
         {
             try
@@ -30,8 +36,13 @@ namespace FourBros.Display
                 font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
                 displayCamera = Camera.main;
                 Apply(scenarios.Snapshot(caseIndex, nextVersion++));
+                DisplayRuntimeEvidence.TryStart(this);
             }
-            catch (Exception error) { status = error.Message; Debug.LogException(error); enabled = false; }
+            catch (Exception error)
+            {
+                status = error.Message; Debug.LogException(error); enabled = false;
+                DisplayRuntimeEvidence.AbortIfRequested();
+            }
         }
 
         // Future transport adapters supply an already committed view. No credentials or domain state accepted.
@@ -141,7 +152,9 @@ namespace FourBros.Display
             var label = new GameObject("Label").AddComponent<TextMesh>();
             label.transform.SetParent(parent, false); label.transform.localPosition = position;
             label.transform.localRotation = Quaternion.Euler(90, 0, 0);
-            label.font = font; label.fontSize = 48; label.characterSize = scale;
+            label.font = font; label.fontSize = 48;
+            // TextMesh world size also scales with fontSize; keep the requested board-space size.
+            label.characterSize = scale * 10f / label.fontSize;
             label.anchor = TextAnchor.MiddleCenter; label.alignment = TextAlignment.Center;
             label.color = color; label.text = text;
             label.GetComponent<Renderer>().sharedMaterial = font.material;
@@ -178,6 +191,11 @@ namespace FourBros.Display
         private void OnGUI()
         {
             float width = Mathf.Min(330f, Screen.width * .4f);
+            // The display camera clears only its viewport; explicitly paint the remaining panel.
+            Color previousColor = GUI.color;
+            GUI.color = new Color(.08f, .1f, .13f);
+            GUI.DrawTexture(new Rect(0, 0, width, Screen.height), Texture2D.whiteTexture);
+            GUI.color = previousColor;
             GUILayout.BeginArea(new Rect(8, 8, width - 16, Screen.height - 16), GUI.skin.box);
             scroll = GUILayout.BeginScrollView(scroll);
             GUILayout.Label("Four Bros / Unity display #818\nFIXTURE ONLY - not a game client");
@@ -187,28 +205,21 @@ namespace FourBros.Display
                 GUILayout.Label(scenarios.Cases[caseIndex].name);
                 for (int i = 0; i < scenarios.Cases.Count; i++)
                 {
-                    int selected = i;
                     if (GUILayout.Button(scenarios.Cases[i].name))
-                    {
-                        caseIndex = selected;
-                        Apply(scenarios.Snapshot(caseIndex, nextVersion++));
-                    }
+                        SelectCase(i);
                 }
                 GUILayout.Label("Committed effect samples (includes kita)");
                 foreach (var kind in DisplayValidation.EffectKinds)
-                    if (GUILayout.Button(kind)) Apply(scenarios.Snapshot(caseIndex, nextVersion++, kind));
+                    if (GUILayout.Button(kind)) ShowEffect(kind);
                 GUILayout.Label("Self hand transitions (select a seated self case)");
                 foreach (var kind in DisplayValidation.TransitionKinds)
-                    if (GUILayout.Button(kind)) Apply(scenarios.Snapshot(caseIndex, nextVersion++, null, kind));
+                    if (GUILayout.Button(kind)) ShowTransition(kind);
                 if (GUILayout.Button("Restore current snapshot / suppress history"))
-                {
-                    var saved = JsonUtility.FromJson<DisplaySnapshot>(JsonUtility.ToJson(session.Current));
-                    session = new DisplaySession(); Apply(saved, true);
-                }
+                    RestoreCurrent();
                 if (GUILayout.Button("Replay fixture version sequence")) ReplayVersions();
                 if (GUILayout.Button("River wrap: " + columns + " columns"))
                 {
-                    columns = columns == 6 ? 4 : 6; StopAllCoroutines(); Render(null, false);
+                    SetColumns(columns == 6 ? 4 : 6);
                 }
                 tilted = GUILayout.Toggle(tilted, "Tilt camera (3D inspection)");
             }
@@ -221,7 +232,26 @@ namespace FourBros.Display
             }
         }
 
-        private void ReplayVersions()
+        internal void SelectCase(int index)
+        {
+            caseIndex = index;
+            Apply(scenarios.Snapshot(caseIndex, nextVersion++));
+        }
+
+        internal void ShowEffect(string kind) { Apply(scenarios.Snapshot(caseIndex, nextVersion++, kind)); }
+        internal void ShowTransition(string kind) { Apply(scenarios.Snapshot(caseIndex, nextVersion++, null, kind)); }
+        internal void SetColumns(int value)
+        {
+            columns = value; StopAllCoroutines(); Render(null, false);
+        }
+        internal void SetTilt(bool value) { tilted = value; }
+        internal void RestoreCurrent()
+        {
+            var saved = DisplaySnapshotJson.RoundTrip(session.Current);
+            session = new DisplaySession(); Apply(saved, true);
+        }
+
+        internal void ReplayVersions()
         {
             session = new DisplaySession();
             string summary = "";
