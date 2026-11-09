@@ -33,7 +33,7 @@ import { pathToFileURL } from "node:url";
  */
 const DOCUMENTATION = [/^docs\//, /^documents\//, /\.md$/];
 
-/** 文書ツリーに置かれていても、出荷moduleが読み込む資産は全検証する。 */
+/** 出荷moduleまたはE2Eが読む、通常は省略される入力は全検証する。 */
 export const PRODUCTION_INPUT_PATHS = [
   // UnityDisplayReference.tsx がclient bundleへimportし、E2Eも同じfixtureを読む。
   "documents/fixtures/unity-display-contract.json",
@@ -73,8 +73,6 @@ export const TEST_INPUT_PATHS = [
   "prototypes/blender/README.md",
   // Schema v1 regression tests retain the later /readyz CaC artifact.
   "documents/fixtures/railway-readyz-before-iac.json",
-  // src/test/unity-display-contract.test.ts がUnity表示契約と席回転を検証する。
-  "documents/fixtures/unity-display-contract.json",
 ];
 
 /** テストがディレクトリ単位で列挙する入力資産。追加・削除も同じ分類にする。 */
