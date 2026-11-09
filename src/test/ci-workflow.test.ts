@@ -1849,7 +1849,7 @@ describe("テスト入力資産をdocs-onlyで黙殺しない (#745)", () => {
     });
   }
 
-  /** Flat in-memory sources exercise the same root walker without new files. */
+  /** In-memory directories exercise the same recursive walker without files. */
   function memoryInputs(files: Readonly<Record<string, string>>): InputSources {
     const sources = new Map(
       Object.entries(files).map(([path, text]) => [
@@ -1858,13 +1858,21 @@ describe("テスト入力資産をdocs-onlyで黙殺しない (#745)", () => {
       ]),
     );
     return {
-      entries: (directory) =>
-        [...sources.keys()]
-          .filter((file) => dirname(file) === directory)
-          .map((file) => ({
-            name: relative(directory, file),
-            isDirectory: () => false,
-          })),
+      entries: (directory) => {
+        const children = new Map<string, boolean>();
+        for (const file of sources.keys()) {
+          const path = relative(directory, file).replaceAll(sep, "/");
+          if (path === ".." || path.startsWith("../") || isAbsolute(path))
+            continue;
+          const parts = path.split("/");
+          const name = parts[0];
+          if (name) children.set(name, parts.length > 1);
+        }
+        return [...children].map(([name, isDirectory]) => ({
+          name,
+          isDirectory: () => isDirectory,
+        }));
+      },
       text: (file) => {
         const text = sources.get(file);
         if (text === undefined) throw new Error("Unexpected input: " + file);
@@ -1936,6 +1944,29 @@ describe("テスト入力資産をdocs-onlyで黙殺しない (#745)", () => {
     ]);
   });
 
+  it("production and E2E union retains disjoint recursive consumers", () => {
+    const io = memoryInputs({
+      "src/views/view.ts":
+        "import data from '../../documents/production-only.json';",
+      "e2e/helpers/fixture.ts":
+        "import data from '../../documents/browser-only.json';",
+    });
+    expect(productionDocumentImports(io)).toEqual([
+      "documents/production-only.json",
+    ]);
+    expect(testInputLiterals(["e2e"], io)).toEqual([
+      "documents/browser-only.json",
+    ]);
+    const required = browserVerificationInputs(io);
+    expect(required).toEqual(
+      new Set([
+        "documents/production-only.json",
+        "documents/browser-only.json",
+      ]),
+    );
+    expect(new Set(missingBrowserVerification(required))).toEqual(required);
+  });
+
   it("production and E2E input catalogs do not retain test-only duplicates", () => {
     expect(
       TEST_INPUT_PATHS.filter((path) => PRODUCTION_INPUT_PATHS.includes(path)),
@@ -1943,6 +1974,9 @@ describe("テスト入力資産をdocs-onlyで黙殺しない (#745)", () => {
   });
 
   it("production moduleまたはE2Eが読む省略対象入力は全検証する", () => {
+    expect(productionDocumentImports()).toContain(
+      "documents/fixtures/unity-display-contract.json",
+    );
     const inputs = browserVerificationInputs();
     expect(inputs).toContain("documents/fixtures/unity-display-contract.json");
     expect(new Set(PRODUCTION_INPUT_PATHS)).toEqual(new Set(inputs));
