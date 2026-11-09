@@ -12,6 +12,8 @@ describe("character projection fidelity", () => {
       const model = createCharacterModel(id);
       for (const clip of ["standing-reference", "call", "kita"] as const) {
         const pose = sampleCharacterPose(model, clip, 0.37);
+        if (id === "p2" && clip !== "standing-reference")
+          expect(pose.handClosure).toBeGreaterThan(0);
         const matrices = skinMatrices(model, pose);
         const projected = projectCharacterGeometry(model, pose);
         for (const [meshIndex, mesh] of model.meshes.entries()) {
@@ -24,22 +26,32 @@ describe("character projection fidelity", () => {
             const offset = vertex * 8;
             const normal = [0, 0, 0];
             const position = [0, 0, 0];
+            // Morph targets are relative object-space deltas, applied before
+            // skinning. Keep this oracle independent of the projection loop.
+            const inputPosition = [0, 1, 2].map(
+              (axis) =>
+                mesh.vertices[offset + axis] +
+                (mesh.handClosure?.positions[vertex * 3 + axis] ?? 0) *
+                  (pose.handClosure ?? 0),
+            );
+            const inputNormal = [0, 1, 2].map(
+              (axis) =>
+                mesh.vertices[offset + axis + 3] +
+                (mesh.handClosure?.normals[vertex * 3 + axis] ?? 0) *
+                  (pose.handClosure ?? 0),
+            );
             for (let influence = 0; influence < 4; influence++) {
               const weight = mesh.weights[vertex * 4 + influence];
               if (weight === 0) continue;
               const matrix = matrices[mesh.joints[vertex * 4 + influence]];
               const p = point(matrix, [
-                mesh.vertices[offset],
-                mesh.vertices[offset + 1],
-                mesh.vertices[offset + 2],
+                inputPosition[0],
+                inputPosition[1],
+                inputPosition[2],
               ]);
               const n = point(
                 matrix,
-                [
-                  mesh.vertices[offset + 3],
-                  mesh.vertices[offset + 4],
-                  mesh.vertices[offset + 5],
-                ],
+                [inputNormal[0], inputNormal[1], inputNormal[2]],
                 true,
               );
               for (let axis = 0; axis < 3; axis++) {
