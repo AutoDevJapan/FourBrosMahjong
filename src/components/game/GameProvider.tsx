@@ -39,6 +39,10 @@ import {
   newLocalDisplaySource,
 } from "@/domain/display/displaySource";
 import {
+  type CommittedPresentation,
+  commitPresentation,
+} from "@/domain/display/presentationCues";
+import {
   createGame,
   DEFAULT_NAMES,
   type EngineState,
@@ -48,6 +52,10 @@ import {
   type PlayerNames,
   type RoundSummary,
 } from "@/domain/game/engine";
+import {
+  capturePresentationEvents,
+  EMPTY_PRESENTATION_BATCH,
+} from "@/domain/game/presentationEvents";
 import type { Tile } from "@/domain/tiles/tile";
 import {
   applyGameAction,
@@ -103,6 +111,7 @@ interface GameControls {
 export interface GameContextValue {
   /** Local display adapter only; absent online until server-version integration. */
   readonly displaySource?: LocalDisplaySource;
+  readonly presentation?: CommittedPresentation;
   /** Read the synchronous committed revision, including before React rerenders. */
   readonly readDisplaySource?: () => LocalDisplaySource | undefined;
   /** この画面を操作している席。オンラインではserver snapshotの`you`。 */
@@ -380,6 +389,7 @@ export interface GameProviderProps {
 
 type InitialSession = ReturnType<typeof initialSession> & {
   readonly displaySource: LocalDisplaySource;
+  readonly presentation: CommittedPresentation;
 };
 
 function GameSeedUnavailable() {
@@ -428,9 +438,16 @@ function createInitialSession(
   initialGame?: EngineState,
 ): InitialSession | null {
   try {
+    const session = initialSession(initialGame);
+    const displaySource = newLocalDisplaySource();
     return {
-      ...initialSession(initialGame),
-      displaySource: newLocalDisplaySource(),
+      ...session,
+      displaySource,
+      presentation: commitPresentation(
+        displaySource,
+        session.engine.roundsPlayed,
+        EMPTY_PRESENTATION_BATCH,
+      ),
     };
   } catch (error) {
     if (error instanceof SecureRandomUnavailableError) return null;
@@ -567,7 +584,9 @@ function GameProviderRuntime({ children, initial }: GameProviderRuntimeProps) {
   const controls = useMemo<GameControls>(() => {
     const renderSession = session;
     const canAccept = () =>
-      !transitionPendingRef.current && sessionRef.current === renderSession;
+      displayActiveRef.current &&
+      !transitionPendingRef.current &&
+      sessionRef.current === renderSession;
     const markAccepted = () => {
       transitionPendingRef.current = true;
     };
@@ -579,10 +598,18 @@ function GameProviderRuntime({ children, initial }: GameProviderRuntimeProps) {
       const displaySource = advanceDisplaySource(
         sessionRef.current.displaySource,
       );
-      const nextEngine = applyGameAction(engine, action);
+      const captured = capturePresentationEvents(engine, () =>
+        applyGameAction(engine, action),
+      );
+      const nextEngine = captured.state;
       // engine が局面上不正な操作を同一 state の no-op として拒否した場合は、
       // 再生不能なイベントを journal に残さない。
       if (nextEngine === engine) return;
+      const presentation = commitPresentation(
+        displaySource,
+        nextEngine.roundsPlayed,
+        captured,
+      );
       markAccepted();
       // この操作で半荘が終局したら、確定結果を退避してから戦績へ追記する(issue #293 / #892)。
       const historyEntry =
@@ -598,6 +625,7 @@ function GameProviderRuntime({ children, initial }: GameProviderRuntimeProps) {
       if (journal === null) {
         const nextSession = {
           displaySource,
+          presentation,
           engine: nextEngine,
           journal: null,
           sessionSaveStatus: sessionRef.current.sessionSaveStatus,
@@ -615,6 +643,7 @@ function GameProviderRuntime({ children, initial }: GameProviderRuntimeProps) {
       const sessionSaveStatus = persistSessionJournal(storage, nextJournal);
       const nextSession = {
         displaySource,
+        presentation,
         engine: nextEngine,
         journal: nextJournal,
         sessionSaveStatus,
@@ -683,9 +712,16 @@ function GameProviderRuntime({ children, initial }: GameProviderRuntimeProps) {
         // 「もう一半荘」は新しい半荘の開始なので、設定で変更された名前をここで取り込む。
         const names = currentPlayerNames();
         const nextJournal = newJournal(seed, names);
+        const nextEngine = createGame({ seed, names });
+        const displaySource = newLocalDisplaySource();
         const nextSession = {
-          engine: createGame({ seed, names }),
-          displaySource: newLocalDisplaySource(),
+          engine: nextEngine,
+          displaySource,
+          presentation: commitPresentation(
+            displaySource,
+            nextEngine.roundsPlayed,
+            EMPTY_PRESENTATION_BATCH,
+          ),
           journal: nextJournal,
           sessionSaveStatus: persistSessionJournal(storage, nextJournal),
           historySaveStatus: "idle" as const,
@@ -706,6 +742,7 @@ function GameProviderRuntime({ children, initial }: GameProviderRuntimeProps) {
   const value = useMemo<GameContextValue>(
     () => ({
       displaySource: session.displaySource,
+      presentation: session.presentation,
       readDisplaySource,
       playerId: "p0",
       isHost: true,
@@ -720,6 +757,7 @@ function GameProviderRuntime({ children, initial }: GameProviderRuntimeProps) {
     }),
     [
       session.displaySource,
+      session.presentation,
       readDisplaySource,
       engine,
       seedGenerationError,

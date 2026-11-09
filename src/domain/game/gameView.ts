@@ -144,6 +144,13 @@ function buildSlotContent(
         })
       : null;
 
+  const ownHand =
+    isSelf && hand
+      ? sortTiles([
+          ...hand.hands[seat],
+          ...(isTurn && hand.drawn ? [hand.drawn.tile] : []),
+        ])
+      : null;
   const seated: SeatedPlayerView = {
     playerId: id,
     name: nameOf(engine, id),
@@ -165,10 +172,11 @@ function buildSlotContent(
       : [],
     ...(isSelf && hand
       ? {
-          hand: sortTiles([
-            ...hand.hands[seat],
-            ...(isTurn && hand.drawn ? [hand.drawn.tile] : []),
-          ]).map(toTileData),
+          hand: ownHand!.map(toTileData),
+          // The drawn occurrence was appended before the stable sort. Use its
+          // last identity occurrence: factories can share equal Tile objects.
+          drawnIndex:
+            isTurn && hand.drawn ? ownHand!.lastIndexOf(hand.drawn.tile) : null,
         }
       : {
           handCount:

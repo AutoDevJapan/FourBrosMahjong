@@ -97,6 +97,13 @@ import {
   type CharacterPlayerId,
   type CharacterPlayerNames,
 } from "./characters";
+import {
+  acceptPresentationAction,
+  beginPresentationAction,
+  type PresentationEventKind,
+  presentationRoundKey,
+  recordPresentationEvent,
+} from "./presentationEvents";
 
 /** プレイヤー識別子(4兄弟)。後方互換の通常対局では `p0` が自家。 */
 export type PlayerId = CharacterPlayerId;
@@ -459,6 +466,19 @@ export const DEFAULT_NAMES: PlayerNames = CHARACTER_DEFAULT_NAMES;
 
 const ALL_IDS: PlayerRing<PlayerId> = CHARACTER_PLAYER_IDS;
 const DEFAULT_HUMAN_PLAYER_IDS: readonly PlayerId[] = [HUMAN_ID];
+
+function present(
+  state: EngineState,
+  kind: PresentationEventKind,
+  seat: SeatKey,
+): void {
+  if (state.hand === null) return;
+  recordPresentationEvent(
+    kind,
+    seatOccupant(state.hand.seating, seat),
+    presentationRoundKey(state.roundsPlayed),
+  );
+}
 
 // ---------------------------------------------------------------------------
 // 純ヘルパ
@@ -853,7 +873,10 @@ function beginRound(state: EngineState): EngineState {
     passedRonSeats: [],
     ponnedKind: null,
   };
-  autoPullDealtNorths(hand, (seat) => {
+  const roundKey = presentationRoundKey(state.roundsPlayed);
+  for (const seat of SEATS)
+    recordPresentationEvent("deal", seatOccupant(seating, seat), roundKey);
+  autoPullDealtNorths(hand, roundKey, (seat) => {
     const occupant = seatOccupant(hand.seating, seat);
     return !usesExplicitKita(state, occupant);
   });
@@ -878,6 +901,7 @@ function autoPullNorth(
   hand: HandState,
   seat: SeatKey,
   tile: Tile,
+  roundKey: string,
 ): { tile: Tile; pulled: boolean } {
   let current = tile;
   let pulled = false;
@@ -896,6 +920,8 @@ function autoPullNorth(
       throw error;
     }
     hand.kita[seat] += 1;
+    recordPresentationEvent("kita", seatOccupant(hand.seating, seat), roundKey);
+    recordPresentationEvent("draw", seatOccupant(hand.seating, seat), roundKey);
     current = replacement;
     pulled = true;
   }
@@ -913,6 +939,7 @@ function isNorth(tile: Pick<Tile, "suit" | "rank">): boolean {
  */
 function autoPullDealtNorths(
   hand: HandState,
+  roundKey: string,
   shouldPull: (seat: SeatKey) => boolean,
 ): void {
   for (const seat of SEATS) {
@@ -920,7 +947,7 @@ function autoPullDealtNorths(
     const concealed: Tile[] = [];
     for (const tile of hand.hands[seat]) {
       if (isNorth(tile)) {
-        concealed.push(autoPullNorth(hand, seat, tile).tile);
+        concealed.push(autoPullNorth(hand, seat, tile, roundKey).tile);
       } else {
         concealed.push(tile);
       }
@@ -939,6 +966,7 @@ function autoPullDealtNorths(
 function drawKanReplacement(
   hand: HandState,
   seat: SeatKey,
+  roundKey: string,
   autoKita = true,
 ): void {
   let tile: Tile;
@@ -951,8 +979,9 @@ function drawKanReplacement(
     }
     throw error;
   }
+  recordPresentationEvent("draw", seatOccupant(hand.seating, seat), roundKey);
   hand.drawn = {
-    tile: autoKita ? autoPullNorth(hand, seat, tile).tile : tile,
+    tile: autoKita ? autoPullNorth(hand, seat, tile, roundKey).tile : tile,
     source: "kanReplacement",
   };
   hand.tempMiss[seat] = false;
@@ -1177,9 +1206,10 @@ function completeAiAnkan(
   ];
   clearAllIppatsu(hand);
   hand.callsMade = true;
+  present(state, "kan", seat);
   const abortiveDraw = settleFourKanAbortiveDraw(state);
   if (abortiveDraw !== null) return abortiveDraw;
-  drawKanReplacement(hand, seat);
+  drawKanReplacement(hand, seat, presentationRoundKey(state.roundsPlayed));
   return state;
 }
 
@@ -1212,9 +1242,10 @@ function completeAiKakan(
   );
   clearAllIppatsu(hand);
   hand.callsMade = true;
+  present(state, "kan", seat);
   const abortiveDraw = settleFourKanAbortiveDraw(state);
   if (abortiveDraw !== null) return abortiveDraw;
-  drawKanReplacement(hand, seat);
+  drawKanReplacement(hand, seat, presentationRoundKey(state.roundsPlayed));
   return state;
 }
 
@@ -1287,10 +1318,11 @@ function applyAiCall(
   hand.passedRonSeats = [];
   hand.drawn = null;
   hand.turn = caller;
+  present(state, kan ? "kan" : "pon", caller);
   if (kan) {
     const abortiveDraw = settleFourKanAbortiveDraw(state);
     if (abortiveDraw !== null) return abortiveDraw;
-    drawKanReplacement(hand, caller);
+    drawKanReplacement(hand, caller, presentationRoundKey(state.roundsPlayed));
     return state;
   }
   // 現物喰い替えは禁止(#105 / スペック1 1.4)。禁止牌は手牌から削らず
@@ -1342,9 +1374,10 @@ function pump(state: EngineState): EngineState {
         return settleDraw(s);
       }
       const raw = hand.wall.draw();
+      present(s, "draw", seat);
       const pull = explicitKita
         ? { tile: raw, pulled: false }
-        : autoPullNorth(hand, seat, raw);
+        : autoPullNorth(hand, seat, raw, presentationRoundKey(s.roundsPlayed));
       hand.drawn = {
         tile: pull.tile,
         // 北抜きの嶺上牌も嶺上補充由来。海底摸月を付けてはならない(#396)。
@@ -1749,6 +1782,7 @@ function applyDiscard(
     haitei: drawSource === "live" && isHaitei(hand.wall.remainingLiveTiles),
   };
   hand.passedRonSeats = [];
+  present(state, "discard", seat);
   return resolveDiscard(state);
 }
 
@@ -1784,6 +1818,7 @@ function commitPendingRiichi(
   if (hand === null || hand.pendingRiichiSeat !== discarder) return state;
   const declarerId = seatOccupant(hand.seating, discarder);
   hand.pendingRiichiSeat = null;
+  present(state, "riichi", discarder);
   return {
     ...state,
     points: {
@@ -2044,6 +2079,7 @@ function settleWin(state: EngineState, win: WinInput): EngineState {
     hand.pendingRiichiSeat = null;
   }
   const winnerId = seatOccupant(hand.seating, winnerSeat);
+  present(state, winType, winnerSeat);
   const isDealerWin = winnerSeat === "east";
   const isRiichiWin = hand.riichi[winnerSeat];
 
@@ -2273,6 +2309,8 @@ export function finishRound(
   conclusion: RoundConclusion,
 ): EngineState {
   const { outcome, isDraw, summary } = conclusion;
+  if (isDraw) for (const seat of SEATS) present(state, "draw-round", seat);
+  for (const seat of SEATS) present(state, "round-end", seat);
   const round = state.round;
   const oorasu = isOorasu(round);
   const tobi = ALL_IDS.some((id) => state.points[id] < 0);
@@ -2559,7 +2597,14 @@ export function removeHumanPlayerIds(
       // AI引継ぎ時点ですでに保持していた北も、従来の自動ガリ席と同じ意味になる。
       // 配牌/手牌の北を先に1枚ずつ処理し、最後に現在のツモ牌を処理する。
       hand.hands[seat] = hand.hands[seat].map((tile) =>
-        isNorth(tile) ? autoPullNorth(hand, seat, tile).tile : tile,
+        isNorth(tile)
+          ? autoPullNorth(
+              hand,
+              seat,
+              tile,
+              presentationRoundKey(next.roundsPlayed),
+            ).tile
+          : tile,
       );
       if (
         hand.turn === seat &&
@@ -2567,7 +2612,12 @@ export function removeHumanPlayerIds(
         isNorth(hand.drawn.tile)
       ) {
         const previousSource = hand.drawn.source;
-        const pull = autoPullNorth(hand, seat, hand.drawn.tile);
+        const pull = autoPullNorth(
+          hand,
+          seat,
+          hand.drawn.tile,
+          presentationRoundKey(next.roundsPlayed),
+        );
         hand.drawn = {
           tile: pull.tile,
           source:
@@ -2651,9 +2701,11 @@ function publicAction<Args extends readonly unknown[]>(
   run: (state: EngineState, ...args: Args) => EngineState,
 ): (state: EngineState, ...args: Args) => EngineState {
   return (state, ...args) => {
+    beginPresentationAction();
     if (consumedStates.has(state)) throw new EngineStateConsumedError(name);
     const next = run(state, ...args);
     if (next !== state) consumedStates.add(state);
+    acceptPresentationAction(next !== state);
     return next;
   };
 }
@@ -2719,6 +2771,8 @@ function declareKitaImpl(
   hand.drawn = { tile: replacement, source };
   hand.kita[seat] += 1;
   hand.tempMiss[seat] = false;
+  present(state, "kita", seat);
+  present(state, "draw", seat);
   return pump({ ...state, pending: null });
 }
 
@@ -2905,6 +2959,7 @@ function declarePonImpl(
   hand.turn = seat;
   // 喰い替え禁止: 直後の打牌でこの牌種(ポンした牌)を切れないよう記録する(スペック1 1.4)。
   hand.ponnedKind = tile;
+  present(state, "pon", seat);
   // ポン後は打牌が必要(ツモなし)。
   return { ...state, pending: buildHumanPending(state, seat) };
 }
@@ -2949,11 +3004,13 @@ function declareKanImpl(
   hand.passedRonSeats = [];
   hand.drawn = null;
   hand.turn = seat;
+  present(state, "kan", seat);
   const abortiveDraw = settleFourKanAbortiveDraw(state);
   if (abortiveDraw !== null) return abortiveDraw;
   drawKanReplacement(
     hand,
     seat,
+    presentationRoundKey(state.roundsPlayed),
     !usesExplicitKita(state, seatOccupant(hand.seating, seat)),
   );
   return { ...state, pending: buildHumanPending(state, seat) };
@@ -3011,11 +3068,13 @@ function declareAnkanImpl(
   ];
   clearAllIppatsu(hand);
   hand.callsMade = true;
+  present(state, "kan", seat);
   const abortiveDraw = settleFourKanAbortiveDraw(state);
   if (abortiveDraw !== null) return abortiveDraw;
   drawKanReplacement(
     hand,
     seat,
+    presentationRoundKey(state.roundsPlayed),
     !usesExplicitKita(state, seatOccupant(hand.seating, seat)),
   );
   // リーチ中の暗槓(Q18・#116)は打牌の自由が無いため、pump に委ねて嶺上ツモ和了 /
@@ -3082,11 +3141,13 @@ function declareKakanImpl(
   );
   clearAllIppatsu(hand);
   hand.callsMade = true;
+  present(state, "kan", seat);
   const abortiveDraw = settleFourKanAbortiveDraw(state);
   if (abortiveDraw !== null) return abortiveDraw;
   drawKanReplacement(
     hand,
     seat,
+    presentationRoundKey(state.roundsPlayed),
     !usesExplicitKita(state, seatOccupant(hand.seating, seat)),
   );
   return { ...state, pending: buildHumanPending(state, seat) };
