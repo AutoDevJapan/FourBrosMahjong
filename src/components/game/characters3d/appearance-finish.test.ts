@@ -1,6 +1,5 @@
 import { readFileSync } from "node:fs";
-import { createRequire } from "node:module";
-import { resolve } from "node:path";
+import sharp from "sharp";
 import { expect, it } from "vitest";
 import { CHARACTER_CLIPS, sampleCharacterPose } from "./clips";
 import { exportCharacterGlb } from "./glb";
@@ -24,8 +23,6 @@ type Glb = {
 const models = (["p0", "p1", "p2", "p3"] as const).map((id) =>
   createCharacterModel(id),
 );
-const req = createRequire(resolve("package.json")),
-  sharp = createRequire(req.resolve("next/package.json"))("sharp");
 it.each(models)(
   "$id joins corresponding skin texels within a small color difference",
   async (model) => {
@@ -75,6 +72,34 @@ it.each(models)(
     ).toBe(true);
   },
 );
+it("omits binary storage for zero morph targets on unchanged p2 surfaces", () => {
+  const model = models.find((m) => m.id === "p2")!,
+    bytes = exportCharacterGlb(
+      model,
+      readFileSync(model.materials.find((m) => m.texture)!.texture!),
+    ),
+    jsonLength = new DataView(bytes.buffer).getUint32(12, true),
+    json = JSON.parse(
+      new TextDecoder().decode(bytes.subarray(20, 20 + jsonLength)),
+    );
+  let unchanged = 0;
+  for (const [i, mesh] of model.meshes.entries()) {
+    if (mesh.handClosure) continue;
+    unchanged++;
+    const target = json.meshes[0].primitives[i].targets[0];
+    for (const semantic of ["POSITION", "NORMAL"]) {
+      const accessor = json.accessors[target[semantic]];
+      expect(accessor.bufferView).toBeUndefined();
+      expect(accessor.count).toBe(mesh.vertices.length / 8);
+      expect(accessor.componentType).toBe(5126);
+      expect(accessor.type).toBe("VEC3");
+      expect(accessor.sparse).toBeUndefined();
+    }
+    expect(json.accessors[target.POSITION].min).toEqual([0, 0, 0]);
+    expect(json.accessors[target.POSITION].max).toEqual([0, 0, 0]);
+  }
+  expect(unchanged).toBe(6);
+});
 it("p2 closes fingers during reactions and returns to the exact open pose", () => {
   const model = models[2],
     skin = model.meshes.find((m) => m.materialId === "skin")!,

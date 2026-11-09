@@ -456,8 +456,18 @@ describe("WebGL2 renderer boundaries", () => {
     const before = gl.createBuffer.mock.calls.length;
     renderer.setCharacters([surface]);
     expect(gl.createBuffer.mock.calls.length - before).toBe(2);
+    const colorUploads = () =>
+      gl.bufferData.mock.calls.filter((args) => args[1]?.length === 9).length;
+    const uploaded = colorUploads();
+    expect(uploaded).toBeGreaterThan(0);
     renderer.setCharacters([surface]);
     expect(gl.createBuffer.mock.calls.length - before).toBe(2);
+    expect(colorUploads()).toBe(uploaded);
+    renderer.setCharacters([{ ...surface, colors: surface.colors.slice() }]);
+    expect(colorUploads()).toBe(uploaded);
+    surface.colors[0] = 0.5;
+    renderer.setCharacters([surface]);
+    expect(colorUploads()).toBe(uploaded + 1);
     renderer.setCharacters([characterSurface()]);
     expect(gl.deleteBuffer.mock.calls.length).toBe(1);
     renderer.setCharacters([]);

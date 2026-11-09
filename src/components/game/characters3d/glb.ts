@@ -4,7 +4,7 @@ import { rotation, sub } from "./matrix";
 import type { CharacterModel, V3 } from "./types";
 
 interface Accessor {
-  bufferView: number;
+  bufferView?: number;
   componentType: number;
   count: number;
   type: string;
@@ -89,6 +89,18 @@ export function exportCharacterGlb(
     accessors.push(accessor);
     return accessors.length - 1;
   };
+  // glTF accessors without a bufferView are implicitly initialized to zero.
+  const zeroMorph = (count: number) => {
+    accessors.push({
+      componentType: 5126,
+      count,
+      type: "VEC3",
+      min: [0, 0, 0],
+      max: [0, 0, 0],
+    });
+    return accessors.length - 1;
+  };
+  const hasHandClosure = model.meshes.some((mesh) => mesh.handClosure);
   const nodes: Record<string, unknown>[] = model.bones.map((bone, index) => {
     const children = model.bones
       .map((b, i) => (b.parent === index ? i : -1))
@@ -127,6 +139,18 @@ export function exportCharacterGlb(
     const joints = Uint16Array.from(mesh.joints, (joint, i) =>
       mesh.weights[i] === 0 ? 0 : joint,
     );
+    let morphTarget: { POSITION: number; NORMAL: number } | undefined;
+    if (hasHandClosure) {
+      if (mesh.handClosure) {
+        morphTarget = {
+          POSITION: attr(mesh.handClosure.positions, "VEC3", 3, true, 34962),
+          NORMAL: attr(mesh.handClosure.normals, "VEC3", 3, false, 34962),
+        };
+      } else {
+        const zero = zeroMorph(n);
+        morphTarget = { POSITION: zero, NORMAL: zero };
+      }
+    }
     return {
       attributes: {
         POSITION: attr(pos, "VEC3", 3, true, 34962),
@@ -138,28 +162,7 @@ export function exportCharacterGlb(
         JOINTS_0: attr(joints, "VEC4", 4, false, 34962),
         WEIGHTS_0: attr(mesh.weights, "VEC4", 4, false, 34962),
       },
-      ...(model.meshes.some((m) => m.handClosure)
-        ? {
-            targets: [
-              {
-                POSITION: attr(
-                  mesh.handClosure?.positions ?? new Float32Array(n * 3),
-                  "VEC3",
-                  3,
-                  true,
-                  34962,
-                ),
-                NORMAL: attr(
-                  mesh.handClosure?.normals ?? new Float32Array(n * 3),
-                  "VEC3",
-                  3,
-                  false,
-                  34962,
-                ),
-              },
-            ],
-          }
-        : {}),
+      ...(morphTarget ? { targets: [morphTarget] } : {}),
       material: model.materials.findIndex((mat) => mat.id === mesh.materialId),
       mode: 4,
     };
@@ -198,7 +201,7 @@ export function exportCharacterGlb(
         target: { node: b, path: "rotation" },
       });
     }
-    if (model.meshes.some((m) => m.handClosure)) {
+    if (hasHandClosure) {
       const values = Float32Array.from(
         times,
         (t) => sampleCharacterPose(model, clip.id, t).handClosure ?? 0,
@@ -249,7 +252,7 @@ export function exportCharacterGlb(
       {
         name: model.name,
         primitives,
-        ...(model.meshes.some((m) => m.handClosure)
+        ...(hasHandClosure
           ? { weights: [0], extras: { targetNames: ["hand-closure"] } }
           : {}),
       },

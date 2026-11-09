@@ -156,7 +156,13 @@ export function createMahjongRenderer(
   let characterBufferBytes = 0;
   const characterMeshes = new Map<
     string,
-    { mesh: Mesh; buffer: WebGLBuffer; colors?: WebGLBuffer; vertices: number }
+    {
+      mesh: Mesh;
+      buffer: WebGLBuffer;
+      colors?: WebGLBuffer;
+      colorData?: Float32Array;
+      vertices: number;
+    }
   >();
   const shaders: WebGLShader[] = [],
     programs: WebGLProgram[] = [],
@@ -595,6 +601,7 @@ export function createMahjongRenderer(
             gl.deleteBuffer(item.colors);
             buffers.splice(buffers.indexOf(item.colors), 1);
             item.colors = undefined;
+            item.colorData = undefined;
           }
           if (surface.colors) {
             if (!item.colors) {
@@ -603,8 +610,18 @@ export function createMahjongRenderer(
               buffers.push(c);
               item.colors = c;
             }
-            gl.bindBuffer(gl.ARRAY_BUFFER, item.colors);
-            gl.bufferData(gl.ARRAY_BUFFER, surface.colors, gl.STATIC_DRAW);
+            const previousColors = item.colorData;
+            if (
+              !previousColors ||
+              surface.colors.some(
+                (value, index) => value !== previousColors[index],
+              )
+            ) {
+              gl.bindBuffer(gl.ARRAY_BUFFER, item.colors);
+              gl.bufferData(gl.ARRAY_BUFFER, surface.colors, gl.STATIC_DRAW);
+              // Own the comparison snapshot so in-place edits are detected too.
+              item.colorData = surface.colors.slice();
+            }
           }
           gl.bindBuffer(gl.ARRAY_BUFFER, item.buffer);
           gl.bufferData(gl.ARRAY_BUFFER, surface.vertices, gl.DYNAMIC_DRAW);

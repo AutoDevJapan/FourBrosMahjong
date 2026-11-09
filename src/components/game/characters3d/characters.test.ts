@@ -483,12 +483,27 @@ describe("portable model supply", () => {
       expect(json.images[0].mimeType).toBe("image/jpeg");
       expect(json.images[0].uri).toBeUndefined();
       expect(json.meshes[0].primitives).toHaveLength(model.meshes.length);
-      for (const a of json.accessors) {
+      const implicitTargets = new Set<number>(
+        json.meshes[0].primitives.flatMap(
+          (primitive: { targets?: Record<string, number>[] }) =>
+            primitive.targets?.flatMap((target) => Object.values(target)) ?? [],
+        ),
+      );
+      for (const [index, a] of json.accessors.entries()) {
+        expect(a.count).toBeGreaterThan(0);
+        if (a.bufferView === undefined) {
+          expect(implicitTargets.has(index)).toBe(true);
+          expect(a.type).toBe("VEC3");
+          expect(a.componentType).toBe(5126);
+          expect(a.min).toEqual([0, 0, 0]);
+          expect(a.max).toEqual([0, 0, 0]);
+          expect(a.sparse).toBeUndefined();
+          continue;
+        }
         const v = json.bufferViews[a.bufferView];
         expect(v.byteOffset + v.byteLength).toBeLessThanOrEqual(
           json.buffers[0].byteLength,
         );
-        expect(a.count).toBeGreaterThan(0);
       }
     },
   );
