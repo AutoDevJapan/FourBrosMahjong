@@ -10,9 +10,15 @@ import { type RefObject, StrictMode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { walkToGameEnd } from "@/components/game/finishedGameFixture";
 import { selectView } from "@/components/game/gameView";
+import {
+  clearResultHistoryAcrossTabs,
+  loadResultHistory,
+} from "@/components/game/resultHistory";
 import { createGame } from "@/domain/game/engine";
+import { replayJournal } from "@/domain/game/gamePersistence";
 import { ONLINE_RESUME_TOKEN_MAX_LENGTH } from "@/domain/online/types";
 import { MAX_PLAYER_NAME_CODE_UNITS } from "@/lib/playerName";
+import { createLockRequest } from "@/test/webLocksStub";
 import OnlineLobby, {
   isStaleOnlineSnapshot,
   MAX_ONLINE_CREDENTIALS_BYTES,
@@ -233,6 +239,195 @@ function openCreatedRoom(): TestWebSocket {
   act(() => socket.open());
   return socket;
 }
+
+describe("online history recovery feedback", () => {
+  const matchId = `${"d".repeat(32)}:1`;
+  const warning = /この端末に今回の戦績を保存できませんでした/;
+  const originalLocks = Object.getOwnPropertyDescriptor(navigator, "locks");
+  let storage: Storage;
+
+  beforeEach(() => {
+    storage = window.localStorage;
+    storage.clear();
+    Object.defineProperty(navigator, "locks", {
+      configurable: true,
+      value: { request: createLockRequest() },
+    });
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    storage.clear();
+    if (originalLocks) Object.defineProperty(navigator, "locks", originalLocks);
+    else delete (navigator as { locks?: unknown }).locks;
+  });
+
+  function connectGame() {
+    const socket = openCreatedRoom();
+    act(() =>
+      socket.message({
+        type: "session",
+        token: "t".repeat(24),
+        snapshot: { ...snapshotFixture(), matchId },
+      }),
+    );
+    return socket;
+  }
+
+  function finish(socket: TestWebSocket) {
+    act(() =>
+      socket.message({
+        type: "snapshot",
+        snapshot: { ...finishedSnapshotFixture(), matchId },
+      }),
+    );
+  }
+
+  function failStorage() {
+    return vi.spyOn(window, "localStorage", "get").mockImplementation(() => {
+      throw new DOMException("storage unavailable", "SecurityError");
+    });
+  }
+
+  it("removes a failed-save warning after recovery on the game and result views", async () => {
+    const socket = connectGame();
+    const access = failStorage();
+    finish(socket);
+    await screen.findByText(warning);
+    access.mockRestore();
+    fireEvent.focus(window);
+    await waitFor(() => {
+      expect(
+        loadResultHistory(storage).filter((entry) => "onlineMatchId" in entry),
+      ).toHaveLength(1);
+      expect(screen.queryByText(warning)).not.toBeInTheDocument();
+    });
+    fireEvent.click(screen.getByRole("button", { name: "結果を見る" }));
+    expect(
+      screen.getByRole("heading", { name: "対局結果" }),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(warning)).not.toBeInTheDocument();
+  });
+
+  it("keeps unrelated operation feedback when history recovers", async () => {
+    const socket = connectGame();
+    const access = failStorage();
+    finish(socket);
+    await screen.findByText(warning);
+    const message = "現在この操作は実行できません。";
+    act(() => socket.message({ type: "error", message }));
+    expect(screen.getByText(message)).toBeInTheDocument();
+    access.mockRestore();
+    fireEvent.focus(window);
+    await waitFor(() => expect(loadResultHistory(storage)).toHaveLength(1));
+    expect(screen.getByText(message)).toBeInTheDocument();
+  });
+
+  it("keeps transport recovery feedback when history recovers", async () => {
+    const socket = connectGame();
+    const access = failStorage();
+    finish(socket);
+    await screen.findByText(warning);
+    act(() => socket.serverClose(1006));
+    access.mockRestore();
+    fireEvent.focus(window);
+    await waitFor(() => expect(loadResultHistory(storage)).toHaveLength(1));
+    expect(
+      document.querySelector('[data-connection-status="reconnecting"]'),
+    ).not.toBeNull();
+    expect(screen.queryByText(warning)).not.toBeInTheDocument();
+  });
+
+  it("keeps the failure warning when an unknown epoch cannot be recovered", async () => {
+    await clearResultHistoryAcrossTabs(storage);
+    const socket = connectGame();
+    const access = failStorage();
+    finish(socket);
+    await screen.findByText(warning);
+    access.mockRestore();
+    fireEvent.focus(window);
+    await act(async () => {
+      await navigator.locks.request(
+        "four-bros-mahjong.history.write.v1",
+        { signal: new AbortController().signal },
+        () => undefined,
+      );
+    });
+    expect(loadResultHistory(storage)).toHaveLength(0);
+    expect(screen.getByText(warning)).toBeInTheDocument();
+  });
+});
+
+describe("online phase status", () => {
+  it("shows game end even if the final snapshot retains a turn owner", () => {
+    const socket = openCreatedRoom();
+    const snapshot = {
+      ...finishedSnapshotFixture(),
+      currentTurn: "p0" as const,
+    };
+    act(() =>
+      socket.message({ type: "session", token: "t".repeat(24), snapshot }),
+    );
+    expect(screen.getByText("対局終了")).toBeInTheDocument();
+    expect(
+      screen.queryByText(`${snapshot.players[0].name}の手番`),
+    ).not.toBeInTheDocument();
+  });
+
+  it("shows round end before the next-round action", () => {
+    const { journal } = walkToGameEnd(1);
+    const next = journal.actions.findIndex(
+      (action) => action.type === "nextRound",
+    );
+    expect(next).toBeGreaterThan(0);
+    const round = replayJournal({
+      ...journal,
+      actions: journal.actions.slice(0, next),
+    });
+    expect(round.phase).toBe("roundEnd");
+    const snapshot: OnlineSnapshot = {
+      ...finishedSnapshotFixture(),
+      phase: round.phase,
+      view: selectView(round, "p0"),
+      pending: round.pending,
+      roundSummary: round.lastRound,
+      currentTurn: "p0",
+    };
+    const socket = openCreatedRoom();
+    act(() =>
+      socket.message({ type: "session", token: "t".repeat(24), snapshot }),
+    );
+    expect(screen.getByText("局終了")).toBeInTheDocument();
+    expect(
+      screen.queryByText(`${snapshot.players[0].name}の手番`),
+    ).not.toBeInTheDocument();
+  });
+
+  it("does not label an active AI turn as game end", () => {
+    const socket = openCreatedRoom();
+    act(() =>
+      socket.message({
+        type: "session",
+        token: "t".repeat(24),
+        snapshot: { ...snapshotFixture(), currentTurn: "p1" },
+      }),
+    );
+    expect(screen.getByText("対局中")).toBeInTheDocument();
+    expect(screen.queryByText("対局終了")).not.toBeInTheDocument();
+  });
+
+  it("keeps the current human turn during an active game", () => {
+    const socket = openCreatedRoom();
+    act(() =>
+      socket.message({
+        type: "session",
+        token: "t".repeat(24),
+        snapshot: snapshotFixture(),
+      }),
+    );
+    expect(screen.getByText("たろうの手番")).toBeInTheDocument();
+  });
+});
 
 beforeEach(() => {
   vi.stubEnv("NEXT_PUBLIC_ONLINE_WS_URL", "ws://localhost:8080/ws");
