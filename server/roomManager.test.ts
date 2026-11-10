@@ -533,6 +533,7 @@ describe("online room manager", () => {
     const before = manager.snapshot(host.room, host.player);
     const beforeVersion = before.version;
     expect(before.phase).toBe("gameEnd");
+    expect(before.matchId).toEqual(expect.stringMatching(/^[0-9a-f]{32}:1$/));
 
     const result = manager.newGame(host.room, host.player);
 
@@ -543,6 +544,30 @@ describe("online room manager", () => {
     expect(after.roundSummary).toBeNull();
     expect(after.view.result).toBeNull();
     expect(after.players).toEqual(before.players);
+    expect(after.matchId).toBe(before.matchId.replace(/:1$/, ":2"));
+  });
+
+  it("keeps match identity across snapshots, reconnect and host handoff", () => {
+    const manager = new RoomManager();
+    const host = manager.create("ホスト");
+    const identity = manager.snapshot(host.room, host.player).matchId;
+    expect(identity).toEqual(expect.stringMatching(/^[0-9a-f]{32}:1$/));
+    const guest = manager.join(host.room.code, "ゲスト");
+    if (!guest) throw new Error("guest should join");
+    expect(manager.snapshot(guest.room, guest.player).matchId).toBe(identity);
+    manager.disconnect(host.room, host.player);
+    expect(manager.snapshot(guest.room, guest.player).matchId).toBe(identity);
+    const resumed = manager.resume(host.room.code, host.player.token);
+    if (!resumed) throw new Error("host should resume");
+    expect(manager.snapshot(resumed.room, resumed.player).matchId).toBe(
+      identity,
+    );
+    expect(manager.newGame(guest.room, guest.player).ok).toBe(false);
+    expect(manager.snapshot(guest.room, guest.player).matchId).toBe(identity);
+    const another = manager.create("別ルーム");
+    expect(manager.snapshot(another.room, another.player).matchId).not.toBe(
+      identity,
+    );
   });
 
   it("keeps a disconnected seat out of the new game after resume", () => {

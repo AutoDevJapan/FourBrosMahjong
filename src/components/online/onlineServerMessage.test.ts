@@ -134,6 +134,34 @@ function mutableVisibleTileSnapshot(
 }
 
 describe("parseOnlineServerMessage", () => {
+  it("accepts optional bounded match identities while preserving older servers", () => {
+    const old = snapshotFixture();
+    expect(
+      parseOnlineServerMessage({ type: "snapshot", snapshot: old }),
+    ).not.toBeNull();
+    const current = { ...old, matchId: `${"a".repeat(32)}:1` };
+    expect(
+      parseOnlineServerMessage({ type: "snapshot", snapshot: current }),
+    ).toEqual({ type: "snapshot", snapshot: current });
+  });
+
+  it.each([
+    null,
+    1,
+    "",
+    "ABC234",
+    `${"a".repeat(32)}:0`,
+    `${"a".repeat(32)}:01`,
+    `${"a".repeat(32)}:9007199254740992`,
+    "a".repeat(200),
+  ])("rejects malformed match identity %j", (matchId) => {
+    expect(
+      parseOnlineServerMessage({
+        type: "snapshot",
+        snapshot: { ...snapshotFixture(), matchId },
+      }),
+    ).toBeNull();
+  });
   it("parses current session, snapshot, error, and pong messages", () => {
     const snapshot = snapshotFixture();
     expect(
