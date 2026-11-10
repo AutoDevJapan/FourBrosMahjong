@@ -39,8 +39,13 @@ const GENERATED_SOURCE = `
 const GENERATED_SHA = createHash("sha256")
   .update(GENERATED_SOURCE)
   .digest("hex");
+// Schema v1 remains a historical pre-cutover contract, not the active source.
+const ARCHIVED_CURRENT_REPOSITORY_PATH = resolve(
+  process.cwd(),
+  "documents/fixtures/railway-readyz-before-iac.json",
+);
 const CURRENT_REPOSITORY_SOURCE = readFileSync(
-  resolve(process.cwd(), "railway.json"),
+  ARCHIVED_CURRENT_REPOSITORY_PATH,
   "utf8",
 );
 const CURRENT_REPOSITORY_SHA = createHash("sha256")
@@ -229,7 +234,7 @@ function withTemporaryRepository<T>(callback: (rootDirectory: string) => T): T {
     mkdirSync(join(rootDirectory, ".railway"));
     writeFileSync(
       join(rootDirectory, "railway.json"),
-      readFileSync(resolve(process.cwd(), "railway.json")),
+      readFileSync(ARCHIVED_CURRENT_REPOSITORY_PATH),
     );
     const legacyFixturePath = join(rootDirectory, RAILWAY_LEGACY_FIXTURE_PATH);
     mkdirSync(dirname(legacyFixturePath), { recursive: true });
@@ -351,18 +356,22 @@ describe("Railway IaC parity snapshot contract (#742)", () => {
       writeFileSync(join(fixtureDirectory, "target"), outsideSentinel);
       symlinkSync(outsideDirectory, join(rootDirectory, "link"));
 
-      // Keep `link/..` in the path passed to the filesystem. `join()` and
-      // `resolve()` would normalize it to the inside sentinel instead.
+      // Keep `link/..` in the path passed to the filesystem. The operating
+      // system decides whether it resolves the symlink before processing `..`:
+      // Windows may read the inside sentinel while POSIX reads the outside one.
       const traversalPath = `${rootDirectory}/link/../target`;
       expect(readFileSync(join(rootDirectory, "target"))).toEqual(
         insideSentinel,
       );
-      // This is what the vulnerable raw read would observe.
-      expect(readFileSync(traversalPath)).toEqual(outsideSentinel);
+      const rawRead = readFileSync(traversalPath);
+      expect([insideSentinel, outsideSentinel]).toContainEqual(rawRead);
       // The hardened helper rejects the escape and reads only the normalized
-      // path within the root.
+      // path within the root, regardless of the operating system's raw read.
       expect(readBoundedFile(traversalPath, 64, rootDirectory)).toEqual(
         insideSentinel,
+      );
+      expect(readBoundedFile(traversalPath, 64, rootDirectory)).not.toEqual(
+        outsideSentinel,
       );
       expect(readBoundedTextFile(traversalPath, 64, rootDirectory)).toBe(
         insideSentinel.toString("utf8"),
@@ -421,11 +430,12 @@ describe("Railway IaC parity snapshot contract (#742)", () => {
     expect(filesystem).toMatchObject({
       currentRepositoryFilePresent: false,
       currentRepositoryFileSha256: null,
+      legacyJsonFilePresent: _caseName !== "missing",
     });
   });
 
   it("reads a regular legacy config and records its bounded raw hash", () => {
-    const expected = readFileSync(resolve(process.cwd(), "railway.json"));
+    const expected = readFileSync(ARCHIVED_CURRENT_REPOSITORY_PATH);
     const filesystem = withTemporaryRepository((rootDirectory) =>
       localFilesystemEvidence(rootDirectory),
     );
@@ -1217,9 +1227,9 @@ export default defineRailway(() => project("fixture", {}));`,
     expect(functionLikeSource).not.toContain("node.parameters.some(");
   });
 
-  it("keeps current readiness and immutable pre-cutover liveness separate", () => {
+  it("keeps archived readiness and immutable pre-cutover liveness separate", () => {
     const currentRailwayJson = JSON.parse(
-      readFileSync(resolve(process.cwd(), "railway.json"), "utf8"),
+      readFileSync(ARCHIVED_CURRENT_REPOSITORY_PATH, "utf8"),
     );
     const preCutoverRailwayJson = JSON.parse(LEGACY_FIXTURE_SOURCE);
     const evidence = validEvidence();
@@ -1244,7 +1254,7 @@ export default defineRailway(() => project("fixture", {}));`,
     ["malformed", "{ not-json"],
     ["empty", ""],
     ["unrelated content", JSON.stringify({ hello: "world" })],
-  ])("holds when current railway.json is %s", (_label, source) => {
+  ])("holds when archived /readyz Config as Code is %s", (_label, source) => {
     const result = validateRailwayIacMigrationEvidence(
       validEvidence(),
       filesystemWithCurrentRepositorySource(source),
@@ -1254,7 +1264,7 @@ export default defineRailway(() => project("fixture", {}));`,
     expect(result.reasons).toContain("legacy-config-missing");
   });
 
-  it("holds when current railway.json contains duplicate object names", () => {
+  it("holds when archived /readyz Config as Code contains duplicate object names", () => {
     const duplicateDeployKeys = CURRENT_REPOSITORY_SOURCE.replace(
       /("deploy"\s*:\s*)\{/,
       '$1{"startCommand":"node --import tsx server/start.ts"},"deploy":{',
@@ -1270,7 +1280,7 @@ export default defineRailway(() => project("fixture", {}));`,
     expect(result.reasons).toContain("legacy-config-missing");
   });
 
-  it("accepts only the strict current /readyz railway.json target", () => {
+  it("retains the strict historical /readyz target for schema v1", () => {
     expect(
       validateRailwayIacMigrationEvidence(
         validEvidence(),
@@ -1288,7 +1298,7 @@ export default defineRailway(() => project("fixture", {}));`,
     });
   });
 
-  it("holds when the current /readyz railway.json is presented as legacy", () => {
+  it("holds when the archived /readyz config is presented as legacy", () => {
     const evidence = validEvidence();
     evidence.ownershipCutover.legacyFileSha256 = CURRENT_REPOSITORY_SHA;
 
@@ -1367,8 +1377,15 @@ export default defineRailway(() => project("fixture", {}));`,
     expect([...observed].sort()).toEqual([...RAILWAY_IAC_MIGRATION_REASONS]);
   });
 
-  it("CLI is non-reflective and holds the current repository", () => {
+  it("CLI rejects obsolete full-project evidence for the current named partial without reflection", () => {
     const secret = "SECRET_SENTINEL";
+    // The real CLI reads the active repository, not the archived v1 fixture.
+    expect(localFilesystemEvidence()).toMatchObject({
+      legacyJsonFilePresent: false,
+      currentRepositoryFilePresent: false,
+      currentRepositoryFileContent: null,
+      currentRepositoryFileSha256: null,
+    });
     const currentEvidence = validEvidence(Date.now());
     currentEvidence.ownershipCutover.legacyFileSha256 = CURRENT_REPOSITORY_SHA;
     const currentResult = spawnSync(
@@ -1390,9 +1407,9 @@ export default defineRailway(() => project("fixture", {}));`,
       authorizesDeployment: false,
       externalMutationPerformed: false,
       reasons: [
-        "generated-iac-missing",
+        "generated-iac-invalid",
+        "legacy-config-missing",
         "ownership-cutover-unverified",
-        "secret-safety-unverified",
       ],
     });
 

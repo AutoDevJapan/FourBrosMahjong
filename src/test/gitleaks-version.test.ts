@@ -52,11 +52,20 @@ describe("gitleaks binary integrity gate", () => {
       .split("\n")
       .map((line) => line.trim())
       .filter((line) => line.startsWith("curl "));
-    expect(downloads).toHaveLength(2);
-    expect(downloads[0]).toContain(
-      `--connect-timeout 10 --max-time 60 --max-filesize ${GITLEAKS_CHECKSUM_MANIFEST_MAX_BYTES}`,
+    expect(downloads).toHaveLength(3);
+    for (const download of downloads) {
+      expect(download).toContain(
+        "--retry 2 --retry-delay 2 --retry-max-time 120",
+      );
+    }
+    expect(downloads[0]).toContain('--max-filesize "$limit"');
+    expect(workflow).toContain(
+      "^https://api.github.com/repos/gitleaks/gitleaks/releases/assets/[0-9]+$",
     );
     expect(downloads[1]).toContain(
+      `--connect-timeout 10 --max-time 60 --max-filesize ${GITLEAKS_CHECKSUM_MANIFEST_MAX_BYTES}`,
+    );
+    expect(downloads[2]).toContain(
       `--connect-timeout 10 --max-time 60 --max-filesize ${GITLEAKS_ARCHIVE_MAX_BYTES}`,
     );
   });

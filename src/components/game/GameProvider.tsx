@@ -34,6 +34,11 @@ import {
 import { localStorageOrNull } from "@/components/common/browserStorage";
 import { loadPlayerNames } from "@/components/settings/playerNames";
 import {
+  advanceDisplaySource,
+  type LocalDisplaySource,
+  newLocalDisplaySource,
+} from "@/domain/display/displaySource";
+import {
   createGame,
   DEFAULT_NAMES,
   type EngineState,
@@ -96,6 +101,10 @@ interface GameControls {
 }
 
 export interface GameContextValue {
+  /** Local display adapter only; absent online until server-version integration. */
+  readonly displaySource?: LocalDisplaySource;
+  /** Read the synchronous committed revision, including before React rerenders. */
+  readonly readDisplaySource?: () => LocalDisplaySource | undefined;
   /** この画面を操作している席。オンラインではserver snapshotの`you`。 */
   readonly playerId: PlayerId;
   /** host専用の局進行・次半荘操作を表示できるか。認可そのものはserverが行う。 */
@@ -369,7 +378,9 @@ export interface GameProviderProps {
   initialGame?: EngineState;
 }
 
-type InitialSession = ReturnType<typeof initialSession>;
+type InitialSession = ReturnType<typeof initialSession> & {
+  readonly displaySource: LocalDisplaySource;
+};
 
 function GameSeedUnavailable() {
   const retry = () => {
@@ -417,7 +428,10 @@ function createInitialSession(
   initialGame?: EngineState,
 ): InitialSession | null {
   try {
-    return initialSession(initialGame);
+    return {
+      ...initialSession(initialGame),
+      displaySource: newLocalDisplaySource(),
+    };
   } catch (error) {
     if (error instanceof SecureRandomUnavailableError) return null;
     throw error;
@@ -440,6 +454,18 @@ function GameProviderRuntime({ children, initial }: GameProviderRuntimeProps) {
   // 次の遷移を計算する。engine は Wall/RNG を含め入力を可変更新するため、レンダー時点の
   // session をクロージャから再利用するとライブ状態だけが二重に進み、journal と分岐する。
   const sessionRef = useRef(session);
+  const displayActiveRef = useRef(true);
+  useLayoutEffect(() => {
+    displayActiveRef.current = true;
+    return () => {
+      displayActiveRef.current = false;
+    };
+  }, []);
+  const readDisplaySource = useCallback(
+    () =>
+      displayActiveRef.current ? sessionRef.current.displaySource : undefined,
+    [],
+  );
   // `localStorage` の保存完了前に「もう一半荘」へ進んでも、結果を現行ジャーナルから
   // 切り離して保持する。sessionStorage にも書くが、Storage が使えない環境では同一
   // プロバイダの存続中だけでも回復できるようメモリを正とする(issue #892)。
@@ -548,6 +574,11 @@ function GameProviderRuntime({ children, initial }: GameProviderRuntimeProps) {
     const commit = (action: GameAction) => {
       if (!canAccept()) return;
       const { engine, journal } = sessionRef.current;
+      // Validate revision capacity before invoking the mutable engine. This
+      // immutable stamp is published only if the engine accepts the action.
+      const displaySource = advanceDisplaySource(
+        sessionRef.current.displaySource,
+      );
       const nextEngine = applyGameAction(engine, action);
       // engine が局面上不正な操作を同一 state の no-op として拒否した場合は、
       // 再生不能なイベントを journal に残さない。
@@ -566,6 +597,7 @@ function GameProviderRuntime({ children, initial }: GameProviderRuntimeProps) {
           : sessionRef.current.historySaveStatus;
       if (journal === null) {
         const nextSession = {
+          displaySource,
           engine: nextEngine,
           journal: null,
           sessionSaveStatus: sessionRef.current.sessionSaveStatus,
@@ -582,6 +614,7 @@ function GameProviderRuntime({ children, initial }: GameProviderRuntimeProps) {
       const storage = sessionStorageOrNull();
       const sessionSaveStatus = persistSessionJournal(storage, nextJournal);
       const nextSession = {
+        displaySource,
         engine: nextEngine,
         journal: nextJournal,
         sessionSaveStatus,
@@ -652,6 +685,7 @@ function GameProviderRuntime({ children, initial }: GameProviderRuntimeProps) {
         const nextJournal = newJournal(seed, names);
         const nextSession = {
           engine: createGame({ seed, names }),
+          displaySource: newLocalDisplaySource(),
           journal: nextJournal,
           sessionSaveStatus: persistSessionJournal(storage, nextJournal),
           historySaveStatus: "idle" as const,
@@ -671,6 +705,8 @@ function GameProviderRuntime({ children, initial }: GameProviderRuntimeProps) {
 
   const value = useMemo<GameContextValue>(
     () => ({
+      displaySource: session.displaySource,
+      readDisplaySource,
       playerId: "p0",
       isHost: true,
       view: selectView(engine),
@@ -683,6 +719,8 @@ function GameProviderRuntime({ children, initial }: GameProviderRuntimeProps) {
       controls,
     }),
     [
+      session.displaySource,
+      readDisplaySource,
       engine,
       seedGenerationError,
       session.sessionSaveStatus,

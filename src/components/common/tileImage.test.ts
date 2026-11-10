@@ -3,15 +3,36 @@ import type { TileData } from "../game/types";
 import { resolveTileFace } from "./tileImage";
 
 describe("resolveTileFace(カタログ内)", () => {
+  // 正規全27面の独立 oracle。resolver / production catalog / buildTileSet
+  // から期待値を生成すると、写像の入替が台帳と一緒に誤っても検出できない。
   it.each<[TileData, string]>([
-    [{ suit: "man", rank: 1 }, "Man1"],
-    [{ suit: "man", rank: 9 }, "Man9"],
-    [{ suit: "pin", rank: 1 }, "Pin1"],
-    [{ suit: "pin", rank: 9 }, "Pin9"],
-    [{ suit: "sou", rank: 1 }, "Sou1"],
-    [{ suit: "sou", rank: 9 }, "Sou9"],
-    [{ suit: "honor", rank: 1 }, "Ton"],
-    [{ suit: "honor", rank: 7 }, "Chun"],
+    [{ suit: "man", rank: 1, isRed: false }, "Man1"],
+    [{ suit: "man", rank: 9, isRed: false }, "Man9"],
+    [{ suit: "pin", rank: 1, isRed: false }, "Pin1"],
+    [{ suit: "pin", rank: 2, isRed: false }, "Pin2"],
+    [{ suit: "pin", rank: 3, isRed: false }, "Pin3"],
+    [{ suit: "pin", rank: 4, isRed: false }, "Pin4"],
+    [{ suit: "pin", rank: 5, isRed: true }, "Pin5-Dora"],
+    [{ suit: "pin", rank: 6, isRed: false }, "Pin6"],
+    [{ suit: "pin", rank: 7, isRed: false }, "Pin7"],
+    [{ suit: "pin", rank: 8, isRed: false }, "Pin8"],
+    [{ suit: "pin", rank: 9, isRed: false }, "Pin9"],
+    [{ suit: "sou", rank: 1, isRed: false }, "Sou1"],
+    [{ suit: "sou", rank: 2, isRed: false }, "Sou2"],
+    [{ suit: "sou", rank: 3, isRed: false }, "Sou3"],
+    [{ suit: "sou", rank: 4, isRed: false }, "Sou4"],
+    [{ suit: "sou", rank: 5, isRed: true }, "Sou5-Dora"],
+    [{ suit: "sou", rank: 6, isRed: false }, "Sou6"],
+    [{ suit: "sou", rank: 7, isRed: false }, "Sou7"],
+    [{ suit: "sou", rank: 8, isRed: false }, "Sou8"],
+    [{ suit: "sou", rank: 9, isRed: false }, "Sou9"],
+    [{ suit: "honor", rank: 1, isRed: false }, "Ton"],
+    [{ suit: "honor", rank: 2, isRed: false }, "Nan"],
+    [{ suit: "honor", rank: 3, isRed: false }, "Shaa"],
+    [{ suit: "honor", rank: 4, isRed: false }, "Pei"],
+    [{ suit: "honor", rank: 5, isRed: false }, "Haku"],
+    [{ suit: "honor", rank: 6, isRed: false }, "Hatsu"],
+    [{ suit: "honor", rank: 7, isRed: false }, "Chun"],
   ])("%o を %s.svg の image に写像する", (tile, name) => {
     const face = resolveTileFace(tile);
     expect(face).toEqual({

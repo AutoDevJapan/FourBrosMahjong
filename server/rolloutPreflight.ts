@@ -97,6 +97,14 @@ const RUNTIME_KEYS = [
 ] as const;
 const REGION_KEYS = ["regionId", "replicaIds"] as const;
 const ROLLBACK_GIT_SOURCE_KEYS = ["kind", "fullRevision"] as const;
+const ROLLBACK_UPLOAD_SOURCE_KEYS = [
+  "kind",
+  "fullRevision",
+  "deploymentId",
+  "imageDigest",
+  "snapshotId",
+  "sourceReceiptSha256",
+] as const;
 const SOURCE_KEYS = [
   "reviewedServerRevision",
   "activeDeploymentRevision",
@@ -213,6 +221,18 @@ function isRollbackSourceProvenance(value: unknown): value is UnknownRecord {
       isFullRevision(value.fullRevision)
     );
   }
+  if (value.kind === "railway-cli-upload") {
+    return (
+      hasExactKeys(value, ROLLBACK_UPLOAD_SOURCE_KEYS) &&
+      isFullRevision(value.fullRevision) &&
+      isOpaqueIdentifier(value.deploymentId) &&
+      typeof value.imageDigest === "string" &&
+      /^sha256:[0-9a-f]{64}$/.test(value.imageDigest) &&
+      isOpaqueIdentifier(value.snapshotId) &&
+      typeof value.sourceReceiptSha256 === "string" &&
+      /^[0-9a-f]{64}$/i.test(value.sourceReceiptSha256)
+    );
+  }
   return false;
 }
 
@@ -311,6 +331,8 @@ export function validateOnlineRolloutPreflight(
     !isOpaqueIdentifier(rollback.deploymentId) ||
     rollback.deploymentId !== target.activeDeploymentId ||
     !isRollbackSourceProvenance(rollback.sourceProvenance) ||
+    (rollbackSource.kind === "railway-cli-upload" &&
+      rollbackSource.deploymentId !== rollback.deploymentId) ||
     rollback.retentionEligible !== true
   ) {
     reasons.push("rollback-not-available");

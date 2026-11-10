@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import {
   ONLINE_DIRECT_START_COMMAND,
@@ -101,7 +101,94 @@ function cloneEvidence(
   return structuredClone(evidence(phase));
 }
 
+function cliUploadEvidence(
+  phase: "drained" | "pre-drain" | "pre-enable" = "pre-enable",
+) {
+  const base = cloneEvidence(phase);
+  return {
+    ...base,
+    rollback: {
+      ...base.rollback,
+      sourceProvenance: {
+        kind: "railway-cli-upload",
+        fullRevision: SERVER_REVISION,
+        deploymentId: base.target.activeDeploymentId,
+        imageDigest: `sha256:${"c".repeat(64)}`,
+        snapshotId: "snapshot-fixture",
+        sourceReceiptSha256: "d".repeat(64),
+      },
+    },
+  };
+}
+
 describe("online rollout preflight", () => {
+  it("accepts well-formed CLI upload evidence for the active deployment and revision", () => {
+    for (const phase of ["pre-enable", "pre-drain", "drained"] as const) {
+      expect(
+        validateOnlineRolloutPreflight(cliUploadEvidence(phase), NOW),
+      ).toEqual({
+        schemaVersion: 1,
+        repoPreflight: "pass",
+        authorizesDeployment: false,
+        externalMutationPerformed: false,
+        reasons: [],
+      });
+    }
+  });
+
+  it("rejects unknown or missing CLI upload keys and uppercase image digests", () => {
+    const extra = cliUploadEvidence();
+    (extra.rollback.sourceProvenance as Record<string, unknown>).extra = "x";
+    expect(validateOnlineRolloutPreflight(extra, NOW).reasons).toEqual([
+      "invalid-schema",
+    ]);
+    const missing = cliUploadEvidence();
+    delete (missing.rollback.sourceProvenance as Record<string, unknown>)
+      .snapshotId;
+    expect(validateOnlineRolloutPreflight(missing, NOW).reasons).toEqual([
+      "invalid-schema",
+    ]);
+    const uppercase = cliUploadEvidence();
+    uppercase.rollback.sourceProvenance.imageDigest = `sha256:${"C".repeat(64)}`;
+    expect(validateOnlineRolloutPreflight(uppercase, NOW).reasons).toEqual([
+      "invalid-schema",
+    ]);
+  });
+
+  it("rejects incomplete CLI upload provenance without reflecting its values", () => {
+    for (const [field, value] of [
+      ["kind", "operator-claim"],
+      ["fullRevision", "unknown"],
+      ["imageDigest", "sha256:short"],
+      ["imageDigest", undefined],
+      ["deploymentId", undefined],
+      ["snapshotId", "unknown"],
+      ["snapshotId", undefined],
+      ["sourceReceiptSha256", "not-a-hash"],
+      ["sourceReceiptSha256", undefined],
+    ] as const) {
+      const candidate = cliUploadEvidence();
+      (candidate.rollback.sourceProvenance as Record<string, unknown>)[field] =
+        value;
+      const result = validateOnlineRolloutPreflight(candidate, NOW);
+      expect(result.repoPreflight).toBe("hold");
+      if (typeof value === "string")
+        expect(JSON.stringify(result)).not.toContain(value);
+    }
+  });
+
+  it("rejects CLI upload evidence belonging to another deployment or revision", () => {
+    const wrongDeployment = cliUploadEvidence();
+    wrongDeployment.rollback.sourceProvenance.deploymentId = "other-deployment";
+    expect(
+      validateOnlineRolloutPreflight(wrongDeployment, NOW).reasons,
+    ).toContain("rollback-not-available");
+    const wrongSource = cliUploadEvidence();
+    wrongSource.rollback.sourceProvenance.fullRevision = "e".repeat(40);
+    expect(validateOnlineRolloutPreflight(wrongSource, NOW).repoPreflight).toBe(
+      "hold",
+    );
+  });
   it("passes normalized pre-enable, pre-drain, and drained evidence without granting authority", () => {
     for (const phase of ["pre-enable", "pre-drain", "drained"] as const) {
       expect(validateOnlineRolloutPreflight(evidence(phase), NOW)).toEqual({
@@ -347,10 +434,8 @@ describe("online rollout preflight", () => {
     expect(
       readFileSync("scripts/verify-online-container-signal.mjs", "utf8"),
     ).toContain(`const EXPECTED_CMDLINE = "${ONLINE_DIRECT_START_COMMAND}";`);
-    const railway = JSON.parse(readFileSync("railway.json", "utf8")) as {
-      deploy?: { startCommand?: unknown };
-    };
-    expect(railway.deploy?.startCommand).toBe(ONLINE_DIRECT_START_COMMAND);
+    expect(existsSync("railway.json")).toBe(false);
+    expect(existsSync("railway.toml")).toBe(false);
     const runtimePackage = JSON.parse(
       readFileSync("container/online/package.json", "utf8"),
     ) as { scripts?: unknown };

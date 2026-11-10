@@ -144,9 +144,8 @@ module.exports = {
     doNotFollow: { path: "node_modules" },
     tsConfig: { fileName: "tsconfig.json" },
     tsPreCompilationDeps: true,
-    // The scanner audit uses an exports-only package (@tailwindcss/postcss).
-    // Match modern Node resolution without waiving no-unresolvable-in-src.
-    // These are dependency-cruiser's own --init defaults for package exports.
+    // Resolve exports-only SDK and CSS compiler packages using the official
+    // resolver defaults, without waiving no-unresolvable-in-src.
     enhancedResolveOptions: {
       exportsFields: ["exports"],
       conditionNames: ["import", "require", "node", "default", "types"],
