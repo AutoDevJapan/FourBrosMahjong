@@ -584,12 +584,12 @@ function ConnectionFeedback({
   );
 }
 
-/** History feedback follows the current result without changing transport errors. */
+/** History feedback includes retained failures without changing transport errors. */
 function OnlineConnectionFeedback(props: ConnectionFeedbackProps) {
   const { historySaveStatus } = useGame();
   const historyError =
     historySaveStatus === "failed"
-      ? "この端末に今回の戦績を保存できませんでした。ブラウザのストレージ設定や空き容量を確認してください。画面に戻ると再試行します。"
+      ? "この端末に戦績を保存できませんでした。ブラウザのストレージ設定や空き容量を確認してください。このタブを閉じずに画面へ戻ると再試行します。"
       : "";
   return <ConnectionFeedback {...props} error={props.error || historyError} />;
 }
