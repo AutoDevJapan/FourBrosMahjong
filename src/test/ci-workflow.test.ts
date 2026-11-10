@@ -1777,7 +1777,7 @@ describe("テスト入力資産をdocs-onlyで黙殺しない (#745)", () => {
         ].map((match) => [match[1], match[2]]),
       );
       for (const match of source.matchAll(
-        /\bresolve\(\s*(\w+)\s*,\s*["']([^"']+\.md)["']\s*\)/g,
+        /\bresolve\(\s*(\w+)\s*,\s*["']([^"']+\.md)["']\s*,?\s*\)/g,
       )) {
         const directory = roots.get(match[1]);
         if (!directory) continue;
@@ -1971,6 +1971,43 @@ describe("テスト入力資産をdocs-onlyで黙殺しない (#745)", () => {
     expect(
       TEST_INPUT_PATHS.filter((path) => PRODUCTION_INPUT_PATHS.includes(path)),
     ).toEqual([]);
+  });
+
+  it.each(["", ","])(
+    "named-root Markdown references retain optional trailing comma %s",
+    (comma) => {
+      const io = memoryInputs({
+        "e2e/readme.ts":
+          'const INPUT_ROOT = resolve(process.cwd(), "prototypes/blender",);\nreadFileSync(resolve(\nINPUT_ROOT,\n"README.md"' +
+          comma +
+          "\n));",
+      });
+      expect(testInputLiterals(["e2e"], io)).toContain(
+        "prototypes/blender/README.md",
+      );
+    },
+  );
+
+  function untrackedProductionInputs(paths: readonly string[]): string[] {
+    const tracked = new Set(
+      execFileSync("git", ["ls-files", "--stage", "-z"], { encoding: "utf8" })
+        .split("\0")
+        .filter(
+          (row) =>
+            (row.startsWith("100644 ") || row.startsWith("100755 ")) &&
+            row.slice(0, row.indexOf("\t")).endsWith(" 0"),
+        )
+        .map((row) => row.slice(row.indexOf("\t") + 1)),
+    );
+    return paths.filter((path) => !tracked.has(path));
+  }
+
+  it("full verification input declarations accept tracked files, never directory prefixes", () => {
+    expect(untrackedProductionInputs(PRODUCTION_INPUT_PATHS)).toEqual([]);
+    // This real tracked directory must not silently stand for its file children.
+    expect(untrackedProductionInputs(["documents/assets/ui-refresh"])).toEqual([
+      "documents/assets/ui-refresh",
+    ]);
   });
 
   it("production moduleまたはE2Eが読む省略対象入力は全検証する", () => {
