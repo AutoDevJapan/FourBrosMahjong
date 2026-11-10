@@ -30,6 +30,8 @@ export interface OnlineDepartureNotice {
 
 export interface OnlineSnapshot {
   readonly code: string;
+  /** Missing on older servers; only a supplied identity can be saved online. */
+  readonly matchId?: string;
   readonly version: number;
   readonly you: PlayerId;
   /** 欠落する旧serverは自動ガリ。trueの席だけ明示的な北抜きを送信する。 */
@@ -59,6 +61,16 @@ export interface OnlineCredentials {
  */
 export const ONLINE_RESUME_TOKEN_MIN_LENGTH = 16;
 export const ONLINE_RESUME_TOKEN_MAX_LENGTH = 512;
+
+/** Opaque room epoch plus success-only half-game sequence, bounded on the wire. */
+export function isOnlineMatchId(value: unknown): value is string {
+  if (
+    typeof value !== "string" ||
+    !/^[0-9a-f]{32}:[1-9][0-9]{0,15}$/.test(value)
+  )
+    return false;
+  return Number.isSafeInteger(Number(value.slice(33)));
+}
 
 export type OnlineErrorCode =
   | "connection_limit"

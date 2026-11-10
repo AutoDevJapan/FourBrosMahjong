@@ -3,6 +3,7 @@ import { CHARACTER_PLAYER_IDS } from "@/domain/game/characters";
 import type { TileData } from "@/domain/game/viewTypes";
 import { isValidTileKind, tileKey } from "@/domain/hand/tile-identity";
 import {
+  isOnlineMatchId,
   ONLINE_RESUME_TOKEN_MAX_LENGTH,
   ONLINE_RESUME_TOKEN_MIN_LENGTH,
 } from "@/domain/online/types";
@@ -791,6 +792,7 @@ function isOnlineSnapshot(value: OnlineSnapshot): boolean {
         hosts[0]?.id === value.hostId;
   return (
     /^[A-HJ-NP-Z2-9]{6}$/u.test(value.code) &&
+    (value.matchId === undefined || isOnlineMatchId(value.matchId)) &&
     isSafeInteger(value.version) &&
     value.version >= 0 &&
     isPlayerId(value.you) &&

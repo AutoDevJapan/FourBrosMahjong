@@ -11,6 +11,7 @@ import type { PlayerId } from "@/domain/game/engine";
 import { createTile, isRedDora } from "@/domain/tiles/tile";
 import { normalizeOnlineWebSocketUrl } from "@/lib/onlineWebSocket";
 import type { OnlineSnapshot } from "./types";
+import { useOnlineHistory } from "./useOnlineHistory";
 
 export interface OnlinePermissions {
   readonly playerId: PlayerId;
@@ -40,6 +41,7 @@ interface OnlineGameProviderProps {
   readonly snapshot: OnlineSnapshot;
   readonly newGameDisabled?: boolean;
   readonly onSendError?: (message: string) => void;
+  readonly onHistorySaveError?: () => void;
 }
 
 const SOCKET_SEND_ERROR_MESSAGE =
@@ -86,7 +88,9 @@ export default function OnlineGameProvider({
   snapshot,
   newGameDisabled = false,
   onSendError,
+  onHistorySaveError,
 }: OnlineGameProviderProps) {
+  const historySaveStatus = useOnlineHistory(snapshot, onHistorySaveError);
   const { playerId, isHost } = useMemo(
     () => onlinePermissions(snapshot),
     [snapshot],
@@ -171,11 +175,11 @@ export default function OnlineGameProvider({
       pending: snapshot.pending,
       roundSummary: snapshot.roundSummary,
       sessionSaveStatus: "idle",
-      historySaveStatus: "idle",
+      historySaveStatus,
       seedGenerationError: false,
       controls,
     }),
-    [controls, isHost, playerId, snapshot],
+    [controls, historySaveStatus, isHost, playerId, snapshot],
   );
 
   return <GameContext.Provider value={value}>{children}</GameContext.Provider>;
