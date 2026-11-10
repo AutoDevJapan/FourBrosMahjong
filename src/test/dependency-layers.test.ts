@@ -65,7 +65,7 @@ const FIXTURE: readonly [path: string, source: string][] = [
     "src/app/exportsConsumer.ts",
     'import { compile } from "css-compiler";\nexport const value = compile;\n',
   ],
-  // Keep the independently reviewed SDK fixture alongside the CSS compiler case.
+  // An exports-only SDK has no main/index.js fallback.
   [
     "node_modules/exported-sdk/package.json",
     '{"name":"exported-sdk","exports":{".":{"import":"./sdk.mjs","require":"./sdk.cjs"}}}\n',
@@ -157,6 +157,7 @@ const FIXTURE: readonly [path: string, source: string][] = [
   ["server/cycle-b.ts", 'import "./cycle-a";\nexport const cycleB = 1;\n'],
   // CSS の明示除外先をクラス供給源に変える import は、除外の再検討なしに入れない。
   ["prototypes/runtime.ts", "export const value = 1;\n"],
+  [".godd/state/runtime.json", '{"value":1}\n'],
   [syntheticEvidence, '{"value":1}\n'],
   ["documents/assets/ui-refresh/manifest.json", '{"value":1}\n'],
   [
@@ -164,10 +165,15 @@ const FIXTURE: readonly [path: string, source: string][] = [
     "export type AssetContract = { id: string };\n",
   ],
   ["documents/fixtures/railway-pre-cutover.json", '{"value":1}\n'],
+  ["documents/fixtures/railway-readyz-before-iac.json", '{"value":1}\n'],
   ["documents/fixtures/unity-display-contract.json", '{"value":1}\n'],
   [
     "src/app/nativeLeak.ts",
     'export { value } from "../../prototypes/runtime";\n',
+  ],
+  [
+    "src/app/metadataLeak.ts",
+    'import fixture from "../../.godd/state/runtime.json";\nexport const value = fixture.value;\n',
   ],
   [
     "src/app/evidenceLeak.ts",
@@ -183,6 +189,26 @@ const FIXTURE: readonly [path: string, source: string][] = [
   [
     "src/app/railwayLeak.ts",
     'import fixture from "../../documents/fixtures/railway-pre-cutover.json";\nexport const value = fixture.value;\n',
+  ],
+  [
+    "src/app/readyzLeak.ts",
+    'import fixture from "../../documents/fixtures/railway-readyz-before-iac.json";\nexport const value = fixture.value;\n',
+  ],
+  [
+    "src/domain/game/__testing__/nativeConsumer.ts",
+    'export { value } from "../../../../prototypes/runtime";\n',
+  ],
+  [
+    "src/domain/hand/__oracle__/nativeConsumer.ts",
+    'export { value } from "../../../../prototypes/runtime";\n',
+  ],
+  [
+    "src/app/testingLeak.ts",
+    'export { value } from "../domain/game/__testing__/nativeConsumer";\n',
+  ],
+  [
+    "src/app/oracleLeak.ts",
+    'export { value } from "../domain/hand/__oracle__/nativeConsumer";\n',
   ],
   [
     "src/app/indirectLeak.ts",
@@ -436,6 +462,20 @@ describe("本番サーバーの依存境界を dependency-cruiser が検出す�
 
 describe("CSS 除外先を runtime へ import する前に境界の再検討を求める (#1191)", () => {
   const rule = "no-runtime-to-css-excluded-inputs";
+  it.each([
+    ["src/test/nativeConsumer.ts", "prototypes/runtime.ts", false],
+    [
+      "src/components/game/characters3d/runtime.ts",
+      posix.join("documents", "assets", "contract.ts"),
+      true,
+    ],
+  ])("許可case %s も実際に対象を解決している", (from, to, typeOnly) => {
+    const dependency = fixtureModules
+      .find((module) => module.source === from)
+      ?.dependencies.find((entry) => entry.resolved === to);
+    expect(dependency).toMatchObject({ couldNotResolve: false });
+    if (typeOnly) expect(dependency?.dependencyTypes).toContain("type-only");
+  });
   it("生成した evidence import は一時 repo 内の資産へ動的 literal として解決される", () => {
     const dependency = fixtureModules
       .find((module) => module.source === "src/app/evidenceLeak.ts")
@@ -448,9 +488,16 @@ describe("CSS 除外先を runtime へ import する前に境界の再検討を�
   });
   it.each([
     ["src/app/nativeLeak.ts", "prototypes/runtime.ts"],
+    ["src/app/metadataLeak.ts", ".godd/state/runtime.json"],
     ["src/app/evidenceLeak.ts", syntheticEvidence],
     ["src/app/assetLeak.ts", "documents/assets/ui-refresh/manifest.json"],
     ["src/app/railwayLeak.ts", "documents/fixtures/railway-pre-cutover.json"],
+    [
+      "src/app/readyzLeak.ts",
+      "documents/fixtures/railway-readyz-before-iac.json",
+    ],
+    ["src/app/testingLeak.ts", "src/domain/game/__testing__/nativeConsumer.ts"],
+    ["src/app/oracleLeak.ts", "src/domain/hand/__oracle__/nativeConsumer.ts"],
     ["scripts/runtimeBridge.ts", "prototypes/runtime.ts"],
     [
       "src/components/game/characters3d/valueLeak.ts",
@@ -473,6 +520,8 @@ describe("CSS 除外先を runtime へ import する前に境界の再検討を�
     "src/test/nativeConsumer.ts",
     "src/components/game/characters3d/runtime.ts",
     "src/components/game/characters3d/offline.ts",
+    "src/domain/game/__testing__/nativeConsumer.ts",
+    "src/domain/hand/__oracle__/nativeConsumer.ts",
   ])("%s の正当な runtime fixture / test consumer は許可", (from) => {
     expect(
       violations.filter(

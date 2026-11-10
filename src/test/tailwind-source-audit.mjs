@@ -7,7 +7,7 @@ import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
-import { dirname, relative, resolve, sep } from "node:path";
+import { dirname, posix, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import tailwind from "@tailwindcss/postcss";
 
@@ -21,20 +21,46 @@ export const BOUNDARY_SOURCES = [
   "../../documents/evidence",
   "../../documents/assets",
   "../../documents/fixtures/railway-pre-cutover.json",
+  "../../documents/fixtures/railway-readyz-before-iac.json",
+  "../../.godd",
+  "../../**/__testing__",
+  "../../**/__oracle__",
 ];
+
+/** @param {string} path Repository-relative path, without reading the file. */
+export function isCssExcludedInput(path) {
+  const candidate = path.replaceAll("\\", "/");
+  return BOUNDARY_SOURCES.some((source) => {
+    const rootPath = posix.normalize(posix.join("src/app", source));
+    if (rootPath.startsWith("**/")) {
+      return candidate.split("/").slice(0, -1).includes(rootPath.slice(3));
+    }
+    // A directory exclusion also covers dotfiles. Glob '*' matching would
+    // silently omit .gitignore/.gitattributes from this consistency check.
+    return source.endsWith(".json")
+      ? candidate === rootPath
+      : candidate.startsWith(`${rootPath}/`);
+  });
+}
 
 /** @param {string} root @param {string} css */
 export async function scanCss(root, css) {
+  // Real-root audits compare the public source tree. Private job metadata is
+  // excluded in both conditions; its directive is tested using owned canaries.
+  const isRealRoot = resolve(root) === resolve(ROOT);
+  const input = isRealRoot
+    ? `${css.trimEnd()}\n@source not "../../.godd";${css.endsWith("\n") ? "\n" : ""}`
+    : css;
   const result = await postcss([
     tailwind({ base: root, optimize: false }),
-  ]).process(css, { from: resolve(root, "src/app/globals.css") });
+  ]).process(input, { from: resolve(root, "src/app/globals.css") });
   return {
     css: result.css,
     dependencies: [
       ...new Set(
         result.messages
           .filter((message) => message.type === "dependency")
-          .map((message) => relative(root, message.file).split(sep).join("/")),
+          .map((message) => relative(root, message.file).replaceAll("\\", "/")),
       ),
     ].sort(),
   };
@@ -76,6 +102,7 @@ if (
     JSON.stringify(
       {
         beforeRef,
+        privateMetadataExcludedInBothScans: true,
         compiler: {
           tailwindPostcss: JSON.parse(
             readFileSync(

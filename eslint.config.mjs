@@ -19,6 +19,7 @@ const eslintConfig = [
     // after a local `pnpm build` lints the minified `.next` bundle itself
     // and fails with thousands of false positives.
     ignores: [
+      ".godd/**",
       ".next/**",
       "out/**",
       "coverage/**",

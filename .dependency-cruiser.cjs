@@ -114,12 +114,17 @@ module.exports = {
       severity: "error",
       // Apply to intermediate modules too, so a runtime re-export through scripts/
       // cannot bypass the boundary. Test consumers remain legitimate.
-      from: { pathNot: [TEST_FILE, "^(src/test|e2e)/"] },
+      from: {
+        pathNot: [
+          TEST_FILE,
+          "^(src/test|e2e)/",
+          "(^|/)(__testing__|__oracle__)/",
+        ],
+      },
       to: {
-        path: "^(prototypes/|documents/(evidence/|assets/|fixtures/railway-pre-cutover\\.json$))",
-        // Type-only contracts cannot supply CSS classes or runtime asset bytes.
-        // Layer-direction rules still check type-only dependencies separately.
+        // Erased type contracts do not supply classes; direction rules still apply.
         dependencyTypesNot: ["type-only"],
+        path: "^(\\.godd/|prototypes/|documents/(evidence/|assets/|fixtures/railway-(pre-cutover|readyz-before-iac)\\.json$))|(^|/)(__testing__|__oracle__)/",
       },
     },
     {
@@ -147,9 +152,8 @@ module.exports = {
     doNotFollow: { path: "node_modules" },
     tsConfig: { fileName: "tsconfig.json" },
     tsPreCompilationDeps: true,
-    // The scanner audit uses an exports-only package (@tailwindcss/postcss).
-    // Match modern Node resolution without waiving no-unresolvable-in-src.
-    // These are dependency-cruiser's own --init defaults for package exports.
+    // Resolve exports-only SDK and CSS compiler packages using the official
+    // resolver defaults, without waiving no-unresolvable-in-src.
     enhancedResolveOptions: {
       exportsFields: ["exports"],
       conditionNames: ["import", "require", "node", "default", "types"],

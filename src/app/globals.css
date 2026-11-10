@@ -42,6 +42,12 @@
 @source not "../../documents/evidence";
 @source not "../../documents/assets";
 @source not "../../documents/fixtures/railway-pre-cutover.json";
+@source not "../../documents/fixtures/railway-readyz-before-iac.json";
+/* domain のテスト専用 helper も実行時のクラス供給源ではない。 */
+@source not "../../**/__testing__";
+@source not "../../**/__oracle__";
+/* 作業メタデータは配布するクラスの供給源ではない。 */
+@source not "../../.godd";
 
 /*
  * ダークモード: OS 追従を既定にしつつ手動トグルを併用する(スペック5 5.4.1)。

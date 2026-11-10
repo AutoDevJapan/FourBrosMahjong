@@ -1,6 +1,8 @@
 # #1191: Tailwind の入力境界
 
-## 2026-11-09の再利用範囲
+## 2026-11-09の再利用範囲（当時の記録）
+
+以下は3D候補の保存済みcheckpointで、後続の入力境界修正と実行結果は末尾に追記する。
 
 本資料の2026-09-15の数値・CI/Preview確認は保存された旧headの履歴であり、現行branchで再実行した結果ではない。
 現行は [ADR-0006](../../documents/adr/0006-prd-only-deployment.md) のPrd専用運用を使い、localhost/CI隔離検証と通常マージ後の既存Production確認を行う。新しいPreview/dev/stgを作成しない。
@@ -21,16 +23,19 @@ Tailwind は import graph ではなくファイルをテキストとして走査
 | `documents/evidence/` | 実行結果・検証記録。基準 `2074f2c` には存在しないため、将来の JSON 混入は一時 fixture の実スキャナ canary で確認する。CSS から除外する。 |
 | `documents/assets/` | 素材原本・UI 更新監査 manifest。`ui-refresh-assets.test.ts` と `scripts/verify-ui-refresh-assets.mjs` が inventory/hash を読む。Web が配信する `public/` とは別。CSS から除外する。 |
 | `documents/fixtures/railway-pre-cutover.json` | Railway 移行契約モジュールとテストが読む、移行前状態の fixture。CSS からこのファイルだけを除外する。 |
+| `documents/fixtures/railway-readyz-before-iac.json` | readyz移行前状態のfixture。単体テストの入力であり、CSSから除外する。 |
+| `.godd/` | 配布しない作業メタデータ。CSS・Git・ESLint・TypeScriptの自動入力から除外する。 |
+| `**/__testing__/` / `**/__oracle__/` | テスト専用のfixture・比較実装。CSSから除外し、これらから検証資産へのimportを許可する。本番moduleからこれらへのimportは許可しない。 |
 | `documents/fixtures/unity-display-contract.json` | `src/components/prototype/UnityDisplayReference.tsx` の本番 import、Unity 契約テスト、`e2e/unity-display-reference.spec.ts` が読む。CSS 走査に残す。 |
 | `src/` の本番コード、`public/`、その他の runtime fixture | 従来の走査を維持する。`documents/` 全体の除外は行わない。 |
 
 ## 再発ガード
 
-- 既存の除外指令回帰テストに4境界を追加した。
+- 除外指令の回帰テストは監査コードの`BOUNDARY_SOURCES`を参照する。実graphの境界照合も同じ一覧を使い、tracked pathと正負のcanary全体でdependency-cruiser側の範囲との一致を確認する。
 - 実際に lock された `@tailwindcss/postcss` と、その package が使う PostCSS を起動する。実 repo の入力 graph で `src` と Unity fixture が残り、除外先が消えることを確認する。
-- 一時 repo の4除外先に独立したクラス canary を置き、入力 graph と生成 CSS の両方から消えることを確認する。`src`、Unity fixture、別 runtime fixture、類似名ディレクトリの4 canary は残す。除外指令だけを消した正対照では全8 canary が復活する。別の base でコンパイルし、スキャナの状態を共有しない。
+- 一時 repo の8除外先に独立したクラス canary を置き、入力 graph と生成 CSS の両方から消えることを確認する。`src`、Unity fixture、別 runtime fixture、類似名ディレクトリの5 canary は残す。除外指令だけを消した正対照では全13 canary が現れる。別の base でコンパイルし、スキャナの状態を共有しない。Windowsではnode_modulesの接続にjunctionを使い、symlink作成権限を必要としない。
 - canary と監査コードは既存の除外対象 `*.test.ts` / `src/test/` に置く。監査自身が CSS 候補を供給しない。
-- `no-runtime-to-css-excluded-inputs` は除外先へのruntime value import、literal の dynamic import、re-export を error にする。中継モジュール経由も見落とさないよう、走査 graph 内の非テストモジュールにも適用する。明示的な型専用参照、直接のテスト consumer、本番 Unity fixture は許可する。任意の計算済みパスによる `fs` / `fetch` は静的 import graph では保証できないため、新たな読み込み処理を追加する際はこの境界の再レビューが必要。
+- `no-runtime-to-css-excluded-inputs` は除外先への静的 import、literal の dynamic import、re-export を error にする。中継モジュール経由も見落とさないよう、走査 graph 内の非テストモジュールにも適用する。直接のテスト consumer と本番 Unity fixture は許可する。任意の計算済みパスによる `fs` / `fetch` は静的 import graph では保証できないため、新たな読み込み処理を追加する際はこの境界の再レビューが必要。
 - コンパイラ package は `exports` のみを公開し、従来の dependency-cruiser resolver（`exportsFields: []`）では未解決だった。未解決 import を除外するのではなく、[公式 options](https://github.com/sverweij/dependency-cruiser/blob/main/doc/options-reference.md#enhancedresolveoptions) と lock 済み18.2.0の `--init` template に従い `exportsFields` / `conditionNames` を明示した。exports-only package の実解決 canary、既存レイヤー canary、実 graph を確認する。
 
 ## 2026-09-15 ソース checkpoint の実測
@@ -132,3 +137,33 @@ sanitizer、検査抑制、CI 分類例外、production code の変更は加え�
 ローカルの CodeQL CLI は未導入で、修正後の実 scan／alert 再判定はまだ未確認。
 旧 head の成功 CI を再実行せず、独立レビュー後の通常 push に伴う新 head の解析結果を
 確認するまでは「alert 解決」と報告しない。
+
+## 2026-11-10 main 更新への追従
+
+元head `aac804c` の実装を現在のmain `6cf781e` へ正常mergeし、exports-only CSS compilerとmainのSDK両方の解決canaryを保持した。非runtimeの4境界に作業メタデータ`.godd/`を追加し、実行時importの禁止側も同じ範囲に揃えた。本番src/publicとUnity契約fixtureは保持する。
+
+未追跡の`.godd/`はローカルに保持し、`.gitignore`で公開対象から明示的に外す。Knipもこの既存の除外機構を使うため、作業用probeを配布ソースの未使用ファイルとして扱わず、Knip独自の重複ignoreは追加しない。
+
+実rootの比較は、私的な作業メタデータを両条件で除外した公開ソース条件で行う。旧stylesheetを使う条件にも同じmetadata除外を加えるため、無視ファイルを含まないmainのcheckoutと同じ比較範囲になる。実`.godd/`を前提条件確認のため再走査しない。除外指令そのものは、隔離した所有fixtureに既知のmetadata canaryを置き、明示的なsource指定と除外削除の正対照で検証する。依存pathはWindowsでもPOSIXへ正規化する。
+
+lock済み`@tailwindcss/postcss` 4.3.3/PostCSS 8.5.25、`optimize:false`で、前後とも52,242 bytes、SHA-256 `fa076e0da6ff2d8d43c43f60a1351847607834c6f22c9c5e414f8b9d6bd1179e`、全バイト一致。依存308→260、除外48/追加0、出力側metadata依存0件。これは同一の現在source treeでstylesheetだけを切り替えた比較で、旧commit全体とのbuild比較ではない。
+
+入力分類・依存境界・実compilerの関連3スイート242件が成功。元の公開済みCI失敗、修正、旧Previewの証跡は上の履歴として保持し、現在の配備先をPreviewへ戻す根拠にはしない。現在はmain→既存Productionだけを使用する。今回の同一CSS出力は3D外観採用や製品全体完成の判断を代替しない。
+
+## 追加の入力境界修正
+
+現在mainで追加済みのreadyz移行fixtureと、テスト専用の`__testing__` / `__oracle__`もCSS走査から除外した。依存境界は同じ範囲へ揃え、テスト専用helperの正当なconsumerは残した。元の修正で明示した`.godd/`の除外はESLintのflat configとTypeScriptにも反映した。ESLintの検証は、存在しない仮pathに対する`isPathIgnored`で行い、実メタデータの内容を読まない。
+
+修正前は、新しい回帰テスト8件が意図したassertionで失敗した（compiler canary、移行fixtureとhelperへのruntime import、helperの正当なconsumer、ESLintとTypeScriptの除外）。Windowsのfixture接続はjunctionへ変更した。境界一覧の整合テストは全tracked pathと正負のcanaryを照合し、監査・CSS指令・importルールの範囲がずれた場合に失敗する。
+
+`6cf781e`のstylesheetを基準に、同じ現在source treeで再測定した結果、CSSは前後とも52,242 bytes、SHA-256 `fa076e0da6ff2d8d43c43f60a1351847607834c6f22c9c5e414f8b9d6bd1179e`、全バイト一致だった。入力依存308→253、除外55/追加0。直前の260件から減った7件は、readyz fixture1件とテスト専用module6件である。実作業メタデータは両条件で除外したまま、隔離fixtureでその除外を対照検証した。末尾LFなしの対照は52,241 bytes、LFを保持すれば元出力と一致する。
+
+関連3スイート250件、型検査、変更ファイルESLint、全体Biome・Knip・dependency-cruiserが成功した。TypeScriptの入力一覧にmetadataは0件。依存検査は457 modules / 1,519 dependenciesで違反0だった。全tracked pathの整合テストは初回、dotfileをglob照合が拾わない4件で失敗したため、directoryの範囲をdotfileも含むprefixへ修正して再確認した。
+
+上の308→253はオンライン戦績統合前の`8116dd5`時点の記録である。最新main`2ac7588`を取り込んだ`758a896`でも関連250件が成功し、同mainのstylesheetを基準に再監査した。CSSは同じ52,242 bytes・同じSHA-256で前後一致、入力311→256、除外55/追加0だった。オンライン機能のruntime module追加による母数の増加と、CSS境界の効果を区別する。
+
+## 3D候補への最新境界の統合
+
+オンライン戦績と最新mainのCI入力検査を統合し、上記の8除外・5保持へthree/characters3dの保持canary2件を追加した。型専用の契約参照はCSS境界だけで許可し、runtime value importは引き続きerrorにする。レイヤーの型依存方向検査は維持する。過去のcanary未実行は当時の記録として残し、この統合版の実行結果とは区別する。
+
+この3D統合treeで実compilerを再実行し、main `2ac7588`のstylesheetとの比較は前後52,806 bytes、SHA-256 `8a98626e97dbe060c62b3ea7a24d49def88f2851d2987397dcd22456b6cc7268`で一致した。依存351→287、除外64/追加0。3D候補を含まないCSS単独headの52,242 bytesや311→256と混同しない。8除外・7保持canary、除外削除の正対照、型専用参照の実解決とruntime value拒否を検証した。型・変更箇所Lint・全体Biome/Knip/依存検査は成功し、依存検査は514 modules / 1,765 dependenciesで違反0だった。描画・モデルのcore sourceは保存済みの3D候補から変更していないが、過去のGPU実測を新しい統合版や本番で再実行したとは扱わない。
