@@ -33,6 +33,12 @@ import { pathToFileURL } from "node:url";
  */
 const DOCUMENTATION = [/^docs\//, /^documents\//, /\.md$/];
 
+/** 出荷moduleまたはE2Eが読む、通常は省略される入力は全検証する。 */
+export const PRODUCTION_INPUT_PATHS = [
+  // UnityDisplayReference.tsx がclient bundleへimportし、E2Eも同じfixtureを読む。
+  "documents/fixtures/unity-display-contract.json",
+];
+
 /**
  * 文書ツリーに置かれているが、単体テストが入力として読む資産。
  *
@@ -63,10 +69,10 @@ export const TEST_INPUT_PATHS = [
   "documents/assets/ui-refresh/manifest.json",
   // src/test/railway-iac-migration.test.ts が契約モジュール経由で不変fixtureを検証する。
   "documents/fixtures/railway-pre-cutover.json",
+  // src/test/blender-asset-study.test.ts がREADMEの実測表とmanifestを照合する。
+  "prototypes/blender/README.md",
   // Schema v1 regression tests retain the later /readyz CaC artifact.
   "documents/fixtures/railway-readyz-before-iac.json",
-  // src/test/unity-display-contract.test.ts がUnity表示契約と席回転を検証する。
-  "documents/fixtures/unity-display-contract.json",
 ];
 
 /** テストがディレクトリ単位で列挙する入力資産。追加・削除も同じ分類にする。 */
@@ -115,6 +121,7 @@ const isTestInput = (path) =>
  */
 export function classifyPath(path) {
   if (matches(path, E2E_ASSET)) return "e2e-asset";
+  if (PRODUCTION_INPUT_PATHS.includes(path)) return "code";
   if (isTestInput(path)) return "unit-test";
   // `public/` は定義上そのまま配信される出荷ツリー。拡張子が .md でも文書ではない
   // (例: public/tiles/CREDITS.md は /tiles/CREDITS.md として配信され、
