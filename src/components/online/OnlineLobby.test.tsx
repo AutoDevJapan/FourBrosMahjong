@@ -13,6 +13,7 @@ import { selectView } from "@/components/game/gameView";
 import {
   clearResultHistoryAcrossTabs,
   loadResultHistory,
+  RESULT_HISTORY_KEY,
 } from "@/components/game/resultHistory";
 import { createGame } from "@/domain/game/engine";
 import { replayJournal } from "@/domain/game/gamePersistence";
@@ -24,6 +25,7 @@ import OnlineLobby, {
   MAX_ONLINE_CREDENTIALS_BYTES,
   MAX_ONLINE_SERVER_MESSAGE_BYTES,
 } from "./OnlineLobby";
+import { loadPendingOnlineHistory } from "./pendingOnlineHistory";
 import type { OnlineSnapshot } from "./types";
 
 vi.mock("@/components/game/GameBoard", () => ({
@@ -288,6 +290,98 @@ describe("online history recovery feedback", () => {
       throw new DOMException("storage unavailable", "SecurityError");
     });
   }
+
+  async function holdHistoryWrite() {
+    let release!: () => void;
+    let entered!: () => void;
+    const acquired = new Promise<void>((resolve) => {
+      entered = resolve;
+    });
+    const done = navigator.locks.request(
+      "four-bros-mahjong.history.write.v1",
+      { signal: new AbortController().signal },
+      () =>
+        new Promise<void>((resolve) => {
+          release = resolve;
+          entered();
+        }),
+    );
+    await acquired;
+    return { release, done };
+  }
+
+  it("shows no history failure while the active game is idle", () => {
+    connectGame();
+    expect(screen.getByText("たろうの手番")).toBeInTheDocument();
+    expect(screen.queryByText(warning)).not.toBeInTheDocument();
+  });
+
+  it("shows no history failure while the initial save is queued", async () => {
+    const socket = connectGame();
+    const held = await holdHistoryWrite();
+    try {
+      finish(socket);
+      await waitFor(() =>
+        expect(loadPendingOnlineHistory(sessionStorage)).toHaveLength(1),
+      );
+      expect(loadResultHistory(storage)).toHaveLength(0);
+      expect(screen.queryByText(warning)).not.toBeInTheDocument();
+    } finally {
+      await act(async () => {
+        held.release();
+        await held.done;
+      });
+    }
+    await waitFor(() => expect(loadResultHistory(storage)).toHaveLength(1));
+    expect(screen.queryByText(warning)).not.toBeInTheDocument();
+  });
+
+  it("preserves the same failed feedback through a queued retry and repeated failure", async () => {
+    const socket = connectGame();
+    const access = failStorage();
+    finish(socket);
+    const firstWarning = await screen.findByText(warning);
+    access.mockRestore();
+    const held = await holdHistoryWrite();
+    const originalSet = Storage.prototype.setItem;
+    const write = vi
+      .spyOn(Storage.prototype, "setItem")
+      .mockImplementation(function (this: Storage, key, value) {
+        if (this === storage && key === RESULT_HISTORY_KEY)
+          throw new Error("write unavailable");
+        return originalSet.call(this, key, value);
+      });
+    try {
+      fireEvent.focus(window);
+      expect(screen.getByText(warning)).toBe(firstWarning);
+      await act(async () => {
+        held.release();
+        await held.done;
+        await navigator.locks.request(
+          "four-bros-mahjong.history.write.v1",
+          { signal: new AbortController().signal },
+          () => undefined,
+        );
+      });
+      expect(write.mock.calls.some(([key]) => key === RESULT_HISTORY_KEY)).toBe(
+        true,
+      );
+      expect(loadResultHistory(storage)).toHaveLength(0);
+      expect(loadPendingOnlineHistory(sessionStorage)).toHaveLength(1);
+      expect(screen.getByText(warning)).toBe(firstWarning);
+    } finally {
+      await act(async () => {
+        held.release();
+        await held.done;
+      });
+      write.mockRestore();
+    }
+    fireEvent.focus(window);
+    await waitFor(() => {
+      expect(loadResultHistory(storage)).toHaveLength(1);
+      expect(screen.queryByText(warning)).not.toBeInTheDocument();
+    });
+  });
 
   it("removes a failed-save warning after recovery on the game and result views", async () => {
     const socket = connectGame();

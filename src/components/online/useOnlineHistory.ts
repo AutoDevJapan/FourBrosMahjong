@@ -103,7 +103,11 @@ export function useOnlineHistory(
       }
       attempts.current.add(id);
       if (active.current && current.current === id)
-        setSaved({ id, status: "pending" });
+        setSaved((previous) =>
+          previous?.id === id && previous.status === "failed"
+            ? previous
+            : { id, status: "pending" },
+        );
       const storage = localStorageOrNull();
       const attempt =
         storage === null
