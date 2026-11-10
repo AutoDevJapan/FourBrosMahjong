@@ -76,6 +76,7 @@ const PRODUCTION_E2E_SPECS = [
   "e2e/security-headers.spec.ts",
   "e2e/metadata.spec.ts",
   "e2e/a11y.spec.ts",
+  "e2e/online-history.spec.ts",
 ] as const;
 
 /**
