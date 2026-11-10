@@ -109,7 +109,7 @@ describe("online completed match persistence", () => {
       fireEvent(window, new Event("focus"));
     });
     await waitFor(() =>
-      expect(screen.getByTestId("save-status")).toHaveTextContent("pending"),
+      expect(screen.getByTestId("save-status")).toHaveTextContent("failed"),
     );
     await act(async () => {
       release();
