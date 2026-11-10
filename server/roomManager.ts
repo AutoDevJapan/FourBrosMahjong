@@ -51,6 +51,8 @@ interface RoomPlayerSnapshot {
 
 export interface RoomSnapshot {
   readonly code: string;
+  /** Public half-game identity; never a room credential or a hidden RNG seed. */
+  readonly matchId: string;
   readonly version: number;
   readonly you: PlayerId;
   readonly explicitKita: boolean;
@@ -83,6 +85,8 @@ interface HostTransition {
 
 interface Room {
   readonly code: string;
+  readonly matchNamespace: string;
+  matchNumber: number;
   state: EngineState;
   version: number;
   readonly players: Map<PlayerId, RoomPlayer>;
@@ -456,6 +460,8 @@ export class RoomManager {
     };
     const room: Room = {
       code,
+      matchNamespace: randomBytes(16).toString("hex"),
+      matchNumber: 1,
       state: createGame({
         seed: randomSeed(),
         names: [name, "ゲスト2", "ゲスト3", "ゲスト4"],
@@ -771,6 +777,12 @@ export class RoomManager {
         error: "新しい半荘を始められるのは対局終了後です。",
         room,
       };
+    if (room.matchNumber >= Number.MAX_SAFE_INTEGER)
+      return {
+        ok: false,
+        error: "新しいルームで対局を開始してください。",
+        room,
+      };
     const observedAt = this.now();
     const connectedPlayerIds = [...room.players.values()]
       .filter((roomPlayer) => roomPlayer.connected)
@@ -795,6 +807,7 @@ export class RoomManager {
       room.humanPlayerIds.add(playerId);
     }
     room.state = nextState;
+    room.matchNumber += 1;
     room.departureNotice = null;
     room.version += 1;
     room.lastActivityAt = observedAt;
@@ -804,6 +817,7 @@ export class RoomManager {
   snapshot(room: Room, player: RoomPlayer): RoomSnapshot {
     return {
       code: room.code,
+      matchId: `${room.matchNamespace}:${room.matchNumber}`,
       version: room.version,
       you: player.id,
       explicitKita: player.explicitKita,

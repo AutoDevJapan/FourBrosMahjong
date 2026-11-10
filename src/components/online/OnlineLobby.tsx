@@ -43,6 +43,7 @@ import {
   MAX_MAINTENANCE_RETRY_AFTER_MS,
   parseOnlineServerMessage,
 } from "./onlineServerMessage";
+import { retryPendingOnlineHistory } from "./pendingOnlineHistory";
 import RoomShareControls from "./RoomShareControls";
 import { readSharedRoomCode, roomShareUrl } from "./roomSharing";
 import type {
@@ -681,6 +682,9 @@ function OnlineResultView({
 }
 
 export default function OnlineLobby() {
+  useEffect(() => {
+    void retryPendingOnlineHistory();
+  }, []);
   const [name, setName] = useState("");
   const [roomCode, setRoomCode] = useState("");
   const [snapshot, setSnapshot] = useState<OnlineSnapshot | null>(null);
@@ -1557,6 +1561,11 @@ export default function OnlineLobby() {
         snapshot={snapshot}
         newGameDisabled={maintenance !== null}
         onSendError={onSendError}
+        onHistorySaveError={() =>
+          setOperationError(
+            "この端末に今回の戦績を保存できませんでした。ブラウザのストレージ設定や空き容量を確認してください。画面に戻ると再試行します。",
+          )
+        }
       >
         <section
           ref={onlineGameFallbackRef}

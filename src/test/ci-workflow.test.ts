@@ -8,7 +8,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join, relative, resolve, sep } from "node:path";
+import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import ts from "typescript";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { parse } from "yaml";
@@ -76,6 +76,7 @@ const PRODUCTION_E2E_SPECS = [
   "e2e/security-headers.spec.ts",
   "e2e/metadata.spec.ts",
   "e2e/a11y.spec.ts",
+  "e2e/online-history.spec.ts",
 ] as const;
 
 /**
@@ -90,8 +91,7 @@ const PRODUCTION_E2E_EXCLUDED_SPECS = [
   "e2e/mobile-touch-targets.spec.ts",
   "e2e/non-text-contrast.spec.ts",
   "e2e/online-host-controls.spec.ts",
-  // The full Chromium suite runs live 3D. The prebuilt parity script currently
-  // selects the explicit six suites above; changing it is a separate CI decision.
+  // Full Chromium exercises 3D QA; the prebuilt parity list above remains explicit.
   "e2e/live-3d.spec.ts",
   "e2e/online-host-handoff.spec.ts",
   "e2e/online-room-sharing.spec.ts",
@@ -1700,12 +1700,84 @@ describe("テスト入力資産をdocs-onlyで黙殺しない (#745)", () => {
     return [...found];
   }
 
-  /** Static imports from shipped modules must never inherit a test-only scope. */
-  function productionDocumentImports(): string[] {
+  interface InputSources {
+    entries(directory: string): readonly {
+      name: string;
+      isDirectory(): boolean;
+    }[];
+    text(file: string): string;
+  }
+
+  const diskInputs: InputSources = {
+    entries: (directory) => readdirSync(directory, { withFileTypes: true }),
+    text: (file) => readFileSync(file, "utf8"),
+  };
+
+  /** Resolve literal module references without reading the imported asset. */
+  function importedVerificationInputs(
+    file: string,
+    text: string,
+    runtimeOnly = false,
+  ): string[] {
+    const found = new Set<string>();
+    const root = process.cwd();
+    const source = ts.createSourceFile(
+      file,
+      text,
+      ts.ScriptTarget.Latest,
+      true,
+    );
+    const runtime = runtimeOnly ? new Set(runtimeSpecifiers(source)) : null;
+    const visit = (node: ts.Node) => {
+      const specifier =
+        ts.isImportDeclaration(node) || ts.isExportDeclaration(node)
+          ? node.moduleSpecifier
+          : ts.isCallExpression(node) &&
+              (node.expression.kind === ts.SyntaxKind.ImportKeyword ||
+                (ts.isIdentifier(node.expression) &&
+                  node.expression.text === "require"))
+            ? node.arguments[0]
+            : undefined;
+      if (
+        specifier &&
+        ts.isStringLiteralLike(specifier) &&
+        (!runtime || runtime.has(specifier.text))
+      ) {
+        const input = specifier.text;
+        const absolute = input.startsWith(".")
+          ? resolve(dirname(file), input)
+          : input.startsWith("@/")
+            ? resolve(root, "src", input.slice(2))
+            : null;
+        if (absolute) {
+          const inputPath = relative(root, absolute).replaceAll(sep, "/");
+          if (
+            inputPath !== ".." &&
+            !inputPath.startsWith("../") &&
+            !isAbsolute(inputPath)
+          ) {
+            const kind = classifyPath(inputPath);
+            if (
+              kind === "documentation" ||
+              kind === "unit-test" ||
+              PRODUCTION_INPUT_PATHS.includes(inputPath)
+            )
+              found.add(inputPath);
+          }
+        }
+      }
+      ts.forEachChild(node, visit);
+    };
+    visit(source);
+    return [...found];
+  }
+
+  /** Static imports from shipped modules must never inherit a skipped scope. */
+  function productionDocumentImports(io: InputSources = diskInputs): string[] {
     const found = new Set<string>();
     const root = process.cwd();
     const walk = (directory: string) => {
-      for (const entry of readdirSync(directory, { withFileTypes: true })) {
+      for (const entry of io.entries(directory)) {
         const file = resolve(directory, entry.name);
         if (entry.isDirectory()) {
           walk(file);
@@ -1714,24 +1786,12 @@ describe("テスト入力資産をdocs-onlyで黙殺しない (#745)", () => {
         const path = relative(root, file).replaceAll(sep, "/");
         if (!/\.[cm]?[jt]sx?$/.test(file) || classifyPath(path) !== "code")
           continue;
-        const source = ts.createSourceFile(
+        for (const input of importedVerificationInputs(
           file,
-          readFileSync(file, "utf8"),
-          ts.ScriptTarget.Latest,
+          io.text(file),
           true,
-        );
-        for (const input of runtimeSpecifiers(source)) {
-          const absolute = input.startsWith(".")
-            ? resolve(dirname(file), input)
-            : input.startsWith("@/")
-              ? resolve(root, "src", input.slice(2))
-              : null;
-          if (absolute) {
-            const inputPath = relative(root, absolute).replaceAll(sep, "/");
-            if (/^(?:docs|documents|prototypes)\//.test(inputPath))
-              found.add(inputPath);
-          }
-        }
+        ))
+          found.add(input);
       }
     };
     for (const directory of ["src", "server"]) walk(resolve(root, directory));
@@ -1748,7 +1808,10 @@ describe("テスト入力資産をdocs-onlyで黙殺しない (#745)", () => {
    * JSON import、ディレクトリコピーのどれかへ限定すると、新しい参照形式を追加した
    * 瞬間に検査が黙って素通りするため、構文ではなくパス文字列を横断的に拾う。
    */
-  function testInputLiterals(): string[] {
+  function testInputLiterals(
+    directories: readonly string[] = ["server", "src", "e2e"],
+    io: InputSources = diskInputs,
+  ): string[] {
     const found = new Set<string>();
     const repositoryRoot = resolve(process.cwd());
     const sourcePath = (file: string, literal: string) => {
@@ -1765,7 +1828,7 @@ describe("テスト入力資産をdocs-onlyで黙殺しない (#745)", () => {
         : null;
     };
     const collect = (file: string) => {
-      const source = readFileSync(file, "utf8");
+      const source = io.text(file);
       // Blender's test composes README.md from a named repository-root path.
       // Collect that actual reference instead of hard-coding an unused exception.
       const roots = new Map(
@@ -1776,7 +1839,7 @@ describe("テスト入力資産をdocs-onlyで黙殺しない (#745)", () => {
         ].map((match) => [match[1], match[2]]),
       );
       for (const match of source.matchAll(
-        /\bresolve\(\s*(\w+)\s*,\s*["']([^"']+\.md)["']\s*\)/g,
+        /\bresolve\(\s*(\w+)\s*,\s*["']([^"']+\.md)["']\s*,?\s*\)/g,
       )) {
         const directory = roots.get(match[1]);
         if (!directory) continue;
@@ -1794,14 +1857,42 @@ describe("テスト入力資産をdocs-onlyで黙殺しない (#745)", () => {
         if (path) found.add(path);
       }
     };
+    // Model source templates supply the original-image hash test's directory.
+    const collectModelDirectory = (file: string) => {
+      const source = ts.createSourceFile(
+        file,
+        io.text(file),
+        ts.ScriptTarget.Latest,
+        true,
+      );
+      const visit = (node: ts.Node) => {
+        if (
+          ts.isTemplateExpression(node) &&
+          /^documents\/assets\/[^`]+\/$/.test(node.head.text)
+        ) {
+          const directory = sourcePath(file, node.head.text);
+          if (directory) found.add(directory);
+        }
+        ts.forEachChild(node, visit);
+      };
+      visit(source);
+    };
     const walk = (dir: string) => {
-      for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      for (const entry of io.entries(dir)) {
         const file = resolve(dir, entry.name);
         if (entry.isDirectory()) {
           walk(file);
           continue;
         }
-        if (!/(?:\.test|\.spec)\.(?:[cm]?ts|tsx|js|mjs)$/.test(entry.name))
+        const path = relative(repositoryRoot, file).replaceAll(sep, "/");
+        if (path === "src/components/game/characters3d/model.ts")
+          collectModelDirectory(file);
+        const browserModule =
+          path.startsWith("e2e/") && /\.[cm]?[jt]sx?$/.test(entry.name);
+        if (
+          !/(?:\.test|\.spec)\.(?:[cm]?ts|tsx|js|mjs)$/.test(entry.name) &&
+          !browserModule
+        )
           continue;
         // このファイル自身は分類テストの入力データとしてパスを並べるため除外する。
         // 判定対象はあくまで「他のテストが参照している入力資産」。
@@ -1810,36 +1901,68 @@ describe("テスト入力資産をdocs-onlyで黙殺しない (#745)", () => {
       }
     };
     // server/ のrunbook、src/ のJSON import、e2e/ のfixtureを同じ検査対象にする。
-    for (const root of ["server", "src", "e2e"])
-      walk(resolve(repositoryRoot, root));
+    for (const root of directories) walk(resolve(repositoryRoot, root));
     // railway-iac-migration.test.ts が import する契約モジュールのfixture定数も検査する。
-    collect(
-      resolve(repositoryRoot, "scripts/railway-iac-migration-contract.ts"),
-    );
-    // The character hash test reads model.source.path, whose directory comes
-    // from the model's template rather than a literal in the test itself.
-    const modelFile = resolve(
-      repositoryRoot,
-      "src/components/game/characters3d/model.ts",
-    );
-    const modelSource = ts.createSourceFile(
-      modelFile,
-      readFileSync(modelFile, "utf8"),
-      ts.ScriptTarget.Latest,
-      true,
-    );
-    const collectModelDirectory = (node: ts.Node) => {
-      if (
-        ts.isTemplateExpression(node) &&
-        /^documents\/assets\/[^`]+\/$/.test(node.head.text)
-      ) {
-        const directory = sourcePath(modelFile, node.head.text);
-        if (directory) found.add(directory);
-      }
-      ts.forEachChild(node, collectModelDirectory);
-    };
-    collectModelDirectory(modelSource);
+    if (directories.includes("src"))
+      collect(
+        resolve(repositoryRoot, "scripts/railway-iac-migration-contract.ts"),
+      );
     return [...found];
+  }
+
+  function browserVerificationInputs(io: InputSources = diskInputs) {
+    return new Set([
+      ...productionDocumentImports(io),
+      ...testInputLiterals(["e2e"], io),
+    ]);
+  }
+
+  function missingBrowserVerification(inputs: ReadonlySet<string>): string[] {
+    return [...inputs].filter((path) => {
+      const ci = resolveScope({
+        job: "ci",
+        paths: [path],
+        postMergeDuplicate: false,
+      });
+      const e2e = resolveScope({
+        job: "e2e",
+        paths: [path],
+        postMergeDuplicate: false,
+      });
+      return !ci.quality || !ci.production || !ci.browser || !e2e.verify;
+    });
+  }
+
+  /** In-memory directories exercise the same recursive walker without files. */
+  function memoryInputs(files: Readonly<Record<string, string>>): InputSources {
+    const sources = new Map(
+      Object.entries(files).map(([path, text]) => [
+        resolve(process.cwd(), path),
+        text,
+      ]),
+    );
+    return {
+      entries: (directory) => {
+        const children = new Map<string, boolean>();
+        for (const file of sources.keys()) {
+          const path = relative(directory, file).replaceAll(sep, "/");
+          if (path === ".." || path.startsWith("../") || isAbsolute(path))
+            continue;
+          const parts = path.split("/");
+          const name = parts[0];
+          if (name) children.set(name, parts.length > 1);
+        }
+        return [...children].map(([name, isDirectory]) => ({
+          name,
+          isDirectory: () => isDirectory,
+        }));
+      },
+      text: (file) => {
+        const text = sources.get(file);
+        if (text === undefined) throw new Error("Unexpected input: " + file);
+        return text;
+      },
+    };
   }
 
   it("型専用参照をruntime入力にせず、value/re-export/dynamic/requireは取りこぼさない", () => {
@@ -1872,10 +1995,153 @@ describe("テスト入力資産をdocs-onlyで黙殺しない (#745)", () => {
     ]);
   });
 
-  it("production moduleがimportする文書ツリーの資産は全検証する", () => {
-    const inputs = productionDocumentImports();
+  it.each([
+    ["import", "import data from '../documents/input.json';"],
+    ["import type", "import type { Data } from '../documents/input.json';"],
+    ["re-export", "export { data } from '../documents/input.json';"],
+    ["dynamic import", "import('../documents/input.json');"],
+    ["require", "require('../documents/input.json');"],
+    ["src alias", "import data from '@/../documents/input.json';"],
+  ])("import parser retains %s inputs", (_, text) => {
+    expect(
+      importedVerificationInputs(resolve(process.cwd(), "src/view.ts"), text),
+    ).toEqual(["documents/input.json"]);
+  });
+
+  it.each(["README.md", "CHANGELOG.md", "notes/runtime.md"])(
+    "import parser retains root Markdown %s",
+    (path) => {
+      expect(
+        importedVerificationInputs(
+          resolve(process.cwd(), "src/view.ts"),
+          "import data from '../" + path + "';",
+        ),
+      ).toEqual([path]);
+    },
+  );
+
+  it("import parser ignores packages, outside files and nonliteral imports", () => {
+    expect(
+      importedVerificationInputs(
+        resolve(process.cwd(), "src/view.ts"),
+        "import ts from 'typescript'; import('../../outside.md'); import(name); require(name);",
+      ),
+    ).toEqual([]);
+  });
+
+  it("production roots retain server inputs and exclude test modules", () => {
+    const io = memoryInputs({
+      "src/view.ts":
+        "import data from '../documents/fixtures/unity-display-contract.json';",
+      "src/view.test.ts": "import data from '../documents/test-only.json';",
+      "server/view.ts":
+        "export { data } from '../prototypes/blender/README.md';",
+    });
+    expect(new Set(productionDocumentImports(io))).toEqual(
+      new Set([
+        "documents/fixtures/unity-display-contract.json",
+        "prototypes/blender/README.md",
+      ]),
+    );
+  });
+
+  it("production walker excludes erased type-only assets while retaining real runtime input", () => {
+    const io = memoryInputs({
+      "src/view.ts":
+        "import type { T } from '../documents/type-only.json'; import {type U} from '../documents/other-type.json'; export type {V} from '../documents/export-type.json'; import data from '../documents/fixtures/unity-display-contract.json';",
+    });
+    expect(productionDocumentImports(io)).toEqual([
+      "documents/fixtures/unity-display-contract.json",
+    ]);
+  });
+
+  it("E2E-only inputs expose missing full verification without a production import", () => {
+    const io = memoryInputs({
+      "e2e/fixture-helper.ts":
+        "import data from '../documents/browser-only.json';",
+    });
+    expect(productionDocumentImports(io)).toEqual([]);
+    const required = browserVerificationInputs(io);
+    expect([...required]).toEqual(["documents/browser-only.json"]);
+    expect(missingBrowserVerification(required)).toEqual([
+      "documents/browser-only.json",
+    ]);
+  });
+
+  it("production and E2E union retains disjoint recursive consumers", () => {
+    const io = memoryInputs({
+      "src/views/view.ts":
+        "import data from '../../documents/production-only.json';",
+      "e2e/helpers/fixture.ts":
+        "import data from '../../documents/browser-only.json';",
+    });
+    expect(productionDocumentImports(io)).toEqual([
+      "documents/production-only.json",
+    ]);
+    expect(testInputLiterals(["e2e"], io)).toEqual([
+      "documents/browser-only.json",
+    ]);
+    const required = browserVerificationInputs(io);
+    expect(required).toEqual(
+      new Set([
+        "documents/production-only.json",
+        "documents/browser-only.json",
+      ]),
+    );
+    expect(new Set(missingBrowserVerification(required))).toEqual(required);
+  });
+
+  it("production and E2E input catalogs do not retain test-only duplicates", () => {
+    expect(
+      TEST_INPUT_PATHS.filter((path) => PRODUCTION_INPUT_PATHS.includes(path)),
+    ).toEqual([]);
+  });
+
+  it.each(["", ","])(
+    "named-root Markdown references retain optional trailing comma %s",
+    (comma) => {
+      const io = memoryInputs({
+        "e2e/readme.ts":
+          'const INPUT_ROOT = resolve(process.cwd(), "prototypes/blender",);\nreadFileSync(resolve(\nINPUT_ROOT,\n"README.md"' +
+          comma +
+          "\n));",
+      });
+      expect(testInputLiterals(["e2e"], io)).toContain(
+        "prototypes/blender/README.md",
+      );
+    },
+  );
+
+  function untrackedProductionInputs(paths: readonly string[]): string[] {
+    const tracked = new Set(
+      execFileSync("git", ["ls-files", "--stage", "-z"], { encoding: "utf8" })
+        .split("\0")
+        .filter(
+          (row) =>
+            (row.startsWith("100644 ") || row.startsWith("100755 ")) &&
+            row.slice(0, row.indexOf("\t")).endsWith(" 0"),
+        )
+        .map((row) => row.slice(row.indexOf("\t") + 1)),
+    );
+    return paths.filter((path) => !tracked.has(path));
+  }
+
+  it("full verification input declarations accept tracked files, never directory prefixes", () => {
+    expect(untrackedProductionInputs(PRODUCTION_INPUT_PATHS)).toEqual([]);
+    // This real tracked directory must not silently stand for its file children.
+    expect(untrackedProductionInputs(["documents/assets/ui-refresh"])).toEqual([
+      "documents/assets/ui-refresh",
+    ]);
+  });
+
+  it("production moduleまたはE2Eが読む省略対象入力は全検証する", () => {
+    expect(productionDocumentImports()).toContain(
+      "documents/fixtures/unity-display-contract.json",
+    );
+    const inputs = browserVerificationInputs();
     expect(inputs).toContain("documents/fixtures/unity-display-contract.json");
     expect(new Set(PRODUCTION_INPUT_PATHS)).toEqual(new Set(inputs));
+    expect(missingBrowserVerification(inputs)).toEqual([]);
     for (const path of inputs) {
       expect(classifyPath(path), `${path}: 出荷moduleの入力を省略しない`).toBe(
         "code",
@@ -1937,7 +2203,7 @@ describe("テスト入力資産をdocs-onlyで黙殺しない (#745)", () => {
 
   it("server/src/e2eの入力はunit-test、出荷moduleとの共有入力はcodeに分類する", () => {
     const literals = testInputLiterals();
-    const productionInputs = new Set(productionDocumentImports());
+    const productionInputs = browserVerificationInputs();
     // 走査自体が壊れて 0 件になれば、この検査は何も守らなくなる。
     expect(
       literals.length,
@@ -1952,7 +2218,6 @@ describe("テスト入力資産をdocs-onlyで黙殺しない (#745)", () => {
         "documents/fixtures/railway-pre-cutover.json",
         "prototypes/blender/README.md",
         "documents/fixtures/railway-readyz-before-iac.json",
-        "documents/fixtures/unity-display-contract.json",
       ]),
     );
 

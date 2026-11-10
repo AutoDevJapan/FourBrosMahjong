@@ -120,7 +120,20 @@ function isEntry(value: unknown): value is MatchHistoryEntry {
     !hasOnlyKeys(entry, ["seed", "finishedAt", "players"]) ||
     !Number.isSafeInteger(entry.seed) ||
     Number(entry.seed) < 0 ||
-    Number(entry.seed) > 0xffffffff ||
+    Number(entry.seed) > 0xffffffff
+  ) {
+    return false;
+  }
+  return isMatchHistoryResult(value);
+}
+
+/** Shared result validation; each version validates its own identity and keys. */
+export function isMatchHistoryResult(
+  value: unknown,
+): value is Omit<MatchHistoryEntry, "seed"> {
+  if (!value || typeof value !== "object") return false;
+  const entry = value as Record<string, unknown>;
+  if (
     !Number.isSafeInteger(entry.finishedAt) ||
     Number(entry.finishedAt) < 0 ||
     Number(entry.finishedAt) > MAX_TIMESTAMP ||
@@ -251,7 +264,7 @@ export interface HistoryLockManager {
  * `null` を返す。明示的に `null` を渡した場合はそのまま `null`(= 排他不能)とする。
  * 追記と削除で解決規則が食い違うと片方だけが lock 外へ漏れるため、両者で共有する。
  */
-function resolveLockManager(
+export function resolveLockManager(
   locks: HistoryLockManager | null | undefined,
 ): HistoryLockManager | null {
   if (locks !== undefined) return locks;
@@ -284,7 +297,7 @@ function resolveLockManager(
  * あると、削除は「消えているのに失敗として案内する」最悪の形になる。
  * `finally` の解除は取得できなかった経路のために残す。
  */
-async function withHistoryLock<T>(
+export async function withHistoryLock<T>(
   lockManager: HistoryLockManager,
   callback: () => T,
   onUnavailable: () => T,

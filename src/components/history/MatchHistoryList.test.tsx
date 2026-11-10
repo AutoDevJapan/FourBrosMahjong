@@ -13,9 +13,14 @@ import {
   appendHistory,
   MATCH_HISTORY_KEY,
   type MatchHistoryEntry,
-  retryHistoryViewSnapshot,
 } from "@/components/game/matchHistory";
 import { PENDING_HISTORY_KEY } from "@/components/game/pendingHistory";
+import {
+  persistOnlineHistoryAcrossTabs,
+  RESULT_HISTORY_KEY,
+  retryResultHistoryViewSnapshot as retryHistoryViewSnapshot,
+} from "@/components/game/resultHistory";
+import { PENDING_ONLINE_HISTORY_KEY } from "@/components/online/pendingOnlineHistory";
 import { restoreWebLocks, stubWebLocks } from "@/test/webLocksStub";
 import MatchHistoryList from "./MatchHistoryList";
 
@@ -70,6 +75,35 @@ afterEach(() => {
 });
 
 describe("MatchHistoryList (#293)", () => {
+  it("shows local and distinct same-time online results in the existing rows and clears all storage versions", async () => {
+    appendHistory(localStorage, entry(1, 100));
+    const result = entry(2, 200, "オンライン勝者");
+    for (const sequence of [1, 2])
+      await persistOnlineHistoryAcrossTabs(localStorage, {
+        finishedAt: result.finishedAt,
+        players: result.players,
+        onlineMatchId: `${"a".repeat(32)}:${sequence}`,
+      });
+    const error = vi
+      .spyOn(console, "error")
+      .mockImplementation(() => undefined);
+    render(<MatchHistoryList />);
+    const list = await screen.findByRole("list", {
+      name: "保存された半荘結果",
+    });
+    expect(list.querySelectorAll(":scope > li")).toHaveLength(3);
+    expect(error).not.toHaveBeenCalled();
+    // The mount retry has finished; put queue sentinels in place to verify clear.
+    sessionStorage.setItem(PENDING_HISTORY_KEY, "pending-local");
+    sessionStorage.setItem(PENDING_ONLINE_HISTORY_KEY, "pending-online");
+    fireEvent.click(screen.getByRole("button", { name: "戦績をすべて削除" }));
+    fireEvent.click(screen.getByRole("button", { name: "削除する" }));
+    await screen.findByText("保存されていた戦績をすべて削除しました。");
+    expect(localStorage.getItem(MATCH_HISTORY_KEY)).toBeNull();
+    expect(localStorage.getItem(RESULT_HISTORY_KEY)).toBeNull();
+    expect(sessionStorage.getItem(PENDING_HISTORY_KEY)).toBeNull();
+    expect(sessionStorage.getItem(PENDING_ONLINE_HISTORY_KEY)).toBeNull();
+  });
   it("保存が無ければローカル/オンラインのCTAと違いを表示する", async () => {
     render(<MatchHistoryList />);
 
