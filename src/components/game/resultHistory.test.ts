@@ -354,6 +354,9 @@ describe("local and online result history", () => {
   );
 
   it("rejects excessive metadata, unknown keys and oversized values before parse", () => {
+    expect(
+      parseResultHistory(serialized([{ ...online(1), historyEpoch: null }])),
+    ).toBeNull();
     expect(parseResultHistory(serialized([], [1, 1]))).toBeNull();
     expect(
       parseResultHistory(

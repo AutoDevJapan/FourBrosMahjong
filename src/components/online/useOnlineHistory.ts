@@ -117,6 +117,10 @@ export function useOnlineHistory(
             : result === "appended" || result === "already-exists"
               ? "saved"
               : "idle";
+        if (retained.historyEpoch === null && result !== "failed") {
+          // A terminal result proves an unknown capture was verified as zero.
+          observed.current.set(id, { ...retained, historyEpoch: 0 });
+        }
         if (result !== "failed") {
           forgetPendingOnlineHistory(
             pending,

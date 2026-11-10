@@ -78,6 +78,107 @@ afterEach(() => {
 });
 
 describe("online completed match persistence", () => {
+  it("keeps a verified-then-cancelled unknown capture cancelled on later snapshots", async () => {
+    const request = createLockRequest();
+    Object.defineProperty(navigator, "locks", {
+      configurable: true,
+      value: { request },
+    });
+    const access = vi
+      .spyOn(window, "localStorage", "get")
+      .mockImplementation(() => {
+        throw new Error("unavailable");
+      });
+    const { rerender } = render(<Provider value={snapshot()} />);
+    await waitFor(() =>
+      expect(screen.getByTestId("save-status")).toHaveTextContent("failed"),
+    );
+    expect(loadPendingOnlineHistory(sessionStorage)[0].historyEpoch).toBeNull();
+    access.mockRestore();
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const blocker = request(
+      "four-bros-mahjong.history.write.v1",
+      { signal: new AbortController().signal },
+      () => held,
+    );
+    const clear = clearResultHistoryAcrossTabs(localStorage);
+    await act(async () => {
+      fireEvent(window, new Event("focus"));
+    });
+    await waitFor(() =>
+      expect(screen.getByTestId("save-status")).toHaveTextContent("pending"),
+    );
+    await act(async () => {
+      release();
+      await blocker;
+      expect(await clear).toBe("cleared");
+      clearPendingOnlineHistory(sessionStorage);
+    });
+    await waitFor(() =>
+      expect(screen.getByTestId("save-status")).toHaveTextContent("idle"),
+    );
+    rerender(<Provider value={{ ...snapshot(), version: 20 }} />);
+    await waitFor(() =>
+      expect(screen.getByTestId("save-status")).toHaveTextContent("idle"),
+    );
+    expect(loadPendingOnlineHistory(sessionStorage)).toEqual([]);
+    expect(localStorage.getItem(RESULT_HISTORY_KEY)).toBeNull();
+  });
+  it("keeps a foreground unverified result failed and recoverable after a previous clear", async () => {
+    expect(await clearResultHistoryAcrossTabs(localStorage)).toBe("cleared");
+    const access = vi
+      .spyOn(window, "localStorage", "get")
+      .mockImplementation(() => {
+        throw new Error("temporarily unavailable");
+      });
+    render(<Provider value={snapshot(2)} />);
+    await waitFor(() =>
+      expect(screen.getByTestId("save-status")).toHaveTextContent("failed"),
+    );
+    const first = loadPendingOnlineHistory(sessionStorage);
+    expect(first).toHaveLength(1);
+    expect(first[0].historyEpoch).toBeNull();
+    access.mockRestore();
+    await act(async () => {
+      fireEvent(window, new Event("focus"));
+    });
+    expect(screen.getByTestId("save-status")).toHaveTextContent("failed");
+    expect(loadPendingOnlineHistory(sessionStorage)).toEqual(first);
+    expect(localStorage.getItem(RESULT_HISTORY_KEY)).toBeNull();
+  });
+
+  it("remembers a verified zero after unknown recovery so a later clear cannot revive it", async () => {
+    const access = vi
+      .spyOn(window, "localStorage", "get")
+      .mockImplementation(() => {
+        throw new Error("temporarily unavailable");
+      });
+    const { rerender } = render(<Provider value={snapshot()} />);
+    await waitFor(() =>
+      expect(screen.getByTestId("save-status")).toHaveTextContent("failed"),
+    );
+    access.mockRestore();
+    await act(async () => {
+      fireEvent(window, new Event("focus"));
+    });
+    await waitFor(() =>
+      expect(screen.getByTestId("save-status")).toHaveTextContent("saved"),
+    );
+    expect(
+      JSON.parse(localStorage.getItem(RESULT_HISTORY_KEY)!).entries[0]
+        .historyEpoch,
+    ).toBe(0);
+    expect(await clearResultHistoryAcrossTabs(localStorage)).toBe("cleared");
+    rerender(<Provider value={{ ...snapshot(), version: 12 }} />);
+    await waitFor(() =>
+      expect(screen.getByTestId("save-status")).toHaveTextContent("idle"),
+    );
+    expect(localStorage.getItem(RESULT_HISTORY_KEY)).toBeNull();
+    expect(loadPendingOnlineHistory(sessionStorage)).toEqual([]);
+  });
   it("does not resave a cleared result on another snapshot, but saves the next half-game", async () => {
     const { rerender } = render(<Provider value={snapshot()} />);
     await waitFor(() =>

@@ -1,13 +1,16 @@
 import { localStorageOrNull } from "@/components/common/browserStorage";
-import { MAX_HISTORY_ENTRIES } from "@/components/game/matchHistory";
+import {
+  MAX_HISTORY_BYTES,
+  MAX_HISTORY_ENTRIES,
+} from "@/components/game/matchHistory";
 import {
   isOnlineHistoryEntry,
   notifyResultHistoryChanged,
   type OnlineHistoryEntry,
-  parseResultHistory,
   persistOnlineHistoryAcrossTabs,
   readHistoryEpoch,
 } from "@/components/game/resultHistory";
+import { hasOnlyKeys } from "@/domain/game/gamePersistence";
 
 export const PENDING_ONLINE_HISTORY_KEY =
   "four-bros-mahjong.history-online-pending.v2";
@@ -23,16 +26,32 @@ export function onlineHistorySessionStorage(): Storage | null {
 function read(storage: Storage): readonly OnlineHistoryEntry[] {
   const raw = storage.getItem(PENDING_ONLINE_HISTORY_KEY);
   if (raw === null) return [];
-  const parsed = parseResultHistory(raw);
-  return parsed !== null &&
-    parsed.legacySeeds.length === 0 &&
-    parsed.entries.every(isOnlineHistoryEntry)
-    ? parsed.entries.map((entry) =>
-        entry.historyEpoch === undefined
-          ? { ...entry, historyEpoch: 0 }
-          : entry,
-      )
-    : [];
+  if (raw.length * 2 > MAX_HISTORY_BYTES) return [];
+  let value: Record<string, unknown>;
+  try {
+    value = JSON.parse(raw) as Record<string, unknown>;
+  } catch {
+    // Corrupt bytes may be explicitly cleared; unreadable storage still throws.
+    return [];
+  }
+  // Pending payloads may carry an unverified epoch; saved records may not.
+  if (
+    !value ||
+    typeof value !== "object" ||
+    !hasOnlyKeys(value, ["version", "entries", "legacySeeds"]) ||
+    value.version !== 2 ||
+    !Array.isArray(value.legacySeeds) ||
+    value.legacySeeds.length !== 0 ||
+    !Array.isArray(value.entries) ||
+    value.entries.length > MAX_HISTORY_ENTRIES ||
+    !value.entries.every(isOnlineHistoryEntry) ||
+    new Set(value.entries.map((entry) => entry.onlineMatchId)).size !==
+      value.entries.length
+  )
+    return [];
+  return value.entries.map((entry) =>
+    entry.historyEpoch === undefined ? { ...entry, historyEpoch: 0 } : entry,
+  );
 }
 
 export function loadPendingOnlineHistory(
@@ -81,7 +100,7 @@ export function rememberPendingOnlineHistory(
   }
   const retained =
     previous.historyEpoch === undefined
-      ? { ...previous, historyEpoch: currentEpoch ?? 0 }
+      ? { ...previous, historyEpoch: currentEpoch }
       : previous;
   pending.set(entry.onlineMatchId, retained);
   while (pending.size > MAX_HISTORY_ENTRIES) {
@@ -92,7 +111,9 @@ export function rememberPendingOnlineHistory(
   if (
     storage !== null &&
     stored !== null &&
-    (currentEpoch === null || retained.historyEpoch === currentEpoch)
+    (currentEpoch === null ||
+      retained.historyEpoch === null ||
+      retained.historyEpoch === currentEpoch)
   ) {
     try {
       const merged = new Map(stored.map((item) => [item.onlineMatchId, item]));

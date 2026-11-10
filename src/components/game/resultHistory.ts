@@ -37,8 +37,8 @@ export function readHistoryEpoch(storage: Storage): number {
 
 export interface OnlineHistoryEntry extends Omit<MatchHistoryEntry, "seed"> {
   readonly onlineMatchId: string;
-  /** First-capture deletion epoch, retained by pending retries. */
-  readonly historyEpoch?: number;
+  /** Captured epoch; null is unverified, undefined is legacy data. */
+  readonly historyEpoch?: number | null;
 }
 type OnlineHistoryPersistenceResult =
   | HistoryPersistenceResult
@@ -73,13 +73,14 @@ export function isOnlineHistoryEntry(
     ) &&
     isOnlineMatchId(entry.onlineMatchId) &&
     (entry.historyEpoch === undefined ||
+      entry.historyEpoch === null ||
       (Number.isSafeInteger(entry.historyEpoch) &&
         Number(entry.historyEpoch) >= 0))
   );
 }
 
 function isResultEntry(value: unknown): value is ResultHistoryEntry {
-  if (isOnlineHistoryEntry(value)) return true;
+  if (isOnlineHistoryEntry(value)) return value.historyEpoch !== null;
   // Preserve the exact v1 parser, including its identity and player invariants.
   return (
     parseHistory(JSON.stringify({ version: 1, entries: [value] })) !== null
@@ -151,8 +152,17 @@ export async function persistOnlineHistoryAcrossTabs(
   const manager = resolveLockManager(locks);
   if (manager === null) return "failed";
   let expectedEpoch: number;
+  let resultEntry = entry;
   try {
-    expectedEpoch = entry.historyEpoch ?? readHistoryEpoch(storage);
+    const currentEpoch = readHistoryEpoch(storage);
+    if (entry.historyEpoch === null) {
+      // Zero proves no successful clear. Otherwise retain the unverified payload.
+      if (currentEpoch !== 0) return "failed";
+      expectedEpoch = 0;
+      resultEntry = { ...entry, historyEpoch: 0 };
+    } else {
+      expectedEpoch = entry.historyEpoch ?? currentEpoch;
+    }
   } catch {
     return "failed";
   }
@@ -174,7 +184,7 @@ export async function persistOnlineHistoryAcrossTabs(
           )
         )
           return "already-exists";
-        let next = [entry, ...entries]
+        let next = [resultEntry, ...entries]
           .sort((a, b) => b.finishedAt - a.finishedAt)
           .slice(0, MAX_HISTORY_ENTRIES);
         const retained = () =>

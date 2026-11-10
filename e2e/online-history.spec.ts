@@ -173,7 +173,80 @@ test("オンライン終局を旧戦績と保存し、再接続・次の半荘�
         localStorage.getItem("four-bros-mahjong.history.v2"),
       ]),
     ).toEqual([null, null]);
+    await page.evaluate(
+      (snapshot) => {
+        const host = window as unknown as OnlineTestWindow & {
+          __restoreHistoryStorage?: () => void;
+        };
+        const descriptor = Object.getOwnPropertyDescriptor(
+          window,
+          "localStorage",
+        );
+        host.__restoreHistoryStorage = () => {
+          if (descriptor)
+            Object.defineProperty(window, "localStorage", descriptor);
+          else Reflect.deleteProperty(window, "localStorage");
+        };
+        Object.defineProperty(window, "localStorage", {
+          configurable: true,
+          get() {
+            throw new DOMException("temporarily unavailable", "SecurityError");
+          },
+        });
+        host.__fourBrosOnlineSockets[0].message({ type: "snapshot", snapshot });
+      },
+      {
+        ...onlineSnapshotFixture(),
+        matchId: `${"a".repeat(32)}:4`,
+        version: 8,
+      },
+    );
+    await expect(page.locator('[data-phase="playing"]')).toBeVisible();
+    await page.evaluate(
+      (snapshot) => {
+        (
+          window as unknown as OnlineTestWindow
+        ).__fourBrosOnlineSockets[0].message({ type: "snapshot", snapshot });
+      },
+      { ...first, matchId: `${"a".repeat(32)}:4`, version: 9 },
+    );
+    await expect(
+      page.getByText(/この端末に今回の戦績を保存できませんでした/),
+    ).toBeVisible();
+    const pendingBefore = await page.evaluate(() =>
+      JSON.parse(
+        sessionStorage.getItem("four-bros-mahjong.history-online-pending.v2") ??
+          "null",
+      ),
+    );
+    expect(pendingBefore.entries).toHaveLength(1);
+    expect(pendingBefore.entries[0].historyEpoch).toBeNull();
+    await page.evaluate(async () => {
+      (
+        window as unknown as { __restoreHistoryStorage?: () => void }
+      ).__restoreHistoryStorage?.();
+      window.dispatchEvent(new Event("focus"));
+      await navigator.locks.request(
+        "four-bros-mahjong.history.write.v1",
+        () => undefined,
+      );
+    });
+    expect(await records()).toEqual([]);
+    expect(
+      await page.evaluate(() =>
+        JSON.parse(
+          sessionStorage.getItem(
+            "four-bros-mahjong.history-online-pending.v2",
+          ) ?? "null",
+        ),
+      ),
+    ).toEqual(pendingBefore);
   } finally {
+    await page.evaluate(() => {
+      (
+        window as unknown as { __restoreHistoryStorage?: () => void }
+      ).__restoreHistoryStorage?.();
+    });
     await history.close();
   }
 });

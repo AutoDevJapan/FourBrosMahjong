@@ -46,6 +46,86 @@ afterEach(() => {
 });
 
 describe("pending online results", () => {
+  it("preserves an unverified post-clear result across storage recovery and session reload", async () => {
+    expect(await clearResultHistoryAcrossTabs(localStorage)).toBe("cleared");
+    const access = vi
+      .spyOn(window, "localStorage", "get")
+      .mockImplementation(() => {
+        throw new Error("unavailable");
+      });
+    const captured = rememberPendingOnlineHistory(
+      new Map(),
+      { ...entry(8), historyEpoch: undefined },
+      sessionStorage,
+    );
+    access.mockRestore();
+    await retryPendingOnlineHistory();
+    const retained = loadPendingOnlineHistory(sessionStorage);
+    expect(loadResultHistory(localStorage).length + retained.length).toBe(1);
+    expect(captured.historyEpoch).toBeNull();
+    expect(retained).toHaveLength(1);
+    expect(retained[0].historyEpoch).toBeNull();
+    expect(retained[0].finishedAt).toBe(8);
+    await retryPendingOnlineHistory();
+    expect(loadPendingOnlineHistory(sessionStorage)).toEqual(retained);
+  });
+
+  it("verifies an unknown capture as zero only when no clear has ever succeeded", async () => {
+    const access = vi
+      .spyOn(window, "localStorage", "get")
+      .mockImplementation(() => {
+        throw new Error("unavailable");
+      });
+    rememberPendingOnlineHistory(
+      new Map(),
+      { ...entry(8), historyEpoch: undefined },
+      sessionStorage,
+    );
+    access.mockRestore();
+    await retryPendingOnlineHistory();
+    expect(loadPendingOnlineHistory(sessionStorage)).toEqual([]);
+    expect(loadResultHistory(localStorage)).toEqual([
+      { ...entry(8), historyEpoch: 0 },
+    ]);
+  });
+
+  it("retains an unknown entry without discarding the known entries in a mixed queue", async () => {
+    expect(await clearResultHistoryAcrossTabs(localStorage)).toBe("cleared");
+    const unknown = { ...entry(1), historyEpoch: null };
+    const known = { ...entry(2), historyEpoch: 1 };
+    sessionStorage.setItem(
+      PENDING_ONLINE_HISTORY_KEY,
+      JSON.stringify({
+        version: 2,
+        entries: [unknown, known],
+        legacySeeds: [],
+      }),
+    );
+    expect(loadPendingOnlineHistory(sessionStorage)).toHaveLength(2);
+    await retryPendingOnlineHistory();
+    expect(loadPendingOnlineHistory(sessionStorage)).toEqual([unknown]);
+    expect(loadResultHistory(localStorage)).toEqual([known]);
+  });
+
+  it("never adopts the new epoch for an unknown result when a clear happened before retry", async () => {
+    const access = vi
+      .spyOn(window, "localStorage", "get")
+      .mockImplementation(() => {
+        throw new Error("unavailable");
+      });
+    rememberPendingOnlineHistory(
+      new Map(),
+      { ...entry(9), historyEpoch: undefined },
+      sessionStorage,
+    );
+    access.mockRestore();
+    expect(await clearResultHistoryAcrossTabs(localStorage)).toBe("cleared");
+    await retryPendingOnlineHistory();
+    expect(loadResultHistory(localStorage)).toEqual([]);
+    expect(loadPendingOnlineHistory(sessionStorage)).toEqual([
+      { ...entry(9), historyEpoch: null },
+    ]);
+  });
   it("cancels a stale pending queue from another tab and accepts a new post-clear result", async () => {
     const values = new Map<string, string>();
     const other: Storage = {
