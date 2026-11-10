@@ -37,14 +37,43 @@ test("オンライン終局を旧戦績と保存し、再接続・次の半荘�
   const first = {
     ...onlineFinishedSnapshotFixture(),
     matchId: `${"a".repeat(32)}:1`,
+    // A final engine snapshot can retain the last turn owner.
+    currentTurn: "p0" as const,
   };
   await page.evaluate((snapshot) => {
-    const socket = (window as unknown as OnlineTestWindow)
-      .__fourBrosOnlineSockets[0];
+    const host = window as unknown as OnlineTestWindow & {
+      __restoreHistoryStorage?: () => void;
+    };
+    const descriptor = Object.getOwnPropertyDescriptor(window, "localStorage");
+    host.__restoreHistoryStorage = () => {
+      if (descriptor) Object.defineProperty(window, "localStorage", descriptor);
+      else Reflect.deleteProperty(window, "localStorage");
+      delete host.__restoreHistoryStorage;
+    };
+    Object.defineProperty(window, "localStorage", {
+      configurable: true,
+      get() {
+        throw new DOMException("temporarily unavailable", "SecurityError");
+      },
+    });
+    const socket = host.__fourBrosOnlineSockets[0];
     if (!socket) throw new Error("test socket missing");
     socket.open();
     socket.message({ type: "session", token: "t".repeat(24), snapshot });
   }, first);
+  const warning = page.getByText(/この端末に今回の戦績を保存できませんでした/);
+  await expect(warning).toBeVisible();
+  const progress = page
+    .getByRole("group", { name: "参加者", exact: true })
+    .locator("..");
+  await expect(progress).toContainText("対局終了");
+  await expect(progress).not.toContainText("の手番");
+  await page.evaluate(() => {
+    (
+      window as unknown as { __restoreHistoryStorage?: () => void }
+    ).__restoreHistoryStorage?.();
+    window.dispatchEvent(new Event("focus"));
+  });
   const records = () =>
     page.evaluate(() => {
       const raw = localStorage.getItem("four-bros-mahjong.history.v2");
@@ -56,6 +85,7 @@ test("オンライン終局を旧戦績と保存し、再接続・次の半荘�
           }[]);
     });
   await expect.poll(async () => (await records()).length).toBe(2);
+  await expect(warning).not.toBeVisible();
   const firstDate = (await records())[0].finishedAt;
   const history = await page.context().newPage();
   try {
@@ -73,6 +103,7 @@ test("オンライン終局を旧戦績と保存し、再接続・次の半荘�
       { ...first, version: 2 },
     );
     await page.getByRole("button", { name: "結果を見る" }).click();
+    await expect(warning).not.toBeVisible();
     await page.getByRole("button", { name: "新しい半荘を開始" }).click();
     await page.evaluate(
       (snapshot) => {

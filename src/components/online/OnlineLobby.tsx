@@ -584,6 +584,16 @@ function ConnectionFeedback({
   );
 }
 
+/** History feedback follows the current result without changing transport errors. */
+function OnlineConnectionFeedback(props: ConnectionFeedbackProps) {
+  const { historySaveStatus } = useGame();
+  const historyError =
+    historySaveStatus === "failed"
+      ? "この端末に今回の戦績を保存できませんでした。ブラウザのストレージ設定や空き容量を確認してください。画面に戻ると再試行します。"
+      : "";
+  return <ConnectionFeedback {...props} error={props.error || historyError} />;
+}
+
 interface OnlineResultViewProps {
   readonly result: GameResultView;
   readonly onBack: () => void;
@@ -1555,17 +1565,20 @@ export default function OnlineLobby() {
 
   if (snapshot) {
     const onlineResult = snapshot.view.result;
+    const turnStatus =
+      snapshot.phase === "gameEnd"
+        ? "対局終了"
+        : snapshot.phase === "roundEnd"
+          ? "局終了"
+          : currentTurnName
+            ? `${currentTurnName}の手番`
+            : "対局中";
     return (
       <OnlineGameProvider
         socket={status === "connected" ? socket : null}
         snapshot={snapshot}
         newGameDisabled={maintenance !== null}
         onSendError={onSendError}
-        onHistorySaveError={() =>
-          setOperationError(
-            "この端末に今回の戦績を保存できませんでした。ブラウザのストレージ設定や空き容量を確認してください。画面に戻ると再試行します。",
-          )
-        }
       >
         <section
           ref={onlineGameFallbackRef}
@@ -1635,7 +1648,7 @@ export default function OnlineLobby() {
               className="player-name-bidi-isolate"
               aria-live="polite"
             >
-              {currentTurnName ? `${currentTurnName}の手番` : "対局終了"}
+              {turnStatus}
             </span>
           </div>
 
@@ -1674,7 +1687,7 @@ export default function OnlineLobby() {
               {maintenanceRecoveryVisible ? (
                 <MaintenanceRecoveryNotice />
               ) : null}
-              <ConnectionFeedback
+              <OnlineConnectionFeedback
                 status={status}
                 error={error?.message ?? ""}
                 canRetry={canRetry}
