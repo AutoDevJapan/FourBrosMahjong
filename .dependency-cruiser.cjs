@@ -116,7 +116,7 @@ module.exports = {
       // cannot bypass the boundary. Test consumers remain legitimate.
       from: { pathNot: [TEST_FILE, "^(src/test|e2e)/"] },
       to: {
-        path: "^(prototypes/|documents/(evidence/|assets/|fixtures/railway-pre-cutover\\.json$))",
+        path: "^(\\.godd/|prototypes/|documents/(evidence/|assets/|fixtures/railway-pre-cutover\\.json$))",
       },
     },
     {

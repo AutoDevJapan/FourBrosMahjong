@@ -121,3 +121,15 @@ sanitizer、検査抑制、CI 分類例外、production code の変更は加え�
 ローカルの CodeQL CLI は未導入で、修正後の実 scan／alert 再判定はまだ未確認。
 旧 head の成功 CI を再実行せず、独立レビュー後の通常 push に伴う新 head の解析結果を
 確認するまでは「alert 解決」と報告しない。
+
+## 2026-11-10 main 更新への追従
+
+元head `aac804c` の実装を現在のmain `6cf781e` へ正常mergeし、exports-only CSS compilerとmainのSDK両方の解決canaryを保持した。非runtimeの4境界に作業メタデータ`.godd/`を追加し、実行時importの禁止側も同じ範囲に揃えた。本番src/publicとUnity契約fixtureは保持する。
+
+未追跡の`.godd/`はローカルに保持し、`.gitignore`で公開対象から明示的に外す。Knipもこの既存の除外機構を使うため、作業用probeを配布ソースの未使用ファイルとして扱わず、Knip独自の重複ignoreは追加しない。
+
+実rootの比較は、私的な作業メタデータを両条件で除外した公開ソース条件で行う。旧stylesheetを使う条件にも同じmetadata除外を加えるため、無視ファイルを含まないmainのcheckoutと同じ比較範囲になる。実`.godd/`を前提条件確認のため再走査しない。除外指令そのものは、隔離した所有fixtureに既知のmetadata canaryを置き、明示的なsource指定と除外削除の正対照で検証する。依存pathはWindowsでもPOSIXへ正規化する。
+
+lock済み`@tailwindcss/postcss` 4.3.3/PostCSS 8.5.25、`optimize:false`で、前後とも52,242 bytes、SHA-256 `fa076e0da6ff2d8d43c43f60a1351847607834c6f22c9c5e414f8b9d6bd1179e`、全バイト一致。依存308→260、除外48/追加0、出力側metadata依存0件。これは同一の現在source treeでstylesheetだけを切り替えた比較で、旧commit全体とのbuild比較ではない。
+
+入力分類・依存境界・実compilerの関連3スイート242件が成功。元の公開済みCI失敗、修正、旧Previewの証跡は上の履歴として保持し、現在の配備先をPreviewへ戻す根拠にはしない。現在はmain→既存Productionだけを使用する。今回の同一CSS出力は3D外観採用や製品全体完成の判断を代替しない。

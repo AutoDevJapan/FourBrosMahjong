@@ -157,6 +157,7 @@ const FIXTURE: readonly [path: string, source: string][] = [
   ["server/cycle-b.ts", 'import "./cycle-a";\nexport const cycleB = 1;\n'],
   // CSS の明示除外先をクラス供給源に変える import は、除外の再検討なしに入れない。
   ["prototypes/runtime.ts", "export const value = 1;\n"],
+  [".godd/state/runtime.json", '{"value":1}\n'],
   [syntheticEvidence, '{"value":1}\n'],
   ["documents/assets/ui-refresh/manifest.json", '{"value":1}\n'],
   ["documents/fixtures/railway-pre-cutover.json", '{"value":1}\n'],
@@ -164,6 +165,10 @@ const FIXTURE: readonly [path: string, source: string][] = [
   [
     "src/app/nativeLeak.ts",
     'export { value } from "../../prototypes/runtime";\n',
+  ],
+  [
+    "src/app/metadataLeak.ts",
+    'import fixture from "../../.godd/state/runtime.json";\nexport const value = fixture.value;\n',
   ],
   [
     "src/app/evidenceLeak.ts",
@@ -430,6 +435,7 @@ describe("CSS 除外先を runtime へ import する前に境界の再検討を�
   });
   it.each([
     ["src/app/nativeLeak.ts", "prototypes/runtime.ts"],
+    ["src/app/metadataLeak.ts", ".godd/state/runtime.json"],
     ["src/app/evidenceLeak.ts", syntheticEvidence],
     ["src/app/assetLeak.ts", "documents/assets/ui-refresh/manifest.json"],
     ["src/app/railwayLeak.ts", "documents/fixtures/railway-pre-cutover.json"],

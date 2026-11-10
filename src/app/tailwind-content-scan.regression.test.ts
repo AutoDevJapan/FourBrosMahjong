@@ -134,6 +134,7 @@ describe("実 Tailwind compiler が非 runtime 境界を適用する (#1191)", (
     [posix.join("documents", "evidence", "unity", "runtime.json"), 9012],
     ["documents/assets/ui-refresh/manifest.json", 9013],
     ["documents/fixtures/railway-pre-cutover.json", 9014],
+    [posix.join(".godd", "state", "canary.json"), 9021],
   ] as const;
   const retained = [
     ["src/components/Runtime.tsx", 9015],
@@ -153,7 +154,7 @@ describe("実 Tailwind compiler が非 runtime 境界を適用する (#1191)", (
     );
     expect(
       result.dependencies.filter((path: string) =>
-        /^(prototypes\/|documents\/(evidence\/|assets\/|fixtures\/railway-pre-cutover\.json$))/.test(
+        /^(\.godd\/|prototypes\/|documents\/(evidence\/|assets\/|fixtures\/railway-pre-cutover\.json$))/.test(
           path,
         ),
       ),
@@ -165,7 +166,9 @@ describe("実 Tailwind compiler が非 runtime 境界を適用する (#1191)", (
     // 一時 repo に隔離する。canary 本体は既に除外済みの本テスト以外へ置かない。
     const directives = css.match(/^@source not .*;$/gm)?.join("\n");
     expect(directives).toBeDefined();
-    const inputs = `@import "tailwindcss";\n${directives}\n`;
+    // Hidden directories may be skipped by automatic discovery. Explicitly
+    // include only the owned fixture's metadata so the negative rule is tested.
+    const inputs = `@import "tailwindcss";\n@source "../../.godd";\n${directives}\n`;
     const control = BOUNDARY_SOURCES.reduce(
       (input, source) => input.replace(sourceNotPattern(source), ""),
       inputs,

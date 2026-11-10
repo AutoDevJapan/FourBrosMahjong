@@ -21,20 +21,27 @@ export const BOUNDARY_SOURCES = [
   "../../documents/evidence",
   "../../documents/assets",
   "../../documents/fixtures/railway-pre-cutover.json",
+  "../../.godd",
 ];
 
 /** @param {string} root @param {string} css */
 export async function scanCss(root, css) {
+  // Real-root audits compare the public source tree. Private job metadata is
+  // excluded in both conditions; its directive is tested using owned canaries.
+  const isRealRoot = resolve(root) === resolve(ROOT);
+  const input = isRealRoot
+    ? `${css.trimEnd()}\n@source not "../../.godd";${css.endsWith("\n") ? "\n" : ""}`
+    : css;
   const result = await postcss([
     tailwind({ base: root, optimize: false }),
-  ]).process(css, { from: resolve(root, "src/app/globals.css") });
+  ]).process(input, { from: resolve(root, "src/app/globals.css") });
   return {
     css: result.css,
     dependencies: [
       ...new Set(
         result.messages
           .filter((message) => message.type === "dependency")
-          .map((message) => relative(root, message.file)),
+          .map((message) => relative(root, message.file).replaceAll("\\", "/")),
       ),
     ].sort(),
   };
@@ -76,6 +83,7 @@ if (
     JSON.stringify(
       {
         beforeRef,
+        privateMetadataExcludedInBothScans: true,
         compiler: {
           tailwindPostcss: JSON.parse(
             readFileSync(
