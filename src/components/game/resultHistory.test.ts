@@ -17,6 +17,7 @@ import {
   parseResultHistory,
   persistOnlineHistoryAcrossTabs,
   RESULT_HISTORY_KEY,
+  readHistoryEpoch,
 } from "./resultHistory";
 
 class MemoryStorage implements Storage {
@@ -74,6 +75,61 @@ function serialized(entries: unknown[], legacySeeds: unknown[] = []): string {
 }
 
 describe("local and online result history", () => {
+  it("does not evict a newer result when an old pending record finally arrives", async () => {
+    const storage = new MemoryStorage();
+    const manager = locks();
+    for (let n = 2; n <= 21; n++)
+      await persistOnlineHistoryAcrossTabs(storage, online(n, n), manager);
+    const result = await persistOnlineHistoryAcrossTabs(
+      storage,
+      online(1, 1),
+      manager,
+    );
+    const retained = loadResultHistory(storage);
+    expect(
+      retained.some(
+        (entry) => historyEntryId(entry) === historyEntryId(online(1, 1)),
+      ),
+    ).toBe(false);
+    expect(retained).toEqual(
+      Array.from({ length: 20 }, (_, i) => online(21 - i, 21 - i)),
+    );
+    expect(result).toBe("not-retained");
+  });
+
+  it("keeps newer stored results when quota would trim away a delayed pending record", async () => {
+    const storage = new MemoryStorage();
+    const manager = locks();
+    for (const n of [6, 7, 8, 9])
+      await persistOnlineHistoryAcrossTabs(storage, online(n, n), manager);
+    const before = storage.getItem(RESULT_HISTORY_KEY);
+    const write = vi.spyOn(storage, "setItem").mockImplementation(() => {
+      throw new DOMException("full", "QuotaExceededError");
+    });
+    expect(
+      await persistOnlineHistoryAcrossTabs(storage, online(1, 1), manager),
+    ).toBe("not-retained");
+    expect(write).toHaveBeenCalledTimes(1);
+    expect(storage.getItem(RESULT_HISTORY_KEY)).toBe(before);
+  });
+
+  it("cancels pre-clear write tickets while allowing a later genuine match", async () => {
+    const storage = new MemoryStorage();
+    const manager = locks();
+    const old = { ...online(1), historyEpoch: readHistoryEpoch(storage) };
+    expect(await clearResultHistoryAcrossTabs(storage, manager)).toBe(
+      "cleared",
+    );
+    expect(await persistOnlineHistoryAcrossTabs(storage, old, manager)).toBe(
+      "cancelled",
+    );
+    expect(loadResultHistory(storage)).toEqual([]);
+    const next = { ...online(2), historyEpoch: readHistoryEpoch(storage) };
+    expect(await persistOnlineHistoryAcrossTabs(storage, next, manager)).toBe(
+      "appended",
+    );
+    expect(loadResultHistory(storage)).toEqual([next]);
+  });
   it("keeps v1 bytes and results while saving online without a fake seed", async () => {
     const storage = new MemoryStorage();
     persistHistory(storage, local(1));
@@ -219,7 +275,7 @@ describe("local and online result history", () => {
     const set = storage.setItem.bind(storage);
     vi.spyOn(storage, "setItem").mockImplementation((key, value) => {
       if (key === RESULT_HISTORY_KEY && JSON.parse(value).entries.length > 2)
-        throw new Error("quota");
+        throw new DOMException("quota", "QuotaExceededError");
       set(key, value);
     });
     expect(

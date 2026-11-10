@@ -35,6 +35,7 @@ import {
   historyEntryId,
   type ResultHistoryEntry as MatchHistoryEntry,
   notifyResultHistoryChanged as notifyHistoryChanged,
+  readHistoryEpoch,
   retryResultHistoryViewSnapshot as retryHistoryViewSnapshot,
   subscribeResultHistory as subscribeHistory,
 } from "@/components/game/resultHistory";
@@ -284,9 +285,12 @@ export default function MatchHistoryList() {
         storage === null
           ? "storage-failed"
           : await clearHistoryAcrossTabs(storage);
-      if (result === "cleared") {
+      if (result === "cleared" && storage !== null) {
         const localPendingCleared = clearPendingHistory();
-        const onlinePendingCleared = clearPendingOnlineHistory();
+        const onlinePendingCleared = clearPendingOnlineHistory(
+          undefined,
+          readHistoryEpoch(storage),
+        );
         // 保存済み履歴は消えているが、退避値の削除を確認できない場合は成功を案内しない。
         // 次回の操作で退避結果が復活するのを防ぐため、利用者へ再試行を促す。
         if (!localPendingCleared || !onlinePendingCleared)

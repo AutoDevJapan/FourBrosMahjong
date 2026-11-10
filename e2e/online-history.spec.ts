@@ -115,6 +115,54 @@ test("オンライン終局を旧戦績と保存し、再接続・次の半荘�
     await expect(
       history.getByText("保存されていた戦績をすべて削除しました。"),
     ).toBeVisible();
+    await page.evaluate(
+      (snapshot) => {
+        (
+          window as unknown as OnlineTestWindow
+        ).__fourBrosOnlineSockets[0].message({ type: "snapshot", snapshot });
+      },
+      {
+        ...first,
+        matchId: `${"a".repeat(32)}:2`,
+        version: 5,
+        hostNotice: {
+          reason: "disconnected" as const,
+          message: "保存確認用の再接続通知",
+          nextAction: "この半荘の結果を確認できます。",
+        },
+      },
+    );
+    await expect(page.getByText("保存確認用の再接続通知")).toBeVisible();
+    await page.evaluate(
+      (snapshot) => {
+        (
+          window as unknown as OnlineTestWindow
+        ).__fourBrosOnlineSockets[0].message({ type: "snapshot", snapshot });
+      },
+      {
+        ...onlineSnapshotFixture(),
+        matchId: `${"a".repeat(32)}:3`,
+        version: 6,
+      },
+    );
+    await expect(page.locator('[data-phase="playing"]')).toBeVisible();
+    await page.evaluate(
+      (snapshot) => {
+        (
+          window as unknown as OnlineTestWindow
+        ).__fourBrosOnlineSockets[0].message({ type: "snapshot", snapshot });
+      },
+      { ...first, matchId: `${"a".repeat(32)}:3`, version: 7 },
+    );
+    await expect
+      .poll(async () => (await records()).map((entry) => entry.onlineMatchId))
+      .toEqual([`${"a".repeat(32)}:3`]);
+    await expect(rows).toHaveCount(1);
+    await history.getByRole("button", { name: "戦績をすべて削除" }).click();
+    await history.getByRole("button", { name: "削除する" }).click();
+    await expect(
+      history.getByText("保存されていた戦績をすべて削除しました。"),
+    ).toBeVisible();
     await history.reload();
     await expect(
       history.getByText(/保存された戦績はまだありません/),

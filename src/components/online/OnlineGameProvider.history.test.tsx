@@ -9,11 +9,15 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { walkToGameEnd } from "@/components/game/finishedGameFixture";
 import { useGame } from "@/components/game/GameProvider";
 import { selectView } from "@/components/game/gameView";
-import { RESULT_HISTORY_KEY } from "@/components/game/resultHistory";
+import {
+  clearResultHistoryAcrossTabs,
+  RESULT_HISTORY_KEY,
+} from "@/components/game/resultHistory";
 import { createGame } from "@/domain/game/engine";
 import { createLockRequest } from "@/test/webLocksStub";
 import OnlineGameProvider from "./OnlineGameProvider";
 import {
+  clearPendingOnlineHistory,
   loadPendingOnlineHistory,
   PENDING_ONLINE_HISTORY_KEY,
   retryPendingOnlineHistory,
@@ -74,6 +78,63 @@ afterEach(() => {
 });
 
 describe("online completed match persistence", () => {
+  it("does not resave a cleared result on another snapshot, but saves the next half-game", async () => {
+    const { rerender } = render(<Provider value={snapshot()} />);
+    await waitFor(() =>
+      expect(screen.getByTestId("save-status")).toHaveTextContent("saved"),
+    );
+    expect(await clearResultHistoryAcrossTabs(localStorage)).toBe("cleared");
+    clearPendingOnlineHistory(sessionStorage);
+    rerender(<Provider value={{ ...snapshot(), version: 11 }} />);
+    await waitFor(() =>
+      expect(screen.getByTestId("save-status")).toHaveTextContent("idle"),
+    );
+    expect(localStorage.getItem(RESULT_HISTORY_KEY)).toBeNull();
+    expect(loadPendingOnlineHistory(sessionStorage)).toEqual([]);
+    rerender(<Provider value={snapshot(2)} />);
+    await waitFor(() =>
+      expect(screen.getByTestId("save-status")).toHaveTextContent("saved"),
+    );
+    const entries = JSON.parse(
+      localStorage.getItem(RESULT_HISTORY_KEY)!,
+    ).entries;
+    expect(entries).toHaveLength(1);
+    expect(entries[0].onlineMatchId).toBe(snapshot(2).matchId);
+    expect(entries[0].historyEpoch).toBe(1);
+  });
+
+  it("cancels a provider save queued behind clear instead of completing it as saved", async () => {
+    const request = createLockRequest();
+    Object.defineProperty(navigator, "locks", {
+      configurable: true,
+      value: { request },
+    });
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const blocker = request(
+      "four-bros-mahjong.history.write.v1",
+      { signal: new AbortController().signal },
+      () => held,
+    );
+    const clear = clearResultHistoryAcrossTabs(localStorage);
+    render(<Provider value={snapshot()} />);
+    await waitFor(() =>
+      expect(loadPendingOnlineHistory(sessionStorage)).toHaveLength(1),
+    );
+    await act(async () => {
+      release();
+      await blocker;
+      expect(await clear).toBe("cleared");
+      clearPendingOnlineHistory(sessionStorage);
+    });
+    await waitFor(() =>
+      expect(screen.getByTestId("save-status")).toHaveTextContent("idle"),
+    );
+    expect(localStorage.getItem(RESULT_HISTORY_KEY)).toBeNull();
+    expect(loadPendingOnlineHistory(sessionStorage)).toEqual([]);
+  });
   it("saves a real finished result in fixed p0-p3 order and reports success", async () => {
     render(<Provider value={snapshot()} />);
     await waitFor(() =>

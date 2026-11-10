@@ -6,6 +6,7 @@ import {
   type OnlineHistoryEntry,
   parseResultHistory,
   persistOnlineHistoryAcrossTabs,
+  readHistoryEpoch,
 } from "@/components/game/resultHistory";
 
 export const PENDING_ONLINE_HISTORY_KEY =
@@ -26,7 +27,11 @@ function read(storage: Storage): readonly OnlineHistoryEntry[] {
   return parsed !== null &&
     parsed.legacySeeds.length === 0 &&
     parsed.entries.every(isOnlineHistoryEntry)
-    ? parsed.entries
+    ? parsed.entries.map((entry) =>
+        entry.historyEpoch === undefined
+          ? { ...entry, historyEpoch: 0 }
+          : entry,
+      )
     : [];
 }
 
@@ -63,17 +68,32 @@ export function rememberPendingOnlineHistory(
       /* Never overwrite an unreadable queue. */
     }
   }
-  const retained =
+  const previous =
     stored?.find((item) => item.onlineMatchId === entry.onlineMatchId) ??
     pending.get(entry.onlineMatchId) ??
     entry;
+  let currentEpoch: number | null = null;
+  try {
+    const local = localStorageOrNull();
+    if (local !== null) currentEpoch = readHistoryEpoch(local);
+  } catch {
+    /* Keep an earlier capture while local storage is unreadable. */
+  }
+  const retained =
+    previous.historyEpoch === undefined
+      ? { ...previous, historyEpoch: currentEpoch ?? 0 }
+      : previous;
   pending.set(entry.onlineMatchId, retained);
   while (pending.size > MAX_HISTORY_ENTRIES) {
     const oldest = pending.keys().next().value;
     if (oldest === undefined) break;
     pending.delete(oldest);
   }
-  if (storage !== null && stored !== null) {
+  if (
+    storage !== null &&
+    stored !== null &&
+    (currentEpoch === null || retained.historyEpoch === currentEpoch)
+  ) {
     try {
       const merged = new Map(stored.map((item) => [item.onlineMatchId, item]));
       for (const [id, item] of pending)
@@ -106,11 +126,26 @@ export function forgetPendingOnlineHistory(
 
 export function clearPendingOnlineHistory(
   storage = onlineHistorySessionStorage(),
+  retainEpoch?: number,
 ): boolean {
   // A browser may have saved pending results before access was revoked.
   // Unreadable storage is not proof that its previous contents were removed.
   if (storage === null) return typeof window === "undefined";
   try {
+    if (retainEpoch !== undefined) {
+      const retained = read(storage).filter(
+        (entry) => entry.historyEpoch === retainEpoch,
+      );
+      if (retained.length) {
+        const raw = JSON.stringify({
+          version: 2,
+          entries: retained,
+          legacySeeds: [],
+        });
+        storage.setItem(PENDING_ONLINE_HISTORY_KEY, raw);
+        return storage.getItem(PENDING_ONLINE_HISTORY_KEY) === raw;
+      }
+    }
     storage.removeItem(PENDING_ONLINE_HISTORY_KEY);
     return storage.getItem(PENDING_ONLINE_HISTORY_KEY) === null;
   } catch {

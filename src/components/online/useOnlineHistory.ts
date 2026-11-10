@@ -9,6 +9,7 @@ import {
 } from "react";
 import { localStorageOrNull } from "@/components/common/browserStorage";
 import type { GameContextValue } from "@/components/game/GameProvider";
+import { MAX_HISTORY_ENTRIES } from "@/components/game/matchHistory";
 import {
   isOnlineHistoryEntry,
   notifyResultHistoryChanged,
@@ -60,6 +61,7 @@ export function useOnlineHistory(
       ),
   );
   const attempts = useRef(new Set<string>());
+  const observed = useRef(new Map<string, OnlineHistoryEntry>());
   const active = useRef(false);
   const current = useRef<string | null>(null);
   const errorCallback = useRef(onSaveError);
@@ -93,6 +95,12 @@ export function useOnlineHistory(
         entry,
         onlineHistorySessionStorage(),
       );
+      observed.current.set(id, retained);
+      while (observed.current.size > MAX_HISTORY_ENTRIES) {
+        const oldest = observed.current.keys().next().value;
+        if (oldest === undefined) break;
+        observed.current.delete(oldest);
+      }
       attempts.current.add(id);
       if (active.current && current.current === id)
         setSaved({ id, status: "pending" });
@@ -103,8 +111,13 @@ export function useOnlineHistory(
           : persistOnlineHistoryAcrossTabs(storage, retained);
       void attempt.then((result) => {
         attempts.current.delete(id);
-        const status = result === "failed" ? "failed" : "saved";
-        if (status === "saved") {
+        const status =
+          result === "failed"
+            ? "failed"
+            : result === "appended" || result === "already-exists"
+              ? "saved"
+              : "idle";
+        if (result !== "failed") {
           forgetPendingOnlineHistory(
             pending,
             id,
@@ -130,7 +143,11 @@ export function useOnlineHistory(
   useEffect(() => {
     const entry = finishedEntry(snapshot);
     if (entry !== null) {
-      persist(entry);
+      persist(
+        observed.current.get(entry.onlineMatchId) ??
+          pending.get(entry.onlineMatchId) ??
+          entry,
+      );
     }
     for (const queued of pending.values()) persist(queued);
   }, [snapshot, pending, persist]);

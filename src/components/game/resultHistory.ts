@@ -23,10 +23,27 @@ import {
 } from "./matchHistory";
 
 export const RESULT_HISTORY_KEY = "four-bros-mahjong.history.v2";
+const HISTORY_EPOCH_KEY = "four-bros-mahjong.history-epoch.v1";
+
+export function readHistoryEpoch(storage: Storage): number {
+  const raw = storage.getItem(HISTORY_EPOCH_KEY);
+  if (raw === null) return 0;
+  if (raw.length > 16) throw new Error("Invalid history epoch");
+  const value = Number(raw);
+  if (!/^(0|[1-9][0-9]{0,15})$/.test(raw) || !Number.isSafeInteger(value))
+    throw new Error("Invalid history epoch");
+  return value;
+}
 
 export interface OnlineHistoryEntry extends Omit<MatchHistoryEntry, "seed"> {
   readonly onlineMatchId: string;
+  /** First-capture deletion epoch, retained by pending retries. */
+  readonly historyEpoch?: number;
 }
+type OnlineHistoryPersistenceResult =
+  | HistoryPersistenceResult
+  | "cancelled"
+  | "not-retained";
 export type ResultHistoryEntry = MatchHistoryEntry | OnlineHistoryEntry;
 
 interface SavedResults {
@@ -48,8 +65,16 @@ export function isOnlineHistoryEntry(
   if (!isMatchHistoryResult(value)) return false;
   const entry = value as unknown as Record<string, unknown>;
   return (
-    hasOnlyKeys(entry, ["onlineMatchId", "finishedAt", "players"]) &&
-    isOnlineMatchId(entry.onlineMatchId)
+    hasOnlyKeys(
+      entry,
+      Object.hasOwn(entry, "historyEpoch")
+        ? ["onlineMatchId", "finishedAt", "players", "historyEpoch"]
+        : ["onlineMatchId", "finishedAt", "players"],
+    ) &&
+    isOnlineMatchId(entry.onlineMatchId) &&
+    (entry.historyEpoch === undefined ||
+      (Number.isSafeInteger(entry.historyEpoch) &&
+        Number(entry.historyEpoch) >= 0))
   );
 }
 
@@ -121,14 +146,22 @@ export async function persistOnlineHistoryAcrossTabs(
   storage: Storage,
   entry: OnlineHistoryEntry,
   locks?: HistoryLockManager | null,
-): Promise<HistoryPersistenceResult> {
+): Promise<OnlineHistoryPersistenceResult> {
   if (!isOnlineHistoryEntry(entry)) return "failed";
   const manager = resolveLockManager(locks);
   if (manager === null) return "failed";
+  let expectedEpoch: number;
+  try {
+    expectedEpoch = entry.historyEpoch ?? readHistoryEpoch(storage);
+  } catch {
+    return "failed";
+  }
   return withHistoryLock(
     manager,
-    (): HistoryPersistenceResult => {
+    (): OnlineHistoryPersistenceResult => {
       try {
+        // The check belongs inside the same lock as append and explicit clear.
+        if (readHistoryEpoch(storage) !== expectedEpoch) return "cancelled";
         const legacyRaw = storage.getItem(MATCH_HISTORY_KEY);
         const legacy =
           legacyRaw === null ? [] : (parseHistory(legacyRaw) ?? []);
@@ -141,7 +174,12 @@ export async function persistOnlineHistoryAcrossTabs(
           )
         )
           return "already-exists";
-        let next = [entry, ...entries].slice(0, MAX_HISTORY_ENTRIES);
+        let next = [entry, ...entries]
+          .sort((a, b) => b.finishedAt - a.finishedAt)
+          .slice(0, MAX_HISTORY_ENTRIES);
+        const retained = () =>
+          next.some((item) => historyEntryId(item) === historyEntryId(entry));
+        if (!retained()) return "not-retained";
         for (;;) {
           const serialized = JSON.stringify({
             version: 2,
@@ -152,9 +190,17 @@ export async function persistOnlineHistoryAcrossTabs(
             if (serialized.length * 2 > MAX_HISTORY_BYTES)
               throw new Error("history capacity");
             storage.setItem(RESULT_HISTORY_KEY, serialized);
-          } catch {
+          } catch (error) {
+            if (
+              !error ||
+              typeof error !== "object" ||
+              !("name" in error) ||
+              error.name !== "QuotaExceededError"
+            )
+              return "failed";
             if (next.length <= 1) return "failed";
             next = next.slice(0, Math.max(1, Math.floor(next.length / 2)));
+            if (!retained()) return "not-retained";
             continue;
           }
           try {
@@ -179,10 +225,15 @@ export async function clearResultHistoryAcrossTabs(
 ): Promise<HistoryClearResult> {
   const clear = (): HistoryClearResult => {
     try {
+      const nextEpoch = readHistoryEpoch(storage) + 1;
+      if (!Number.isSafeInteger(nextEpoch)) return "storage-failed";
       if (!clearHistory(storage)) return "storage-failed";
       storage.removeItem(RESULT_HISTORY_KEY);
+      // Removing records first also frees quota for the small invalidation marker.
+      storage.setItem(HISTORY_EPOCH_KEY, String(nextEpoch));
       return storage.getItem(MATCH_HISTORY_KEY) === null &&
-        storage.getItem(RESULT_HISTORY_KEY) === null
+        storage.getItem(RESULT_HISTORY_KEY) === null &&
+        storage.getItem(HISTORY_EPOCH_KEY) === String(nextEpoch)
         ? "cleared"
         : "storage-failed";
     } catch {
