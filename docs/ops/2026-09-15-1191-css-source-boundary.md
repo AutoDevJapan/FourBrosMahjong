@@ -146,3 +146,5 @@ lock済み`@tailwindcss/postcss` 4.3.3/PostCSS 8.5.25、`optimize:false`で、�
 `6cf781e`のstylesheetを基準に、同じ現在source treeで再測定した結果、CSSは前後とも52,242 bytes、SHA-256 `fa076e0da6ff2d8d43c43f60a1351847607834c6f22c9c5e414f8b9d6bd1179e`、全バイト一致だった。入力依存308→253、除外55/追加0。直前の260件から減った7件は、readyz fixture1件とテスト専用module6件である。実作業メタデータは両条件で除外したまま、隔離fixtureでその除外を対照検証した。末尾LFなしの対照は52,241 bytes、LFを保持すれば元出力と一致する。
 
 関連3スイート250件、型検査、変更ファイルESLint、全体Biome・Knip・dependency-cruiserが成功した。TypeScriptの入力一覧にmetadataは0件。依存検査は457 modules / 1,519 dependenciesで違反0だった。全tracked pathの整合テストは初回、dotfileをglob照合が拾わない4件で失敗したため、directoryの範囲をdotfileも含むprefixへ修正して再確認した。
+
+上の308→253はオンライン戦績統合前の`8116dd5`時点の記録である。最新main`2ac7588`を取り込んだ`758a896`でも関連250件が成功し、同mainのstylesheetを基準に再監査した。CSSは同じ52,242 bytes・同じSHA-256で前後一致、入力311→256、除外55/追加0だった。オンライン機能のruntime module追加による母数の増加と、CSS境界の効果を区別する。
