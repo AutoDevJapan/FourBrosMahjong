@@ -1,6 +1,71 @@
 import { expect, test } from "@playwright/test";
 import { advanceUntil } from "./helpers/gameDriver";
 
+for (const width of [320, 393, 700, 1280]) {
+  test(`${width}pxで3D演出が牌・情報・操作領域を覆わない`, async ({ page }) => {
+    await page.setViewportSize({ width, height: 1500 });
+    await page.goto("/game?seed=1");
+    await expect(page.locator(".game-table-3d")).toHaveAttribute(
+      "data-3d-status",
+      "ready",
+    );
+    const hand = page.getByRole("listbox", { name: "自家の手牌" });
+    await hand.getByRole("option").first().focus();
+    await hand.getByRole("option").first().press("Enter");
+    // Presence and all rectangles share one read; an expired cue cannot pass.
+    const active = await page.waitForFunction(() => {
+      const cue = document.querySelector('[data-effect-overlay="true"] > div');
+      const board = document.querySelector(".game-live-table");
+      if (!cue || !board) return null;
+      const a = cue.getBoundingClientRect();
+      if (!a.width || !a.height) return null;
+      const hands = [
+        ...document.querySelectorAll(
+          '.game-legacy-board [aria-label="自家の手牌"]',
+        ),
+      ]
+        .map((element) => element.getBoundingClientRect())
+        .filter((rect) => rect.width && rect.height);
+      const controls = [
+        ...document.querySelectorAll('[aria-label="操作パネル"]'),
+      ]
+        .map((element) => element.getBoundingClientRect())
+        .filter((rect) => rect.width && rect.height);
+      if (!hands.length || !controls.length) return null;
+      const protectedRects = [
+        board.getBoundingClientRect(),
+        ...hands,
+        ...controls,
+      ];
+      if (protectedRects.some((rect) => !rect.width || !rect.height))
+        return null;
+      return {
+        cue: { x: a.x, y: a.y, right: a.right, bottom: a.bottom },
+        protected: protectedRects.map((rect) => ({
+          x: rect.x,
+          y: rect.y,
+          right: rect.right,
+          bottom: rect.bottom,
+        })),
+        overlaps: protectedRects.some(
+          (rect) =>
+            a.x < rect.right &&
+            a.right > rect.x &&
+            a.y < rect.bottom &&
+            a.bottom > rect.y,
+        ),
+      };
+    });
+    const measurement = await active.jsonValue();
+    if (measurement === null)
+      throw new Error("Live cue geometry was not captured");
+    expect(measurement.overlaps, JSON.stringify(measurement)).toBe(false);
+    expect(
+      await page.evaluate(() => document.documentElement.scrollWidth),
+    ).toBeLessThanOrEqual(width);
+  });
+}
+
 test("通常対局でWebGL盤面が起動し、打牌・復元・context lossを通過する", async ({
   page,
 }, testInfo) => {
@@ -60,6 +125,18 @@ test("通常対局でWebGL盤面が起動し、打牌・復元・context lossを
   await expect(
     page.locator('[data-testid="remaining-live-tiles"] dd').first(),
   ).toHaveText(after ?? "");
+  const restoredHand = page
+    .getByLabel("自家の手牌", { exact: true })
+    .filter({ visible: true });
+  await expect(restoredHand).toHaveCount(1);
+  const handRole = await restoredHand.getAttribute("role");
+  expect(["list", "listbox"]).toContain(handRole);
+  const faces = await restoredHand
+    .locator("[data-face]")
+    .evaluateAll((tiles) =>
+      tiles.map((tile) => tile.getAttribute("data-face")),
+    );
+  expect(faces.length).toBeGreaterThan(0);
   await canvas.evaluate((element: HTMLCanvasElement) => {
     const gl = element.getContext("webgl2");
     const extension = gl?.getExtension("WEBGL_lose_context");
@@ -75,9 +152,17 @@ test("通常対局でWebGL盤面が起動し、打牌・復元・context lossを
       (element) => getComputedStyle(element, "::before").content,
     ),
   ).not.toBe("none");
-  await expect(
-    page.getByRole("list", { name: "自家の手牌", exact: true }),
-  ).toBeVisible();
+  // The actual pending action determines list versus listbox. Normal production
+  // ignores the dev seed query, so preserve observed semantics and every face.
+  await expect(restoredHand).toBeVisible();
+  await expect(restoredHand).toHaveAttribute("role", handRole as string);
+  expect(
+    await restoredHand
+      .locator("[data-face]")
+      .evaluateAll((tiles) =>
+        tiles.map((tile) => tile.getAttribute("data-face")),
+      ),
+  ).toEqual(faces);
   await expect(
     page.locator('[data-testid="remaining-live-tiles"] dd').first(),
   ).toHaveText(after ?? "");

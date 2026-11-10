@@ -814,6 +814,11 @@ export default function GameBoard({
           ) : null}
         </div>
       ) : null}
+      {render3D && tableDisplayStatus === "ready" ? (
+        <div className="flex min-h-[4.5rem] items-center justify-center">
+          <EffectOverlay effect={gameEffect} placement="inline" />
+        </div>
+      ) : null}
       {/*
        * 盤面本体(段階①/段階②)。いずれか一方だけがコンテナクエリの display:none で
        * 可視化されるため、AT・E2E のロール照会には常に1側だけが露出する(非表示側は
@@ -893,7 +898,9 @@ export default function GameBoard({
         </div>
       ) : null}
 
-      <EffectOverlay effect={gameEffect} />
+      {render3D && tableDisplayStatus === "ready" ? null : (
+        <EffectOverlay effect={gameEffect} />
+      )}
 
       {/* 全体盤面モーダル(段階②の補完): 4物理枠を閲覧専用で再表示。狭幅では読み順に1列化し、フォーカストラップ/Escape は Modal が担保。 */}
       {boardOpen ? (

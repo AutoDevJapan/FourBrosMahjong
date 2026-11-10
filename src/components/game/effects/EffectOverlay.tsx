@@ -13,16 +13,24 @@ const EFFECT_CLASS: Record<ActiveGameEffect["kind"], string> = {
 
 interface EffectOverlayProps {
   readonly effect: ActiveGameEffect | null;
+  readonly placement?: "overlay" | "inline";
 }
 
 /** A decorative, pointer-transparent cue; the existing LiveRegion carries its text. */
-export default function EffectOverlay({ effect }: EffectOverlayProps) {
+export default function EffectOverlay({
+  effect,
+  placement = "overlay",
+}: EffectOverlayProps) {
   if (effect === null) return null;
 
   return (
     <div
       aria-hidden="true"
-      className="pointer-events-none absolute inset-x-0 top-1/2 z-20 flex -translate-y-1/2 justify-center px-4"
+      className={
+        placement === "inline"
+          ? "pointer-events-none flex w-full min-w-0 justify-center px-4"
+          : "pointer-events-none absolute inset-x-0 top-1/2 z-20 flex -translate-y-1/2 justify-center px-4"
+      }
       data-effect-id={effect.eventId}
       data-effect-key={effect.eventKey}
       data-effect-overlay="true"
