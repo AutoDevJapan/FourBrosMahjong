@@ -161,6 +161,7 @@ const FIXTURE: readonly [path: string, source: string][] = [
   [syntheticEvidence, '{"value":1}\n'],
   ["documents/assets/ui-refresh/manifest.json", '{"value":1}\n'],
   ["documents/fixtures/railway-pre-cutover.json", '{"value":1}\n'],
+  ["documents/fixtures/railway-readyz-before-iac.json", '{"value":1}\n'],
   ["documents/fixtures/unity-display-contract.json", '{"value":1}\n'],
   [
     "src/app/nativeLeak.ts",
@@ -184,6 +185,26 @@ const FIXTURE: readonly [path: string, source: string][] = [
   [
     "src/app/railwayLeak.ts",
     'import fixture from "../../documents/fixtures/railway-pre-cutover.json";\nexport const value = fixture.value;\n',
+  ],
+  [
+    "src/app/readyzLeak.ts",
+    'import fixture from "../../documents/fixtures/railway-readyz-before-iac.json";\nexport const value = fixture.value;\n',
+  ],
+  [
+    "src/domain/game/__testing__/nativeConsumer.ts",
+    'export { value } from "../../../../prototypes/runtime";\n',
+  ],
+  [
+    "src/domain/hand/__oracle__/nativeConsumer.ts",
+    'export { value } from "../../../../prototypes/runtime";\n',
+  ],
+  [
+    "src/app/testingLeak.ts",
+    'export { value } from "../domain/game/__testing__/nativeConsumer";\n',
+  ],
+  [
+    "src/app/oracleLeak.ts",
+    'export { value } from "../domain/hand/__oracle__/nativeConsumer";\n',
   ],
   [
     "src/app/indirectLeak.ts",
@@ -439,6 +460,12 @@ describe("CSS 除外先を runtime へ import する前に境界の再検討を�
     ["src/app/evidenceLeak.ts", syntheticEvidence],
     ["src/app/assetLeak.ts", "documents/assets/ui-refresh/manifest.json"],
     ["src/app/railwayLeak.ts", "documents/fixtures/railway-pre-cutover.json"],
+    [
+      "src/app/readyzLeak.ts",
+      "documents/fixtures/railway-readyz-before-iac.json",
+    ],
+    ["src/app/testingLeak.ts", "src/domain/game/__testing__/nativeConsumer.ts"],
+    ["src/app/oracleLeak.ts", "src/domain/hand/__oracle__/nativeConsumer.ts"],
     ["scripts/runtimeBridge.ts", "prototypes/runtime.ts"],
   ])(
     "%s → %s は error（静的 import・re-export・動的 literal import・中継）",
@@ -455,6 +482,8 @@ describe("CSS 除外先を runtime へ import する前に境界の再検討を�
     "src/app/unityConsumer.ts",
     "src/app/native.test.ts",
     "src/test/nativeConsumer.ts",
+    "src/domain/game/__testing__/nativeConsumer.ts",
+    "src/domain/hand/__oracle__/nativeConsumer.ts",
   ])("%s の正当な runtime fixture / test consumer は許可", (from) => {
     expect(
       violations.filter(

@@ -7,7 +7,7 @@ import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
-import { dirname, relative, resolve } from "node:path";
+import { dirname, posix, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import tailwind from "@tailwindcss/postcss";
 
@@ -21,8 +21,27 @@ export const BOUNDARY_SOURCES = [
   "../../documents/evidence",
   "../../documents/assets",
   "../../documents/fixtures/railway-pre-cutover.json",
+  "../../documents/fixtures/railway-readyz-before-iac.json",
   "../../.godd",
+  "../../**/__testing__",
+  "../../**/__oracle__",
 ];
+
+/** @param {string} path Repository-relative path, without reading the file. */
+export function isCssExcludedInput(path) {
+  const candidate = path.replaceAll("\\", "/");
+  return BOUNDARY_SOURCES.some((source) => {
+    const rootPath = posix.normalize(posix.join("src/app", source));
+    if (rootPath.startsWith("**/")) {
+      return candidate.split("/").slice(0, -1).includes(rootPath.slice(3));
+    }
+    // A directory exclusion also covers dotfiles. Glob '*' matching would
+    // silently omit .gitignore/.gitattributes from this consistency check.
+    return source.endsWith(".json")
+      ? candidate === rootPath
+      : candidate.startsWith(`${rootPath}/`);
+  });
+}
 
 /** @param {string} root @param {string} css */
 export async function scanCss(root, css) {

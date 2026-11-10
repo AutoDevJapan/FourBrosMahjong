@@ -114,9 +114,15 @@ module.exports = {
       severity: "error",
       // Apply to intermediate modules too, so a runtime re-export through scripts/
       // cannot bypass the boundary. Test consumers remain legitimate.
-      from: { pathNot: [TEST_FILE, "^(src/test|e2e)/"] },
+      from: {
+        pathNot: [
+          TEST_FILE,
+          "^(src/test|e2e)/",
+          "(^|/)(__testing__|__oracle__)/",
+        ],
+      },
       to: {
-        path: "^(\\.godd/|prototypes/|documents/(evidence/|assets/|fixtures/railway-pre-cutover\\.json$))",
+        path: "^(\\.godd/|prototypes/|documents/(evidence/|assets/|fixtures/railway-(pre-cutover|readyz-before-iac)\\.json$))|(^|/)(__testing__|__oracle__)/",
       },
     },
     {

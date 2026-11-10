@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process";
 import {
   mkdirSync,
   mkdtempSync,
@@ -7,11 +8,17 @@ import {
   symlinkSync,
   writeFileSync,
 } from "node:fs";
+import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { dirname, join, posix } from "node:path";
 import { fileURLToPath } from "node:url";
+import { ESLint } from "eslint";
 import { describe, expect, it } from "vitest";
-import { BOUNDARY_SOURCES, scanCss } from "../test/tailwind-source-audit.mjs";
+import {
+  BOUNDARY_SOURCES,
+  isCssExcludedInput,
+  scanCss,
+} from "../test/tailwind-source-audit.mjs";
 
 /**
  * Tailwind v4 のコンテンツ走査除外を守る回帰テスト(#329 / #333)。
@@ -135,6 +142,9 @@ describe("実 Tailwind compiler が非 runtime 境界を適用する (#1191)", (
     ["documents/assets/ui-refresh/manifest.json", 9013],
     ["documents/fixtures/railway-pre-cutover.json", 9014],
     [posix.join(".godd", "state", "canary.json"), 9021],
+    ["documents/fixtures/railway-readyz-before-iac.json", 9022],
+    [posix.join("src", "domain", "game", "__testing__", "canary.ts"), 9023],
+    [posix.join("src", "domain", "hand", "__oracle__", "canary.ts"), 9024],
   ] as const;
   const retained = [
     ["src/components/Runtime.tsx", 9015],
@@ -142,6 +152,7 @@ describe("実 Tailwind compiler が非 runtime 境界を適用する (#1191)", (
     // 類似名まで広く消すパターンへの退行も検出する。
     [posix.join("documents", "assets-runtime", "contract.json"), 9017],
     [posix.join("documents", "fixtures", "other-runtime.json"), 9018],
+    [posix.join("src", "__testing__-runtime", "contract.ts"), 9025],
   ] as const;
 
   it("実リポジトリの依存 graph から境界内だけを外し、本番 src / Unity fixture を保持する", async () => {
@@ -152,12 +163,37 @@ describe("実 Tailwind compiler が非 runtime 境界を適用する (#1191)", (
     expect(result.dependencies).toContain(
       "documents/fixtures/unity-display-contract.json",
     );
+    expect(result.dependencies.filter(isCssExcludedInput)).toEqual([]);
+  });
+
+  it("全 tracked path と正負の canary で compiler 境界と import 境界が一致する", () => {
+    const loadConfig = createRequire(import.meta.url);
+    const config = loadConfig(join(ROOT, ".dependency-cruiser.cjs"));
+    const boundary = config.forbidden.find(
+      (rule: { name: string }) =>
+        rule.name === "no-runtime-to-css-excluded-inputs",
+    );
+    expect(boundary?.severity).toBe("error");
+    const target = new RegExp(boundary.to.path);
+    const tracked = execFileSync("git", ["ls-files", "-z"], {
+      cwd: ROOT,
+      encoding: "utf8",
+    })
+      .split("\0")
+      .filter(Boolean);
+    expect(tracked).toContain("src/app/globals.css");
+    for (const [path] of excluded) {
+      expect(isCssExcludedInput(path), path).toBe(true);
+    }
+    for (const [path] of retained) {
+      expect(isCssExcludedInput(path), path).toBe(false);
+    }
     expect(
-      result.dependencies.filter((path: string) =>
-        /^(\.godd\/|prototypes\/|documents\/(evidence\/|assets\/|fixtures\/railway-pre-cutover\.json$))/.test(
-          path,
-        ),
-      ),
+      [
+        ...tracked,
+        ...excluded.map(([path]) => path),
+        ...retained.map(([path]) => path),
+      ].filter((path) => target.test(path) !== isCssExcludedInput(path)),
     ).toEqual([]);
   });
 
@@ -186,7 +222,7 @@ describe("実 Tailwind compiler が非 runtime 境界を適用する (#1191)", (
         symlinkSync(
           join(ROOT, "node_modules"),
           join(dir, "node_modules"),
-          "dir",
+          process.platform === "win32" ? "junction" : "dir",
         );
         for (const [path, value] of [...excluded, ...retained]) {
           const absolute = join(dir, path);
@@ -217,5 +253,26 @@ describe("実 Tailwind compiler が非 runtime 境界を適用する (#1191)", (
         rmSync(dir, { recursive: true, force: true });
       }
     }
+  });
+});
+
+describe("作業メタデータは検証ソースへ含めない", () => {
+  it("ESLint は仮の metadata path を無視し、通常の src は検査する", async () => {
+    const eslint = new ESLint({ cwd: ROOT });
+    // isPathIgnored is a config-only lookup: do not create/read job metadata.
+    expect(
+      await eslint.isPathIgnored(join(ROOT, ".godd/hypothetical-only.cjs")),
+    ).toBe(true);
+    expect(await eslint.isPathIgnored(join(ROOT, "src/app/page.tsx"))).toBe(
+      false,
+    );
+  }, 60_000);
+
+  it("TypeScript の自動 include から metadata を外す", () => {
+    const config = JSON.parse(
+      readFileSync(join(ROOT, "tsconfig.json"), "utf8"),
+    );
+    expect(config.exclude).toContain(".godd");
+    expect(config.exclude).toContain("node_modules");
   });
 });

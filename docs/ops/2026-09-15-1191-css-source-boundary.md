@@ -10,14 +10,17 @@ Tailwind は import graph ではなくファイルをテキストとして走査
 | `documents/evidence/` | 実行結果・検証記録。基準 `2074f2c` には存在しないため、将来の JSON 混入は一時 fixture の実スキャナ canary で確認する。CSS から除外する。 |
 | `documents/assets/` | 素材原本・UI 更新監査 manifest。`ui-refresh-assets.test.ts` と `scripts/verify-ui-refresh-assets.mjs` が inventory/hash を読む。Web が配信する `public/` とは別。CSS から除外する。 |
 | `documents/fixtures/railway-pre-cutover.json` | Railway 移行契約モジュールとテストが読む、移行前状態の fixture。CSS からこのファイルだけを除外する。 |
+| `documents/fixtures/railway-readyz-before-iac.json` | readyz移行前状態のfixture。単体テストの入力であり、CSSから除外する。 |
+| `.godd/` | 配布しない作業メタデータ。CSS・Git・ESLint・TypeScriptの自動入力から除外する。 |
+| `**/__testing__/` / `**/__oracle__/` | テスト専用のfixture・比較実装。CSSから除外し、これらから検証資産へのimportを許可する。本番moduleからこれらへのimportは許可しない。 |
 | `documents/fixtures/unity-display-contract.json` | `src/components/prototype/UnityDisplayReference.tsx` の本番 import、Unity 契約テスト、`e2e/unity-display-reference.spec.ts` が読む。CSS 走査に残す。 |
 | `src/` の本番コード、`public/`、その他の runtime fixture | 従来の走査を維持する。`documents/` 全体の除外は行わない。 |
 
 ## 再発ガード
 
-- 既存の除外指令回帰テストに4境界を追加した。
+- 除外指令の回帰テストは監査コードの`BOUNDARY_SOURCES`を参照する。実graphの境界照合も同じ一覧を使い、tracked pathと正負のcanary全体でdependency-cruiser側の範囲との一致を確認する。
 - 実際に lock された `@tailwindcss/postcss` と、その package が使う PostCSS を起動する。実 repo の入力 graph で `src` と Unity fixture が残り、除外先が消えることを確認する。
-- 一時 repo の4除外先に独立したクラス canary を置き、入力 graph と生成 CSS の両方から消えることを確認する。`src`、Unity fixture、別 runtime fixture、類似名ディレクトリの4 canary は残す。除外指令だけを消した正対照では全8 canary が復活する。別の base でコンパイルし、スキャナの状態を共有しない。
+- 一時 repo の8除外先に独立したクラス canary を置き、入力 graph と生成 CSS の両方から消えることを確認する。`src`、Unity fixture、別 runtime fixture、類似名ディレクトリの5 canary は残す。除外指令だけを消した正対照では全13 canary が現れる。別の base でコンパイルし、スキャナの状態を共有しない。Windowsではnode_modulesの接続にjunctionを使い、symlink作成権限を必要としない。
 - canary と監査コードは既存の除外対象 `*.test.ts` / `src/test/` に置く。監査自身が CSS 候補を供給しない。
 - `no-runtime-to-css-excluded-inputs` は除外先への静的 import、literal の dynamic import、re-export を error にする。中継モジュール経由も見落とさないよう、走査 graph 内の非テストモジュールにも適用する。直接のテスト consumer と本番 Unity fixture は許可する。任意の計算済みパスによる `fs` / `fetch` は静的 import graph では保証できないため、新たな読み込み処理を追加する際はこの境界の再レビューが必要。
 - コンパイラ package は `exports` のみを公開し、従来の dependency-cruiser resolver（`exportsFields: []`）では未解決だった。未解決 import を除外するのではなく、[公式 options](https://github.com/sverweij/dependency-cruiser/blob/main/doc/options-reference.md#enhancedresolveoptions) と lock 済み18.2.0の `--init` template に従い `exportsFields` / `conditionNames` を明示した。exports-only package の実解決 canary、既存レイヤー canary、実 graph を確認する。
@@ -133,3 +136,13 @@ sanitizer、検査抑制、CI 分類例外、production code の変更は加え�
 lock済み`@tailwindcss/postcss` 4.3.3/PostCSS 8.5.25、`optimize:false`で、前後とも52,242 bytes、SHA-256 `fa076e0da6ff2d8d43c43f60a1351847607834c6f22c9c5e414f8b9d6bd1179e`、全バイト一致。依存308→260、除外48/追加0、出力側metadata依存0件。これは同一の現在source treeでstylesheetだけを切り替えた比較で、旧commit全体とのbuild比較ではない。
 
 入力分類・依存境界・実compilerの関連3スイート242件が成功。元の公開済みCI失敗、修正、旧Previewの証跡は上の履歴として保持し、現在の配備先をPreviewへ戻す根拠にはしない。現在はmain→既存Productionだけを使用する。今回の同一CSS出力は3D外観採用や製品全体完成の判断を代替しない。
+
+## 追加の入力境界修正
+
+現在mainで追加済みのreadyz移行fixtureと、テスト専用の`__testing__` / `__oracle__`もCSS走査から除外した。依存境界は同じ範囲へ揃え、テスト専用helperの正当なconsumerは残した。元の修正で明示した`.godd/`の除外はESLintのflat configとTypeScriptにも反映した。ESLintの検証は、存在しない仮pathに対する`isPathIgnored`で行い、実メタデータの内容を読まない。
+
+修正前は、新しい回帰テスト8件が意図したassertionで失敗した（compiler canary、移行fixtureとhelperへのruntime import、helperの正当なconsumer、ESLintとTypeScriptの除外）。Windowsのfixture接続はjunctionへ変更した。境界一覧の整合テストは全tracked pathと正負のcanaryを照合し、監査・CSS指令・importルールの範囲がずれた場合に失敗する。
+
+`6cf781e`のstylesheetを基準に、同じ現在source treeで再測定した結果、CSSは前後とも52,242 bytes、SHA-256 `fa076e0da6ff2d8d43c43f60a1351847607834c6f22c9c5e414f8b9d6bd1179e`、全バイト一致だった。入力依存308→253、除外55/追加0。直前の260件から減った7件は、readyz fixture1件とテスト専用module6件である。実作業メタデータは両条件で除外したまま、隔離fixtureでその除外を対照検証した。末尾LFなしの対照は52,241 bytes、LFを保持すれば元出力と一致する。
+
+関連3スイート250件、型検査、変更ファイルESLint、全体Biome・Knip・dependency-cruiserが成功した。TypeScriptの入力一覧にmetadataは0件。依存検査は457 modules / 1,519 dependenciesで違反0だった。全tracked pathの整合テストは初回、dotfileをglob照合が拾わない4件で失敗したため、directoryの範囲をdotfileも含むprefixへ修正して再確認した。
