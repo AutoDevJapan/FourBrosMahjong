@@ -19,5 +19,5 @@
 
 ## 関連
 
-- [`docs/デプロイ環境運用.md`](../../docs/デプロイ環境運用.md) — Vercel 連携・dev/stg/prd 環境定義・昇格フロー
+- [`docs/デプロイ環境運用.md`](../../docs/デプロイ環境運用.md) — 既存PrdだけへのVercel/Railway配布、localhost・CI検証、配備と受入の記録
 - [`documents/adr/`](../adr/README.md) — デプロイ構成などのアーキテクチャ決定
