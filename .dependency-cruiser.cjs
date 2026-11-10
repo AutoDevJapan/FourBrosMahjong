@@ -106,6 +106,26 @@ module.exports = {
       to: { path: PRESENTATION },
     },
     {
+      name: "no-runtime-to-css-excluded-inputs",
+      comment:
+        "CSS source exclusions assume these native/evidence/asset-audit inputs " +
+        "do not supply runtime classes. Review globals.css before importing them " +
+        "into shipped code; the production Unity contract fixture is not excluded.",
+      severity: "error",
+      // Apply to intermediate modules too, so a runtime re-export through scripts/
+      // cannot bypass the boundary. Test consumers remain legitimate.
+      from: {
+        pathNot: [
+          TEST_FILE,
+          "^(src/test|e2e)/",
+          "(^|/)(__testing__|__oracle__)/",
+        ],
+      },
+      to: {
+        path: "^(\\.godd/|prototypes/|documents/(evidence/|assets/|fixtures/railway-(pre-cutover|readyz-before-iac)\\.json$))|(^|/)(__testing__|__oracle__)/",
+      },
+    },
+    {
       name: "no-unresolvable-in-src",
       comment:
         "An import under src/ that dependency-cruiser cannot resolve produces no " +
@@ -130,7 +150,8 @@ module.exports = {
     doNotFollow: { path: "node_modules" },
     tsConfig: { fileName: "tsconfig.json" },
     tsPreCompilationDeps: true,
-    // Resolve SDK packages that expose only package.json exports.
+    // Resolve exports-only SDK and CSS compiler packages using the official
+    // resolver defaults, without waiving no-unresolvable-in-src.
     enhancedResolveOptions: {
       exportsFields: ["exports"],
       conditionNames: ["import", "require", "node", "default", "types"],

@@ -48,3 +48,5 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+# Private local job metadata is retained locally, outside published sources.
+.godd/

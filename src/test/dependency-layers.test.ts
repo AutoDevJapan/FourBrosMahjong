@@ -10,7 +10,7 @@ import {
 } from "node:fs";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { dirname, join, posix } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   cruise,
@@ -44,12 +44,27 @@ function makeFixtureDir(): string {
   return realpathSync(mkdtempSync(join(tmpdir(), "depcruise-layers-")));
 }
 
+// 一時 fixture にのみ生成する資産。実 repo 入力の literal ではないため、
+// #745 の入力 inventory に架空の evidence を登録しないよう部品から組み立てる。
+const syntheticEvidence = posix.join("documents", "evidence", "runtime.json");
+
 /**
  * 合成フィクスチャ。`[パス, 中身]` の形で、レイヤー境界の各ケースを 1 つずつ含む。
  * 依存は相対パスで書く(`@/` エイリアスは `tsConfig` に依存するが、一時ディレクトリには
  * リポジトリの `tsconfig.json` が無いため `cruise()` 呼び出しで `tsConfig` を外している)。
  */
 const FIXTURE: readonly [path: string, source: string][] = [
+  // exports-only packages have no legacy main/index.js fallback.
+  [
+    "node_modules/css-compiler/package.json",
+    '{"name":"css-compiler","exports":{".":{"import":"./compiler.mjs","require":"./compiler.cjs"}}}\n',
+  ],
+  ["node_modules/css-compiler/compiler.mjs", "export const compile = 1;\n"],
+  ["node_modules/css-compiler/compiler.cjs", "exports.compile = 1;\n"],
+  [
+    "src/app/exportsConsumer.ts",
+    'import { compile } from "css-compiler";\nexport const value = compile;\n',
+  ],
   // An exports-only SDK has no main/index.js fallback.
   [
     "node_modules/exported-sdk/package.json",
@@ -140,6 +155,77 @@ const FIXTURE: readonly [path: string, source: string][] = [
   ],
   ["server/cycle-a.ts", 'import "./cycle-b";\nexport const cycleA = 1;\n'],
   ["server/cycle-b.ts", 'import "./cycle-a";\nexport const cycleB = 1;\n'],
+  // CSS の明示除外先をクラス供給源に変える import は、除外の再検討なしに入れない。
+  ["prototypes/runtime.ts", "export const value = 1;\n"],
+  [".godd/state/runtime.json", '{"value":1}\n'],
+  [syntheticEvidence, '{"value":1}\n'],
+  ["documents/assets/ui-refresh/manifest.json", '{"value":1}\n'],
+  ["documents/fixtures/railway-pre-cutover.json", '{"value":1}\n'],
+  ["documents/fixtures/railway-readyz-before-iac.json", '{"value":1}\n'],
+  ["documents/fixtures/unity-display-contract.json", '{"value":1}\n'],
+  [
+    "src/app/nativeLeak.ts",
+    'export { value } from "../../prototypes/runtime";\n',
+  ],
+  [
+    "src/app/metadataLeak.ts",
+    'import fixture from "../../.godd/state/runtime.json";\nexport const value = fixture.value;\n',
+  ],
+  [
+    "src/app/evidenceLeak.ts",
+    // 固定コードだけを使い、値の埋め込みや JSON sanitizer を必要としない。
+    // 分割は tmp-only パスを実入力 literal と区別するため。解決先は回帰で照合する。
+    'export const load = () => import("../../documents' +
+      '/evidence/runtime.json");\n',
+  ],
+  [
+    "src/app/assetLeak.ts",
+    'import manifest from "../../documents/assets/ui-refresh/manifest.json";\nexport const value = manifest.value;\n',
+  ],
+  [
+    "src/app/railwayLeak.ts",
+    'import fixture from "../../documents/fixtures/railway-pre-cutover.json";\nexport const value = fixture.value;\n',
+  ],
+  [
+    "src/app/readyzLeak.ts",
+    'import fixture from "../../documents/fixtures/railway-readyz-before-iac.json";\nexport const value = fixture.value;\n',
+  ],
+  [
+    "src/domain/game/__testing__/nativeConsumer.ts",
+    'export { value } from "../../../../prototypes/runtime";\n',
+  ],
+  [
+    "src/domain/hand/__oracle__/nativeConsumer.ts",
+    'export { value } from "../../../../prototypes/runtime";\n',
+  ],
+  [
+    "src/app/testingLeak.ts",
+    'export { value } from "../domain/game/__testing__/nativeConsumer";\n',
+  ],
+  [
+    "src/app/oracleLeak.ts",
+    'export { value } from "../domain/hand/__oracle__/nativeConsumer";\n',
+  ],
+  [
+    "src/app/indirectLeak.ts",
+    'export { value } from "../../scripts/runtimeBridge";\n',
+  ],
+  [
+    "scripts/runtimeBridge.ts",
+    'export { value } from "../prototypes/runtime";\n',
+  ],
+  [
+    "src/app/unityConsumer.ts",
+    'import fixture from "../../documents/fixtures/unity-display-contract.json";\nexport const value = fixture.value;\n',
+  ],
+  [
+    "src/app/native.test.ts",
+    'export { value } from "../../prototypes/runtime";\n',
+  ],
+  [
+    "src/test/nativeConsumer.ts",
+    'export { value } from "../../prototypes/runtime";\n',
+  ],
 ];
 
 /** 解決できない import の specifier(上記フィクスチャと対応)。 */
@@ -356,6 +442,57 @@ describe("本番サーバーの依存境界を dependency-cruiser が検出す�
   });
 });
 
+describe("CSS 除外先を runtime へ import する前に境界の再検討を求める (#1191)", () => {
+  const rule = "no-runtime-to-css-excluded-inputs";
+  it("生成した evidence import は一時 repo 内の資産へ動的 literal として解決される", () => {
+    const dependency = fixtureModules
+      .find((module) => module.source === "src/app/evidenceLeak.ts")
+      ?.dependencies.find((entry) => entry.resolved === syntheticEvidence);
+    expect(dependency).toMatchObject({
+      couldNotResolve: false,
+      dynamic: true,
+      module: `../../${syntheticEvidence}`,
+    });
+  });
+  it.each([
+    ["src/app/nativeLeak.ts", "prototypes/runtime.ts"],
+    ["src/app/metadataLeak.ts", ".godd/state/runtime.json"],
+    ["src/app/evidenceLeak.ts", syntheticEvidence],
+    ["src/app/assetLeak.ts", "documents/assets/ui-refresh/manifest.json"],
+    ["src/app/railwayLeak.ts", "documents/fixtures/railway-pre-cutover.json"],
+    [
+      "src/app/readyzLeak.ts",
+      "documents/fixtures/railway-readyz-before-iac.json",
+    ],
+    ["src/app/testingLeak.ts", "src/domain/game/__testing__/nativeConsumer.ts"],
+    ["src/app/oracleLeak.ts", "src/domain/hand/__oracle__/nativeConsumer.ts"],
+    ["scripts/runtimeBridge.ts", "prototypes/runtime.ts"],
+  ])(
+    "%s → %s は error（静的 import・re-export・動的 literal import・中継）",
+    (from, to) => {
+      expect(
+        violations.find(
+          (entry) =>
+            entry.from === from && entry.to === to && entry.rule.name === rule,
+        )?.rule.severity,
+      ).toBe("error");
+    },
+  );
+  it.each([
+    "src/app/unityConsumer.ts",
+    "src/app/native.test.ts",
+    "src/test/nativeConsumer.ts",
+    "src/domain/game/__testing__/nativeConsumer.ts",
+    "src/domain/hand/__oracle__/nativeConsumer.ts",
+  ])("%s の正当な runtime fixture / test consumer は許可", (from) => {
+    expect(
+      violations.filter(
+        (entry) => entry.from === from && entry.rule.name === rule,
+      ),
+    ).toEqual([]);
+  });
+});
+
 /**
  * 上の 2 つは合成パスを使うため、ルールの正規表現が**実在しない**フォルダを指すように
  * 書き換えられても(例: `^src/core/`)、フィクスチャ側を同じ名前にすれば緑のままになる。
@@ -414,6 +551,13 @@ describe("ルールが指すレイヤーが実リポジトリに存在する (#3
  * `no-unresolvable-in-src` がその失敗モードを error として顕在化させる。
  */
 describe("レイヤールールが機能する前提条件 (#382)", () => {
+  it("exports-only パッケージを実際に解決し、未解決 import の例外を作らない (#1191)", () => {
+    const dependency = fixtureModules
+      .find((module) => module.source === "src/app/exportsConsumer.ts")
+      ?.dependencies.find((entry) => entry.module === "css-compiler");
+    expect(dependency?.couldNotResolve).toBe(false);
+    expect(dependency?.resolved).toBe("node_modules/css-compiler/compiler.mjs");
+  });
   it("解決できない import が error として報告される", () => {
     const violation = violations.find(
       (candidate) =>
