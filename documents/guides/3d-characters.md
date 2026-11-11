@@ -42,6 +42,21 @@ pnpm exec tsx src/components/game/characters3d/capture-review.ts
 `produce-review` と `serve-review` は、固定した原本4枚とtracked texture4枚・provenanceのID・パス・SHA・容量を検証し、読み取った同じbytesを使う。比較の開始では画像やprovenanceを再生成・上書きしない。`produce-review` は4体のGLB、CPU比較、manifestとsource hashesを保存する。GLBは19joints・13clips・JPGを内包し、各ボーンのrest/bindとquaternionの規約を保持する。
 `serve-review` は127.0.0.1:43196で検証済み原本・候補texture・比較bundleだけを配信し、Nextのビルドを変更しない。`capture-review` はインストール済みPlaywrightのChromiumを使い、原本と候補の前・横・背面・着席俯瞰、draw/call/和了の画像と動画を保存する。actor切替完了と要求actor/clip、時刻0を確認してから再生し、時間・描画回数の増加とpause後2フレームでの不変をそれぞれ検証する。比較用viewerの机と椅子は寸法確認用である。
 
+### 書出しファイルの再取り込み
+
+native TypeScriptモデルが編集元で、GLBは交換用の書出し形式である。編集元の意図した変更を通常の差分で確認し、`produce-review`を新規出力へ実行した後、その実GLB4点を比較viewerへ読み戻せる。
+
+```powershell
+$env:CHARACTER_REVIEW_GLB_DIRECTORY='<directory-containing-p0.glb-through-p3.glb>'
+$env:CHARACTER_REVIEW_OUTPUT='<separate-review-output>'
+pnpm exec tsx src/components/game/characters3d/serve-review.ts
+# 別のshellで、上記と同じoutputと既存profileを指定してcapture-reviewを実行する。
+```
+
+指定directoryの固定名4点を、起動前に同じhandleから32MiB以下で読み検証する。ID・原本出典・19joints・材質slot・埋込JPG・13clipsを確認し、geometry、UV、weights、bind、channel/samplerの時間値と補間をファイルから使う。外部画像や別bufferの取得は行わない。対応は本製品exportの非indexed/非圧縮subset、LINEARのtranslation・morphとrotationのSLERPに限り、未対応形式をsourceモデルへ黙って置き換えない。JPEGは8MiB以下・2048px以下、JSONは2MiB以下、accessorの総component数も制限する。元のGLBやtracked素材は書き換えず、比較中の破棄・pause/reduced motionを既存viewerと共有する。
+
+この経路は同じ`projectCharacterGeometry`を使う比較WebGL rendererへの再取り込みであり、通常の対局routeへGLBを読み込む機能ではない。TypeScriptモデルの編集→GLB書出し→実ファイル読戻し→比較表示を検証しても、本人の外観採用、通常routeでの4人の統合、実機性能やProduction受入の完了にはしない。元のsource表示へ戻す場合は`CHARACTER_REVIEW_GLB_DIRECTORY`を解除してserverを再起動する。
+
 textureの再生成が必要なら、別の新規出力を明示する。
 
 ```powershell

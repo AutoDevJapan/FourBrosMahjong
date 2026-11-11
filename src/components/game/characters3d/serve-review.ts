@@ -1,9 +1,10 @@
 /** Independent static review server. Does not start Next or touch .next. */
 
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, open, readFile, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import { createRequire } from "node:module";
 import { join, resolve } from "node:path";
+import { readCharacterGlb } from "./glb-review";
 import { MODEL_PROFILES } from "./profiles";
 import { readCharacterTextureSet } from "./texture-supply";
 
@@ -15,6 +16,38 @@ async function main() {
   const esbuild = createRequire(r.resolve("tsx/package.json"))("esbuild");
   const textures = await readCharacterTextureSet();
   const assets = new Map<string, Buffer>();
+  const glbDirectory = process.env.CHARACTER_REVIEW_GLB_DIRECTORY;
+  if (glbDirectory) {
+    for (const id of ["p0", "p1", "p2", "p3"] as const) {
+      const handle = await open(join(resolve(glbDirectory), `${id}.glb`), "r");
+      let bytes: Buffer;
+      try {
+        const size = (await handle.stat()).size;
+        if (size < 28 || size > 32 * 1024 * 1024)
+          throw new TypeError("Character GLB exceeds the review limit");
+        bytes = Buffer.alloc(size);
+        let offset = 0;
+        while (offset < size) {
+          const { bytesRead } = await handle.read(
+            bytes,
+            offset,
+            size - offset,
+            offset,
+          );
+          if (!bytesRead)
+            throw new TypeError("Character GLB changed while reading");
+          offset += bytesRead;
+        }
+        const extra = Buffer.alloc(1);
+        if ((await handle.read(extra, 0, 1, size)).bytesRead)
+          throw new TypeError("Character GLB changed while reading");
+      } finally {
+        await handle.close();
+      }
+      readCharacterGlb(bytes, id);
+      assets.set(`/models/${id}.glb`, bytes);
+    }
+  }
   for (const [id, supplied] of textures) {
     assets.set(
       `/src/components/game/characters3d/textures/${id}-reference.jpg`,
@@ -35,7 +68,7 @@ async function main() {
     target: "es2022",
   });
   const html = `<!doctype html><html lang="ja"><meta charset="utf-8"><title>四兄弟3D 原本比較（未承認候補）</title><style>
-body{margin:0;padding:16px;background:#f6f7f8;color:#18212c;font:16px sans-serif}h1{font-size:24px;margin:0 0 8px}p{margin:0 0 14px}nav{display:flex;gap:20px;margin:10px 0}button,select{font-size:16px;padding:5px}#labels,#sources{display:grid;grid-template-columns:repeat(4,1fr)}#labels span{padding:8px;background:#dce4e9}#sources{padding:6px 0}.source{height:240px;background:white;display:flex;justify-content:center}.crop{position:relative;overflow:hidden;width:68px;height:240px}.source img{position:absolute;top:-34px;height:317px;width:auto}canvas{display:block;width:1440px;height:560px;max-width:100%;border:1px solid #aebbc4}output{display:block;padding:10px 0;font:14px monospace}</style><main id="review"></main><script src="/viewer.js"></script></html>`;
+body{margin:0;padding:16px;background:#f6f7f8;color:#18212c;font:16px sans-serif}h1{font-size:24px;margin:0 0 8px}p{margin:0 0 14px}nav{display:flex;gap:20px;margin:10px 0}button,select{font-size:16px;padding:5px}#labels,#sources{display:grid;grid-template-columns:repeat(4,1fr)}#labels span{padding:8px;background:#dce4e9}#sources{padding:6px 0}.source{height:240px;background:white;display:flex;justify-content:center}.crop{position:relative;overflow:hidden;width:68px;height:240px}.source img{position:absolute;top:-34px;height:317px;width:auto}canvas{display:block;width:1440px;height:560px;max-width:100%;border:1px solid #aebbc4}output{display:block;padding:10px 0;font:14px monospace}</style><main id="review" data-input="${glbDirectory ? "glb" : "source"}"></main><script src="/viewer.js"></script></html>`;
   await writeFile(join(output, "viewer.html"), html);
   const server = createServer(async (req, res) => {
     try {
@@ -59,9 +92,11 @@ body{margin:0;padding:16px;background:#f6f7f8;color:#18212c;font:16px sans-serif
         "Content-Type",
         name.endsWith(".js")
           ? "text/javascript"
-          : name.endsWith(".jpg")
-            ? "image/jpeg"
-            : "image/png",
+          : name.endsWith(".glb")
+            ? "model/gltf-binary"
+            : name.endsWith(".jpg")
+              ? "image/jpeg"
+              : "image/png",
       );
       res.end(bytes);
     } catch {

@@ -1,7 +1,8 @@
 /** Isolated review entry; never imported by the production route. */
 
 import type { CharacterPlayerId } from "@/domain/game/characters";
-import { CHARACTER_CLIPS, sampleCharacterPose } from "./clips";
+import { sampleCharacterPose } from "./clips";
+import { type ImportedCharacter, readCharacterGlb } from "./glb-review";
 import { cross, dot, multiply, sub, unit } from "./matrix";
 import { createCharacterModel } from "./model";
 import { projectCharacterGeometry } from "./project";
@@ -90,7 +91,8 @@ function camera(
   return multiply(p, view);
 }
 const root = document.querySelector<HTMLElement>("#review")!;
-root.innerHTML = `<h1>四兄弟3D — 未承認候補</h1><p>原本と同じモデルsourceをWebGL2で表示。通常対局への接続・最終外見の承認は未実施。</p>
+const importedFiles = root.dataset.input === "glb";
+root.innerHTML = `<h1>四兄弟3D — 未承認候補</h1><p>${importedFiles ? "指定したGLBファイルのgeometry・texture・clipを読み戻してWebGL2で表示。" : "原本と同じモデルsourceをWebGL2で表示。"}通常対局への接続・最終外見の承認は未実施。</p>
 <nav><label>人物 <select id="actor"><option value="p0">粗悪品</option><option value="p1">竜二</option><option value="p2">マサキ</option><option value="p3">糸瓜</option></select></label>
 <label>動作 <select id="clip">${CLIP_IDS.map((id) => `<option value="${id}">${id}</option>`).join("")}</select></label><button id="play">再生</button><button id="restart">先頭</button><label><input type="checkbox" id="reduced">動きを抑える</label></nav>
 <div id="labels"><span>front / 正面</span><span>side / 横</span><span>back / 背面</span><span>table camera / 卓俯瞰</span></div>
@@ -132,6 +134,7 @@ const actors = new Map<
   CharacterPlayerId,
   {
     model: CharacterModel;
+    sample: ImportedCharacter["sample"];
     texture: WebGLTexture;
     meshes: {
       vao: WebGLVertexArrayObject;
@@ -227,12 +230,37 @@ function reviewBox(center: V3, size: V3, color: V3) {
 async function load(id: CharacterPlayerId) {
   if (disposed) return;
   if (actors.has(id)) return actors.get(id)!;
-  const model = createCharacterModel(id),
+  let imported: ImportedCharacter | undefined;
+  if (importedFiles) {
+    const response = await fetch(`/models/${id}.glb`);
+    if (
+      !response.ok ||
+      !response.headers.get("Content-Type")?.startsWith("model/gltf-binary")
+    )
+      throw new TypeError("Character GLB unavailable");
+    imported = readCharacterGlb(
+      new Uint8Array(await response.arrayBuffer()),
+      id,
+    );
+    if (disposed) return;
+  }
+  const model = imported?.model ?? createCharacterModel(id),
     texture = gpu.createTexture()!;
   textures.push(texture);
   const image = new Image();
-  image.src = `/${model.materials.find((m) => m.texture)!.texture}`;
-  await image.decode();
+  const imageUrl = imported
+    ? URL.createObjectURL(
+        new Blob([Uint8Array.from(imported.texture).buffer], {
+          type: "image/jpeg",
+        }),
+      )
+    : `/${model.materials.find((m) => m.texture)!.texture}`;
+  image.src = imageUrl;
+  try {
+    await image.decode();
+  } finally {
+    if (imported) URL.revokeObjectURL(imageUrl);
+  }
   if (disposed) return;
   gpu.bindTexture(gpu.TEXTURE_2D, texture);
   gpu.pixelStorei(gpu.UNPACK_FLIP_Y_WEBGL, false);
@@ -272,7 +300,15 @@ async function load(id: CharacterPlayerId) {
     }
     return { vao, buffer, colorBuffer };
   });
-  const actor = { model, texture, meshes };
+  const actor = {
+    model,
+    texture,
+    meshes,
+    sample:
+      imported?.sample ??
+      ((clip: CharacterClipId, t: number, r = false) =>
+        sampleCharacterPose(model, clip, t, r)),
+  };
   actors.set(id, actor);
   return actor;
 }
@@ -287,8 +323,8 @@ function draw() {
   gpu.activeTexture(gpu.TEXTURE0);
   gpu.uniform1i(uniforms.image, 0);
   gpu.bindTexture(gpu.TEXTURE_2D, actor.texture);
-  const standing = sampleCharacterPose(actor.model, "standing-reference", 0),
-    pose = sampleCharacterPose(actor.model, clipId, time, reduced),
+  const standing = actor.sample("standing-reference", 0),
+    pose = actor.sample(clipId, time, reduced),
     h = actor.model.height;
   for (let j = 0; j < 4; j++) {
     const view: View = (["front", "side", "back", "table"] as const)[j],
@@ -442,9 +478,10 @@ function telemetry() {
     disposed,
     contexts: 1,
     renderer: gpu.getParameter(gpu.RENDERER),
+    input: importedFiles ? "glb" : "source",
     version: gpu.getParameter(gpu.VERSION),
     finished:
-      !CHARACTER_CLIPS[clipId].loop && time >= CHARACTER_CLIPS[clipId].duration,
+      actors.get(modelId)?.sample(clipId, time, reduced).finished ?? false,
     triangles: actors
       .get(modelId)
       ?.model.meshes.reduce((sum, m) => sum + m.vertices.length / 24, 0),
