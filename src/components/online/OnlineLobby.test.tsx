@@ -244,7 +244,7 @@ function openCreatedRoom(): TestWebSocket {
 
 describe("online history recovery feedback", () => {
   const matchId = `${"d".repeat(32)}:1`;
-  const warning = /この端末に今回の戦績を保存できませんでした/;
+  const warning = /この端末に戦績を保存できませんでした/;
   const originalLocks = Object.getOwnPropertyDescriptor(navigator, "locks");
   let storage: Storage;
 
@@ -381,6 +381,44 @@ describe("online history recovery feedback", () => {
       expect(loadResultHistory(storage)).toHaveLength(1);
       expect(screen.queryByText(warning)).not.toBeInTheDocument();
     });
+  });
+
+  it("retains the previous match warning through a new match and its queued retry", async () => {
+    const socket = connectGame();
+    const access = failStorage();
+    finish(socket);
+    const firstWarning = await screen.findByText(warning);
+    act(() =>
+      socket.message({
+        type: "snapshot",
+        snapshot: {
+          ...snapshotFixture(),
+          matchId: `${"d".repeat(32)}:2`,
+          version: 2,
+        },
+      }),
+    );
+    expect(screen.getByText("たろうの手番")).toBeInTheDocument();
+    expect(screen.queryByText(warning)).toBe(firstWarning);
+    expect(loadPendingOnlineHistory(sessionStorage)).toHaveLength(1);
+    access.mockRestore();
+    const held = await holdHistoryWrite();
+    try {
+      fireEvent.focus(window);
+      expect(screen.getByText(warning)).toBe(firstWarning);
+      expect(loadResultHistory(storage)).toHaveLength(0);
+    } finally {
+      await act(async () => {
+        held.release();
+        await held.done;
+      });
+    }
+    await waitFor(() => {
+      expect(loadResultHistory(storage)).toHaveLength(1);
+      expect(loadPendingOnlineHistory(sessionStorage)).toEqual([]);
+      expect(screen.queryByText(warning)).not.toBeInTheDocument();
+    });
+    expect(screen.getByText("たろうの手番")).toBeInTheDocument();
   });
 
   it("removes a failed-save warning after recovery on the game and result views", async () => {

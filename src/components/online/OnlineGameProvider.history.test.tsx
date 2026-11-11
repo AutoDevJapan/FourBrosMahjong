@@ -383,6 +383,184 @@ describe("online completed match persistence", () => {
     expect(loadPendingOnlineHistory(sessionStorage)).toEqual([]);
   });
 
+  it("keeps a previous match failure visible while the next match is playing", async () => {
+    const access = vi
+      .spyOn(window, "localStorage", "get")
+      .mockImplementation(() => {
+        throw new DOMException("unavailable", "SecurityError");
+      });
+    const { rerender } = render(<Provider value={snapshot()} />);
+    await waitFor(() =>
+      expect(screen.getByTestId("save-status")).toHaveTextContent("failed"),
+    );
+    const retained = loadPendingOnlineHistory(sessionStorage);
+    expect(retained).toHaveLength(1);
+    const playing = createGame({ seed: 0 });
+    await act(async () => {
+      rerender(
+        <Provider
+          value={{
+            ...snapshot(2),
+            phase: "playing",
+            view: selectView(playing, "p0"),
+            pending: playing.pending,
+          }}
+        />,
+      );
+    });
+    expect(screen.getByTestId("save-status")).toHaveTextContent("failed");
+    access.mockRestore();
+    fireEvent.focus(window);
+    await waitFor(() =>
+      expect(loadPendingOnlineHistory(sessionStorage)).toEqual([]),
+    );
+    expect(screen.getByTestId("save-status")).toHaveTextContent("idle");
+    expect(
+      JSON.parse(localStorage.getItem(RESULT_HISTORY_KEY)!).entries[0],
+    ).toMatchObject({
+      onlineMatchId: snapshot().matchId,
+      finishedAt: retained[0].finishedAt,
+    });
+  });
+
+  it("reports an older write failure that completes after the next match starts", async () => {
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const request = createLockRequest();
+    Object.defineProperty(navigator, "locks", {
+      configurable: true,
+      value: { request },
+    });
+    const blocker = request(
+      "four-bros-mahjong.history.write.v1",
+      { signal: new AbortController().signal },
+      () => held,
+    );
+    const set = Storage.prototype.setItem;
+    vi.spyOn(Storage.prototype, "setItem").mockImplementation(function (
+      this: Storage,
+      key,
+      value,
+    ) {
+      if (key === RESULT_HISTORY_KEY) throw new Error("quota");
+      set.call(this, key, value);
+    });
+    try {
+      const { rerender } = render(<Provider value={snapshot()} />);
+      await waitFor(() =>
+        expect(loadPendingOnlineHistory(sessionStorage)).toHaveLength(1),
+      );
+      const playing = createGame({ seed: 0 });
+      rerender(
+        <Provider
+          value={{
+            ...snapshot(2),
+            phase: "playing",
+            view: selectView(playing, "p0"),
+            pending: playing.pending,
+          }}
+        />,
+      );
+      expect(screen.getByTestId("save-status")).toHaveTextContent("idle");
+      await act(async () => {
+        release();
+        await blocker;
+      });
+      await waitFor(() =>
+        expect(screen.getByTestId("save-status")).toHaveTextContent("failed"),
+      );
+      expect(localStorage.getItem(RESULT_HISTORY_KEY)).toBeNull();
+      expect(loadPendingOnlineHistory(sessionStorage)).toHaveLength(1);
+    } finally {
+      release();
+      await blocker;
+    }
+  });
+
+  it("keeps an older pending failure when a later match saves successfully", async () => {
+    const set = Storage.prototype.setItem;
+    const write = vi
+      .spyOn(Storage.prototype, "setItem")
+      .mockImplementation(function (this: Storage, key, value) {
+        if (
+          key === RESULT_HISTORY_KEY &&
+          JSON.parse(value).entries.some(
+            (entry: { onlineMatchId?: string }) =>
+              entry.onlineMatchId === snapshot().matchId,
+          )
+        )
+          throw new Error("first result unavailable");
+        set.call(this, key, value);
+      });
+    const { rerender } = render(<Provider value={snapshot()} />);
+    await waitFor(() =>
+      expect(screen.getByTestId("save-status")).toHaveTextContent("failed"),
+    );
+    rerender(<Provider value={snapshot(2)} />);
+    await waitFor(() =>
+      expect(
+        JSON.parse(localStorage.getItem(RESULT_HISTORY_KEY)!).entries,
+      ).toHaveLength(1),
+    );
+    expect(
+      JSON.parse(localStorage.getItem(RESULT_HISTORY_KEY)!).entries[0]
+        .onlineMatchId,
+    ).toBe(snapshot(2).matchId);
+    expect(
+      loadPendingOnlineHistory(sessionStorage).map((e) => e.onlineMatchId),
+    ).toEqual([snapshot().matchId]);
+    expect(screen.getByTestId("save-status")).toHaveTextContent("failed");
+    write.mockRestore();
+    fireEvent.focus(window);
+    await waitFor(() =>
+      expect(loadPendingOnlineHistory(sessionStorage)).toEqual([]),
+    );
+    expect(screen.getByTestId("save-status")).toHaveTextContent("saved");
+    expect(
+      JSON.parse(localStorage.getItem(RESULT_HISTORY_KEY)!).entries,
+    ).toHaveLength(2);
+  });
+
+  it("clears an older failure after explicit deletion cancels its pending result", async () => {
+    const set = Storage.prototype.setItem;
+    const write = vi
+      .spyOn(Storage.prototype, "setItem")
+      .mockImplementation(function (this: Storage, key, value) {
+        if (key === RESULT_HISTORY_KEY) throw new Error("quota");
+        set.call(this, key, value);
+      });
+    const { rerender } = render(<Provider value={snapshot()} />);
+    await waitFor(() =>
+      expect(screen.getByTestId("save-status")).toHaveTextContent("failed"),
+    );
+    expect(loadPendingOnlineHistory(sessionStorage)[0].historyEpoch).toBe(0);
+    const playing = createGame({ seed: 0 });
+    rerender(
+      <Provider
+        value={{
+          ...snapshot(2),
+          phase: "playing",
+          view: selectView(playing, "p0"),
+          pending: playing.pending,
+        }}
+      />,
+    );
+    expect(screen.getByTestId("save-status")).toHaveTextContent("failed");
+    write.mockRestore();
+    await act(async () => {
+      expect(await clearResultHistoryAcrossTabs(localStorage)).toBe("cleared");
+      expect(clearPendingOnlineHistory(sessionStorage)).toBe(true);
+      fireEvent.focus(window);
+    });
+    await waitFor(() =>
+      expect(screen.getByTestId("save-status")).toHaveTextContent("idle"),
+    );
+    expect(localStorage.getItem(RESULT_HISTORY_KEY)).toBeNull();
+    expect(loadPendingOnlineHistory(sessionStorage)).toEqual([]);
+  });
+
   it("keeps an old server usable without fabricating a match identity", () => {
     render(<Provider value={{ ...snapshot(), matchId: undefined }} />);
     expect(screen.getByTestId("save-status")).toHaveTextContent("idle");
