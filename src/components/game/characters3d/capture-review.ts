@@ -3,6 +3,7 @@
 import { mkdir, stat, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { join, resolve } from "node:path";
+import { verifyReviewPlayback } from "./review-playback";
 
 async function main() {
   const r = createRequire(resolve("package.json")),
@@ -106,19 +107,10 @@ async function main() {
         }
       }
     }
-    // Exercise actual controls and verify time advances then stops.
-    await page.locator("#actor").selectOption("p2");
-    await page.locator("#clip").selectOption("declare");
-    await page.locator("#play").click();
-    await page.waitForFunction(
-      () =>
-        (window.characterReview.telemetry() as { time: number }).time > 0.15,
-    );
-    await page.locator("#play").click();
-    const final = await page.evaluate(() => window.characterReview.telemetry());
+    const playback = await verifyReviewPlayback(page);
     await page.locator("#reduced").check();
     await page.locator("#restart").click();
-    telemetry.push(final);
+    telemetry.push(playback);
     await page.evaluate(() => window.characterReview.dispose());
     telemetry.push(
       await page.evaluate(() => window.characterReview.telemetry()),

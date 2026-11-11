@@ -3,18 +3,29 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import { createRequire } from "node:module";
-import { join, resolve, sep } from "node:path";
-import { bakeCharacterTextures } from "./bake-textures";
+import { join, resolve } from "node:path";
+import { MODEL_PROFILES } from "./profiles";
+import { readCharacterTextureSet } from "./texture-supply";
 
 async function main() {
   if (!process.env.CHARACTER_REVIEW_OUTPUT)
     throw new Error("Set CHARACTER_REVIEW_OUTPUT to the artifact directory");
-  const root = resolve("."),
-    output = resolve(process.env.CHARACTER_REVIEW_OUTPUT ?? ""),
-    r = createRequire(resolve("package.json"));
+  const output = resolve(process.env.CHARACTER_REVIEW_OUTPUT ?? ""),
+    r = createRequire(import.meta.url);
   const esbuild = createRequire(r.resolve("tsx/package.json"))("esbuild");
+  const textures = await readCharacterTextureSet();
+  const assets = new Map<string, Buffer>();
+  for (const [id, supplied] of textures) {
+    assets.set(
+      `/src/components/game/characters3d/textures/${id}-reference.jpg`,
+      supplied.texture,
+    );
+    assets.set(
+      `/documents/assets/characters/originals/${MODEL_PROFILES[id].source}`,
+      supplied.source,
+    );
+  }
   await mkdir(output, { recursive: true });
-  await bakeCharacterTextures();
   await esbuild.build({
     entryPoints: ["src/components/game/characters3d/review-viewer.ts"],
     outfile: join(output, "viewer.js"),
@@ -35,29 +46,20 @@ body{margin:0;padding:16px;background:#f6f7f8;color:#18212c;font:16px sans-serif
         res.end(html);
         return;
       }
-      const path =
+      const bytes =
         name === "/viewer.js"
-          ? join(output, "viewer.js")
-          : resolve(root, "." + name);
-      const allowed =
-        path.startsWith(
-          resolve(root, "src/components/game/characters3d/textures") + sep,
-        ) ||
-        path.startsWith(
-          resolve(root, "documents/assets/characters/originals") + sep,
-        ) ||
-        path === join(output, "viewer.js");
-      if (!allowed) {
+          ? await readFile(join(output, "viewer.js"))
+          : assets.get(name);
+      if (!bytes) {
         res.statusCode = 404;
         res.end();
         return;
       }
-      const bytes = await readFile(path);
       res.setHeader(
         "Content-Type",
-        path.endsWith(".js")
+        name.endsWith(".js")
           ? "text/javascript"
-          : path.endsWith(".jpg")
+          : name.endsWith(".jpg")
             ? "image/jpeg"
             : "image/png",
       );

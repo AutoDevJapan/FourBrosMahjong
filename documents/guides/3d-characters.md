@@ -39,8 +39,17 @@ pnpm exec tsx src/components/game/characters3d/serve-review.ts
 pnpm exec tsx src/components/game/characters3d/capture-review.ts
 ```
 
-`produce-review` は4体のGLB、CPU比較、manifestとsource hashesを保存する。GLBは19joints・13clips・JPGを内包し、各ボーンのrest/bindとquaternionの規約を保持する。
-`serve-review` は127.0.0.1:43196で原本・候補texture・比較bundleだけを配信し、Nextのビルドを変更しない。`capture-review` はインストール済みPlaywrightのChromiumを使い、原本と候補の前・横・背面・着席俯瞰、draw/call/和了の画像と動画を保存する。比較用viewerの机と椅子は寸法確認用である。
+`produce-review` と `serve-review` は、固定した原本4枚とtracked texture4枚・provenanceのID・パス・SHA・容量を検証し、読み取った同じbytesを使う。比較の開始では画像やprovenanceを再生成・上書きしない。`produce-review` は4体のGLB、CPU比較、manifestとsource hashesを保存する。GLBは19joints・13clips・JPGを内包し、各ボーンのrest/bindとquaternionの規約を保持する。
+`serve-review` は127.0.0.1:43196で検証済み原本・候補texture・比較bundleだけを配信し、Nextのビルドを変更しない。`capture-review` はインストール済みPlaywrightのChromiumを使い、原本と候補の前・横・背面・着席俯瞰、draw/call/和了の画像と動画を保存する。actor切替完了と要求actor/clip、時刻0を確認してから再生し、時間・描画回数の増加とpause後2フレームでの不変をそれぞれ検証する。比較用viewerの机と椅子は寸法確認用である。
+
+textureの再生成が必要なら、別の新規出力を明示する。
+
+```powershell
+$env:CHARACTER_TEXTURE_OUTPUT='<new-texture-directory>'
+pnpm exec tsx src/components/game/characters3d/bake-textures.ts
+```
+
+全原本の検証と4枚のencodeが完了してから、新規ディレクトリへ4画像とprovenanceを書き出す。既存先は上書きせず、書込み途中の失敗・中断ではprovenanceのない不完全な新規出力だけが残り、tracked一式は保持する。provenanceを完成markerとして扱い、不完全な出力を採用しない。tracked一式への同期はこの比較・再生成コマンドには含めず、変更画像とprovenanceをまとめて通常の差分確認・レビューへ渡す。
 
 ```powershell
 pnpm exec vitest run --project unit src/components/game/characters3d/characters.test.ts src/components/game/characters3d/fittings.test.ts src/components/game/three/characterProjection.test.ts

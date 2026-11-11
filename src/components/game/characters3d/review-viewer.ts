@@ -149,7 +149,8 @@ let modelId: CharacterPlayerId = "p0",
   raf = 0,
   previous = 0;
 let generation = 0,
-  draws = 0;
+  draws = 0,
+  pendingState = false;
 const actorSelect = root.querySelector<HTMLSelectElement>("#actor")!,
   clipSelect = root.querySelector<HTMLSelectElement>("#clip")!,
   status = root.querySelector<HTMLOutputElement>("#status")!;
@@ -224,6 +225,7 @@ function reviewBox(center: V3, size: V3, color: V3) {
   gpu.drawArrays(gpu.TRIANGLES, 0, vertices.length / 8);
 }
 async function load(id: CharacterPlayerId) {
+  if (disposed) return;
   if (actors.has(id)) return actors.get(id)!;
   const model = createCharacterModel(id),
     texture = gpu.createTexture()!;
@@ -231,6 +233,7 @@ async function load(id: CharacterPlayerId) {
   const image = new Image();
   image.src = `/${model.materials.find((m) => m.texture)!.texture}`;
   await image.decode();
+  if (disposed) return;
   gpu.bindTexture(gpu.TEXTURE_2D, texture);
   gpu.pixelStorei(gpu.UNPACK_FLIP_Y_WEBGL, false);
   gpu.texImage2D(gpu.TEXTURE_2D, 0, gpu.RGB, gpu.RGB, gpu.UNSIGNED_BYTE, image);
@@ -349,16 +352,21 @@ async function setState(
   r = false,
 ) {
   const token = ++generation;
-  await load(id);
-  if (disposed || token !== generation) return;
-  modelId = id;
-  clipId = clip;
-  time = t;
-  reduced = r;
-  actorSelect.value = id;
-  clipSelect.value = clip;
-  updateSource(actors.get(id)!.model);
-  draw();
+  pendingState = true;
+  try {
+    await load(id);
+    if (disposed || token !== generation) return;
+    modelId = id;
+    clipId = clip;
+    time = t;
+    reduced = r;
+    actorSelect.value = id;
+    clipSelect.value = clip;
+    updateSource(actors.get(id)!.model);
+    draw();
+  } finally {
+    if (token === generation) pendingState = false;
+  }
 }
 function animate(now: number) {
   if (disposed || !playing) return;
@@ -399,6 +407,7 @@ function dispose() {
   disposed = true;
   generation++;
   playing = false;
+  pendingState = false;
   cancelAnimationFrame(raf);
   actorSelect.removeEventListener("change", onActor);
   clipSelect.removeEventListener("change", onClip);
@@ -416,20 +425,20 @@ declare global {
   interface Window {
     characterReview: {
       setState: typeof setState;
-      telemetry: () => unknown;
+      telemetry: typeof telemetry;
       dispose: typeof dispose;
       ready: Promise<void>;
     };
   }
 }
-window.characterReview = {
-  setState,
-  dispose,
-  telemetry: () => ({
+function telemetry() {
+  return {
     modelId,
     clipId,
     time,
     draws,
+    playing,
+    pendingState,
     disposed,
     contexts: 1,
     renderer: gpu.getParameter(gpu.RENDERER),
@@ -439,7 +448,12 @@ window.characterReview = {
     triangles: actors
       .get(modelId)
       ?.model.meshes.reduce((sum, m) => sum + m.vertices.length / 24, 0),
-  }),
+  };
+}
+window.characterReview = {
+  setState,
+  dispose,
+  telemetry,
   ready: setState("p0", "standing-reference"),
 };
 window.addEventListener("pagehide", dispose, { once: true });

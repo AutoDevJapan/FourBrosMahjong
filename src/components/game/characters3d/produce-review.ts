@@ -4,14 +4,14 @@ import { createHash } from "node:crypto";
 import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { join, relative, resolve } from "node:path";
-import { bakeCharacterTextures } from "./bake-textures";
 import { CHARACTER_CLIPS, sampleCharacterPose } from "./clips";
 import { exportCharacterGlb } from "./glb";
 import { createCharacterModel } from "./model";
 import { type ReviewCamera, renderCharacterReview } from "./review-render";
+import { readCharacterTextureSet } from "./texture-supply";
 import type { CharacterClipId } from "./types";
 
-const require = createRequire(resolve("package.json"));
+const require = createRequire(import.meta.url);
 // Reuse Next's installed image encoder. No package installation.
 const sharp = createRequire(require.resolve("next/package.json"))("sharp");
 const output = resolve(process.env.CHARACTER_REVIEW_OUTPUT ?? "");
@@ -22,8 +22,8 @@ const label = (text: string, w: number, h = 32) =>
 async function main() {
   if (!process.env.CHARACTER_REVIEW_OUTPUT)
     throw new Error("Set CHARACTER_REVIEW_OUTPUT to the artifact directory");
+  const textures = await readCharacterTextureSet();
   await mkdir(output, { recursive: true });
-  await bakeCharacterTextures();
   const manifest: Record<string, unknown> = {
     revision: 6,
     status: "unapproved-candidate",
@@ -34,17 +34,13 @@ async function main() {
   const entries = manifest.models as unknown[];
   for (const id of ["p0", "p1", "p2", "p3"] as const) {
     const model = createCharacterModel(id),
-      image = sharp(await readFile(model.source.path));
+      supplied = textures.get(id)!,
+      image = sharp(supplied.source);
     await writeFile(
       join(output, `${id}.glb`),
-      exportCharacterGlb(
-        model,
-        await readFile(model.materials.find((m) => m.texture)!.texture!),
-      ),
+      exportCharacterGlb(model, supplied.texture),
     );
-    const { data, info } = await sharp(
-      await readFile(model.materials.find((m) => m.texture)!.texture!),
-    )
+    const { data, info } = await sharp(supplied.texture)
       .removeAlpha()
       .raw()
       .toBuffer({ resolveWithObject: true });

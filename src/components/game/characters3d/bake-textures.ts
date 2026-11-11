@@ -1,22 +1,37 @@
-/** Rebuild derived review maps; the four source images are never overwritten. */
+/** Explicit regeneration into a new output; never rewrites the tracked set. */
 import { createHash } from "node:crypto";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { lstat, mkdir, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { join, resolve } from "node:path";
 import { headTextureRegions, MODEL_PROFILES } from "./profiles";
+import { CHARACTER_TEXTURE_IDS, readCharacterSources } from "./texture-supply";
 
-const require = createRequire(resolve("package.json"));
+const require = createRequire(import.meta.url);
 const sharp = createRequire(require.resolve("next/package.json"))("sharp");
-export async function bakeCharacterTextures() {
-  const directory = resolve("src/components/game/characters3d/textures");
-  await mkdir(directory, { recursive: true });
+export async function bakeCharacterTextures(
+  output: string,
+  root = resolve("."),
+) {
+  if (!output) throw new Error("Specify a new texture output directory");
+  const directory = resolve(output);
+  const exists = await lstat(directory).then(
+    () => true,
+    (error: NodeJS.ErrnoException) => {
+      if (error.code === "ENOENT") return false;
+      throw error;
+    },
+  );
+  if (exists)
+    throw Object.assign(new Error("Texture output already exists"), {
+      code: "EEXIST",
+    });
+  // Validate every source before encoding or creating any output.
+  const sources = await readCharacterSources(root);
   const records = [];
-  for (const id of ["p0", "p1", "p2", "p3"] as const) {
+  const images: { name: string; bytes: Buffer }[] = [];
+  for (const id of CHARACTER_TEXTURE_IDS) {
     const profile = MODEL_PROFILES[id],
-      source = resolve("documents/assets/characters/originals", profile.source),
-      bytes = await readFile(source);
-    if (createHash("sha256").update(bytes).digest("hex") !== profile.sha256)
-      throw new Error(`Reference changed: ${id}`);
+      bytes = sources.get(id)!;
     const { data, info } = await sharp(bytes)
       .removeAlpha()
       .raw()
@@ -115,7 +130,6 @@ export async function bakeCharacterTextures() {
               data[i + c] = Math.round(color[c] * 255);
           }
     }
-    const destination = join(directory, `${id}-reference.jpg`);
     const processed = await sharp(data, { raw: info }).png().toBuffer();
     const sleeveTop = id === "p2" ? 235 : 240,
       sleeveHeight = id === "p2" ? 170 : id === "p3" ? 225 : 210;
@@ -190,7 +204,7 @@ export async function bakeCharacterTextures() {
       ])
       .jpeg({ quality: 90, chromaSubsampling: "4:4:4" })
       .toBuffer();
-    await writeFile(destination, result);
+    images.push({ name: `${id}-reference.jpg`, bytes: result });
     records.push({
       id,
       source: profile.source,
@@ -220,8 +234,7 @@ export async function bakeCharacterTextures() {
       encoder: sharp.versions.sharp,
     });
   }
-  await writeFile(
-    join(directory, "provenance.json"),
+  const manifest =
     JSON.stringify(records, null, 2).replace(
       /\[\s+([\d.,\s-]+)\s+\]/g,
       (_match, numbers: string) =>
@@ -229,12 +242,17 @@ export async function bakeCharacterTextures() {
           .trim()
           .split(/\s*,\s*/)
           .join(", ")}]`,
-    ) + "\n",
-  );
+    ) + "\n";
+  // An existing directory is never replaced. The manifest is the completion
+  // marker: an interrupted new output without it is not a texture supply.
+  await mkdir(directory);
+  for (const image of images)
+    await writeFile(join(directory, image.name), image.bytes, { flag: "wx" });
+  await writeFile(join(directory, "provenance.json"), manifest, { flag: "wx" });
   return records;
 }
 if (process.argv[1]?.replaceAll("\\", "/").endsWith("/bake-textures.ts"))
-  void bakeCharacterTextures()
+  void bakeCharacterTextures(process.env.CHARACTER_TEXTURE_OUTPUT ?? "")
     .then((records) =>
       console.log(
         JSON.stringify(records.map((r) => ({ id: r.id, bytes: r.bytes }))),
