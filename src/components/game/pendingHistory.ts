@@ -229,24 +229,28 @@ export function rememberPendingHistory(
   }
   let restoredResult = resultOnly(entry);
   let restoredEpoch = epoch;
-  if (source === "restored" && captured !== undefined) {
-    restoredResult = captured.result;
-    restoredEpoch = captured.epoch;
-  } else if (source === "restored") {
-    restoredEpoch = null;
+  if (source === "restored") {
+    restoredResult = captured?.result ?? restoredResult;
+    restoredEpoch = captured?.epoch ?? null;
     try {
       const raw = local?.getItem(MATCH_HISTORY_KEY);
       const saved = raw == null ? [] : parseHistory(raw);
       const original = saved?.find((item) => sameResult(item, entry));
-      if (original !== undefined) restoredResult = original;
-      // Only a saved identical result, or the proof that no clear occurred,
-      // can establish provenance for a legacy completed journal.
-      if (
+      if (original !== undefined) {
+        // A failed capture-key update may leave an older same-seed origin.
+        // The saved payload is authoritative, but its read must retain the
+        // epoch captured above so an intervening clear still cancels it.
+        restoredResult = original;
+        restoredEpoch = captureReadable ? epoch : null;
+      } else if (
+        captured === undefined &&
         captureReadable &&
         saved !== null &&
-        (original !== undefined || epoch === 0)
-      )
-        restoredEpoch = epoch;
+        epoch === 0
+      ) {
+        // No successful clear occurred, so a legacy journal can establish E0.
+        restoredEpoch = 0;
+      }
     } catch {
       // Keep the original payload as unverified; never promote it to now.
     }

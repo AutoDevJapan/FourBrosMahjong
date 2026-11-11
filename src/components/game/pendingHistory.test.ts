@@ -107,10 +107,111 @@ describe("local pending recovery transaction (#1244)", () => {
     ).toBe("saved");
     expect(loadHistory(local)).toEqual([result(1, 200)]);
   });
+
+  it.each([false, true])(
+    "restores the saved result after a capture-only write failure (synthetic same epoch: %s)",
+    async (sameEpoch) => {
+      const local = new MemoryStorage(),
+        session = new MemoryStorage(),
+        first = queue();
+      const old = rememberPendingHistory(first, result(1, 100), session, local);
+      expect(
+        await persistPendingHistoryEntry(first, old, session, local, manager()),
+      ).toBe("saved");
+      expect(
+        await clearResultHistoryAcrossTabs(local, manager(), session),
+      ).toBe("cleared");
+      // The primary case uses the real clear epoch. This additional synthetic
+      // variant models stale provenance in the same epoch without claiming a
+      // normal clear resets its monotonically increasing counter.
+      if (sameEpoch) local.setItem(HISTORY_EPOCH_KEY, "0");
+      const expectedEpoch = sameEpoch ? 0 : 1;
+      const before = session.getItem(CAPTURED_HISTORY_KEY);
+      const write = vi
+        .spyOn(session, "setItem")
+        .mockImplementation((key, value) => {
+          if (key === CAPTURED_HISTORY_KEY)
+            throw new Error("temporary capture write failure");
+          MemoryStorage.prototype.setItem.call(session, key, value);
+        });
+      const pending = queue();
+      const live = rememberPendingHistory(
+        pending,
+        result(1, 200),
+        session,
+        local,
+        "live",
+      );
+      expect(live.historyEpoch).toBe(expectedEpoch);
+      expect(
+        await persistPendingHistoryEntry(
+          pending,
+          live,
+          session,
+          local,
+          manager(),
+        ),
+      ).toBe("saved");
+      expect(session.getItem(PENDING_HISTORY_KEY)).toBeNull();
+      expect(session.getItem(CAPTURED_HISTORY_KEY)).toBe(before);
+      write.mockRestore();
+      const restoredQueue = queue();
+      const restored = rememberPendingHistory(
+        restoredQueue,
+        result(1, 300),
+        session,
+        local,
+        "restored",
+      );
+      expect(restored.finishedAt).toBe(200);
+      expect(restored.historyEpoch).toBe(expectedEpoch);
+      expect(
+        await persistPendingHistoryEntry(
+          restoredQueue,
+          restored,
+          session,
+          local,
+          manager(),
+        ),
+      ).toBe("saved");
+      expect(loadHistory(local)).toEqual([result(1, 200)]);
+      expect(session.getItem(PENDING_HISTORY_KEY)).toBeNull();
+      // Saved-result priority must still respect a subsequent explicit clear.
+      expect(
+        await clearResultHistoryAcrossTabs(local, manager(), session),
+      ).toBe("cleared");
+      const clearedQueue = queue();
+      const cleared = rememberPendingHistory(
+        clearedQueue,
+        result(1, 400),
+        session,
+        local,
+        "restored",
+      );
+      expect(
+        await persistPendingHistoryEntry(
+          clearedQueue,
+          cleared,
+          session,
+          local,
+          manager(),
+        ),
+      ).toBe("cancelled");
+      expect(loadHistory(local)).toEqual([]);
+    },
+  );
+
   it("captures epoch before reading saved bytes and rejects a concurrent clear", async () => {
     const local = new MemoryStorage(),
       session = new MemoryStorage();
     persistHistory(local, result(7, 100));
+    session.setItem(
+      CAPTURED_HISTORY_KEY,
+      JSON.stringify({
+        version: 1,
+        entries: [{ result: result(7, 50), epoch: 0 }],
+      }),
+    );
     const read = local.getItem.bind(local);
     let crossed = false;
     vi.spyOn(local, "getItem").mockImplementation((key) => {
