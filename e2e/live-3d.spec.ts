@@ -1,7 +1,9 @@
 import { expect, test } from "@playwright/test";
 import { advanceUntil } from "./helpers/gameDriver";
 
-for (const width of [320, 393, 700, 1280]) {
+const requiredWidths = [320, 360, 393, 414, 460, 700, 1280];
+
+for (const width of requiredWidths) {
   test(`${width}pxで3D演出が牌・情報・操作領域を覆わない`, async ({ page }) => {
     await page.setViewportSize({ width, height: 1500 });
     await page.goto("/game?seed=1");
@@ -282,7 +284,7 @@ test("320pxでも同じ対局状態を描画し、横にはみ出さない", asy
   });
 });
 
-for (const width of [320, 393, 700, 1280]) {
+for (const width of requiredWidths) {
   test(`${width}pxで局情報がドラ牌を覆わない`, async ({ page }) => {
     await page.setViewportSize({ width, height: 900 });
     await page.goto("/game?seed=1");
