@@ -5,6 +5,7 @@ import {
   isCharacterPlayerId,
 } from "@/domain/game/characters";
 import { MODEL_PROFILES } from "./profiles";
+import { createRig } from "./rig";
 import type {
   Bone,
   BoneName,
@@ -365,6 +366,14 @@ export function readCharacterGlb(
       expected.some((value, i) => Math.abs(value - bone.inverseBind[i]) > 1e-5)
     )
       return fail();
+  }
+  const expectedRig = createRig(MODEL_PROFILES[expectedId]);
+  for (const bone of bones) {
+    const expected = expectedRig.find((entry) => entry.name === bone.name)!;
+    const expectedParent =
+      expected.parent < 0 ? null : expectedRig[expected.parent].name;
+    const actualParent = bone.parent < 0 ? null : bones[bone.parent].name;
+    if (actualParent !== expectedParent) return fail();
   }
   const mats = list(json.materials, 32)
     .map(row)

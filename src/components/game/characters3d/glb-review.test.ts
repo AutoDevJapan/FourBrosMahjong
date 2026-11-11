@@ -364,4 +364,34 @@ describe("exported character file consumer", () => {
       );
     },
   );
+  it("rejects a hand reparented to the chest with an unchanged rest pivot", () => {
+    const { bytes } = fixture();
+    const changed = changeJson(bytes, (j) => {
+      const nodes = j.nodes as {
+        name: string;
+        translation?: number[];
+        children?: number[];
+      }[];
+      const hand = nodes.findIndex((n) => n.name === "hand.L"),
+        chest = nodes.findIndex((n) => n.name === "chest");
+      const oldParent = nodes.findIndex((n) => n.children?.includes(hand));
+      const absolute = (index: number): number[] => {
+        const parent = nodes.findIndex((n) => n.children?.includes(index));
+        const base = parent < 0 ? [0, 0, 0] : absolute(parent);
+        return base.map((v, k) => v + (nodes[index].translation?.[k] ?? 0));
+      };
+      const handPivot = absolute(hand),
+        chestPivot = absolute(chest);
+      nodes[oldParent].children = nodes[oldParent].children!.filter(
+        (n) => n !== hand,
+      );
+      if (nodes[oldParent].children!.length === 0)
+        delete nodes[oldParent].children;
+      nodes[chest].children = [...(nodes[chest].children ?? []), hand];
+      nodes[hand].translation = handPivot.map((v, k) => v - chestPivot[k]);
+    });
+    expect(() => readCharacterGlb(changed, "p2")).toThrow(
+      "Unsupported character GLB",
+    );
+  });
 });
