@@ -144,6 +144,48 @@ describe("exported character file consumer", () => {
     );
   });
 
+  it.each(ids)(
+    "%s accepts a re-exported rest-pivot edit with its matching inverse bind",
+    (id) => {
+      const { model, texture } = fixture(id);
+      const bones = model.bones.map((bone) => {
+        if (bone.name !== "forearm.L") return bone;
+        const pivot = [
+          bone.pivot[0] + 0.001,
+          bone.pivot[1],
+          bone.pivot[2],
+        ] as const;
+        const inverseBind = Float32Array.from(bone.inverseBind);
+        inverseBind[12] = -pivot[0];
+        return { ...bone, pivot, inverseBind };
+      });
+      const edited = { ...model, bones };
+      const loaded = readCharacterGlb(exportCharacterGlb(edited, texture), id);
+      const importedBone = loaded.model.bones.find(
+        (b) => b.name === "forearm.L",
+      )!;
+      expect(importedBone.pivot[0]).toBeCloseTo(
+        bones.find((b) => b.name === "forearm.L")!.pivot[0],
+        6,
+      );
+      expect(importedBone.pivot[0]).not.toBeCloseTo(
+        model.bones.find((b) => b.name === "forearm.L")!.pivot[0],
+        4,
+      );
+      expect(importedBone.inverseBind[12]).toBeCloseTo(
+        -importedBone.pivot[0],
+        6,
+      );
+      const pose = loaded.sample("kita", 0.417);
+      expect(
+        delta(
+          projectCharacterGeometry(edited, pose),
+          projectCharacterGeometry(loaded.model, pose),
+        ),
+      ).toBeLessThan(2e-5);
+    },
+  );
+
   it.each([
     [
       "wrong source hash",
