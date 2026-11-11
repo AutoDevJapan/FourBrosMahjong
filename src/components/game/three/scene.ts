@@ -270,20 +270,19 @@ export function projectScene(
       );
     }
     count(slot.discards.length, 40);
+    let discardOffset = 0;
     for (let i = 0; i < slot.discards.length; i++) {
       const value = slot.discards[i];
-      const rowStart = Math.floor(i / 6) * 6;
-      let offset = 0;
-      for (let j = rowStart; j < i; j++)
-        offset += slot.discards[j].isRiichi ? 1.02 : 0.77;
+      if (i % 6 === 0) discardOffset = 0;
       const sideways = value.isRiichi === true;
+      const footprintWidth = sideways ? 0.97 : 0.71;
       tile(
         `${position}/discard/${i}`,
         "discards",
         position,
         seatPoint(
           position,
-          -2.05 + offset,
+          -2.05 + discardOffset + (footprintWidth - 0.71) / 2,
           0.24,
           3.9 + Math.floor(i / 6) * 1.02,
         ),
@@ -291,6 +290,7 @@ export function projectScene(
         [0.71, 0.42, 0.97],
         faceUrl(value),
       );
+      discardOffset += footprintWidth + 0.06;
     }
     count(slot.melds.length, 4);
     // Public meld order is preserved. The DTO has no called-from/added-kan
