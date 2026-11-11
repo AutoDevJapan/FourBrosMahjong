@@ -3,6 +3,7 @@
 既存Prdでオンラインの半荘結果を保存し、Storage失敗から復旧しても履歴を重複させないことを確認した。
 配備先は[既存Vercel Production](https://four-bros-mahjong.vercel.app)と既存Railway Productionのままである。
 それ以前の設定移行・maintenance通知・通常TTLの受入は[前段階の記録](./production-online-20261109.md)に保持する。
+次の半荘への未保存警告の保持と復旧は[2026-11-11の追加受入](./production-online-20261111.md)に記録する。
 
 ## 配布したsourceと実効設定
 

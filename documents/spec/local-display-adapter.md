@@ -1,7 +1,8 @@
-# ローカル対局の表示アダプター境界（#1177・先行実装）
+# ローカル対局の表示アダプター境界（#1177）
 
-対象は TypeScript の表示 DTO・入力ガード・差し替え可能な transport の契約まで。
-Unity/C# renderer、WebGL、CSP、Editor 導入、公開 3D 化は変更しない。
+この文書は TypeScript の表示 DTO・入力ガード・差し替え可能な transport の契約を定める。
+ローカル対局のWebGL2 consumer、素材・入力・失敗時の2D継続は
+[ブラウザ3D盤面](./browser-3d-display.md)で定め、ここではrenderer側のルール計算を追加しない。
 既存 `documents/fixtures/unity-display-contract.json` の Unity 試作 v1 とは別の
 `four-bros-mahjong/local-display` version 1 を用い、既存 C# がそのまま読めるとは扱わない。
 
@@ -76,8 +77,10 @@ controls は void のため receipt は `dispatched` であり `accepted` では
 ## React host の接続順序・失敗境界
 
 React 側の正式な窓口は `useLocalDisplayPort(createPort, onError)`。
-Provider 配下の host が使う契約であり、既存 `GameBoard` はまだこの hook や renderer を
-mount しない。`connectDisplayPort` を子の layout effect から直接接続・refresh すると、
+Provider 配下の `GameBoard` は `render3D` が有効なとき `GameTable3D` をmountし、
+そのcomponentがこのhookでportを接続する。通常のローカル`/game`は盤面3Dを選択し、
+人物3Dは別の `renderCharacters` が有効な場合だけ接続する。
+`connectDisplayPort` を子の layout effect から直接接続・refresh すると、
 StrictMode の再 setup では子が先、Provider の活性化が後になるため初期配信を失う。
 hook は確定した context と最新の error handler を layout effect で保持し、全 layout
 setup の後の passive effect で port を生成・接続・refresh する。初回と StrictMode の
@@ -118,8 +121,10 @@ WebSocket、server version、再接続・resume・secret の処理を追加・�
 - React host component: 実 Provider + StrictMode の両 setup、fresh port、同版無再送、2D との同 tick 競合、host だけの解除/無効化、Provider unmount、transport/reporting 失敗とリソース解放。
 - 既存関連 unit/component、対象 lint/format、typecheck を分割実行する。
 
-この先行実装だけで #1177 全体、#1179 runtime、#1180 素材、#1181 受け入れ、
-公開 Preview/Production の 3D 完成とはしない。追加 Editor/module 導入はユーザー判断で保留。
+このadapterの検証だけで #1177 全体、#1179 runtime、#1180 素材、#1181の統合受け入れや
+Productionの3D完成とはしない。通常ルートの描画・実操作・素材・保存復元・性能は、
+同じ候補のrenderer検証と既存Prdでの受け入れへ対応付ける。
+配備は既存Prdだけとし、localhost・CIの検証と分ける。追加Editor/moduleは導入していない。
 
 ## 確定イベントのcue追補
 
