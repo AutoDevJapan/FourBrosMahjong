@@ -11,6 +11,7 @@ import { readHistoryEpoch } from "./historyEpoch";
 import {
   type HistoryLockManager,
   loadHistory,
+  MATCH_HISTORY_KEY,
   MAX_HISTORY_BYTES,
   MAX_HISTORY_ENTRIES,
   type MatchHistoryEntry,
@@ -25,6 +26,8 @@ import {
 export const PENDING_HISTORY_KEY = "four-bros-mahjong.history-pending.v1";
 export const PENDING_HISTORY_EPOCHS_KEY =
   "four-bros-mahjong.history-pending-epochs.v1";
+/** Capture provenance survives successful saves and explicit history deletion. */
+export const CAPTURED_HISTORY_KEY = "four-bros-mahjong.history-captures.v1";
 
 /** The v1 result bytes stay unchanged; capture metadata is stored separately. */
 export interface PendingHistoryEntry extends MatchHistoryEntry {
@@ -57,8 +60,11 @@ export function pendingHistorySessionStorage(): Storage | null {
   }
 }
 
-function readAssociations(storage: Storage): readonly EpochAssociation[] {
-  const raw = storage.getItem(PENDING_HISTORY_EPOCHS_KEY);
+function readAssociations(
+  storage: Storage,
+  key = PENDING_HISTORY_EPOCHS_KEY,
+): readonly EpochAssociation[] {
+  const raw = storage.getItem(key);
   if (raw === null) return [];
   if (raw.length * 2 > MAX_HISTORY_BYTES + 4096)
     throw new Error("Invalid epochs");
@@ -89,6 +95,32 @@ function readAssociations(storage: Storage): readonly EpochAssociation[] {
   )
     throw new Error("Invalid epochs");
   return value.entries;
+}
+
+function sameResult(a: MatchHistoryEntry, b: MatchHistoryEntry): boolean {
+  return (
+    a.seed === b.seed && JSON.stringify(a.players) === JSON.stringify(b.players)
+  );
+}
+
+function retainCapture(
+  storage: Storage | null,
+  entry: PendingHistoryEntry,
+): void {
+  if (storage === null) return;
+  try {
+    const previous = readAssociations(storage, CAPTURED_HISTORY_KEY);
+    const next = [
+      ...previous.filter((item) => item.result.seed !== entry.seed),
+      { result: resultOnly(entry), epoch: entry.historyEpoch },
+    ].slice(-MAX_HISTORY_ENTRIES);
+    storage.setItem(
+      CAPTURED_HISTORY_KEY,
+      JSON.stringify({ version: 1, entries: next }),
+    );
+  } catch {
+    // A later restore without readable provenance cannot assume a post-clear epoch.
+  }
 }
 
 /** Read failure is distinct from an empty queue inside a write transaction. */
@@ -166,26 +198,65 @@ export function rememberPendingHistory(
   entry: MatchHistoryEntry,
   storage: Storage | null,
   local = localStorageOrNull(),
+  source: "live" | "restored" = "live",
 ): PendingHistoryEntry {
   const existing = pending.get(entry.seed);
   if (existing !== undefined) return existing;
+  // Capture before reading any saved result. Another tab may clear after that
+  // read, so this exact epoch must reach the eventual locked comparison.
+  let epoch: number | null = null;
+  try {
+    if (local !== null) epoch = readHistoryEpoch(local);
+  } catch {
+    // Unknown is not a new capture in the currently visible generation.
+  }
   let current: readonly PendingHistoryEntry[] | null = null;
   try {
     if (storage !== null) current = readPending(storage);
   } catch {
     // Do not overwrite a queue whose current contents cannot be read.
   }
-  let epoch: number | null = null;
+  let captured: EpochAssociation | undefined;
+  let captureReadable = storage !== null;
   try {
-    if (local !== null) epoch = readHistoryEpoch(local);
+    if (storage !== null) {
+      captured = readAssociations(storage, CAPTURED_HISTORY_KEY).find((item) =>
+        sameResult(item.result, entry),
+      );
+    }
   } catch {
-    // Unknown is kept until a later epoch-zero proof can establish its age.
+    captureReadable = false;
+  }
+  let restoredResult = resultOnly(entry);
+  let restoredEpoch = epoch;
+  if (source === "restored" && captured !== undefined) {
+    restoredResult = captured.result;
+    restoredEpoch = captured.epoch;
+  } else if (source === "restored") {
+    restoredEpoch = null;
+    try {
+      const raw = local?.getItem(MATCH_HISTORY_KEY);
+      const saved = raw == null ? [] : parseHistory(raw);
+      const original = saved?.find((item) => sameResult(item, entry));
+      if (original !== undefined) restoredResult = original;
+      // Only a saved identical result, or the proof that no clear occurred,
+      // can establish provenance for a legacy completed journal.
+      if (
+        captureReadable &&
+        saved !== null &&
+        (original !== undefined || epoch === 0)
+      )
+        restoredEpoch = epoch;
+    } catch {
+      // Keep the original payload as unverified; never promote it to now.
+    }
   }
   const retained = current?.find((item) => item.seed === entry.seed) ?? {
-    ...resultOnly(entry),
-    historyEpoch: epoch,
+    ...restoredResult,
+    historyEpoch: restoredEpoch,
     stored: false,
   };
+  retainCapture(storage, retained);
   pending.set(entry.seed, retained);
   while (pending.size > MAX_HISTORY_ENTRIES) {
     const oldest = pending.keys().next().value;
@@ -252,6 +323,7 @@ export async function persistPendingHistoryEntry(
         if (entry.historyEpoch === null) {
           if (epoch !== 0) return "failed";
           entry.historyEpoch = 0;
+          retainCapture(session, entry);
         }
         if (entry.historyEpoch !== epoch) {
           forgetPendingHistory(pending, entry, session);

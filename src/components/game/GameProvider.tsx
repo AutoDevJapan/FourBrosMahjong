@@ -558,6 +558,8 @@ function GameProviderRuntime({ children, initial }: GameProviderRuntimeProps) {
           pendingHistory,
           entry,
           sessionStorageOrNull(),
+          localStorageOrNull(),
+          "restored",
         );
         persistPendingHistoryEntry(pendingEntry, initial.journal);
         retryPendingHistory(pendingEntry.seed);

@@ -232,8 +232,10 @@ describe("match history store (#302)", () => {
     const unsubscribe = subscribe(callback);
     expect(getHistoryViewSnapshot()).toEqual({ status: "read-error" });
 
-    appendHistory(window.localStorage, entry(9));
     blocked = false;
+    // The external writer can read its own storage; an unreadable writer must
+    // fail closed rather than replace existing history with an empty snapshot.
+    appendHistory(window.localStorage, entry(9));
     window.dispatchEvent(
       new StorageEvent("storage", { key: MATCH_HISTORY_KEY }),
     );

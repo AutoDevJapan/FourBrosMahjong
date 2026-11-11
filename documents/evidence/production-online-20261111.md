@@ -39,7 +39,8 @@ consoleとpage errorは、オンライン画面の初回ロード後から実対
 connected rooms、WebSocket connections、attached sessions、unique connected seats、pending upgrades、blocking drain rooms、reconnect grace roomsはすべて0件だった。
 保持ルーム1件は既存の自然TTLへ任せ、手動削除・再起動・TTL更新は行っていない。この時点で保持ルーム0を確認した結果ではない。
 
-2026-11-11T12:20:54.188Zの通常の認証済み読戻しでは、同じsource・deployment・replicaでHTTP 200・`accepting`を確認し、保持ルームを含む全aggregateが0件だった。自然TTLと既存の定期sweep後の実観測であり、経過時間だけから削除済みと推定した結果ではない。
+2026-11-11T12:20:54.188Zの通常の認証済み読戻しでは、保持ルームを含む全aggregateが0件だったが、予定期限12:21Zより前なので期限後の確認には使用しない。
+期限後の2026-11-11T12:35:49.827Zの後続読戻しで、同じsource・deploymentのHTTP 200と全10aggregateの整数0を確認した。これは後続担当が取得した原応答の再検証で、元担当の再GETや正確な消滅時刻を証明した結果ではない。
 
 本番表示は既存2Dのままで、3D盤面・人物の採用や本番有効化の受入ではない。
 外観への本人回答照合、3D・人物の統合レビューと本番操作・保存復元・実機性能は引き続き残る。

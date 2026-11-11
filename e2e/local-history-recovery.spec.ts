@@ -1,12 +1,15 @@
 import { expect, test } from "@playwright/test";
+import { tileLabel } from "@/components/common/tileLabel";
 import { walkToGameEnd } from "@/components/game/finishedGameFixture";
 import { replayJournal } from "@/components/game/gamePersistence";
-import { advanceUntil } from "./helpers/gameDriver";
+import { visibleHand } from "./helpers/gameDriver";
 
 test("ローカル保存失敗後に次半荘から戦績へ移り、元の結果を再保存できる(#1244)", async ({
   page,
 }) => {
   const fixture = walkToGameEnd(1);
+  const lastAction = fixture.journal.actions.at(-1);
+  if (!lastAction) throw new Error("The completed fixture has no final action");
   const errors: string[] = [];
   page.on("pageerror", (error) => errors.push(error.message));
   page.on("console", (message) => {
@@ -42,11 +45,39 @@ test("ローカル保存失敗後に次半荘から戦績へ移り、元の結�
   );
 
   await page.goto("/game");
-  await advanceUntil(
-    page,
-    async () => (await page.locator('[data-phase="gameEnd"]').count()) > 0,
-    { legalOnly: true, maxSteps: 10, onGameEnd: "stop" },
-  );
+  // Use the fixture's actual final legal action, not a different discard policy.
+  await expect(page.getByRole("group", { name: "対局盤面" })).toBeVisible();
+  if (lastAction.type === "discard") {
+    await visibleHand(page)
+      .getByRole("option", { name: tileLabel(lastAction.tile), exact: true })
+      .last()
+      .press("Enter");
+  } else {
+    const label =
+      lastAction.type === "nextRound"
+        ? "次の局へ"
+        : lastAction.type === "passRon"
+          ? "スルー"
+          : null;
+    if (label === null)
+      throw new Error(`Unsupported fixture final action: ${lastAction.type}`);
+    await page
+      .getByRole("button", { name: label, exact: true })
+      .filter({ visible: true })
+      .first()
+      .click();
+  }
+  await expect
+    .poll(() =>
+      page.evaluate(
+        () =>
+          JSON.parse(
+            sessionStorage.getItem("four-bros-mahjong.game.v3") ?? "null",
+          )?.actions,
+      ),
+    )
+    .toEqual(fixture.journal.actions);
+  await expect(page.locator('[data-phase="gameEnd"]').first()).toBeVisible();
   await page.getByRole("button", { name: "結果を見る" }).first().click();
   await expect(page).toHaveURL(/\/game\/result$/);
   await expect(page.locator('[data-save-status="failed"]')).toBeVisible();

@@ -9,6 +9,7 @@ import {
   persistHistory,
 } from "./matchHistory";
 import {
+  CAPTURED_HISTORY_KEY,
   forgetPendingHistory,
   loadPendingHistory,
   PENDING_HISTORY_EPOCHS_KEY,
@@ -70,6 +71,126 @@ const legacy = (session: Storage, entry: MatchHistoryEntry) =>
   );
 
 describe("local pending recovery transaction (#1244)", () => {
+  it("uses the public capture provenance key for fault injection", () => {
+    expect(CAPTURED_HISTORY_KEY).toBe("four-bros-mahjong.history-captures.v1");
+  });
+
+  it("a genuinely new final action captures the post-clear epoch instead of an older origin", async () => {
+    const local = new MemoryStorage(),
+      session = new MemoryStorage(),
+      first = queue();
+    const old = rememberPendingHistory(first, result(1, 100), session, local);
+    expect(
+      await persistPendingHistoryEntry(first, old, session, local, manager()),
+    ).toBe("saved");
+    expect(await clearResultHistoryAcrossTabs(local, manager(), session)).toBe(
+      "cleared",
+    );
+    const pending = queue();
+    const live = rememberPendingHistory(
+      pending,
+      result(1, 200),
+      session,
+      local,
+      "live",
+    );
+    expect(live.historyEpoch).toBe(1);
+    expect(live.finishedAt).toBe(200);
+    expect(
+      await persistPendingHistoryEntry(
+        pending,
+        live,
+        session,
+        local,
+        manager(),
+      ),
+    ).toBe("saved");
+    expect(loadHistory(local)).toEqual([result(1, 200)]);
+  });
+  it("captures epoch before reading saved bytes and rejects a concurrent clear", async () => {
+    const local = new MemoryStorage(),
+      session = new MemoryStorage();
+    persistHistory(local, result(7, 100));
+    const read = local.getItem.bind(local);
+    let crossed = false;
+    vi.spyOn(local, "getItem").mockImplementation((key) => {
+      const raw = read(key);
+      if (key === MATCH_HISTORY_KEY && !crossed) {
+        crossed = true;
+        local.removeItem(MATCH_HISTORY_KEY);
+        local.setItem(HISTORY_EPOCH_KEY, "1");
+      }
+      return raw;
+    });
+    const pending = queue();
+    const entry = rememberPendingHistory(
+      pending,
+      result(7, 999),
+      session,
+      local,
+      "restored",
+    );
+    expect(crossed).toBe(true);
+    expect(entry.finishedAt).toBe(100);
+    expect(entry.historyEpoch).toBe(0);
+    expect(
+      await persistPendingHistoryEntry(
+        pending,
+        entry,
+        session,
+        local,
+        manager(),
+      ),
+    ).toBe("cancelled");
+    expect(loadHistory(local)).toEqual([]);
+    expect(session.getItem(PENDING_HISTORY_KEY)).toBeNull();
+  });
+
+  it.each(["read", "write"])(
+    "capture provenance %s failure does not promote an old journal after clear",
+    async (fault) => {
+      const local = new MemoryStorage(),
+        session = new MemoryStorage();
+      local.setItem(HISTORY_EPOCH_KEY, "1");
+      const method = fault === "read" ? "getItem" : "setItem";
+      const originalRead = session.getItem.bind(session),
+        originalWrite = session.setItem.bind(session);
+      if (method === "getItem")
+        vi.spyOn(session, "getItem").mockImplementation((key) => {
+          if (key === CAPTURED_HISTORY_KEY)
+            throw new Error("unreadable provenance");
+          return originalRead(key);
+        });
+      else
+        vi.spyOn(session, "setItem").mockImplementation((key, value) => {
+          if (key === CAPTURED_HISTORY_KEY)
+            throw new Error("unwritable provenance");
+          originalWrite(key, value);
+        });
+      const pending = queue();
+      const entry = rememberPendingHistory(
+        pending,
+        result(1),
+        session,
+        local,
+        "restored",
+      );
+      expect(entry.historyEpoch).toBeNull();
+      expect(
+        await persistPendingHistoryEntry(
+          pending,
+          entry,
+          session,
+          local,
+          manager(),
+        ),
+      ).toBe("failed");
+      expect(loadPendingHistory(session).map((item) => item.seed)).toEqual([1]);
+      expect(loadHistory(local)).toEqual([]);
+      vi.restoreAllMocks();
+    },
+  );
+
   it("keeps the original v1 result and first capture through retry and deduplicates", async () => {
     const local = new MemoryStorage(),
       session = new MemoryStorage(),
