@@ -49,7 +49,7 @@ $env:CHARACTER_TEXTURE_OUTPUT='<new-texture-directory>'
 pnpm exec tsx src/components/game/characters3d/bake-textures.ts
 ```
 
-全原本の検証と4枚のencodeが完了してから、新規ディレクトリへ4画像とprovenanceを書き出す。既存先は上書きせず、書込み途中の失敗・中断ではprovenanceのない不完全な新規出力だけが残り、tracked一式は保持する。provenanceを完成markerとして扱い、不完全な出力を採用しない。tracked一式への同期はこの比較・再生成コマンドには含めず、変更画像とprovenanceをまとめて通常の差分確認・レビューへ渡す。
+全原本の検証と4枚のencodeが完了してから、新規ディレクトリへ4画像を書き出す。manifestは`provenance.complete.json`へ全量を書いて閉じた後、同じディレクトリのhard linkで`provenance.json`として原子的に公開する。既存先は上書きせず、書込み途中の失敗・中断では最終名`provenance.json`のない不完全な新規出力だけが残り、tracked一式は保持する。最終名を完成markerとして扱い、読取側は引き続き全件の妥当性を検証する。hard link非対応の出力先では公開を失敗として扱い、非原子的な代替へ切り替えない。tracked一式への同期はこの比較・再生成コマンドには含めず、変更画像とprovenanceをまとめて通常の差分確認・レビューへ渡す。
 
 ```powershell
 pnpm exec vitest run --project unit src/components/game/characters3d/characters.test.ts src/components/game/characters3d/fittings.test.ts src/components/game/three/characterProjection.test.ts

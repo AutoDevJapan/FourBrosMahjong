@@ -1,6 +1,6 @@
 /** Explicit regeneration into a new output; never rewrites the tracked set. */
 import { createHash } from "node:crypto";
-import { lstat, mkdir, writeFile } from "node:fs/promises";
+import { link, lstat, mkdir, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { join, resolve } from "node:path";
 import { headTextureRegions, MODEL_PROFILES } from "./profiles";
@@ -248,7 +248,11 @@ export async function bakeCharacterTextures(
   await mkdir(directory);
   for (const image of images)
     await writeFile(join(directory, image.name), image.bytes, { flag: "wx" });
-  await writeFile(join(directory, "provenance.json"), manifest, { flag: "wx" });
+  const completedManifest = join(directory, "provenance.complete.json");
+  await writeFile(completedManifest, manifest, { flag: "wx" });
+  // Same-directory hard-link publication is atomic and refuses an existing
+  // destination. The final name cannot expose a partially written manifest.
+  await link(completedManifest, join(directory, "provenance.json"));
   return records;
 }
 if (process.argv[1]?.replaceAll("\\", "/").endsWith("/bake-textures.ts"))

@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
-import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
+import { link, mkdir, readdir, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { describe, expect, it, vi } from "vitest";
@@ -9,7 +9,11 @@ import { readCharacterTextureSet } from "./texture-supply";
 
 vi.mock("node:fs/promises", async (importOriginal) => {
   const actual = await importOriginal<typeof import("node:fs/promises")>();
-  return { ...actual, writeFile: vi.fn(actual.writeFile) };
+  return {
+    ...actual,
+    writeFile: vi.fn(actual.writeFile),
+    link: vi.fn(actual.link),
+  };
 });
 
 const ids = ["p0", "p1", "p2", "p3"] as const;
@@ -148,6 +152,67 @@ describe("fixed character texture supply", () => {
     expect(await fingerprint(f.textures)).toEqual(before);
   });
 
+  it("never exposes a partial completion manifest after a short failed write", async () => {
+    const f = await fixture(),
+      before = await fingerprint(f.textures),
+      output = join(f.root, "manifest-failure");
+    const actual =
+      await vi.importActual<typeof import("node:fs/promises")>(
+        "node:fs/promises",
+      );
+    vi.mocked(writeFile).mockImplementation(async (...args) => {
+      if (String(args[0]).includes("provenance")) {
+        await actual.writeFile(args[0], '[{"', { flag: "wx" });
+        throw Object.assign(new Error("fixture partial manifest failure"), {
+          code: "EIO",
+        });
+      }
+      return actual.writeFile(...args);
+    });
+    try {
+      await expect(bakeCharacterTextures(output, f.root)).rejects.toMatchObject(
+        { code: "EIO" },
+      );
+    } finally {
+      vi.mocked(writeFile).mockImplementation(actual.writeFile);
+    }
+    expect(
+      (await readdir(output)).filter((name) => name.endsWith(".jpg")),
+    ).toHaveLength(4);
+    await expect(
+      readFile(join(output, "provenance.json")),
+    ).rejects.toMatchObject({ code: "ENOENT" });
+    expect(await fingerprint(f.textures)).toEqual(before);
+  });
+
+  it("keeps the completed staging manifest private when atomic publication fails", async () => {
+    const f = await fixture(),
+      before = await fingerprint(f.textures),
+      output = join(f.root, "publication-failure");
+    const actual =
+      await vi.importActual<typeof import("node:fs/promises")>(
+        "node:fs/promises",
+      );
+    vi.mocked(link).mockRejectedValueOnce(
+      Object.assign(new Error("fixture publication failure"), { code: "EIO" }),
+    );
+    try {
+      await expect(bakeCharacterTextures(output, f.root)).rejects.toMatchObject(
+        { code: "EIO" },
+      );
+    } finally {
+      vi.mocked(link).mockImplementation(actual.link);
+    }
+    const completed = JSON.parse(
+      await readFile(join(output, "provenance.complete.json"), "utf8"),
+    );
+    expect(completed.map((row: { id: string }) => row.id)).toEqual(ids);
+    await expect(
+      readFile(join(output, "provenance.json")),
+    ).rejects.toMatchObject({ code: "ENOENT" });
+    expect(await fingerprint(f.textures)).toEqual(before);
+  });
+
   it("publishes four textures and their matching manifest only into a new output", async () => {
     const f = await fixture(),
       before = await fingerprint(f.textures),
@@ -158,6 +223,7 @@ describe("fixed character texture supply", () => {
       "p1-reference.jpg",
       "p2-reference.jpg",
       "p3-reference.jpg",
+      "provenance.complete.json",
       "provenance.json",
     ]);
     const manifest = JSON.parse(
