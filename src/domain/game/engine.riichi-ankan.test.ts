@@ -1,15 +1,23 @@
 import { describe, expect, it } from "vitest";
-import { resolveDora } from "@/domain/dora/doraSet";
-import { sameKind } from "@/domain/hand/tile-identity";
+import { createDoraSet, resolveDora } from "@/domain/dora/doraSet";
+import { decomposeAll } from "@/domain/hand/decompose";
+import { waitingTiles } from "@/domain/hand/tenpai";
+import { sameKind, tileKey } from "@/domain/hand/tile-identity";
 import { createTile, HONOR, type Suit, type Tile } from "@/domain/tiles/tile";
+import { buildTileSet } from "@/domain/tiles/tileSet";
+import { Wall } from "@/domain/wall/wall";
 import {
   canAnkanAfterRiichi,
   createGame,
   declareAnkan,
+  declareRiichi,
   declareTsumo,
   type EngineState,
   type Pending,
+  passRon,
   seatOfPlayer,
+  setHumanPlayerIds,
+  tsumogiri,
 } from "./engine";
 
 /**
@@ -366,5 +374,157 @@ describe("declareAnkan: リーチ後暗槓の結線(Q18 / #116)", () => {
     const state: EngineState = { ...s0, pending: riichiPending([], true) };
     const after = declareAnkan(state, createTile("pin", 1));
     expect(after).toBe(state);
+  });
+});
+
+function fixedTripletCounterexample() {
+  return [1, 1, 1, 2, 2, 2, 3, 3, 3]
+    .map((rank) => createTile("pin", rank))
+    .concat([4, 5, 6, 9].map((rank) => createTile("sou", rank)));
+}
+
+describe("Q18 fixed-triplet condition has an independent witness (Q27)", () => {
+  it("rejects a draw with unchanged waits when a three-sequence completion also exists", () => {
+    const concealed = fixedTripletCounterexample(),
+      drawn = createTile("pin", 1),
+      winning = createTile("sou", 9);
+    expect(
+      concealed.filter((tile) => tileKey(tile) === tileKey(drawn)),
+    ).toHaveLength(3);
+    const before = waitingTiles(concealed, []);
+    const after = waitingTiles(
+      concealed.filter((tile) => tileKey(tile) !== tileKey(drawn)),
+      [{ tiles: [drawn, drawn, drawn, drawn], isKan: true, concealed: true }],
+    );
+    expect(before).toEqual([winning]);
+    expect(after).toEqual([winning]);
+    expect(before).not.toContainEqual(drawn);
+    const forms = decomposeAll([...concealed, winning], []);
+    expect(forms).toHaveLength(2);
+    expect(
+      forms
+        .filter((form) => form.kind === "standard")
+        .map((form) =>
+          form.kind === "standard"
+            ? {
+                melds: form.melds.map(
+                  (m) => `${m.kind}:${m.suit}:${m.startRank}`,
+                ),
+                pair: `${form.pair.suit}:${form.pair.startRank}`,
+              }
+            : null,
+        ),
+    ).toEqual([
+      {
+        melds: [
+          "triplet:pin:1",
+          "triplet:pin:2",
+          "triplet:pin:3",
+          "sequence:sou:4",
+        ],
+        pair: "sou:9",
+      },
+      {
+        melds: [
+          "sequence:pin:1",
+          "sequence:pin:1",
+          "sequence:pin:1",
+          "sequence:sou:4",
+        ],
+        pair: "sou:9",
+      },
+    ]);
+    expect(canAnkanAfterRiichi(concealed, drawn)).toBe(false);
+  });
+
+  it("never presents the prohibited ankan after a real public riichi action and next draw", () => {
+    let state = createGame({ seed: 1, humanPlayerIds: ["p0"] });
+    if (!state.hand) throw new Error("expected initial hand");
+    const seat = seatOfPlayer(state.hand.seating, "p0");
+    if (!seat) throw new Error("expected seated p0");
+    const pool = buildTileSet();
+    const take = (tile: ReturnType<typeof createTile>) => {
+      const at = pool.findIndex((item) => tileKey(item) === tileKey(tile));
+      if (at < 0) throw new Error("fixture exceeds four canonical copies");
+      return pool.splice(at, 1)[0];
+    };
+    const prepared = fixedTripletCounterexample().map(take);
+    const declaration = take(createTile("man", 9));
+    const drawn = take(createTile("pin", 1));
+    const nextDraws = [
+      take(createTile("honor", 5)),
+      take(createTile("honor", 6)),
+      drawn,
+    ];
+    const others = [pool.splice(0, 13), pool.splice(0, 13)];
+    const wall = new Wall([
+      ...prepared,
+      ...others.flat(),
+      declaration,
+      ...nextDraws,
+      ...pool,
+    ]);
+    for (let n = 0; n < 40; n++) wall.draw();
+    const seats = ["east", "south", "west"] as const,
+      otherSeats = seats.filter((item) => item !== seat),
+      current = state.hand;
+    state = {
+      ...state,
+      pending: null,
+      humanPlayerIds: ["p0"],
+      hand: {
+        ...current,
+        wall,
+        doraSet: createDoraSet(wall.deadWall, current.dice),
+        turn: seat,
+        hands: {
+          ...current.hands,
+          [seat]: prepared,
+          [otherSeats[0]]: others[0],
+          [otherSeats[1]]: others[1],
+        },
+        drawn: { tile: declaration, source: "live" },
+        callsMade: false,
+        discards: { east: [], south: [], west: [] },
+        discardHistory: { east: [], south: [], west: [] },
+        melds: { east: [], south: [], west: [] },
+        kita: { east: 0, south: 0, west: 0 },
+        riichi: { east: false, south: false, west: false },
+        pendingDiscard: null,
+        pendingRiichiSeat: null,
+        passedRonSeats: [],
+      },
+    };
+    state = setHumanPlayerIds(state, ["p0", "p1", "p2", "p3"]);
+    expect(state.pending?.kind).toBe("humanDiscard");
+    if (state.pending?.kind !== "humanDiscard")
+      throw new Error("expected riichi decision");
+    expect(state.pending.canRiichi).toBe(true);
+    expect(state.pending.riichiTiles).toContainEqual(declaration);
+    state = declareRiichi(state, declaration, "p0");
+    expect(state.hand?.riichi[seat]).toBe(true);
+    for (
+      let n = 0;
+      n < 8 &&
+      state.phase === "playing" &&
+      state.pending &&
+      state.pending.playerId !== "p0";
+      n++
+    ) {
+      const id = state.pending.playerId ?? "p0";
+      state =
+        state.pending.kind === "humanReact"
+          ? passRon(state, id)
+          : tsumogiri(state, id);
+    }
+    expect(state.hand?.melds[seat]).toEqual([]);
+    expect(state.hand?.discards[seat].map(tileKey)).toContain(tileKey(drawn));
+    expect(
+      state.pending?.kind === "humanDiscard" &&
+        state.pending.playerId === "p0" &&
+        state.pending.ankanTiles.some(
+          (tile) => tileKey(tile) === tileKey(drawn),
+        ),
+    ).toBe(false);
   });
 });
