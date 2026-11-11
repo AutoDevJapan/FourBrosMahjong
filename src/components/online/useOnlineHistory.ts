@@ -68,6 +68,9 @@ export function useOnlineHistory(
   const [saved, setSaved] = useState<{ id: string; status: SaveStatus } | null>(
     null,
   );
+  const [failedIds, setFailedIds] = useState<ReadonlySet<string>>(
+    () => new Set(),
+  );
   const identity =
     snapshot.phase === "gameEnd" &&
     snapshot.view.result !== null &&
@@ -133,6 +136,19 @@ export function useOnlineHistory(
           );
           if (result === "appended") notifyResultHistoryChanged();
         }
+        if (active.current) {
+          setFailedIds((previous) => {
+            const next = new Set(
+              [...previous].filter((failedId) => pending.has(failedId)),
+            );
+            if (result === "failed" && pending.has(id)) next.add(id);
+            else next.delete(id);
+            return next.size === previous.size &&
+              [...next].every((failedId) => previous.has(failedId))
+              ? previous
+              : next;
+          });
+        }
         if (active.current && current.current === id) {
           setSaved({ id, status });
           if (status === "failed") {
@@ -180,6 +196,8 @@ export function useOnlineHistory(
     };
   }, [pending, persist]);
 
+  // A new match cannot hide an older retained failure or report it as saved.
+  if ([...failedIds].some((id) => pending.has(id))) return "failed";
   return identity === null
     ? "idle"
     : saved?.id === identity

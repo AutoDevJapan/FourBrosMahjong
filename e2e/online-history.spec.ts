@@ -61,7 +61,7 @@ test("オンライン終局を旧戦績と保存し、再接続・次の半荘�
     socket.open();
     socket.message({ type: "session", token: "t".repeat(24), snapshot });
   }, first);
-  const warning = page.getByText(/この端末に今回の戦績を保存できませんでした/);
+  const warning = page.getByText(/この端末に戦績を保存できませんでした/);
   await expect(warning).toBeVisible();
   const progress = page
     .getByRole("group", { name: "参加者", exact: true })
@@ -242,7 +242,7 @@ test("オンライン終局を旧戦績と保存し、再接続・次の半荘�
       { ...first, matchId: `${"a".repeat(32)}:4`, version: 9 },
     );
     await expect(
-      page.getByText(/この端末に今回の戦績を保存できませんでした/),
+      page.getByText(/この端末に戦績を保存できませんでした/),
     ).toBeVisible();
     const pendingBefore = await page.evaluate(() =>
       JSON.parse(
@@ -279,5 +279,172 @@ test("オンライン終局を旧戦績と保存し、再接続・次の半荘�
       ).__restoreHistoryStorage?.();
     });
     await history.close();
+  }
+});
+
+test("前の半荘の未保存警告は次の半荘と再試行待機中も残り、保存確認後に消える", async ({
+  page,
+}, testInfo) => {
+  await page.setViewportSize({ width: 320, height: 900 });
+  await page.goto("/online");
+  await installWebSocketStub(page);
+  await page.getByLabel("表示名").fill("保存引継テスト");
+  await page.getByRole("button", { name: "新しいルームを作る" }).click();
+  const firstId = `${"c".repeat(32)}:1`;
+  try {
+    await page.evaluate(
+      (snapshot) => {
+        const host = window as unknown as OnlineTestWindow & {
+          __restoreHistoryStorage?: () => void;
+        };
+        const descriptor = Object.getOwnPropertyDescriptor(
+          window,
+          "localStorage",
+        );
+        host.__restoreHistoryStorage = () => {
+          if (descriptor)
+            Object.defineProperty(window, "localStorage", descriptor);
+          else Reflect.deleteProperty(window, "localStorage");
+          delete host.__restoreHistoryStorage;
+        };
+        Object.defineProperty(window, "localStorage", {
+          configurable: true,
+          get() {
+            throw new DOMException("temporarily unavailable", "SecurityError");
+          },
+        });
+        const socket = host.__fourBrosOnlineSockets[0];
+        if (!socket) throw new Error("test socket missing");
+        socket.open();
+        socket.message({ type: "session", token: "t".repeat(24), snapshot });
+      },
+      { ...onlineFinishedSnapshotFixture(), matchId: firstId },
+    );
+    const warning = page.getByText(/この端末に戦績を保存できませんでした/);
+    await expect(warning).toBeVisible();
+    const pending = () =>
+      page.evaluate(() => {
+        const raw = sessionStorage.getItem(
+          "four-bros-mahjong.history-online-pending.v2",
+        );
+        return raw === null
+          ? []
+          : (JSON.parse(raw).entries as {
+              onlineMatchId: string;
+              finishedAt: number;
+            }[]);
+      });
+    const before = await pending();
+    expect(before).toHaveLength(1);
+    expect(before[0].onlineMatchId).toBe(firstId);
+    await page.getByRole("button", { name: "結果を見る" }).click();
+    await page.getByRole("button", { name: "新しい半荘を開始" }).click();
+    expect(
+      await page.evaluate(() =>
+        (window as unknown as OnlineTestWindow).__fourBrosOnlineSockets[0].sent
+          .map((raw) => JSON.parse(raw))
+          .some((message) => message.type === "newGame"),
+      ),
+    ).toBe(true);
+    await page.evaluate(
+      (snapshot) => {
+        (
+          window as unknown as OnlineTestWindow
+        ).__fourBrosOnlineSockets[0].message({
+          type: "snapshot",
+          snapshot,
+        });
+      },
+      {
+        ...onlineSnapshotFixture(),
+        matchId: `${"c".repeat(32)}:2`,
+        version: 2,
+      },
+    );
+    await expect(page.locator('[data-phase="playing"]')).toBeVisible();
+    await expect(warning).toBeVisible();
+    expect(await pending()).toEqual(before);
+    expect(
+      await page.evaluate(() => document.documentElement.scrollWidth),
+    ).toBeLessThanOrEqual(320);
+    await page.screenshot({
+      path: testInfo.outputPath("pending-new-match-320.png"),
+      fullPage: true,
+    });
+    const warningNode = await warning.elementHandle();
+    if (!warningNode) throw new Error("retained warning missing");
+    await page.evaluate(async () => {
+      const host = window as unknown as {
+        __restoreHistoryStorage?: () => void;
+        __releaseHistoryWrite?: () => void;
+        __historyWriteDone?: Promise<void>;
+      };
+      let entered!: () => void;
+      const acquired = new Promise<void>((resolve) => {
+        entered = resolve;
+      });
+      host.__historyWriteDone = navigator.locks.request(
+        "four-bros-mahjong.history.write.v1",
+        () =>
+          new Promise<void>((resolve) => {
+            host.__releaseHistoryWrite = resolve;
+            entered();
+          }),
+      );
+      await acquired;
+      host.__restoreHistoryStorage?.();
+      window.dispatchEvent(new Event("focus"));
+    });
+    await expect(warning).toBeVisible();
+    expect(
+      await warning.evaluate(
+        (current, previous) => current === previous,
+        warningNode,
+      ),
+    ).toBe(true);
+    expect(await pending()).toEqual(before);
+    expect(
+      await page.evaluate(() =>
+        localStorage.getItem("four-bros-mahjong.history.v2"),
+      ),
+    ).toBeNull();
+    await page.evaluate(async () => {
+      const host = window as unknown as {
+        __releaseHistoryWrite?: () => void;
+        __historyWriteDone?: Promise<void>;
+      };
+      host.__releaseHistoryWrite?.();
+      await host.__historyWriteDone;
+      delete host.__releaseHistoryWrite;
+      delete host.__historyWriteDone;
+    });
+    await expect.poll(pending).toEqual([]);
+    await expect(warning).not.toBeVisible();
+    await expect(page.locator('[data-phase="playing"]')).toBeVisible();
+    expect(
+      await page.evaluate(() =>
+        JSON.parse(
+          localStorage.getItem("four-bros-mahjong.history.v2")!,
+        ).entries.map(
+          (entry: { onlineMatchId: string; finishedAt: number }) => ({
+            onlineMatchId: entry.onlineMatchId,
+            finishedAt: entry.finishedAt,
+          }),
+        ),
+      ),
+    ).toEqual([{ onlineMatchId: firstId, finishedAt: before[0].finishedAt }]);
+  } finally {
+    await page.evaluate(async () => {
+      const host = window as unknown as {
+        __restoreHistoryStorage?: () => void;
+        __releaseHistoryWrite?: () => void;
+        __historyWriteDone?: Promise<void>;
+      };
+      host.__restoreHistoryStorage?.();
+      host.__releaseHistoryWrite?.();
+      await host.__historyWriteDone;
+      delete host.__releaseHistoryWrite;
+      delete host.__historyWriteDone;
+    });
   }
 });
