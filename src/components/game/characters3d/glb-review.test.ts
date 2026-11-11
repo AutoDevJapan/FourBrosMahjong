@@ -224,4 +224,23 @@ describe("exported character file consumer", () => {
     expect(() => loaded.sample("kita", NaN)).toThrow();
     expect(() => loaded.sample("kita", -1)).toThrow();
   });
+  it("rejects finite inverse-bind matrices that do not invert the exported rest pivots", () => {
+    const { bytes } = fixture();
+    const header = new DataView(
+      bytes.buffer,
+      bytes.byteOffset,
+      bytes.byteLength,
+    );
+    const length = header.getUint32(12, true);
+    const json = JSON.parse(
+      new TextDecoder().decode(bytes.subarray(20, 20 + length)),
+    );
+    const a = json.accessors[json.skins[0].inverseBindMatrices];
+    const start = 28 + length + json.bufferViews[a.bufferView].byteOffset;
+    for (let bone = 0; bone < 19; bone++)
+      header.setFloat32(start + (bone * 16 + 5) * 4, 3e38, true);
+    expect(() => readCharacterGlb(bytes, "p2")).toThrow(
+      "Unsupported character GLB",
+    );
+  });
 });

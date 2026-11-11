@@ -340,6 +340,32 @@ export function readCharacterGlb(
     bones[0].name !== "root"
   )
     return fail();
+  // This export subset has identity bind rotations and no scale: inverse bind
+  // must undo the absolute rest pivot, rather than introduce arbitrary transforms.
+  for (const bone of bones) {
+    const expected = [
+      1,
+      0,
+      0,
+      0,
+      0,
+      1,
+      0,
+      0,
+      0,
+      0,
+      1,
+      0,
+      -bone.pivot[0],
+      -bone.pivot[1],
+      -bone.pivot[2],
+      1,
+    ];
+    if (
+      expected.some((value, i) => Math.abs(value - bone.inverseBind[i]) > 1e-5)
+    )
+      return fail();
+  }
   const mats = list(json.materials, 32)
     .map(row)
     .map((mat) => {
