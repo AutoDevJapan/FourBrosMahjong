@@ -1,5 +1,7 @@
 # オンラインProduction受入（2026-11-09）
 
+この文書は各段階の受入履歴を保持する。後続のbackend更新とChromeでのオンライン戦績保存・復旧の受入は[2026-11-10の記録](./production-online-20261110.md)を参照する。
+
 既存Railway Productionへ、[PR #1225](https://github.com/AutoDevJapan/FourBrosMahjong/pull/1225)を統合した
 [`82725fc4d9f3cf33340fa63a55c87f1810030648`](https://github.com/AutoDevJapan/FourBrosMahjong/commit/82725fc4d9f3cf33340fa63a55c87f1810030648)
 を反映した。対象は既存service `9f7f42d2-7383-4201-b4d8-efeb054b301c`、Production environment
