@@ -57,6 +57,8 @@ pnpm exec tsx src/components/game/characters3d/serve-review.ts
 
 骨格の互換範囲は既存19ボーンと親子関係、bind時に回転・scaleを持たない本exportの規約である。各ボーンのlocal translationを親から累積してrest pivotを求め、inverse-bindの全16成分がidentityとそのpivotの逆平行移動に絶対誤差`1e-5`以内で一致することを確認する。これは元のpivot座標へ固定する検査ではない。pivotを編集した場合も、対応するinverse-bindを再生成して書き出せば受理する。geometry・UV・weights・材質・clipの編集も対応subset内で読み戻す。ボーンの追加・削除、bind時の回転・scale、別のglTF拡張を用いる編集はこのreaderの対象外なので、対応形式へ再書出しするかreaderを別途拡張してから検証する。
 
+位置とmorphは単位metreの各成分についてweight 0・1の両端が`[-5,5]`内であることを確認する。法線はbaseとmorph後が各成分`[-1,1]`（誤差`1e-4`）、差分も2以下（同誤差2倍）とし、clipのmorph weightは`[0,1]`に限る。LINEAR補間の途中もこの範囲に入り、巨大な有限入力がFloat32投影で非有限になることを防ぐ。これは元の形状やmorph値への固定ではなく、上記範囲内の編集を受理するための寸法・方向契約である。
+
 この経路は同じ`projectCharacterGeometry`を使う比較WebGL rendererへの再取り込みであり、通常の対局routeへGLBを読み込む機能ではない。TypeScriptモデルの編集→GLB書出し→実ファイル読戻し→比較表示を検証しても、本人の外観採用、通常routeでの4人の統合、実機性能やProduction受入の完了にはしない。元のsource表示へ戻す場合は`CHARACTER_REVIEW_GLB_DIRECTORY`を解除してserverを再起動する。
 
 textureの再生成が必要なら、別の新規出力を明示する。

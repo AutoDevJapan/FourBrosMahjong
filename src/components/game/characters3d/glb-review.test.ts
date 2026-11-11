@@ -285,4 +285,66 @@ describe("exported character file consumer", () => {
       "Unsupported character GLB",
     );
   });
+  it.each(["POSITION", "NORMAL"] as const)(
+    "rejects huge finite morph %s before sampling",
+    (semantic) => {
+      const { bytes } = fixture();
+      const header = new DataView(
+          bytes.buffer,
+          bytes.byteOffset,
+          bytes.byteLength,
+        ),
+        length = header.getUint32(12, true);
+      const json = JSON.parse(
+          new TextDecoder().decode(bytes.subarray(20, 20 + length)),
+        ),
+        bin = 28 + length;
+      const primitive = json.meshes[0].primitives.find(
+        (p: { targets: { POSITION: number; NORMAL: number }[] }) =>
+          json.accessors[p.targets[0][semantic]].bufferView !== undefined,
+      );
+      const a = json.accessors[primitive.targets[0][semantic]],
+        start = bin + json.bufferViews[a.bufferView].byteOffset;
+      for (let i = 0; i < a.count * 3; i++)
+        header.setFloat32(start + i * 4, 3e38, true);
+      for (const clip of json.animations)
+        for (const channel of clip.channels) {
+          if (channel.target.path !== "weights") continue;
+          const w = json.accessors[clip.samplers[channel.sampler].output],
+            offset = bin + json.bufferViews[w.bufferView].byteOffset;
+          for (let i = 0; i < w.count; i++)
+            header.setFloat32(offset + i * 4, 1, true);
+        }
+      expect(() => readCharacterGlb(bytes, "p2")).toThrow(
+        "Unsupported character GLB",
+      );
+    },
+  );
+  it("accepts a modest authored morph edit and finite intermediate poses", () => {
+    const { model, texture } = fixture();
+    const meshes = model.meshes.map((mesh) => {
+      if (!mesh.handClosure) return mesh;
+      const positions = Float32Array.from(mesh.handClosure.positions);
+      positions[0] += 0.001;
+      return { ...mesh, handClosure: { ...mesh.handClosure, positions } };
+    });
+    const imported = readCharacterGlb(
+      exportCharacterGlb({ ...model, meshes }, texture),
+      "p2",
+    );
+    for (const seconds of [0, 0.137, 0.417, 0.8, 1.25]) {
+      const pose = imported.sample("kita", seconds);
+      const actual = projectCharacterGeometry(imported.model, pose);
+      const expected = projectCharacterGeometry({ ...model, meshes }, pose);
+      expect(actual.every((m) => m.vertices.every(Number.isFinite))).toBe(true);
+      expect(delta(actual, expected)).toBeLessThan(2e-5);
+    }
+    expect(
+      imported.model.meshes.find(
+        (m) =>
+          m.handClosure?.positions[0] ===
+          meshes.find((m) => m.handClosure)!.handClosure!.positions[0],
+      ),
+    ).toBeDefined();
+  });
 });

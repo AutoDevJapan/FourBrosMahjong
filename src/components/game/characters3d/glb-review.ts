@@ -451,6 +451,24 @@ export function readCharacterGlb(
           morph.normals.length !== count * 3)
       )
         return fail();
+      // A LINEAR morph weight is limited to [0,1]. Bounding both endpoints
+      // bounds every intermediate position and normal before Float32 skinning.
+      for (let v = 0; v < count; v++)
+        for (let axis = 0; axis < 3; axis++) {
+          const i = v * 3 + axis,
+            position = positions[i],
+            normal = normals[i];
+          const moved = position + (morph?.positions[i] ?? 0),
+            changedNormal = normal + (morph?.normals[i] ?? 0);
+          if (
+            Math.abs(position) > 5 ||
+            Math.abs(moved) > 5 ||
+            Math.abs(normal) > 1.0001 ||
+            Math.abs(morph?.normals[i] ?? 0) > 2.0002 ||
+            Math.abs(changedNormal) > 1.0001
+          )
+            return fail();
+        }
       return {
         id: `imported-${i}`,
         materialId: mats[integer(p.material, mats.length - 1)].id,
