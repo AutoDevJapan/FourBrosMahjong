@@ -625,7 +625,9 @@ export function readCharacterGlb(
     const requested = animations.find((a) => a.id === clipId);
     if (!requested) throw new TypeError("Unknown character clip");
     const animation =
-      reducedMotion && clipId !== "standing-reference"
+      reducedMotion &&
+      clipId !== "standing-reference" &&
+      clipId !== "bench-idle"
         ? animations.find((a) => a.id === "seated-idle")!
         : requested;
     const t = reducedMotion

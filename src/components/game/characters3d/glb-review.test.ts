@@ -347,4 +347,21 @@ describe("exported character file consumer", () => {
       ),
     ).toBeDefined();
   });
+  it.each(ids)(
+    "%s keeps the exported bench posture with reduced motion",
+    (id) => {
+      const { bytes } = fixture(id),
+        loaded = readCharacterGlb(bytes, id);
+      const bench = loaded.sample("bench-idle", 0);
+      expect(loaded.sample("bench-idle", 2, true).rotations).toEqual(
+        bench.rotations,
+      );
+      expect(loaded.sample("bench-idle", 2, true).rootOffset).toEqual(
+        bench.rootOffset,
+      );
+      expect(bench.rotations["upperArm.L"]).not.toEqual(
+        loaded.sample("seated-idle", 0).rotations["upperArm.L"],
+      );
+    },
+  );
 });
