@@ -23,7 +23,7 @@ GPU buffer、24fps以下の時計1つ、visibility/reduced motion、寿命と失
 
 ## Textureと補完
 
-`material.texture` は `textures/p0-reference.jpg` 等のrepository source keyである。配信にはNext static importのcontent hash付きURLを対応させ、PWAにも同じURLを使う。
+`material.texture` は `textures/p0-reference.jpg` 等のrepository source keyである。配信にはNext static importのcontent hash付きURLを対応させる。通常人物表示が無効の間はこの4枚をPWAの必須precacheへ加えず、人物を通常導線で有効化する変更に合わせてオフライン用の供給・予算・受入を追加する。既存portraitや牌のprecacheは保持する。
 4枚の派生JPGは1536×1536 atlas。原本画像と袖・頭部の切り出し領域、encoder版、元と出力のSHAは `textures/provenance.json` に記録する。原本は上書きしない。
 原本で手が隠す衣服、見えない袖裏、首・手・耳・髪の奥行きは候補として補完している。これらを提供者が承認した完成デザインと扱わない。
 

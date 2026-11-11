@@ -1,11 +1,19 @@
 import { spawnSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import { MODEL_PROFILES } from "./profiles";
+
+const ownedRoots = new Set<string>();
+afterEach(async () => {
+  for (const root of ownedRoots) {
+    await rm(root, { recursive: true, force: true });
+    ownedRoots.delete(root);
+  }
+});
 
 describe("ordinary character review does not bake", () => {
   it.each(["produce-review.ts", "serve-review.ts"])(
@@ -15,6 +23,7 @@ describe("ordinary character review does not bake", () => {
         resolve(process.env.CHARACTER_SUPPLY_TEST_ROOT ?? tmpdir()),
         `fourbros-review-cli-${randomUUID()}`,
       );
+      ownedRoots.add(root);
       const sources = join(root, "documents/assets/characters/originals"),
         textures = join(root, "src/components/game/characters3d/textures");
       await mkdir(sources, { recursive: true });

@@ -24,7 +24,6 @@
  * 偽の ServiceWorkerGlobalScope を注入してハンドラの挙動を検証できるようにするため)。
  */
 import { TILE_ASSET_URLS } from "@/components/common/tileImage";
-import { CHARACTER_TEXTURES } from "@/components/game/three/characterAssets";
 import { CHARACTER_PROFILES } from "@/domain/game/characters";
 
 const CHARACTER_ASSET_URLS = Object.values(CHARACTER_PROFILES).map(
@@ -52,7 +51,6 @@ export const PRECACHE_ASSETS: readonly string[] = [
   "/icons/icon-512",
   ...CHARACTER_ASSET_URLS,
   ...TILE_ASSET_URLS,
-  ...Object.values(CHARACTER_TEXTURES),
 ];
 
 /**

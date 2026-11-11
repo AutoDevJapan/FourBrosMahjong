@@ -1,8 +1,15 @@
 import { createHash, randomUUID } from "node:crypto";
-import { link, mkdir, readdir, readFile, writeFile } from "node:fs/promises";
+import {
+  link,
+  mkdir,
+  readdir,
+  readFile,
+  rm,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { bakeCharacterTextures } from "./bake-textures";
 import { MODEL_PROFILES } from "./profiles";
 import { readCharacterTextureSet } from "./texture-supply";
@@ -22,9 +29,17 @@ const hash = (bytes: Buffer) =>
 const fixtureParent = resolve(
   process.env.CHARACTER_SUPPLY_TEST_ROOT ?? tmpdir(),
 );
+const ownedRoots = new Set<string>();
+afterEach(async () => {
+  for (const root of ownedRoots) {
+    await rm(root, { recursive: true, force: true });
+    ownedRoots.delete(root);
+  }
+});
 
 async function fixture() {
   const root = join(fixtureParent, `fourbros-texture-${randomUUID()}`);
+  ownedRoots.add(root);
   const sources = join(root, "documents/assets/characters/originals");
   const textures = join(root, "src/components/game/characters3d/textures");
   await mkdir(sources, { recursive: true });

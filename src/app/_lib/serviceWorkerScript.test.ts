@@ -271,8 +271,29 @@ describe("buildServiceWorkerScript", () => {
     expect(textures).toHaveLength(4);
     for (const texture of textures) {
       expect(texture).toMatch(/^\/_next\/static\/media\/.+\.jpg$/);
-      expect(PRECACHE_ASSETS).toContain(texture);
+      expect(PRECACHE_ASSETS).not.toContain(texture);
     }
+  });
+
+  it("人物表示を有効にしていない間は候補textureをinstallで取得しない", async () => {
+    const sw = bootServiceWorker();
+    const fetchSpy = vi.fn(async (input: RequestInfo | URL) => {
+      const url = new URL(String(input), ORIGIN);
+      if (Object.values(CHARACTER_TEXTURES).includes(url.pathname))
+        throw new Error("disabled character texture must not be fetched");
+      return PRECACHE_ROUTES.includes(url.pathname)
+        ? htmlResponse("<main>offline shell</main>")
+        : staticAssetResponse(url.pathname, "asset");
+    });
+    sw.setFetchImpl(fetchSpy as typeof fetch);
+    await sw.dispatchLifecycle("install");
+    expect(fetchSpy).toHaveBeenCalled();
+    for (const texture of Object.values(CHARACTER_TEXTURES))
+      expect(
+        fetchSpy.mock.calls.some(
+          ([input]) => new URL(String(input), ORIGIN).pathname === texture,
+        ),
+      ).toBe(false);
   });
 
   it("installでプリキャッシュし、旧タブ保護のため即時activateしない(#349)", async () => {
