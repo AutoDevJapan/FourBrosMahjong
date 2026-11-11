@@ -123,12 +123,14 @@ describe.each(["pon", "kan"] as const)("大四喜の実対局結線: %s", (call)
             });
           })();
 
+    // Check payment before its downstream bankruptcy/round transition so a
+    // broken responsibility mapping reports the actual payer differences.
+    expect(after.lastRound?.deltas).toEqual(deltas);
     expect(after.phase).toBe("roundEnd");
     expect(after.lastRound?.winnerId).toBe("p0");
     expect(
       after.lastRound?.winDetails?.yaku.some((yaku) => yaku.name === "大四喜"),
     ).toBe(true);
-    expect(after.lastRound?.deltas).toEqual(deltas);
     expect(after.points).toEqual({
       p0: 30000 + deltas.p0,
       p1: 60000 + deltas.p1,
