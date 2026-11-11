@@ -109,12 +109,12 @@ Playwright はブラウザ本体を別途ダウンロードする必要があり
 
 ```bash
 pnpm exec playwright install chromium webkit               # ローカル開発環境(このリポジトリが使う 2 ブラウザ)
-pnpm exec playwright install --with-deps chromium webkit   # Linux CI ランナー等、OS 依存パッケージも同時に導入する場合
+pnpm exec playwright install --with-deps chromium webkit   # 非コンテナの Linux で OS 依存パッケージも未導入の場合
 ```
 
 `playwright.config.ts` は `chromium` と `webkit-modal-focus`(Desktop Safari)の **2 プロジェクト**を定義しているため、**webkit を入れないと `pnpm test:e2e` が失敗します**。引数を省略した `pnpm exec playwright install` でも全ブラウザが入りますが、firefox など不要なブラウザまで取得するため上記の明示指定を推奨します。
 
-`--with-deps` は Linux 上で Playwright 実行に必要な OS パッケージ(apt 経由)も併せてインストールするオプションで、GitHub Actions の `ubuntu-latest` ランナーなど Linux 環境では基本的にこちらを使用してください。macOS/Windows のローカル環境では通常 `pnpm exec playwright install` のみで十分です。
+`--with-deps` は Linux 上で Playwright 実行に必要な OS パッケージ(apt 経由)も併せてインストールするオプションです。非コンテナの Linux 環境でOS依存が未導入の場合に使用してください。このリポジトリのGitHub Actionsは両jobとも固定PlaywrightイメージにbrowserとOS依存が同梱されており、追加installは行いません。macOS/Windows のローカル環境では通常 `pnpm exec playwright install` のみで十分です。
 
 ### 実行
 
