@@ -146,15 +146,6 @@ const ALLOWED_WRITE_PERMISSION_JOBS = {
 
 /** Playwright のブラウザバイナリを置く共有キャッシュパス。 */
 const PLAYWRIGHT_CACHE_PATH = "~/.cache/ms-playwright";
-/** `playwright install` に名前で渡せるターゲット。増やしたらここへ追加する。 */
-const PLAYWRIGHT_BROWSERS = [
-  "chromium",
-  "firefox",
-  "webkit",
-  "chrome",
-  "msedge",
-] as const;
-
 function readWorkflow(): Workflow {
   const source = readFileSync(
     resolve(process.cwd(), ".github/workflows/ci.yml"),
@@ -869,50 +860,6 @@ function isCacheWritingStep(step: Step): boolean {
   );
 }
 
-/** キャッシュを**読み取る**ステップか(一体型 `actions/cache@` は復元も行う)。 */
-function isCacheReadingStep(step: Step): boolean {
-  return (
-    step.uses?.startsWith("actions/cache@") === true ||
-    step.uses?.startsWith("actions/cache/restore@") === true
-  );
-}
-
-/**
- * `~/.cache/ms-playwright` を復元する各ステップと、同じ job でその後に走る
- * `playwright install` が要求するブラウザ集合を対応付ける。
- *
- * 前提(崩れた場合は下の件数アサーションで落ちる): Playwright を使うのは `ci.yml` のみ、
- * `with.path` は単一行で `~/.cache/ms-playwright` 完全一致。
- */
-function playwrightBrowserCaches(workflow: Workflow) {
-  const caches: {
-    job: string;
-    key: string;
-    install: string | undefined;
-    browsers: string[];
-  }[] = [];
-  for (const [job, definition] of Object.entries(workflow.jobs ?? {})) {
-    const steps = definition.steps ?? [];
-    steps.forEach((step, index) => {
-      if (!isCacheReadingStep(step)) return;
-      if (String(step.with?.path ?? "").trim() !== PLAYWRIGHT_CACHE_PATH)
-        return;
-      const install = steps
-        .slice(index + 1)
-        .find((later) => later.run?.includes("playwright install"))?.run;
-      caches.push({
-        job,
-        key: String(step.with?.key ?? ""),
-        install,
-        browsers: PLAYWRIGHT_BROWSERS.filter((browser) =>
-          new RegExp(`\\b${browser}\\b`).test(install ?? ""),
-        ),
-      });
-    });
-  }
-  return caches;
-}
-
 describe("CI workflow job timeouts", () => {
   it.each(["ci", "e2e"])("%s job has a bounded timeout", (jobName) => {
     const workflow = readWorkflow();
@@ -1008,6 +955,36 @@ describe("production E2E parity gate (#432)", () => {
 });
 
 describe("Playwright E2E provisioned environment (#557)", () => {
+  it("ci uses the pinned browser image and fails before production tests if Chromium is absent", () => {
+    const job = readWorkflow().jobs?.ci;
+    expect(job?.container?.image).toBe(
+      "mcr.microsoft.com/playwright:v1.62.1-noble@sha256:c091b21d9fae78c76e85cd4356431e9b018402f172a214fc7d7a5e9a7e29d8ac",
+    );
+    expect(job?.container?.options).toContain("--ipc=host");
+    expect(job?.container?.options).toContain("--init");
+    const steps = job?.steps ?? [];
+    expect(steps.some((step) => step.run?.includes("playwright install"))).toBe(
+      false,
+    );
+    expect(
+      steps.some((step) => step.with?.path === PLAYWRIGHT_CACHE_PATH),
+    ).toBe(false);
+    const check = steps.find(
+      (step) => step.name === "Verify Playwright browsers are provisioned",
+    );
+    expect(check?.if).toBe("steps.scope.outputs.production == 'true'");
+    expect(check?.run?.trim()).toBe(
+      "test -x /ms-playwright/chromium-*/chrome-linux64/chrome",
+    );
+    const browserTest = steps.find(
+      (step) => step.run?.trim() === "pnpm test:e2e:prod:prebuilt",
+    );
+    expect(browserTest).toBeDefined();
+    expect(steps.indexOf(check as Step)).toBeLessThan(
+      steps.indexOf(browserTest as Step),
+    );
+  });
+
   it("uses a pinned Playwright image with Chromium and WebKit already provisioned", () => {
     const job = readWorkflow().jobs?.e2e;
     const image = job?.container?.image ?? "";
@@ -1033,48 +1010,6 @@ describe("Playwright E2E provisioned environment (#557)", () => {
       "/ms-playwright/chromium-*/chrome-linux64/chrome",
     );
     expect(provisionCheck?.run).toContain("/ms-playwright/webkit-*/pw_run.sh");
-  });
-});
-
-/**
- * ローカルのproduction E2E jobは `~/.cache/ms-playwright` を使う。E2E jobは
- * #557 の公式Playwright imageにブラウザを固定しているため、ここでは残るキャッシュが
- * 要求するブラウザ集合と衝突しないことを確認する。
- */
-describe("Playwright browser cache keys", () => {
-  it("インストールするブラウザ集合をキーに含め、job 間で衝突しない", () => {
-    const caches = playwrightBrowserCaches(readWorkflow());
-    expect(caches.length).toBeGreaterThanOrEqual(1);
-
-    for (const { job, key, install, browsers } of caches) {
-      expect(
-        install,
-        `${job}: キャッシュの後に playwright install ステップが無い`,
-      ).toBeTypeOf("string");
-      expect(
-        browsers,
-        `${job}: playwright install がブラウザ名を明示していない(引数なしは全ブラウザ取得になりキーと対応付けられない)`,
-      ).not.toEqual([]);
-      for (const browser of browsers) {
-        expect(
-          key,
-          `${job}: cache key に ${browser} が含まれていない`,
-        ).toContain(browser);
-      }
-    }
-
-    const keysByBrowserSet = new Map<string, Set<string>>();
-    for (const { key, browsers } of caches) {
-      const set = keysByBrowserSet.get(key) ?? new Set<string>();
-      set.add(browsers.join("+"));
-      keysByBrowserSet.set(key, set);
-    }
-    for (const [key, browserSets] of keysByBrowserSet) {
-      expect(
-        [...browserSets],
-        `cache key ${key} が異なるブラウザ集合で共有されている`,
-      ).toHaveLength(1);
-    }
   });
 });
 
@@ -1161,29 +1096,32 @@ describe("変更パスによる実行範囲の絞り込み (#491)", () => {
     },
   );
 
-  it("E2E scopeは最初のGit操作前にworkspace限定のsafe.directoryを設定する", () => {
-    const steps = readWorkflowFile("ci.yml").jobs?.e2e?.steps ?? [];
-    const scope = steps.find((step) => step.id === SCOPE_STEP_ID);
-    const safeDirectoryCommand =
-      'git config --global --add safe.directory "$GITHUB_WORKSPACE"';
-    const resolverCommand = "node .github/scripts/verification-scope.mjs";
+  it.each(["ci", "e2e"])(
+    "%s scopeは最初のGit操作前にworkspace限定のsafe.directoryを設定する",
+    (jobName) => {
+      const steps = readWorkflowFile("ci.yml").jobs?.[jobName]?.steps ?? [];
+      const scope = steps.find((step) => step.id === SCOPE_STEP_ID);
+      const safeDirectoryCommand =
+        'git config --global --add safe.directory "$GITHUB_WORKSPACE"';
+      const resolverCommand = "node .github/scripts/verification-scope.mjs";
 
-    expect(scope, "e2e: scope stepが無い").toBeDefined();
-    expect(scope?.run?.trim()).toBe(
-      `${safeDirectoryCommand}\n${resolverCommand}`,
-    );
+      expect(scope, "e2e: scope stepが無い").toBeDefined();
+      expect(scope?.run?.trim()).toBe(
+        `${safeDirectoryCommand}\n${resolverCommand}`,
+      );
 
-    const safeDirectoryCommands = steps
-      .map((step) => step.run?.trim() ?? "")
-      .filter((run) => run.includes("safe.directory"));
-    expect(safeDirectoryCommands).toEqual([
-      `${safeDirectoryCommand}\n${resolverCommand}`,
-      'git -c safe.directory="$GITHUB_WORKSPACE" sparse-checkout disable',
-    ]);
-    expect(safeDirectoryCommands.join("\n")).not.toMatch(
-      /safe\.directory\s*=\s*\*/,
-    );
-  });
+      const safeDirectoryCommands = steps
+        .map((step) => step.run?.trim() ?? "")
+        .filter((run) => run.includes("safe.directory"));
+      expect(safeDirectoryCommands).toEqual([
+        `${safeDirectoryCommand}\n${resolverCommand}`,
+        'git -c safe.directory="$GITHUB_WORKSPACE" sparse-checkout disable',
+      ]);
+      expect(safeDirectoryCommands.join("\n")).not.toMatch(
+        /safe\.directory\s*=\s*\*/,
+      );
+    },
+  );
 
   it.each(Object.keys(SCOPED_JOBS))(
     "%s job の checkout は判定に必要な履歴を取得している",
@@ -1228,9 +1166,7 @@ describe("変更パスによる実行範囲の絞り込み (#491)", () => {
       );
 
       const expectedMaterializeCommand =
-        jobName === "e2e"
-          ? 'git -c safe.directory="$GITHUB_WORKSPACE" sparse-checkout disable'
-          : "git sparse-checkout disable";
+        'git -c safe.directory="$GITHUB_WORKSPACE" sparse-checkout disable';
       const materialize = steps.find(
         (step) => step.run?.trim() === expectedMaterializeCommand,
       );
@@ -1304,60 +1240,47 @@ describe("変更パスによる実行範囲の絞り込み (#491)", () => {
     },
   );
 
-  /**
-   * ホストrunner上で残るブラウザ導入は「検証する」か「キャッシュがまだ無い」ときだけ必要。
-   * E2E jobのChromium/WebKit導入は #557 の公式Playwright imageへ移し、apt経路を持たない。
-   */
-  it("ブラウザの導入はキャッシュミス時のみ実行される", () => {
+  /** 品質jobとE2E jobは同じ固定imageからbrowserとOS依存を受け取る。 */
+  it("browserを実行する2jobは追加installに依存しない", () => {
     const workflow = readWorkflowFile("ci.yml");
     let checked = 0;
     for (const [jobName, definition] of Object.entries(workflow.jobs ?? {})) {
-      for (const step of definition.steps ?? []) {
-        if (!step.run?.includes("playwright install")) continue;
+      const steps = definition.steps ?? [];
+      expect(
+        steps.some((step) =>
+          /playwright\s+install|apt-get/.test(step.run ?? ""),
+        ),
+        `${jobName}: browser依存は固定imageで供給する`,
+      ).toBe(false);
+      if (steps.some((step) => step.run?.includes("pnpm test:e2e")))
         checked += 1;
-        expect(
-          step.if ?? "",
-          `${jobName} / ${step.name}: setup しない run ではブラウザ導入も実行してはならない`,
-        ).toMatch(/^steps\.scope\.outputs\.browser == 'true' && \(/);
-        expect(
-          step.if ?? "",
-          `${jobName} / ${step.name}: 検証するかcache missの場合だけ導入すべき`,
-        ).toMatch(
-          /steps\.scope\.outputs\.production == 'true' \|\| steps\.[\w-]+\.outputs\.cache-hit != 'true'/,
-        );
-      }
     }
-    expect(checked, "playwright install を 1 つも検出できなかった").toBe(1);
+    expect(checked, "browser検証jobの欠落を許可しない").toBe(2);
   });
 
-  /**
-   * `pnpm exec playwright install` は node_modules を必要とする。
-   * `pnpm install` にブラウザ側より狭い条件を付けると、「pnpm キャッシュはヒットしたが
-   * Playwright キャッシュは外れた」(2 つのキャッシュは同じキーでも LRU で独立に退避
-   * されうる: #380) の組み合わせで **node_modules 無しに playwright install が走って落ちる**。
-   * 実際にこの条件を入れかけたため、順序の前提をテストで固定する。
-   */
-  it("playwright install が走りうる場面では必ず依存が導入されている", () => {
+  /** 固定browserだけで成功にせず、node依存と同じbuildを使う実検証まで進める。 */
+  it("browser検証より前に必ずnode依存が導入されている", () => {
     const workflow = readWorkflowFile("ci.yml");
     for (const [jobName, definition] of Object.entries(workflow.jobs ?? {})) {
       const steps = definition.steps ?? [];
-      const browserInstall = steps.find((step) =>
-        step.run?.includes("playwright install"),
+      const browserTest = steps.find((step) =>
+        step.run?.includes("pnpm test:e2e"),
       );
-      if (!browserInstall) continue;
+      if (!browserTest) continue;
       const dependencyInstall = steps.find((step) =>
         step.run?.includes("pnpm install"),
       );
       expect(
         dependencyInstall,
-        `${jobName}: playwright install の前に pnpm install が無い`,
+        `${jobName}: browser検証の前に pnpm install が無い`,
       ).toBeDefined();
-      // 依存の導入は `setup` 全体で走らなければならない。ブラウザ側と同じ
-      // cache-hit 条件を付けると、キャッシュが片方だけ外れたときに破綻する。
       expect(
         dependencyInstall?.if ?? "",
-        `${jobName}: pnpm install はブラウザ側より狭い条件にしてはならない(node_modules 無しで playwright install が走る)`,
+        `${jobName}: pnpm install はsetup全体で実行する`,
       ).toBe("steps.scope.outputs.setup == 'true'");
+      expect(steps.indexOf(dependencyInstall as Step)).toBeLessThan(
+        steps.indexOf(browserTest),
+      );
     }
   });
 
