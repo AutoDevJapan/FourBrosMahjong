@@ -122,17 +122,97 @@ test.describe("戦績のローカル保存・閲覧(#293)", () => {
     );
     await Promise.all(
       [first, second].map((tab, index) =>
-        tab.addInitScript(
-          (raw) => sessionStorage.setItem("four-bros-mahjong.game.v3", raw),
-          JSON.stringify(journals[index]),
-        ),
+        tab.addInitScript((raw) => {
+          sessionStorage.setItem("four-bros-mahjong.game.v3", raw);
+          // Observe the restored provider reaching persistence, independently
+          // of document load/React hydration. Keep the first real Web Lock
+          // until both tabs request it, so this test always covers contention.
+          const state = { requested: false, acquired: false, released: false };
+          let release!: () => void;
+          const gate = new Promise<void>((resolve) => {
+            release = resolve;
+          });
+          Object.assign(window, {
+            historyRestoreProbe: {
+              state,
+              release: () => {
+                state.released = true;
+                release();
+              },
+            },
+          });
+          const original = navigator.locks.request;
+          navigator.locks.request = function (name, ...args: unknown[]) {
+            if (
+              name !== "four-bros-mahjong.history.write.v1" ||
+              typeof args[0] !== "object" ||
+              typeof args[1] !== "function"
+            )
+              return Reflect.apply(original, navigator.locks, [name, ...args]);
+            state.requested = true;
+            const callback = args[1] as (lock: Lock | null) => unknown;
+            return Reflect.apply(original, navigator.locks, [
+              name,
+              args[0],
+              async (lock: Lock | null) => {
+                state.acquired = true;
+                // Invoke the real callback immediately: the product clears its
+                // acquisition deadline and performs its original storage write.
+                const result = callback(lock);
+                await gate;
+                return result;
+              },
+            ]);
+          } as typeof navigator.locks.request;
+        }, JSON.stringify(journals[index])),
       ),
     );
 
     // localStorage は同一 context で共有、sessionStorage はタブごとに独立する。
     // 2つの復元効果を同時に起動し、Web Locks が read-modify-write を直列化する。
     await Promise.all([first.reload(), second.reload()]);
-    // reload は document load までなので、CI の CPU 競合時も両タブの復元完了を待つ。
+    // reload only observes document load. Wait for the actual restored provider
+    // in both tabs before testing storage exclusion; no fixed sleep/retry.
+    await Promise.all(
+      [first, second].map((tab) =>
+        tab.waitForFunction(
+          () =>
+            (
+              window as unknown as {
+                historyRestoreProbe: { state: { requested: boolean } };
+              }
+            ).historyRestoreProbe.state.requested,
+        ),
+      ),
+    );
+    await expect
+      .poll(async () => {
+        const acquired = await Promise.all(
+          [first, second].map((tab) =>
+            tab.evaluate(
+              () =>
+                (
+                  window as unknown as {
+                    historyRestoreProbe: { state: { acquired: boolean } };
+                  }
+                ).historyRestoreProbe.state.acquired,
+            ),
+          ),
+        );
+        return acquired.filter(Boolean).length;
+      })
+      .toBe(1);
+    await Promise.all(
+      [first, second].map((tab) =>
+        tab.evaluate(() =>
+          (
+            window as unknown as {
+              historyRestoreProbe: { release: () => void };
+            }
+          ).historyRestoreProbe.release(),
+        ),
+      ),
+    );
     await Promise.all(
       [first, second].map((tab) =>
         expect(tab.getByRole("group", { name: "対局盤面" })).toHaveAttribute(
