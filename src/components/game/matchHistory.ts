@@ -214,7 +214,11 @@ function save(storage: Storage, entries: readonly MatchHistoryEntry[]): void {
  * 戦績追記の詳細結果。GameProvider は「既に保存済み」と「保存失敗」を区別して
  * 結果画面へ正しい状態を渡す必要があるため、boolean 版とは別に公開する(#358)。
  */
-export type HistoryPersistenceResult = "appended" | "already-exists" | "failed";
+export type HistoryPersistenceResult =
+  | "appended"
+  | "already-exists"
+  | "failed"
+  | "not-retained";
 
 /** Web Locks で使う origin 内共通名。戦績 JSON の read-modify-write 全体を直列化する。 */
 const MATCH_HISTORY_LOCK = "four-bros-mahjong.history.write.v1";
@@ -331,7 +335,7 @@ export async function withHistoryLock<T>(
 }
 
 /**
- * 半荘結果を戦績の先頭(最新)へ追記する。
+ * 半荘結果を元の終了日時順で戦績へ追記する。
  *
  * - 保存前に読み込みと同じ検証をかけ、`parseHistory` が受理できない値は書き込まない。
  *   書き込めてしまうと次回読み込みで全体が破損扱いになり、過去の記録ごと消える
@@ -344,12 +348,9 @@ export async function withHistoryLock<T>(
  *
  * 追記できたかを返す(`clearHistory` と同じく返り値で成否を伝える)。呼び出し側はこの返り値を見て
  * `notifyHistoryChanged()` を呼び、購読者へ通知する(issue #310)。検証を通らない値と
- * 保存失敗は `"failed"`、重複 seed は `"already-exists"` で、いずれも追記しない。
- *
- * 保証は**片方向**である ─ `"appended"` なら保存内容は必ず変化しているが、それ以外は
- * 「変化していない」を意味しない。破損データが残っていた場合、`loadHistory` が
- * その削除を行った上で追記に失敗し得る。ただしこのとき購読者から見える値は前後とも
- * 空配列(破損データは `getHistorySnapshot` でも空に落ちる)なので、通知の取りこぼしにはならない。
+ * 保存失敗は `"failed"`、重複 seed は `"already-exists"` を返す。読取不可・破損した
+ * 保存値を空履歴として上書きしない。遅れて到着した結果が件数・容量上限から外れる場合は
+ * `"not-retained"` とし、新しい保存済み結果を押し出さない。
  *
  * **排他制御を持たない下位API。** 複数タブから呼ぶと read-modify-write が競合するため、
  * アプリからは `persistHistoryAcrossTabs` を使う。
@@ -360,19 +361,34 @@ export function persistHistory(
 ): HistoryPersistenceResult {
   if (!isEntry(entry)) return "failed";
   try {
-    const entries = loadHistory(storage);
+    // A display read may safely fall back to an empty list. A writer cannot:
+    // unreadable old bytes must not be replaced with just the new result.
+    const raw = storage.getItem(MATCH_HISTORY_KEY);
+    const entries = raw === null ? [] : parseHistory(raw);
+    if (entries === null) return "failed";
     if (entries.some((existing) => existing.seed === entry.seed)) {
       return "already-exists";
     }
-    let next = [entry, ...entries].slice(0, MAX_HISTORY_ENTRIES);
+    let next = [entry, ...entries]
+      .sort((a, b) => b.finishedAt - a.finishedAt)
+      .slice(0, MAX_HISTORY_ENTRIES);
+    const retained = () => next.some((item) => item.seed === entry.seed);
+    if (!retained()) return "not-retained";
     // 半減で切り詰めるため試行回数は log2(MAX_HISTORY_ENTRIES) 程度に収まる。
     for (;;) {
       try {
         save(storage, next);
         return "appended";
-      } catch {
+      } catch (error) {
+        if (
+          !(error instanceof DOMException) ||
+          error.name !== "QuotaExceededError"
+        )
+          return "failed";
         if (next.length <= 1) return "failed";
         next = next.slice(0, Math.max(1, Math.floor(next.length / 2)));
+        // A late retry must not evict newer saved results just to retain itself.
+        if (!retained()) return "not-retained";
       }
     }
   } catch {
@@ -408,7 +424,7 @@ export async function persistHistoryAcrossTabs(
     lockManager,
     () => {
       const result = persistHistory(storage, entry);
-      if (result === "failed") return result;
+      if (result === "failed" || result === "not-retained") return result;
       // lock callback 内で再読込し、自分の結果が実際に残っている場合だけ成功を返す。
       return loadHistory(storage).some(
         (existing) => existing.seed === entry.seed,
