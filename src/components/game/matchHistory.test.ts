@@ -156,7 +156,9 @@ describe("match history persistence (#293)", () => {
       "already-exists",
       "appended",
     ]);
-    expect(loadHistory(storage).map((item) => item.seed)).toEqual([2, 3]);
+    // A delayed writer keeps its original completion date; arrival order must
+    // not put an older result ahead of a newer saved match.
+    expect(loadHistory(storage).map((item) => item.seed)).toEqual([3, 2]);
   });
 
   it("Web Locksが利用不能または失敗する場合は書き込まずfailedを返す(#363)", async () => {

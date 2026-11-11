@@ -66,14 +66,11 @@ import {
   saveJournal,
 } from "./gamePersistence";
 import { selectView, toTile } from "./gameView";
+import { MAX_HISTORY_ENTRIES, type MatchHistoryEntry } from "./matchHistory";
 import {
-  type MatchHistoryEntry,
-  notifyHistoryChanged,
-  persistHistoryAcrossTabs,
-} from "./matchHistory";
-import {
-  forgetPendingHistory,
   loadPendingHistory,
+  type PendingHistoryEntry,
+  persistPendingHistoryEntry as persistRetainedHistory,
   rememberPendingHistory,
 } from "./pendingHistory";
 import type { GameViewState, TileData } from "./types";
@@ -280,25 +277,6 @@ function finishedHistoryEntry(
   };
 }
 
-/**
- * 終局した半荘の確定結果を戦績(`localStorage`)へ追記する(issue #293)。
- *
- * `entry.seed` はジャーナルの seed をそのまま半荘の識別子に使い、`persistHistory` 側の
- * 重複排除で「終局済みジャーナルのリロード再生」や退避結果の再試行による二重保存を防ぐ。
- * 実際に追記できたときは購読者へ通知する(issue #310)。永続化と通知は
- * `matchHistory.ts` 側で分離されているため、書き換えた側が明示的に知らせる。
- * **描画フェーズから呼んではならない**(通知が他コンポーネントの再描画を要求するため)。
- */
-async function recordFinishedGame(
-  entry: MatchHistoryEntry,
-): Promise<"saved" | "failed"> {
-  const storage = localStorageOrNull();
-  if (storage === null) return "failed";
-  const persisted = await persistHistoryAcrossTabs(storage, entry);
-  if (persisted === "appended") notifyHistoryChanged();
-  return persisted === "failed" ? "failed" : "saved";
-}
-
 /** Storage の getter 自体が SecurityError を投げる環境ではメモリ内対局へ退避する。 */
 function sessionStorageOrNull(): Storage | null {
   if (typeof window === "undefined") return null;
@@ -496,20 +474,32 @@ function GameProviderRuntime({ children, initial }: GameProviderRuntimeProps) {
       ),
   );
   const pendingHistoryAttemptsRef = useRef(new Set<number>());
+  const terminalHistoryRef = useRef(new Set<number>());
   const [seedGenerationError, setSeedGenerationError] = useState(false);
   const persistPendingHistoryEntry = useCallback(
-    (entry: MatchHistoryEntry, expectedJournal?: GameJournal) => {
+    (entry: PendingHistoryEntry, expectedJournal?: GameJournal) => {
       if (pendingHistoryAttemptsRef.current.has(entry.seed)) return;
       pendingHistoryAttemptsRef.current.add(entry.seed);
-      void recordFinishedGame(entry).then((historySaveStatus) => {
+      void persistRetainedHistory(
+        pendingHistory,
+        entry,
+        sessionStorageOrNull(),
+      ).then((result) => {
         pendingHistoryAttemptsRef.current.delete(entry.seed);
-        if (historySaveStatus === "saved") {
-          forgetPendingHistory(
-            pendingHistory,
-            entry.seed,
-            sessionStorageOrNull(),
-          );
+        if (result !== "failed") {
+          terminalHistoryRef.current.add(entry.seed);
+          while (terminalHistoryRef.current.size > MAX_HISTORY_ENTRIES) {
+            const oldest = terminalHistoryRef.current.values().next().value;
+            if (oldest === undefined) break;
+            terminalHistoryRef.current.delete(oldest);
+          }
         }
+        const historySaveStatus: GameContextValue["historySaveStatus"] =
+          result === "saved"
+            ? "saved"
+            : result === "failed"
+              ? "failed"
+              : "idle";
         // 背景再試行は履歴だけを更新し、現在の新規対局の表示状態を変更しない。
         if (
           expectedJournal === undefined ||
@@ -683,7 +673,8 @@ function GameProviderRuntime({ children, initial }: GameProviderRuntimeProps) {
         const previous = sessionRef.current;
         if (
           previous.historySaveStatus !== "saved" &&
-          previous.journal !== null
+          previous.journal !== null &&
+          !terminalHistoryRef.current.has(previous.journal.seed)
         ) {
           const entry = finishedHistoryEntry(
             previous.engine,

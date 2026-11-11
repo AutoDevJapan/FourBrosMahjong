@@ -2,6 +2,7 @@
 import { localStorageOrNull } from "@/components/common/browserStorage";
 import { isOnlineMatchId } from "@/domain/online/types";
 import { hasOnlyKeys } from "./gamePersistence";
+import { HISTORY_EPOCH_KEY, readHistoryEpoch } from "./historyEpoch";
 import {
   clearHistory,
   getHistoryViewSnapshot,
@@ -21,19 +22,13 @@ import {
   subscribeHistory,
   withHistoryLock,
 } from "./matchHistory";
+import {
+  clearPendingHistory,
+  pendingHistorySessionStorage,
+} from "./pendingHistory";
 
 export const RESULT_HISTORY_KEY = "four-bros-mahjong.history.v2";
-const HISTORY_EPOCH_KEY = "four-bros-mahjong.history-epoch.v1";
-
-export function readHistoryEpoch(storage: Storage): number {
-  const raw = storage.getItem(HISTORY_EPOCH_KEY);
-  if (raw === null) return 0;
-  if (raw.length > 16) throw new Error("Invalid history epoch");
-  const value = Number(raw);
-  if (!/^(0|[1-9][0-9]{0,15})$/.test(raw) || !Number.isSafeInteger(value))
-    throw new Error("Invalid history epoch");
-  return value;
-}
+export { readHistoryEpoch } from "./historyEpoch";
 
 export interface OnlineHistoryEntry extends Omit<MatchHistoryEntry, "seed"> {
   readonly onlineMatchId: string;
@@ -232,6 +227,7 @@ export async function persistOnlineHistoryAcrossTabs(
 export async function clearResultHistoryAcrossTabs(
   storage: Storage,
   locks?: HistoryLockManager | null,
+  pendingStorage = pendingHistorySessionStorage(),
 ): Promise<HistoryClearResult> {
   const clear = (): HistoryClearResult => {
     try {
@@ -243,7 +239,8 @@ export async function clearResultHistoryAcrossTabs(
       storage.setItem(HISTORY_EPOCH_KEY, String(nextEpoch));
       return storage.getItem(MATCH_HISTORY_KEY) === null &&
         storage.getItem(RESULT_HISTORY_KEY) === null &&
-        storage.getItem(HISTORY_EPOCH_KEY) === String(nextEpoch)
+        storage.getItem(HISTORY_EPOCH_KEY) === String(nextEpoch) &&
+        clearPendingHistory(pendingStorage)
         ? "cleared"
         : "storage-failed";
     } catch {

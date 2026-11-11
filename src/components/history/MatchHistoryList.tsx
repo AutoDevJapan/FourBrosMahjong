@@ -26,7 +26,7 @@ import {
   type HistoryClearResult,
   MAX_HISTORY_ENTRIES,
 } from "@/components/game/matchHistory";
-import { clearPendingHistory } from "@/components/game/pendingHistory";
+import { retryPendingLocalHistory } from "@/components/game/pendingHistory";
 import {
   clearResultHistoryAcrossTabs as clearHistoryAcrossTabs,
   getResultHistoryViewSnapshot as getHistoryViewSnapshot,
@@ -191,6 +191,7 @@ function HistoryItem({ entry }: { entry: MatchHistoryEntry }) {
 
 export default function MatchHistoryList() {
   useEffect(() => {
+    void retryPendingLocalHistory();
     void retryPendingOnlineHistory();
   }, []);
   // localStorage は React の外にある可変ストアなので `useSyncExternalStore` で購読する
@@ -286,15 +287,13 @@ export default function MatchHistoryList() {
           ? "storage-failed"
           : await clearHistoryAcrossTabs(storage);
       if (result === "cleared" && storage !== null) {
-        const localPendingCleared = clearPendingHistory();
         const onlinePendingCleared = clearPendingOnlineHistory(
           undefined,
           readHistoryEpoch(storage),
         );
         // 保存済み履歴は消えているが、退避値の削除を確認できない場合は成功を案内しない。
         // 次回の操作で退避結果が復活するのを防ぐため、利用者へ再試行を促す。
-        if (!localPendingCleared || !onlinePendingCleared)
-          result = "storage-failed";
+        if (!onlinePendingCleared) result = "storage-failed";
       }
       if (result === "cleared") {
         // 購読通知は同期的に再描画を起こし得るため、通知より先に着地点を予約する。
