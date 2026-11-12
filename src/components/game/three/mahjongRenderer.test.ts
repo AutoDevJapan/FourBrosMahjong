@@ -193,16 +193,44 @@ describe("WebGL2 renderer boundaries", () => {
       canvas = setup(gl),
       images = controlledImages(1536, 1536),
       onError = vi.fn(),
-      live = new Map<WebGLBuffer, number>();
+      live = new Map<WebGLBuffer, number>(),
+      liveBuffers = new Set<WebGLBuffer>(),
+      liveVaos = new Set<WebGLVertexArrayObject>(),
+      liveTextures = new Set<WebGLTexture>(),
+      allocateBuffer = gl.createBuffer.getMockImplementation()!,
+      allocateVao = gl.createVertexArray.getMockImplementation()!,
+      allocateTexture = gl.createTexture.getMockImplementation()!;
     let bound: WebGLBuffer | null = null;
     Object.assign(gl, {
+      createBuffer: vi.fn(() => {
+        const value = allocateBuffer();
+        liveBuffers.add(value);
+        return value;
+      }),
+      createVertexArray: vi.fn(() => {
+        const value = allocateVao();
+        liveVaos.add(value);
+        return value;
+      }),
+      createTexture: vi.fn(() => {
+        const value = allocateTexture();
+        liveTextures.add(value);
+        return value;
+      }),
       bindBuffer: vi.fn((_target: number, value: WebGLBuffer | null) => {
         bound = value;
       }),
       bufferData: vi.fn((_target: number, data: ArrayBufferView) => {
         if (bound) live.set(bound, data.byteLength);
       }),
-      deleteBuffer: vi.fn((value: WebGLBuffer) => live.delete(value)),
+      deleteBuffer: vi.fn((value: WebGLBuffer) => {
+        live.delete(value);
+        liveBuffers.delete(value);
+      }),
+      deleteVertexArray: vi.fn((value: WebGLVertexArrayObject) =>
+        liveVaos.delete(value),
+      ),
+      deleteTexture: vi.fn((value: WebGLTexture) => liveTextures.delete(value)),
     });
     const controller = createCharacterController(),
       f = frame();
@@ -221,6 +249,10 @@ describe("WebGL2 renderer boundaries", () => {
     try {
       renderer.publish(f);
       for (const image of images) image.dispatchEvent(new Event("load"));
+      expect(liveTextures.size).toBe(TILE_TEXTURE_URLS.length + 4);
+      const baseBuffers = new Set(liveBuffers),
+        baseVaos = new Set(liveVaos),
+        allTextures = new Set(liveTextures);
       const baseBytes = [...live.values()].reduce((sum, n) => sum + n, 0);
       expect(keys).toHaveLength(4);
       expect(new Set(first.map((s) => s.id.split("/")[0])).size).toBe(4);
@@ -255,17 +287,27 @@ describe("WebGL2 renderer boundaries", () => {
       checkBudget(1280, 900);
       renderer.setCharacters([]);
       expect([...live.values()].reduce((sum, n) => sum + n, 0)).toBe(baseBytes);
+      expect(liveBuffers).toEqual(baseBuffers);
+      expect(liveVaos).toEqual(baseVaos);
+      // Texture lifetime belongs to the whole renderer, not a pose update.
+      expect(liveTextures).toEqual(allTextures);
       expect(onError).not.toHaveBeenCalled();
     } finally {
       controller.dispose();
       renderer.dispose();
     }
     expect(live.size).toBe(0);
+    expect(liveBuffers.size).toBe(0);
+    expect(liveVaos.size).toBe(0);
+    expect(liveTextures.size).toBe(0);
     expect(gl.deleteBuffer).toHaveBeenCalledTimes(
       gl.createBuffer.mock.calls.length,
     );
     expect(gl.deleteVertexArray).toHaveBeenCalledTimes(
       gl.createVertexArray.mock.calls.length,
+    );
+    expect(gl.deleteTexture).toHaveBeenCalledTimes(
+      gl.createTexture.mock.calls.length,
     );
   });
 
