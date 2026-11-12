@@ -9,11 +9,22 @@
  * - `localStorage` が使えない環境でも対局が継続すること
  * を検証する。
  */
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import {
+  act,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react";
 import { useSyncExternalStore } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import MatchHistoryList from "@/components/history/MatchHistoryList";
 import { CHARACTER_PLAYER_IDS } from "@/domain/game/characters";
-import { restoreWebLocks, stubWebLocks } from "@/test/webLocksStub";
+import {
+  createLockRequest,
+  restoreWebLocks,
+  stubWebLocks,
+} from "@/test/webLocksStub";
 import { walkToGameEnd } from "./finishedGameFixture";
 import { GameProvider, useGame } from "./GameProvider";
 import type { GameAction } from "./gamePersistence";
@@ -24,7 +35,8 @@ import {
   type MatchHistoryEntry,
   subscribeHistory,
 } from "./matchHistory";
-import { PENDING_HISTORY_KEY } from "./pendingHistory";
+import { PENDING_HISTORY_KEY, rememberPendingHistory } from "./pendingHistory";
+import { clearResultHistoryAcrossTabs } from "./resultHistory";
 
 const GAME_SESSION_KEY = "four-bros-mahjong.game.v3";
 
@@ -228,6 +240,7 @@ describe("GameProvider match history recording (#293)", () => {
   });
 
   it("終局済みジャーナルの復元で保存漏れを補完し、再復元でも二重保存しない", async () => {
+    const clock = vi.spyOn(Date, "now").mockReturnValue(1_700_000_000_000);
     window.sessionStorage.setItem(
       GAME_SESSION_KEY,
       JSON.stringify(fixture.journal),
@@ -236,23 +249,166 @@ describe("GameProvider match history recording (#293)", () => {
     const first = render(
       <GameProvider>
         <output data-testid="probe" />
+        <HistorySaveStatusProbe />
       </GameProvider>,
     );
     await waitFor(() =>
-      expect(loadHistory(window.localStorage)).toHaveLength(1),
+      expect(screen.getByTestId("history-save-status")).toHaveTextContent(
+        "saved",
+      ),
     );
+    const original = loadHistory(window.localStorage);
+    expect(original).toHaveLength(1);
+    expect(original[0].finishedAt).toBe(1_700_000_000_000);
+    expect(sessionStorage.getItem(PENDING_HISTORY_KEY)).toBeNull();
 
     // リロード相当(同一ジャーナルからの再マウント)でも同一半荘は追記されない。
     first.unmount();
+    clock.mockReturnValue(1_700_000_001_000);
     render(
       <GameProvider>
         <output data-testid="probe" />
+        <HistorySaveStatusProbe />
       </GameProvider>,
     );
 
+    await waitFor(() =>
+      expect(screen.getByTestId("history-save-status")).toHaveTextContent(
+        "saved",
+      ),
+    );
     const entries = loadHistory(window.localStorage);
-    expect(entries).toHaveLength(1);
+    expect(entries).toEqual(original);
     expect(entries[0].players).toEqual(expectedPlayers);
+    expect(sessionStorage.getItem(PENDING_HISTORY_KEY)).toBeNull();
+  });
+
+  it("完成journalと同seedでも別の確定内訳は保存済みと誤認しない(#1244)", async () => {
+    const saved: MatchHistoryEntry = {
+      seed: fixture.journal.seed,
+      finishedAt: 1_700_000_000_000,
+      players: expectedPlayers.map((player, index) =>
+        index === 0 ? { ...player, name: "別の結果" } : player,
+      ),
+    };
+    localStorage.setItem(
+      "four-bros-mahjong.history.v1",
+      JSON.stringify({ version: 1, entries: [saved] }),
+    );
+    sessionStorage.setItem(GAME_SESSION_KEY, JSON.stringify(fixture.journal));
+    render(
+      <GameProvider>
+        <HistorySaveStatusProbe />
+      </GameProvider>,
+    );
+    await waitFor(() =>
+      expect(screen.getByTestId("history-save-status")).toHaveTextContent(
+        "failed",
+      ),
+    );
+    expect(loadHistory(localStorage)).toEqual([saved]);
+    expect(
+      JSON.parse(sessionStorage.getItem(PENDING_HISTORY_KEY) ?? "null")
+        .entries[0].players,
+    ).toEqual(expectedPlayers);
+  });
+
+  it.each(["same-tab", "other-tab"] as const)(
+    "明示削除後に完成journalを再復元しても結果を復活させない(%s)(#1244)",
+    async (origin) => {
+      sessionStorage.setItem(GAME_SESSION_KEY, JSON.stringify(fixture.journal));
+      const first = render(
+        <GameProvider>
+          <HistorySaveStatusProbe />
+        </GameProvider>,
+      );
+      await waitFor(() =>
+        expect(screen.getByTestId("history-save-status")).toHaveTextContent(
+          "saved",
+        ),
+      );
+      const otherSession: Storage = {
+        length: 0,
+        clear() {},
+        getItem() {
+          return null;
+        },
+        key() {
+          return null;
+        },
+        removeItem() {},
+        setItem() {},
+      };
+      expect(
+        await clearResultHistoryAcrossTabs(
+          localStorage,
+          undefined,
+          origin === "same-tab" ? sessionStorage : otherSession,
+        ),
+      ).toBe("cleared");
+      first.unmount();
+      render(
+        <GameProvider>
+          <HistorySaveStatusProbe />
+        </GameProvider>,
+      );
+      await waitFor(() =>
+        expect(screen.getByTestId("history-save-status")).not.toHaveTextContent(
+          "pending",
+        ),
+      );
+      expect(loadHistory(localStorage)).toEqual([]);
+      expect(sessionStorage.getItem(PENDING_HISTORY_KEY)).toBeNull();
+      expect(screen.getByTestId("history-save-status")).toHaveTextContent(
+        "idle",
+      );
+    },
+  );
+
+  it("削除後に新しく終局した別半荘は現在世代で保存する(#1244)", async () => {
+    expect(await clearResultHistoryAcrossTabs(localStorage)).toBe("cleared");
+    sessionStorage.setItem(
+      GAME_SESSION_KEY,
+      JSON.stringify({
+        ...fixture.journal,
+        actions: fixture.journal.actions.slice(0, -1),
+      }),
+    );
+    render(
+      <GameProvider>
+        <LastActionProbe action={fixture.journal.actions.at(-1)!} />
+      </GameProvider>,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "最終操作" }));
+    await waitFor(() =>
+      expect(screen.getByTestId("history-save-status")).toHaveTextContent(
+        "saved",
+      ),
+    );
+    expect(loadHistory(localStorage).map((entry) => entry.seed)).toEqual([
+      fixture.journal.seed,
+    ]);
+    expect(sessionStorage.getItem(PENDING_HISTORY_KEY)).toBeNull();
+  });
+
+  it("来歴の無い旧完成journalを削除後の現在世代へ付け替えない(#1244)", async () => {
+    expect(await clearResultHistoryAcrossTabs(localStorage)).toBe("cleared");
+    sessionStorage.setItem(GAME_SESSION_KEY, JSON.stringify(fixture.journal));
+    render(
+      <GameProvider>
+        <HistorySaveStatusProbe />
+      </GameProvider>,
+    );
+    await waitFor(() =>
+      expect(screen.getByTestId("history-save-status")).toHaveTextContent(
+        "failed",
+      ),
+    );
+    expect(loadHistory(localStorage)).toEqual([]);
+    expect(
+      JSON.parse(sessionStorage.getItem(PENDING_HISTORY_KEY) ?? "null")
+        .entries[0].players,
+    ).toEqual(expectedPlayers);
   });
 
   it("終局操作での追記が同時マウント中の購読者へ届く(通知経路の対称性 / #310)", async () => {
@@ -433,6 +589,148 @@ describe("GameProvider match history recording (#293)", () => {
     );
     expect(loadHistory(window.localStorage)[0].seed).toBe(fixture.journal.seed);
     expect(window.sessionStorage.getItem(PENDING_HISTORY_KEY)).toBeNull();
+  });
+
+  it("未保存の半荘を次対局へ退避した後、戦績画面への再訪で元結果を回復する(#1244)", async () => {
+    const lastAction = fixture.journal.actions.at(-1);
+    if (!lastAction) throw new Error("ジャーナルが空");
+    sessionStorage.setItem(
+      GAME_SESSION_KEY,
+      JSON.stringify({
+        ...fixture.journal,
+        actions: fixture.journal.actions.slice(0, -1),
+      }),
+    );
+    blockLocalStorage();
+    const game = render(
+      <GameProvider>
+        <LastActionProbe action={lastAction} />
+        <NewGameProbe />
+      </GameProvider>,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "最終操作" }));
+    await waitFor(() =>
+      expect(screen.getByTestId("history-save-status")).toHaveTextContent(
+        "failed",
+      ),
+    );
+    const retained = JSON.parse(
+      sessionStorage.getItem(PENDING_HISTORY_KEY) ?? "null",
+    ).entries[0] as MatchHistoryEntry;
+    fireEvent.click(screen.getByRole("button", { name: "もう一半荘" }));
+    expect(screen.getByTestId("phase")).toHaveTextContent("playing");
+    game.unmount();
+    if (!originalLocalStorageDescriptor) throw new Error("storage required");
+    Object.defineProperty(
+      window,
+      "localStorage",
+      originalLocalStorageDescriptor,
+    );
+
+    const history = render(<MatchHistoryList />);
+    await screen.findByRole("list", { name: "保存された半荘結果" });
+    expect(loadHistory(localStorage)).toEqual([retained]);
+    expect(retained.seed).toBe(fixture.journal.seed);
+    expect(retained.players).toEqual(expectedPlayers);
+    expect(sessionStorage.getItem(PENDING_HISTORY_KEY)).toBeNull();
+    history.unmount();
+    render(<MatchHistoryList />);
+    await screen.findByRole("list", { name: "保存された半荘結果" });
+    expect(loadHistory(localStorage)).toEqual([retained]);
+  });
+
+  it("削除に続いて待機したProvider保存は失効し、新規捕捉した結果を消さない(#1244)", async () => {
+    const request = createLockRequest();
+    stubWebLocks(request);
+    let release!: () => void, entered!: () => void;
+    const acquired = new Promise<void>((resolve) => {
+      entered = resolve;
+    });
+    const held = request(
+      "four-bros-mahjong.history.write.v1",
+      { signal: new AbortController().signal },
+      () => {
+        entered();
+        return new Promise<void>((resolve) => {
+          release = resolve;
+        });
+      },
+    );
+    await acquired;
+    // Queue clear before the Provider's actual final-action save.
+    const cleared = clearResultHistoryAcrossTabs(localStorage);
+    sessionStorage.setItem(
+      GAME_SESSION_KEY,
+      JSON.stringify({
+        ...fixture.journal,
+        actions: fixture.journal.actions.slice(0, -1),
+      }),
+    );
+    const game = render(
+      <GameProvider>
+        <LastActionProbe action={fixture.journal.actions.at(-1)!} />
+        <NewGameProbe />
+      </GameProvider>,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "最終操作" }));
+    expect(screen.getByTestId("history-save-status")).toHaveTextContent(
+      "pending",
+    );
+    await act(async () => {
+      release();
+      await held;
+      expect(await cleared).toBe("cleared");
+    });
+    await waitFor(() =>
+      expect(screen.getByTestId("history-save-status")).toHaveTextContent(
+        "idle",
+      ),
+    );
+    expect(loadHistory(localStorage)).toEqual([]);
+    expect(sessionStorage.getItem(PENDING_HISTORY_KEY)).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "もう一半荘" }));
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(loadHistory(localStorage)).toEqual([]);
+    game.unmount();
+  });
+
+  it("一覧の実削除がlockを解放した後に捕捉された結果は退避から消さない(#1244)", async () => {
+    // Begin with one saved row so the actual clear UI is available.
+    const saved: MatchHistoryEntry = {
+      seed: 88,
+      finishedAt: 88,
+      players: expectedPlayers,
+    };
+    localStorage.setItem(
+      "four-bros-mahjong.history.v1",
+      JSON.stringify({ version: 1, entries: [saved] }),
+    );
+    const fresh = { ...saved, seed: 99, finishedAt: 99 };
+    let captured = false;
+    const request = createLockRequest();
+    stubWebLocks(async (name, options, callback) => {
+      const value = await request(name, options, callback);
+      if (
+        !captured &&
+        localStorage.getItem("four-bros-mahjong.history.v1") === null
+      ) {
+        captured = true;
+        rememberPendingHistory(new Map(), fresh, sessionStorage);
+      }
+      return value;
+    });
+    render(<MatchHistoryList />);
+    fireEvent.click(
+      await screen.findByRole("button", { name: "戦績をすべて削除" }),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "削除する" }));
+    await screen.findByText("保存されていた戦績をすべて削除しました。");
+    expect(captured).toBe(true);
+    expect(
+      JSON.parse(sessionStorage.getItem(PENDING_HISTORY_KEY) ?? "null").entries,
+    ).toEqual([fresh]);
   });
 
   it("終局直前のsessionStorage書き込み失敗でも結果を保ち、復元不可を公開する", async () => {

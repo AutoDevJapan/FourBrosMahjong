@@ -316,8 +316,10 @@ describe("MatchHistoryList (#293)", () => {
     ).toBeVisible();
     expect(screen.getByRole("link", { name: "ロビーへ戻る" })).toBeVisible();
 
-    appendHistory(window.localStorage, entry(9, 1_753_200_000_000, "二郎"));
     blocked = false;
+    // The other writer can read its storage. A writer with the same failing
+    // getter must now fail closed rather than overwriting unreadable history.
+    appendHistory(window.localStorage, entry(9, 1_753_200_000_000, "二郎"));
     fireEvent(window, new StorageEvent("storage", { key: MATCH_HISTORY_KEY }));
     expect(
       await screen.findByRole("list", { name: "保存された半荘結果" }),
