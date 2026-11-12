@@ -1,7 +1,11 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { DisplayEnvelope } from "@/domain/display/displaySnapshot";
-import type { CharacterSurface } from "./characterScene";
+import { createCharacterController } from "../characters3d/controller";
+import {
+  type CharacterSurface,
+  projectCharacterSurfaces,
+} from "./characterScene";
 import { createMahjongRenderer } from "./mahjongRenderer";
 import { projectScene, TILE_TEXTURE_URLS } from "./scene";
 import { frame } from "./sceneFixture";
@@ -182,6 +186,87 @@ describe("WebGL2 renderer boundaries", () => {
       expect(canvas.style.height).toBe("");
     }
     renderer.dispose();
+  });
+
+  it("budgets real four-actor skin and color uploads, reuses poses, and retires their allocations", () => {
+    const gl = driver(),
+      canvas = setup(gl),
+      images = controlledImages(1536, 1536),
+      onError = vi.fn(),
+      live = new Map<WebGLBuffer, number>();
+    let bound: WebGLBuffer | null = null;
+    Object.assign(gl, {
+      bindBuffer: vi.fn((_target: number, value: WebGLBuffer | null) => {
+        bound = value;
+      }),
+      bufferData: vi.fn((_target: number, data: ArrayBufferView) => {
+        if (bound) live.set(bound, data.byteLength);
+      }),
+      deleteBuffer: vi.fn((value: WebGLBuffer) => live.delete(value)),
+    });
+    const controller = createCharacterController(),
+      f = frame();
+    controller.publish(f, [], "allocation-round", 0);
+    const first = projectCharacterSurfaces(controller.sample(0)),
+      second = projectCharacterSurfaces(controller.sample(0.5)),
+      characterBytes = first.reduce(
+        (sum, s) => sum + s.vertices.byteLength + (s.colors?.byteLength ?? 0),
+        0,
+      ),
+      keys = [...new Set(first.flatMap((s) => s.material.texture ?? []))],
+      renderer = createMahjongRenderer(canvas, {
+        onError,
+        characterTextures: Object.fromEntries(keys.map((key) => [key, key])),
+      });
+    try {
+      renderer.publish(f);
+      for (const image of images) image.dispatchEvent(new Event("load"));
+      const baseBytes = [...live.values()].reduce((sum, n) => sum + n, 0);
+      expect(keys).toHaveLength(4);
+      expect(new Set(first.map((s) => s.id.split("/")[0])).size).toBe(4);
+      expect(first.some((s) => s.colors)).toBe(true);
+      expect(characterBytes).toBeGreaterThan(4 * 1024 * 1024);
+      const textureBytes = Math.ceil(
+        (TILE_TEXTURE_URLS.length * 192 * 256 + 4 * 1024 * 1024) * 4 * (4 / 3),
+      );
+      const checkBudget = (width: number, height: number) => {
+        renderer.resize(width, height, 2);
+        const geometryBytes = [...live.values()].reduce((sum, n) => sum + n, 0);
+        expect(geometryBytes - baseBytes).toBe(characterBytes);
+        expect(
+          canvas.width * canvas.height * (4 + 4 * 8) +
+            textureBytes +
+            geometryBytes -
+            baseBytes,
+        ).toBeLessThanOrEqual(64 * 1024 * 1024);
+        expect(canvas.width / canvas.height).toBeCloseTo(width / height, 2);
+        expect(canvas.style.width).toBe("");
+        expect(canvas.style.height).toBe("");
+      };
+      renderer.setCharacters(first);
+      const bufferAllocations = gl.createBuffer.mock.calls.length,
+        vaoAllocations = gl.createVertexArray.mock.calls.length;
+      checkBudget(320, 800);
+      checkBudget(1280, 900);
+      checkBudget(10000, 8000);
+      renderer.setCharacters(second);
+      expect(gl.createBuffer).toHaveBeenCalledTimes(bufferAllocations);
+      expect(gl.createVertexArray).toHaveBeenCalledTimes(vaoAllocations);
+      checkBudget(1280, 900);
+      renderer.setCharacters([]);
+      expect([...live.values()].reduce((sum, n) => sum + n, 0)).toBe(baseBytes);
+      expect(onError).not.toHaveBeenCalled();
+    } finally {
+      controller.dispose();
+      renderer.dispose();
+    }
+    expect(live.size).toBe(0);
+    expect(gl.deleteBuffer).toHaveBeenCalledTimes(
+      gl.createBuffer.mock.calls.length,
+    );
+    expect(gl.deleteVertexArray).toHaveBeenCalledTimes(
+      gl.createVertexArray.mock.calls.length,
+    );
   });
 
   const characterSurface = (): CharacterSurface => ({
