@@ -16,6 +16,7 @@
 | [unity-display-feasibility.md](./unity-display-feasibility.md) | Unity版の表示専用契約、固定ローテーションfixture、実行前のGo/No-Go境界 |
 | [unity-display-reference.md](./unity-display-reference.md) | #828のUnity導入前ブラウザ・リファレンスと確認手順 |
 | [unity-display-text-spike.md](./unity-display-text-spike.md) | #818の表示契約スライス、検証マトリクス、未凍結のUnity境界 |
+| [3d-characters.md](./3d-characters.md) | 四兄弟のモデル・リグ・clip・派生texture・再供給と比較手順 |
 
 ## 関連
 

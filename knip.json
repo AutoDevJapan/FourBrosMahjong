@@ -4,6 +4,14 @@
   "workspaces": {
     "container/online": {
       "ignoreDependencies": ["tsx", "ws"]
+    },
+    ".": {
+      "entry": [
+        "src/components/game/characters3d/produce-review.ts",
+        "src/components/game/characters3d/serve-review.ts",
+        "src/components/game/characters3d/capture-review.ts",
+        "src/components/game/characters3d/review-viewer.ts"
+      ]
     }
   }
 }

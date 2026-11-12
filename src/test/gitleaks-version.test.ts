@@ -58,9 +58,21 @@ describe("gitleaks binary integrity gate", () => {
         "--retry 2 --retry-delay 2 --retry-max-time 120",
       );
     }
-    expect(downloads[0]).toContain('--max-filesize "$limit"');
+    expect(downloads[0]).toContain(
+      '--header "Authorization: Bearer $GH_TOKEN"',
+    );
+    expect(downloads[0]).not.toContain("--location-trusted");
+    expect(downloads[0]).toContain(
+      '--connect-timeout 10 --max-time 60 --max-filesize "$limit"',
+    );
     expect(workflow).toContain(
-      "^https://api.github.com/repos/gitleaks/gitleaks/releases/assets/[0-9]+$",
+      `|| download_via_api "$checksum_file" ${GITLEAKS_CHECKSUM_MANIFEST_MAX_BYTES}`,
+    );
+    expect(workflow).toContain(
+      `|| download_via_api "$archive" ${GITLEAKS_ARCHIVE_MAX_BYTES}`,
+    );
+    expect(workflow).toContain(
+      String.raw`^https://api\.github\.com/repos/gitleaks/gitleaks/releases/assets/[0-9]+$`,
     );
     expect(downloads[1]).toContain(
       `--connect-timeout 10 --max-time 60 --max-filesize ${GITLEAKS_CHECKSUM_MANIFEST_MAX_BYTES}`,

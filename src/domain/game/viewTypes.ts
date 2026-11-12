@@ -83,6 +83,8 @@ export interface SeatedPlayerView {
   readonly status?: PlayerStatus;
   /** 自家の手牌(表向き)。他家では未使用。 */
   readonly hand?: readonly TileData[];
+  /** Index in the existing sorted self hand; null when no drawn tile is shown. */
+  readonly drawnIndex?: number | null;
   /** 他家の伏せ手牌の枚数。自家では未使用。 */
   readonly handCount?: number;
   /** 副露(ポン・カン)。晒した面子を全員分表示する。 */

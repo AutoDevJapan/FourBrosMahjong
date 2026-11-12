@@ -1,12 +1,18 @@
 import type { GamePhase, Pending, PlayerId } from "@/domain/game/engine";
 import type {
   GameViewState,
+  SeatedPlayerView,
   SeatPosition,
   SlotContent,
   TileData,
 } from "@/domain/game/viewTypes";
 import { isRedDora } from "@/domain/tiles/tile";
 import type { LocalDisplaySource } from "./displaySource";
+import {
+  type CommittedPresentation,
+  type PresentationCue,
+  projectPresentation,
+} from "./presentationCues";
 
 export const DISPLAY_PROTOCOL = "four-bros-mahjong/local-display";
 export const DISPLAY_PROTOCOL_VERSION = 1;
@@ -20,6 +26,8 @@ export interface DisplayInput {
   readonly pending: Pending;
   /** Absent for the online provider: preserve its existing 2D UI. */
   readonly displaySource?: LocalDisplaySource;
+  /** Same synchronous commit as displaySource; absent for unsupported sources. */
+  readonly presentation?: CommittedPresentation;
 }
 
 type TileDisplayAction = "discard" | "riichi" | "ankan" | "kakan";
@@ -58,6 +66,22 @@ function tile(value: TileData): DisplayTile {
   return { suit: value.suit, rank: value.rank, red: isRedDora(value) };
 }
 
+function ownHand(player: SeatedPlayerView): {
+  hand: DisplayTile[];
+  drawnIndex?: number | null;
+} {
+  const hand = (player.hand ?? []).map(tile);
+  const drawnIndex = player.drawnIndex ?? null;
+  if (
+    drawnIndex !== null &&
+    (!Number.isSafeInteger(drawnIndex) ||
+      drawnIndex < 0 ||
+      drawnIndex >= hand.length)
+  )
+    throw new TypeError("Invalid self drawn tile index");
+  return { hand, drawnIndex };
+}
+
 function slot(position: SeatPosition, content: SlotContent) {
   const player = content.player;
   const common = {
@@ -82,9 +106,7 @@ function slot(position: SeatPosition, content: SlotContent) {
         ? { furitenReason: seated.status.furitenReason }
         : {}),
     },
-    ...(own
-      ? { hand: (seated.hand ?? []).map(tile) }
-      : { handCount: seated.handCount ?? 0 }),
+    ...(own ? ownHand(seated) : { handCount: seated.handCount ?? 0 }),
     melds: (seated.melds ?? []).map((meld) => ({
       type: meld.type,
       concealed: meld.concealed,
@@ -239,7 +261,17 @@ export interface DisplayEnvelope {
   readonly generation: number;
   readonly revision: number;
   readonly mode: "restore" | "live";
+  readonly roundKey?: string;
+  readonly cues?: readonly PresentationCue[];
+  readonly cueStatus?: { readonly overflow: boolean; readonly dropped: number };
   readonly snapshot: ReturnType<typeof projectDisplaySnapshot>;
+}
+
+/** Locally produced frames always carry the additive presentation fields. */
+export interface LocalDisplayEnvelope extends DisplayEnvelope {
+  readonly roundKey: string;
+  readonly cues: readonly PresentationCue[];
+  readonly cueStatus: { readonly overflow: boolean; readonly dropped: number };
 }
 
 function freezeDto<T>(value: T): T {
@@ -254,7 +286,7 @@ function freezeDto<T>(value: T): T {
 export function createDisplayEnvelope(
   input: DisplayInput,
   mode: DisplayEnvelope["mode"],
-): DisplayEnvelope | null {
+): LocalDisplayEnvelope | null {
   const source = input.displaySource;
   if (source?.kind !== "local") return null;
   if (
@@ -274,6 +306,7 @@ export function createDisplayEnvelope(
     generation: source.generation,
     revision: source.revision,
     mode,
+    ...projectPresentation(source, input.presentation, mode),
     snapshot: projectDisplaySnapshot(input),
   });
 }

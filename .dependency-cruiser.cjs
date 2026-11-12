@@ -122,6 +122,8 @@ module.exports = {
         ],
       },
       to: {
+        // Erased type contracts do not supply classes; direction rules still apply.
+        dependencyTypesNot: ["type-only"],
         path: "^(\\.godd/|prototypes/|documents/(evidence/|assets/|fixtures/railway-(pre-cutover|readyz-before-iac)\\.json$))|(^|/)(__testing__|__oracle__)/",
       },
     },

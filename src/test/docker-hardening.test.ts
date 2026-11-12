@@ -291,6 +291,35 @@ describe("Docker hardening repository contract (#734)", () => {
     ).toContain("knip runtime workspace must ignore exactly tsx and ws");
   });
 
+  it("allows only the four documented character review entries in the root workspace", () => {
+    const entries = [
+      "src/components/game/characters3d/produce-review.ts",
+      "src/components/game/characters3d/serve-review.ts",
+      "src/components/game/characters3d/capture-review.ts",
+      "src/components/game/characters3d/review-viewer.ts",
+    ];
+    const valid = {
+      workspaces: {
+        "container/online": { ignoreDependencies: ["tsx", "ws"] },
+        ".": { entry: entries },
+      },
+    };
+    expect(knipWorkspaceViolations(valid)).toEqual([]);
+    for (const root of [
+      { entry: [...entries, "src/**/*.ts"] },
+      { entry: entries, ignore: ["src/**/*.ts"] },
+      { entry: entries, ignoreDependencies: ["next"] },
+      { entry: entries.slice(1) },
+    ]) {
+      expect(
+        knipWorkspaceViolations({
+          ...valid,
+          workspaces: { ...valid.workspaces, ".": root },
+        }),
+      ).not.toEqual([]);
+    }
+  });
+
   it("rejects unconsumed deploy stages, broad copies, or root final stages", () => {
     const digest = "a".repeat(64);
     const runtimePackageName = ONLINE_RUNTIME_PACKAGE_NAME;

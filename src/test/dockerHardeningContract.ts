@@ -698,10 +698,29 @@ export function knipWorkspaceViolations(value: unknown): readonly string[] {
   }
   const workspaces = config.workspaces as Record<string, unknown>;
   if (
-    JSON.stringify(Object.keys(workspaces)) !==
-    JSON.stringify(["container/online"])
+    Object.keys(workspaces).some(
+      (key) => key !== "container/online" && key !== ".",
+    )
   ) {
     violations.push("knip must configure only container/online");
+  }
+  const root = workspaces["."];
+  if (root !== undefined) {
+    const allowedReviewEntries = [
+      "src/components/game/characters3d/produce-review.ts",
+      "src/components/game/characters3d/serve-review.ts",
+      "src/components/game/characters3d/capture-review.ts",
+      "src/components/game/characters3d/review-viewer.ts",
+    ];
+    if (
+      root === null ||
+      typeof root !== "object" ||
+      JSON.stringify(Object.keys(root)) !== JSON.stringify(["entry"]) ||
+      !Array.isArray((root as { entry?: unknown }).entry) ||
+      JSON.stringify([...(root as { entry: string[] }).entry].sort()) !==
+        JSON.stringify(allowedReviewEntries.sort())
+    )
+      violations.push("knip must configure only container/online");
   }
   const runtimeConfig = workspaces["container/online"];
   if (runtimeConfig === null || typeof runtimeConfig !== "object") {

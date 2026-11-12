@@ -1,7 +1,8 @@
-# ローカル対局の表示アダプター境界（#1177・先行実装）
+# ローカル対局の表示アダプター境界（#1177）
 
-対象は TypeScript の表示 DTO・入力ガード・差し替え可能な transport の契約まで。
-Unity/C# renderer、WebGL、CSP、Editor 導入、公開 3D 化は変更しない。
+この文書は TypeScript の表示 DTO・入力ガード・差し替え可能な transport の契約を定める。
+ローカル対局のWebGL2 consumer、素材・入力・失敗時の2D継続は
+[ブラウザ3D盤面](./browser-3d-display.md)で定め、ここではrenderer側のルール計算を追加しない。
 既存 `documents/fixtures/unity-display-contract.json` の Unity 試作 v1 とは別の
 `four-bros-mahjong/local-display` version 1 を用い、既存 C# がそのまま読めるとは扱わない。
 
@@ -44,8 +45,8 @@ Provider の unmount でこの窓口は無効になり、古い callback から�
 
 各 transport 接続の最初・別 session の最初は `restore`、以後は `live`。
 同 session の同版・古い版は再送しない。復元時に過去の操作や演出を再生しない。
-今回の DTO は effect/手牌遷移 cue を含めない。CPU 中間演出、ツモ牌の分離、
-局決着の詳細演出は既存 view に情報がないため後続 #1177 に残す。
+実対局の演出cueと自家ツモ位置の加法的な投影は、末尾の「確定イベントのcue追補」を参照する。
+局決着の詳細な牌移動は、このcue列だけで補完しない。
 
 ## 入力と transport
 
@@ -76,8 +77,10 @@ controls は void のため receipt は `dispatched` であり `accepted` では
 ## React host の接続順序・失敗境界
 
 React 側の正式な窓口は `useLocalDisplayPort(createPort, onError)`。
-Provider 配下の host が使う契約であり、既存 `GameBoard` はまだこの hook や renderer を
-mount しない。`connectDisplayPort` を子の layout effect から直接接続・refresh すると、
+Provider 配下の `GameBoard` は `render3D` が有効なとき `GameTable3D` をmountし、
+そのcomponentがこのhookでportを接続する。通常のローカル`/game`は盤面3Dを選択し、
+人物3Dは別の `renderCharacters` が有効な場合だけ接続する。
+`connectDisplayPort` を子の layout effect から直接接続・refresh すると、
 StrictMode の再 setup では子が先、Provider の活性化が後になるため初期配信を失う。
 hook は確定した context と最新の error handler を layout effect で保持し、全 layout
 setup の後の passive effect で port を生成・接続・refresh する。初回と StrictMode の
@@ -118,5 +121,66 @@ WebSocket、server version、再接続・resume・secret の処理を追加・�
 - React host component: 実 Provider + StrictMode の両 setup、fresh port、同版無再送、2D との同 tick 競合、host だけの解除/無効化、Provider unmount、transport/reporting 失敗とリソース解放。
 - 既存関連 unit/component、対象 lint/format、typecheck を分割実行する。
 
-この先行実装だけで #1177 全体、#1179 runtime、#1180 素材、#1181 受け入れ、
-公開 Preview/Production の 3D 完成とはしない。追加 Editor/module 導入はユーザー判断で保留。
+このadapterの検証だけで #1177 全体、#1179 runtime、#1180 素材、#1181の統合受け入れや
+Productionの3D完成とはしない。通常ルートの描画・実操作・素材・保存復元・性能は、
+同じ候補のrenderer検証と既存Prdでの受け入れへ対応付ける。
+配備は既存Prdだけとし、localhost・CIの検証と分ける。追加Editor/moduleは導入していない。
+
+## 確定イベントのcue追補
+
+`GameProvider`は、1回の`applyGameAction`を`capturePresentationEvents`で同期的に包み、
+engineの成立箇所から記録した非秘密のscalarイベントだけを取得する。
+最終viewの差、名前、席、点差から動作を推測しない。
+engineが返した`next !== state`だけを採用し、同じsessionRefの更新で
+`displaySource`・engine・journal・presentationを一緒に確定する。
+保存schema・判定・山・乱数・得点・CPUの同期進行は変えず、演出完了を待たない。
+
+| kind | 記録する成立箇所・actor |
+|---|---|
+| deal | 次局の配牌後、着席3人それぞれの固定playerId |
+| draw | 通常/嶺上/北抜き補充の取得成功時、その取得者。牌面は記録しない |
+| discard | 人間/CPUの打牌を実際の手牌・河へ反映した時、その打牌者 |
+| riichi | 宣言牌へのロンがなく、供託が確定した時の宣言者。宣言牌ロンでは出さない |
+| pon / kan | 副露を反映した時の鳴いた人。暗槓/加槓は槍槓解決後の成立時のみ |
+| kita | 実際に北を抜き補充できた人。CPUの配牌北・連続補充北も順に記録 |
+| tsumo / ron | 和了の成立時の和了者。CPU和了・槍槓ロンも同じ経路 |
+| draw-round / round-end | 流局/局終了時の着席3人それぞれ。四槓散了も含む |
+
+CPUの中間動作も、同じ同期操作内で発生した順を維持する。
+例えばCPUのポンと直後の打牌は、最終viewの河から消えていても列に残る。
+各eventは`{seq, actorId, kind, roundKey}`のみで、seqは1操作内で1から連番。
+roundKeyは半荘内の実開始局カウンター`roundsPlayed`由来の`round-N`で、連荘でも変わる。
+次局への操作が抜け番中の1局全体を同期実行した場合も、局内の全イベントを同じrevisionへ載せる。
+
+DTOのローカル生成値は`roundKey`・`cues`・`cueStatus: {overflow, dropped}`を持つ。
+各cueは`{id,actorId,kind,sessionId,generation,revision,roundKey}`で、
+idは`generation:revision:seq`。同realmのgenerationと同sessionのrevisionにより一意となる。
+既存character controllerのCharacterCueと構造互換で、rendererへの型依存をdomainへ加えない。
+旧fixture/受信側との互換のため基底DisplayEnvelopeでは追補フィールドをoptionalとし、
+`createDisplayEnvelope`が返すLocalDisplayEnvelopeでは必須とする。
+presentationのsourceがDTOのsession/generation/revisionと違う場合は投影を拒否する。
+
+recorderは通常OFFで、明示的な1回のpublicActionの間だけ動く。
+外部observer callbackは実行しないため、observerの例外・再入がゲーム判定へ入らない。
+各publicAction入口で記録をリセットし、no-op・例外は公開しない。
+入れ子capture、同capture内の2個目のpublicActionは実操作前に拒否する。
+記録sinkへ渡す値は非秘密scalarと採用済みbooleanのみで、state/hand/山の参照を渡さない。
+元のengine例外はそのまま伝播し、finallyでrecorderを解除する。
+上限は1024件で、超過時はゲーム判定を中断せず、追加記録だけを止め、欠落数とoverflowを返す。
+overflow付きの列を、全演出取得済みや製品完成の根拠にしてはならない。
+
+初回・journal復元・newGameの初期化では記録を有効にせず、cuesは空。
+途中revisionへ接続した新transportもrestoreとして空にする。
+同版再送の抑止は既存connectDisplayPortが担う。
+履歴保存だけの再描画・古いcontrols・同tick二重入力・StrictMode再setupは新cueを作らない。
+unmount後のretained controlsも同期active guardで無効になる。
+
+自家の`drawnIndex`は、selectViewが従来どおりsortした公開self hand内の、
+実ツモ牌の位置を指す。既存DOMの手牌順や操作は変更しない。
+同じTile実体が複数位置に共有されても、sort前に末尾へ加えたツモの最後のidentity位置を使う。
+ツモ表示がない時はnull。他家/抜け番には牌面もdrawnIndexも渡さない。
+暗槓両端null・他家handCount・未開示裏ドラの既存boundaryを保つ。
+
+この追補は確定イベントの受け渡しまでであり、controller側の順次再生・割込み・
+round変更時の演出や実ブラウザの見た目の完成を保証しない。
+新UIの本番反映には既存の画像確認を保持する。

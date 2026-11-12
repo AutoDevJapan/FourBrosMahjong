@@ -1,4 +1,180 @@
 /* Issue #712 Phase B4: `/game` 固有。オンライン共有盤面の既存fallbackは変えない。 */
+.game-page .game-live-table {
+  position: relative;
+  width: 100%;
+  min-width: 0;
+}
+
+.game-page .game-table-3d {
+  position: relative;
+  width: 100%;
+  min-width: 0;
+}
+
+.game-page .game-table-3d-canvas {
+  display: block;
+  width: 100%;
+  height: auto;
+  aspect-ratio: 3 / 2;
+  border-radius: 0.8rem;
+  touch-action: manipulation;
+}
+
+.game-page .game-table-3d[data-3d-status="failed"] .game-table-3d-canvas {
+  height: 0;
+  aspect-ratio: auto;
+}
+
+.game-page .game-table-3d-notice {
+  margin: 0.5rem;
+  color: var(--ui-text);
+  font-size: 0.875rem;
+}
+
+.game-page .game-table-3d-labels {
+  position: absolute;
+  inset: 0 0 auto;
+  aspect-ratio: 3 / 2;
+  pointer-events: none;
+}
+
+.game-page .game-table-3d-player {
+  position: absolute;
+  display: flex;
+  width: clamp(4.5rem, 12%, 8rem);
+  align-items: center;
+  flex-direction: column;
+  color: var(--ui-text);
+  font-size: clamp(0.625rem, 1.3vw, 0.9rem);
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+  text-align: center;
+  background: color-mix(in srgb, var(--ui-surface) 92%, transparent);
+  border: 1px solid var(--ui-frame);
+  border-radius: 0.6rem;
+  padding: 0.3rem;
+}
+
+.game-page .game-table-3d-player--left {
+  left: 0.5%;
+  top: 36%;
+}
+.game-page .game-table-3d-player--right {
+  right: 0.5%;
+  top: 36%;
+}
+.game-page .game-table-3d-player--across {
+  left: 44%;
+  top: 0.5%;
+}
+
+.game-page .game-table-3d-info {
+  position: static;
+  display: grid;
+  width: 100%;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  padding: 0.4rem;
+  gap: 0.25rem;
+  border-radius: 0.5rem;
+  color: var(--ui-text);
+  background: var(--ui-surface);
+  font-size: clamp(0.5rem, 1.2vw, 0.875rem);
+  text-align: center;
+}
+
+.game-page .game-table-3d-confirm {
+  display: flex;
+  justify-content: center;
+  padding: 0.5rem;
+}
+
+/* This control sits on the page surface rather than the hidden felt table. */
+.game-page .game-live-glossary > button {
+  color: var(--ui-text);
+  border-color: var(--control-border);
+}
+
+.game-page
+  .game-board[data-3d-status="ready"]
+  .game-board-cross.game-board-inline {
+  display: flex;
+  max-width: none;
+  flex-direction: column;
+}
+
+@container (max-width: 359px) {
+  .game-page
+    .game-board[data-3d-status="ready"]
+    .game-board-cross.game-board-inline {
+    display: none;
+  }
+}
+
+.game-page .game-board[data-3d-status="ready"] .game-slot--self {
+  width: 100%;
+}
+
+.game-page .game-board[data-3d-status="ready"] .game-actions-region {
+  width: 100%;
+  background: none;
+}
+
+.game-page
+  .game-board[data-3d-status="ready"]
+  .game-board-cross.game-board-inline::before {
+  content: none;
+}
+
+@media (max-width: 480px) {
+  .game-page .game-table-3d-canvas {
+    aspect-ratio: 1 / 1;
+  }
+  .game-page .game-table-3d-player {
+    width: 4rem;
+  }
+  .game-page .game-table-3d-player .character-portrait {
+    display: none;
+  }
+  .game-page .game-table-3d-labels {
+    aspect-ratio: 1 / 1;
+  }
+  .game-page .game-table-3d-info {
+    font-size: 0.625rem;
+  }
+}
+
+/* The original semantic board remains the keyboard/AT and failure path.
+   Canvas input always selects first and confirms with a native button. */
+.game-page
+  .game-board[data-3d-status="ready"]
+  .game-legacy-board
+  .game-slot:not(.game-slot--self),
+.game-page
+  .game-board[data-3d-status="ready"]
+  .game-legacy-board
+  .game-table-cell,
+.game-page
+  .game-board[data-3d-status="ready"]
+  .game-legacy-board
+  .game-focus-opponents,
+.game-page
+  .game-board[data-3d-status="ready"]
+  .game-legacy-board
+  .game-focus-board
+  > .game-table,
+.game-page .game-board[data-3d-status="ready"] .game-legacy-board .game-river,
+.game-page .game-board[data-3d-status="ready"] .game-legacy-board .game-melds {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
 .game-page,
 .game-full-board-modal {
   --game-surface: color-mix(in srgb, var(--ui-surface) 94%, transparent);

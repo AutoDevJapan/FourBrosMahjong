@@ -1,0 +1,276 @@
+import {
+  act,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react";
+import { StrictMode } from "react";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import type { DisplayEnvelope } from "@/domain/display/displaySnapshot";
+import { createGame } from "@/domain/game/engine";
+import GameBoard from "./GameBoard";
+import { GameProvider } from "./GameProvider";
+import GameTable3D from "./GameTable3D";
+
+vi.mock("next/navigation", () => ({
+  useRouter: () => ({ push: vi.fn(), replace: vi.fn() }),
+}));
+
+const renderer = vi.hoisted(() => ({
+  instances: [] as Array<{
+    frames: DisplayEnvelope[];
+    dispose: ReturnType<typeof vi.fn>;
+    setCharacters: ReturnType<typeof vi.fn>;
+    pick: (id: string) => void;
+    fail: (error: unknown) => void;
+  }>,
+  failCreate: false,
+}));
+
+vi.mock("./three/mahjongRenderer", () => ({
+  createMahjongRenderer: vi.fn((_canvas, options) => {
+    if (renderer.failCreate) throw new Error("WebGL unavailable");
+    const instance = {
+      frames: [] as DisplayEnvelope[],
+      dispose: vi.fn(),
+      setCharacters: vi.fn(),
+      pick: options.onPick,
+      fail: options.onError,
+    };
+    renderer.instances.push(instance);
+    return {
+      publish: (frame: DisplayEnvelope) => {
+        instance.frames.push(frame);
+        options.onReady?.();
+      },
+      resize: vi.fn(),
+      dispose: instance.dispose,
+      select: vi.fn(),
+      setCharacters: instance.setCharacters,
+    };
+  }),
+}));
+
+const characters = vi.hoisted(() => ({
+  instances: [] as Array<{
+    publish: ReturnType<typeof vi.fn>;
+    sample: ReturnType<typeof vi.fn>;
+    dispose: ReturnType<typeof vi.fn>;
+  }>,
+}));
+vi.mock("./characters3d", () => ({
+  createCharacterController: () => {
+    const instance = {
+      publish: vi.fn(),
+      sample: vi.fn(() => []),
+      dispose: vi.fn(),
+    };
+    characters.instances.push(instance);
+    return instance;
+  },
+}));
+vi.mock("./three/characterScene", () => ({
+  projectCharacterSurfaces: () => [],
+}));
+
+beforeEach(() => {
+  renderer.instances = [];
+  renderer.failCreate = false;
+  characters.instances = [];
+  window.sessionStorage.clear();
+  window.localStorage.clear();
+  window.history.replaceState(null, "", "/game?seed=1");
+});
+
+describe("live 3D display host", () => {
+  it.each([
+    ["pin", "五筒"],
+    ["sou", "五索"],
+  ] as const)(
+    "preserves the red indicator when confirming %s five",
+    (suit, name) => {
+      render(
+        <GameProvider initialGame={createGame({ seed: 2 })}>
+          <GameTable3D />
+        </GameProvider>,
+      );
+      const current = renderer.instances[0];
+      const option = current.frames[0].snapshot.options.find(
+        (candidate) =>
+          candidate.action === "discard" &&
+          candidate.tile.suit === suit &&
+          candidate.tile.rank === 5 &&
+          candidate.tile.red,
+      );
+      expect(option).toBeDefined();
+      act(() => current.pick(option!.id));
+      expect(
+        screen.getByRole("button", { name: `${name}(赤ドラ)を打牌` }),
+      ).toBeInTheDocument();
+    },
+  );
+
+  it("samples the current clock when the first RAF timestamp precedes publication", () => {
+    let callback: FrameRequestCallback | undefined;
+    const clock = vi.spyOn(performance, "now").mockReturnValue(2000);
+    const raf = vi
+      .spyOn(window, "requestAnimationFrame")
+      .mockImplementation((next) => {
+        callback = next;
+        return 73;
+      });
+    const cancel = vi
+      .spyOn(window, "cancelAnimationFrame")
+      .mockImplementation(() => {});
+    const ui = render(
+      <GameProvider>
+        <GameTable3D renderCharacters />
+      </GameProvider>,
+    );
+    try {
+      const controller = characters.instances[0];
+      controller.sample.mockImplementation((now: number) => {
+        if (now < 2)
+          throw new Error("Character clock must be monotonic seconds");
+        return [];
+      });
+      if (!callback) throw new Error("Missing owned animation callback");
+      act(() => callback?.(1990));
+      expect(renderer.instances[0].dispose).not.toHaveBeenCalled();
+      expect(controller.sample.mock.calls.at(-1)?.[0]).toBe(2);
+      expect(ui.container.querySelector(".game-table-3d")).toHaveAttribute(
+        "data-3d-status",
+        "ready",
+      );
+    } finally {
+      ui.unmount();
+      clock.mockRestore();
+      raf.mockRestore();
+      cancel.mockRestore();
+    }
+  });
+
+  it("places the single live glossary outside the clipped semantic table", async () => {
+    const ui = render(
+      <GameProvider>
+        <GameBoard render3D />
+      </GameProvider>,
+    );
+    await waitFor(() =>
+      expect(ui.container.querySelector("[data-phase]")).toHaveAttribute(
+        "data-3d-status",
+        "ready",
+      ),
+    );
+    const glossary = screen.getAllByRole("button", {
+      name: "対局中の用語を見る",
+    });
+    expect(glossary).toHaveLength(1);
+    expect(glossary[0].closest(".game-table")).toBeNull();
+    fireEvent.click(glossary[0]);
+    expect(
+      screen.getByRole("dialog", { name: "対局中の用語" }),
+    ).toBeInTheDocument();
+  });
+
+  it("uses one owned animation clock and cancels it on context loss", async () => {
+    const raf = vi.spyOn(window, "requestAnimationFrame").mockReturnValue(73);
+    const cancel = vi.spyOn(window, "cancelAnimationFrame");
+    const ui = render(
+      <GameProvider>
+        <GameTable3D renderCharacters />
+      </GameProvider>,
+    );
+    const controller = characters.instances[0];
+    expect(controller.publish).toHaveBeenCalledWith(
+      renderer.instances[0].frames[0],
+      [],
+      expect.any(String),
+      expect.any(Number),
+    );
+    expect(controller.sample).toHaveBeenCalled();
+    expect(renderer.instances[0].setCharacters).toHaveBeenCalled();
+    expect(raf).toHaveBeenCalledOnce();
+    act(() => renderer.instances[0].fail(new Error("GPU lost")));
+    await waitFor(() =>
+      expect(screen.getByRole("status")).toHaveTextContent("2D"),
+    );
+    expect(cancel).toHaveBeenCalledWith(73);
+    expect(controller.dispose).toHaveBeenCalledOnce();
+    ui.unmount();
+    expect(controller.dispose).toHaveBeenCalledOnce();
+    raf.mockRestore();
+    cancel.mockRestore();
+  });
+
+  it("publishes actual provider state, confirms once and disposes both StrictMode resources", async () => {
+    const ui = render(
+      <StrictMode>
+        <GameProvider>
+          <GameTable3D />
+        </GameProvider>
+      </StrictMode>,
+    );
+    await waitFor(() => expect(renderer.instances).toHaveLength(2));
+    expect(renderer.instances[0].dispose).toHaveBeenCalledOnce();
+    const current = renderer.instances[1];
+    const first = current.frames[0];
+    expect(first.mode).toBe("restore");
+    expect(
+      first.snapshot.slots.filter((slot) => slot.kind === "bench"),
+    ).toHaveLength(1);
+    const option = first.snapshot.options.find(
+      (candidate) => candidate.action === "discard",
+    );
+    expect(option).toBeDefined();
+    act(() => current.pick(option!.id));
+    const confirm = screen.getByRole("button", { name: /を打牌/ });
+    fireEvent.click(confirm);
+    await waitFor(() =>
+      expect(current.frames.at(-1)!.revision).toBe(first.revision + 1),
+    );
+    // An old pick after the committed revision cannot repeat the old intent.
+    act(() => current.pick("unknown-option"));
+    expect(
+      screen.queryByRole("button", { name: /を打牌/ }),
+    ).not.toBeInTheDocument();
+    ui.unmount();
+    expect(current.dispose).toHaveBeenCalledOnce();
+  });
+
+  it("reports unsupported rendering without taking down the provider or retaining a live input", async () => {
+    render(
+      <GameProvider>
+        <GameTable3D />
+        <p>対局は継続できます</p>
+      </GameProvider>,
+    );
+    const current = renderer.instances[0];
+    act(() => current.fail(new Error("context lost")));
+    await waitFor(() =>
+      expect(screen.getByRole("status")).toHaveTextContent("2D"),
+    );
+    expect(screen.getByText("対局は継続できます")).toBeVisible();
+    expect(current.dispose).toHaveBeenCalledOnce();
+    const frames = current.frames.length;
+    act(() => current.pick(current.frames[0].snapshot.options[0].id));
+    expect(current.frames).toHaveLength(frames);
+    expect(
+      screen.queryByRole("button", { name: /を打牌/ }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("handles a renderer factory failure with an explicit 2D fallback", async () => {
+    renderer.failCreate = true;
+    render(
+      <GameProvider>
+        <GameTable3D />
+      </GameProvider>,
+    );
+    await waitFor(() =>
+      expect(screen.getByRole("status")).toHaveTextContent("2D"),
+    );
+    expect(renderer.instances).toHaveLength(0);
+  });
+});

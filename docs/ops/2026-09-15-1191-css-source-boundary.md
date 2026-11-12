@@ -1,5 +1,18 @@
 # #1191: Tailwind の入力境界
 
+## 2026-11-09の再利用範囲（当時の記録）
+
+以下は3D候補の保存済みcheckpointで、後続の入力境界修正と実行結果は末尾に追記する。
+
+本資料の2026-09-15の数値・CI/Preview確認は保存された旧headの履歴であり、現行branchで再実行した結果ではない。
+現行は [ADR-0006](../../documents/adr/0006-prd-only-deployment.md) のPrd専用運用を使い、localhost/CI隔離検証と通常マージ後の既存Production確認を行う。新しいPreview/dev/stgを作成しない。
+画像の一般公開・再配布は2026-11-07の提供者回答と各CREDITSに従う。CSS境界は画像公開の許否を決めるものではない。
+
+`src/components/game/three/` と `src/components/game/characters3d/` はCSS走査にもCI full検証にも残す。
+キャラ原本はオフライン制作とhash検証だけが読み、geometryのsource path文字列を持つことと原本のruntime importを区別する。
+`documents/assets/` のruntime value importは禁止したまま、明示的なtype-only参照はこのCSS境界の対象外とする。domain/presentationの型依存方向ルールは引き続き有効である。
+現行の合成canaryには `three/` と `characters3d/` の保持ケースを追加し、4除外・6保持を検証する。今回の一時フォルダー作成条件ではこの隔離canaryは未実行とし、実repoのread-onlyスキャンと旧Macのcanary実測を分けて記録する。
+
 ## 対象と根拠
 
 Tailwind は import graph ではなくファイルをテキストとして走査する。`@source not` のパスは stylesheet からの相対である（[公式仕様](https://tailwindcss.com/docs/detecting-classes-in-source-files)）。そのため JavaScript が import しない native 資産も CSS の入力になり得る。今回の変更は CSS の入力だけを狭め、検証範囲の分類・CI・native 検証ゲートを変更しない。
@@ -148,3 +161,9 @@ lock済み`@tailwindcss/postcss` 4.3.3/PostCSS 8.5.25、`optimize:false`で、�
 関連3スイート250件、型検査、変更ファイルESLint、全体Biome・Knip・dependency-cruiserが成功した。TypeScriptの入力一覧にmetadataは0件。依存検査は457 modules / 1,519 dependenciesで違反0だった。全tracked pathの整合テストは初回、dotfileをglob照合が拾わない4件で失敗したため、directoryの範囲をdotfileも含むprefixへ修正して再確認した。
 
 上の308→253はオンライン戦績統合前の`8116dd5`時点の記録である。最新main`2ac7588`を取り込んだ`758a896`でも関連250件が成功し、同mainのstylesheetを基準に再監査した。CSSは同じ52,242 bytes・同じSHA-256で前後一致、入力311→256、除外55/追加0だった。オンライン機能のruntime module追加による母数の増加と、CSS境界の効果を区別する。
+
+## 3D候補への最新境界の統合
+
+オンライン戦績と最新mainのCI入力検査を統合し、上記の8除外・5保持へthree/characters3dの保持canary2件を追加した。型専用の契約参照はCSS境界だけで許可し、runtime value importは引き続きerrorにする。レイヤーの型依存方向検査は維持する。過去のcanary未実行は当時の記録として残し、この統合版の実行結果とは区別する。
+
+この3D統合treeで実compilerを再実行し、main `2ac7588`のstylesheetとの比較は前後52,806 bytes、SHA-256 `8a98626e97dbe060c62b3ea7a24d49def88f2851d2987397dcd22456b6cc7268`で一致した。依存351→287、除外64/追加0。3D候補を含まないCSS単独headの52,242 bytesや311→256と混同しない。8除外・7保持canary、除外削除の正対照、型専用参照の実解決とruntime value拒否を検証した。型・変更箇所Lint・全体Biome/Knip/依存検査は成功し、依存検査は514 modules / 1,765 dependenciesで違反0だった。描画・モデルのcore sourceは保存済みの3D候補から変更していないが、過去のGPU実測を新しい統合版や本番で再実行したとは扱わない。

@@ -76,7 +76,12 @@ export const TEST_INPUT_PATHS = [
 ];
 
 /** テストがディレクトリ単位で列挙する入力資産。追加・削除も同じ分類にする。 */
-export const TEST_INPUT_DIRECTORIES = ["documents/assets/ui-refresh"];
+export const TEST_INPUT_DIRECTORIES = [
+  "documents/assets/ui-refresh",
+  // characters3d/characters.test.ts verifies each reference image's source hash.
+  // Offline texture production reads these originals; runtime geometry remains in src/.
+  "documents/assets/characters/originals",
+];
 
 /** @deprecated TEST_INPUT_PATHS に改名。既存のimportとの互換性を保つ。 */
 export const DOCUMENTATION_EXCEPTIONS = TEST_INPUT_PATHS;

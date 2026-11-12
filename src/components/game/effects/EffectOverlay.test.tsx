@@ -37,4 +37,14 @@ describe("EffectOverlay", () => {
     const { container } = render(<EffectOverlay effect={null} />);
     expect(container).toBeEmptyDOMElement();
   });
+
+  it("通常フローの演出も読み上げと操作を二重化しない", () => {
+    render(<EffectOverlay effect={effect} placement="inline" />);
+    const overlay = screen.getByTestId("effect-overlay");
+    expect(overlay).toHaveAttribute("aria-hidden", "true");
+    expect(overlay).toHaveClass("pointer-events-none");
+    expect(overlay).toHaveTextContent(effect.title);
+    expect(overlay).not.toHaveAttribute("tabindex");
+    expect(screen.queryByRole("button")).not.toBeInTheDocument();
+  });
 });

@@ -337,7 +337,7 @@ describe("GitHub Actions SHA pinning policy (#663)", () => {
     // list and its expected reference count in the same change.
     expect(workflowFilenames(REPOSITORY_ROOT)).toEqual([...EXPECTED_WORKFLOWS]);
     expect(auditActionReferences(REPOSITORY_ROOT)).toEqual({
-      externalReferenceCount: 20,
+      externalReferenceCount: 18,
       localReferenceCount: 0,
       violations: [],
     });

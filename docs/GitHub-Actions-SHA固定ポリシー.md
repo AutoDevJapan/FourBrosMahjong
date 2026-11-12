@@ -177,7 +177,9 @@ policy 有効後の `origin/main` 同一 SHA に対する [CI run 33975755005](h
 
 2026-08-27 の `origin/main` (`df55a38465b6e7e80451d7e214b2a6b26b47c772`) では、4 workflow の外部 `uses:` 18 件がすべて 40 桁 commit SHA に固定されています。local Action / reusable workflow の参照は 0 件です。
 
-Issue #747 では Release 公開jobからcheckoutとrepository管理shellを撤去するため、`actions/download-artifact` v8.0.1 (`3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c`) を1件追加しました。上記18件は2026-08-27時点の監査値として維持し、現在のstatic contractは外部参照20件を期待します。Issue #804では、任意refでdispatch可能なread-only検査（`gitleaks-version-check.yml`）と、同一リポジトリの`main`からの成功した`workflow_run`に限って書き込む`gitleaks-version-bump.yml`を分離しました。
+Issue #747 では Release 公開jobからcheckoutとrepository管理shellを撤去するため、`actions/download-artifact` v8.0.1 (`3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c`) を1件追加しました。Issue #804では、任意refでdispatch可能なread-only検査（`gitleaks-version-check.yml`）と、同一リポジトリの`main`からの成功した`workflow_run`に限って書き込む`gitleaks-version-bump.yml`を分離しました。上記18件は2026-08-27時点の監査値として保持し、その後の5 workflowでは20件を期待していました。
+
+PR #1226では品質jobも既存E2Eと同じdigest固定のPlaywrightイメージへ移し、ブラウザcache用の `actions/cache/restore` と `actions/cache/save` を各1参照削除しました。現在のstatic contractは5 workflowの外部参照18件、local参照0件、未固定0件を期待します。2026-08-27の18件とは内訳が異なり、過去の監査結果を書き換えるものではありません。
 
 対象 workflow:
 

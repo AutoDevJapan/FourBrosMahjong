@@ -52,11 +52,11 @@ jobs:
           download_via_api() {
             local name="$1" limit="$2" api_url
             api_url="$(gh api "repos/gitleaks/gitleaks/releases/tags/v${GITLEAKS_VERSION}" --jq ".assets[] | select(.name == \"${name}\") | .url")"
-            if [[ ! "$api_url" =~ ^https://api.github.com/repos/gitleaks/gitleaks/releases/assets/[0-9]+$ ]]; then
+            if [[ ! "$api_url" =~ ^https://api\.github\.com/repos/gitleaks/gitleaks/releases/assets/[0-9]+$ ]]; then
               echo "release metadata must identify one canonical upstream asset" >&2
               return 1
             fi
-            curl --fail --location --silent --show-error --retry 2 --retry-delay 2 --retry-max-time 120 --connect-timeout 10 --max-time 60 --max-filesize "$limit" --header 'Accept: application/octet-stream' --output "$name" "$api_url"
+            curl --fail --location --silent --show-error --retry 2 --retry-delay 2 --retry-max-time 120 --connect-timeout 10 --max-time 60 --max-filesize "$limit" --header 'Accept: application/octet-stream' --header "Authorization: Bearer $GH_TOKEN" --output "$name" "$api_url"
           }
           # The release is authenticated below, but an upstream/network fault
           # must not make a secret-scan runner download forever or fill its disk.

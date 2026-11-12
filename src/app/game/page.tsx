@@ -59,7 +59,7 @@ export default function GamePage() {
         </header>
 
         <DesignPanel className="game-board-panel">
-          <GameBoard />
+          <GameBoard render3D />
         </DesignPanel>
       </main>
     </DesignPageShell>

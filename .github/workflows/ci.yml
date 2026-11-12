@@ -58,6 +58,12 @@ jobs:
   ci:
     name: lint / typecheck / format / test / build
     runs-on: ubuntu-latest
+    # Reuse the E2E image's exact browsers and OS libraries. Browser caches do
+    # not supply host dependencies, and installing them on a rolling Ubuntu
+    # runner adds an unrelated apt/DNS failure after a successful build.
+    container:
+      image: mcr.microsoft.com/playwright:v1.62.1-noble@sha256:c091b21d9fae78c76e85cd4356431e9b018402f172a214fc7d7a5e9a7e29d8ac
+      options: --init --ipc=host
     # 個別ツールが終了しない回帰でも、既定の6時間まで品質ゲートを占有させない。
     # 通常実行時間には十分な余裕を持たせつつ、異常時は30分で失敗として返す。
     timeout-minutes: 30
@@ -101,13 +107,15 @@ jobs:
           SCOPE_FORCED: ${{ github.event.forced }}
           SCOPE_CHECK_NAME: lint / typecheck / format / test / build
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: node .github/scripts/verification-scope.mjs
+        run: |
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          node .github/scripts/verification-scope.mjs
 
       # scope=false の文書変更などでは sparse worktree のまま終了して blob を取得しない。
       # 検証が必要な場合だけ、依存導入・テスト・buildの前に全ファイルを復元する。
       - name: Materialize repository for verification
         if: steps.scope.outputs.setup == 'true'
-        run: git sparse-checkout disable
+        run: git -c safe.directory="$GITHUB_WORKSPACE" sparse-checkout disable
 
       - name: Setup pnpm
         if: steps.scope.outputs.setup == 'true'
@@ -140,10 +148,8 @@ jobs:
           path: ${{ steps.pnpm-store.outputs.path }}
           key: pnpm-store-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
 
-      # `setup` のときは常に実行する。後続の `pnpm exec playwright install` が node_modules を
-      # 必要とするため、「pnpm キャッシュはヒットしたが Playwright キャッシュは外れた」
-      # (2 つのキャッシュは同じキーでも LRU で独立に退避されうる: #380) の組み合わせで
-      # node_modules 無しに playwright install が走って落ちる。実測 3 秒なので条件は付けない。
+      # browserとOS依存は固定imageが供給する。node_modulesは後続の品質検査・build・
+      # production E2Eが必要とするため、pnpm storeのcache hitにかかわらずsetup時に導入する。
       - name: Install dependencies
         if: steps.scope.outputs.setup == 'true'
         run: pnpm install --frozen-lockfile
@@ -206,31 +212,9 @@ jobs:
       # pwa-offline.spec.ts の全件が意図的に skip される。既にこのjobで作った `.next` を
       # そのまま `next start` し、依存install/buildを重複させずPWAと主要導線のprod parityを固定する。
 
-      # キャッシュキーにはインストールするブラウザ集合を必ず含める。両 job が同じ path を
-      # 同じキーで共有すると、先に保存した側(chromium のみ)の内容がキーを占有し、
-      # webkit を要求する e2e job は毎回ダウンロードし直しになる(exact hit のため保存も走らない)。
-      - name: Restore Playwright browser for production PWA E2E
-        if: steps.scope.outputs.browser == 'true'
-        id: pwa-playwright-cache
-        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: ~/.cache/ms-playwright
-          key: playwright-browsers-${{ runner.os }}-chromium-${{ hashFiles('pnpm-lock.yaml') }}
-
-      # 同上。検証しない run でキャッシュも既にあるなら取得する意味が無い (#491)。
-      - name: Install Playwright browser for production PWA E2E
-        if: steps.scope.outputs.browser == 'true' && (steps.scope.outputs.production == 'true' || steps.pwa-playwright-cache.outputs.cache-hit != 'true')
-        env:
-          DEBIAN_FRONTEND: noninteractive
-          NEEDRESTART_MODE: a
-        run: pnpm exec playwright install --with-deps chromium
-
-      - name: Save Playwright browser for production PWA E2E
-        if: steps.scope.outputs.browser == 'true' && github.ref == 'refs/heads/main' && steps.pwa-playwright-cache.outputs.cache-hit != 'true'
-        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: ~/.cache/ms-playwright
-          key: playwright-browsers-${{ runner.os }}-chromium-${{ hashFiles('pnpm-lock.yaml') }}
+      - name: Verify Playwright browsers are provisioned
+        if: steps.scope.outputs.production == 'true'
+        run: test -x /ms-playwright/chromium-*/chrome-linux64/chrome
 
       - name: Production E2E (PWA / persistence / modal focus / security / metadata / a11y)
         if: steps.scope.outputs.production == 'true'

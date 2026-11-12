@@ -75,8 +75,8 @@ namespace FourBros.Display.Editor
         [MenuItem("Four Bros/Validate display contract")]
         public static void Validate()
         {
-            DisplayContractChecks.Run(JsonUtility.FromJson<ContractFixture>(File.ReadAllText(ContractPath)));
-            Debug.Log("#818 pure C# display contract checks passed (not a rendering test)");
+            int checks = DisplayContractChecks.Run(JsonUtility.FromJson<ContractFixture>(File.ReadAllText(ContractPath)));
+            Debug.Log("#818 Unity JsonUtility display contract: " + checks + " assertions passed (not a rendering test)");
         }
 
         // Run explicitly; never launches a build/import on editor startup.

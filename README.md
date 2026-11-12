@@ -109,12 +109,12 @@ Playwright はブラウザ本体を別途ダウンロードする必要があり
 
 ```bash
 pnpm exec playwright install chromium webkit               # ローカル開発環境(このリポジトリが使う 2 ブラウザ)
-pnpm exec playwright install --with-deps chromium webkit   # Linux CI ランナー等、OS 依存パッケージも同時に導入する場合
+pnpm exec playwright install --with-deps chromium webkit   # 非コンテナの Linux で OS 依存パッケージも未導入の場合
 ```
 
 `playwright.config.ts` は `chromium` と `webkit-modal-focus`(Desktop Safari)の **2 プロジェクト**を定義しているため、**webkit を入れないと `pnpm test:e2e` が失敗します**。引数を省略した `pnpm exec playwright install` でも全ブラウザが入りますが、firefox など不要なブラウザまで取得するため上記の明示指定を推奨します。
 
-`--with-deps` は Linux 上で Playwright 実行に必要な OS パッケージ(apt 経由)も併せてインストールするオプションで、GitHub Actions の `ubuntu-latest` ランナーなど Linux 環境では基本的にこちらを使用してください。macOS/Windows のローカル環境では通常 `pnpm exec playwright install` のみで十分です。
+`--with-deps` は Linux 上で Playwright 実行に必要な OS パッケージ(apt 経由)も併せてインストールするオプションです。非コンテナの Linux 環境でOS依存が未導入の場合に使用してください。このリポジトリのGitHub Actionsは両jobとも固定PlaywrightイメージにbrowserとOS依存が同梱されており、追加installは行いません。macOS/Windows のローカル環境では通常 `pnpm exec playwright install` のみで十分です。
 
 ### 実行
 
@@ -138,8 +138,8 @@ pnpm test:e2e:ui    # Playwright UI モード(対話的にテストを選択・�
 ### CI での実行に関する注意
 
 - `.github/workflows/ci.yml` の `E2E (Playwright)` ジョブが、検証対象の変更を含むPRやscope判定で検証が必要なpushに対して、ヘッドレスで `pnpm test:e2e` を実行します([#29](https://github.com/AutoDevJapan/FourBrosMahjong/issues/29) で組み込み済み)。検証済みmain pushなど、PR側で同じtreeを検証済みと確認できた場合は重複実行を省略します。
-- Service Worker はdev serverでは無効なため、通常E2Eでは `e2e/pwa-offline.spec.ts` の全件をskipします。CIは品質ジョブの既存production buildを再利用して `pnpm test:e2e:pwa:prebuilt` を実行し、初回登録の追加オンライン再読込みなしでのオフライン起動・実打によるhydrate確認・登録・プリキャッシュ・対局復元を別途検証します。`prebuilt` はCI内部用で、ローカルではbuild込みの `pnpm test:e2e:pwa` を使ってください。
-- CI の `ci` job では production E2E 用の Chromium と pnpm store をキャッシュします。通常の `E2E (Playwright)` job は Chromium/WebKit とOS依存を含むバージョン固定のPlaywrightイメージを使うため、毎回の `playwright install --with-deps` やE2E専用ブラウザcacheはありません。検証済みmain pushのE2Eは重複検証とsetupを省略し、共有cacheのseedは `ci` job だけが行います。
+- Service Worker はdev serverでは無効なため、通常E2Eでは `e2e/pwa-offline.spec.ts` の全件をskipします。CIは品質ジョブの既存production buildを再利用して `pnpm test:e2e:prod:prebuilt` を実行し、PWA・保存復元・モーダル・security headers・metadata・accessibility・online historyの7specを検証します。PWAでは初回登録の追加オンライン再読込みなしでのオフライン起動・実打によるhydrate確認・登録・プリキャッシュ・対局復元を確認します。`prebuilt` はCI内部用で、ローカルでPWAだけを実行する場合はbuild込みの `pnpm test:e2e:pwa` を使ってください。
+- `ci` と通常の `E2E (Playwright)` は、Chromium/WebKitとOS依存を含む同じdigest固定のPlaywrightイメージを使います。`ci` はChromiumで既存production buildを検証し、通常E2EはChromiumとWebKitの対象を実行します。ブラウザのcache・追加installは使わず、共有するpnpm storeのcache保存は `main` の `ci` jobだけが行います。検証済みmain pushのE2Eは重複検証とsetupを省略します。
 - **キャッシュの保存は `main` の `ci` job に限定しています**([#380](https://github.com/AutoDevJapan/FourBrosMahjong/issues/380))。GitHub Actions のキャッシュ予算はリポジトリあたり 10GB・超過分は LRU で退避されるうえ、キャッシュは ref スコープなので、PR ref (`refs/pull/N/merge`) でも保存すると同一内容が ref の数だけ複製されて予算が数日で一巡し、「保存するが復元前に消える」恒常ミス状態になります。既定ブランチの `ci` cacheは全ブランチ・全 PR から復元できるため、保存をmainに限定してもヒット率は落ちません。PR の `ci` jobは `actions/cache/restore` による復元専用です。E2E jobは固定Playwrightイメージを使いブラウザcacheを持ちません。この不変条件は `src/test/ci-workflow.test.ts` が回帰テストとして固定しています。
 - `playwright.config.ts` は `retries: process.env.CI ? 2 : 0` としており、CI 環境(`CI=true`)でのみ失敗テストを自動リトライします。
 - localのE2E全体は2 workerで実行し、CIのworker設定は変更しません。localでworker上限を一時的に変えて切り分ける場合だけ、`pnpm exec playwright test --workers=1` のようにCLI引数で上書きできます。検証対象の通常コマンドは `pnpm test:e2e` です。

@@ -1,5 +1,6 @@
 using System;
 using System.IO;
+using System.Linq;
 using UnityEditor;
 using UnityEditor.SceneManagement;
 using UnityEngine;
@@ -7,7 +8,7 @@ using UnityEngine.SceneManagement;
 
 namespace FourBros.BlenderStudy
 {
-    // Built-in pipeline; no third-party importer/package. Editor validation pending.
+    // Built-in pipeline; no third-party importer/package.
     public static class BlenderAssetStudy
     {
         private const string Destination = "Assets/FourBrosBlenderStudy";
@@ -47,6 +48,8 @@ namespace FourBros.BlenderStudy
                 if (File.Exists(Path.Combine(candidate, "manifest.json"))) return candidate;
                 directory = directory.Parent;
             }
+            if (Application.isBatchMode)
+                throw new DirectoryNotFoundException("Run the batch check from this repository's Unity project.");
             var selected = EditorUtility.OpenFolderPanel("Select Blender generated folder" +
                 (revision ? " / revision" : ""), "", "");
             if (string.IsNullOrEmpty(selected)) throw new OperationCanceledException("No source folder selected.");
@@ -123,7 +126,18 @@ namespace FourBros.BlenderStudy
             foreach (var name in AssetNames)
                 if (AssetDatabase.LoadAssetAtPath<GameObject>(Destination + "/Models/" + name + ".fbx") == null)
                     throw new InvalidOperationException("Run Import baseline first.");
-            var scene = EditorSceneManager.NewScene(NewSceneSetup.EmptyScene, NewSceneMode.Additive);
+            var mode = NewSceneMode.Additive;
+            for (var i = 0; i < SceneManager.sceneCount; i++)
+            {
+                var existing = SceneManager.GetSceneAt(i);
+                if (!string.IsNullOrEmpty(existing.path)) continue;
+                // Unity cannot add a scene alongside an untitled scene. A fresh, empty
+                // startup scene can be replaced; user-created objects must be saved first.
+                if (SceneManager.sceneCount == 1 && !existing.isDirty && existing.rootCount == 0)
+                    mode = NewSceneMode.Single;
+                else throw new InvalidOperationException("Save the untitled scene before building the asset preview.");
+            }
+            var scene = EditorSceneManager.NewScene(NewSceneSetup.EmptyScene, mode);
             SceneManager.SetActiveScene(scene);
             var table = InstantiateModel("MahjongTable", new Vector3(-.38f, 0, 0));
             InstantiateModel("SoakuhinStudy", new Vector3(.54f, 0, .15f));
@@ -144,6 +158,7 @@ namespace FourBros.BlenderStudy
             light.type = LightType.Directional;
             light.intensity = 1.2f;
             lightObject.transform.rotation = Quaternion.Euler(40, -35, 0);
+            RenderSettings.ambientMode = UnityEngine.Rendering.AmbientMode.Flat;
             RenderSettings.ambientLight = new Color(.35f, .35f, .35f);
             var controller = cameraObject.AddComponent<BlenderStudyCamera>();
             controller.tile = tile.transform;
@@ -162,7 +177,8 @@ namespace FourBros.BlenderStudy
         {
             if (EditorApplication.isPlayingOrWillChangePlaymode)
                 throw new InvalidOperationException("Exit Play mode before capturing so the tile is at its original position.");
-            var cameraObject = GameObject.Find("Preview camera");
+            var cameraObject = SceneManager.GetActiveScene().GetRootGameObjects()
+                .SingleOrDefault(root => root.name == "Preview camera");
             if (cameraObject == null)
                 throw new InvalidOperationException("Open the preview scene from step 2 before capturing.");
             var camera = cameraObject.GetComponent<Camera>();
@@ -210,6 +226,10 @@ namespace FourBros.BlenderStudy
             var instance = (GameObject)PrefabUtility.InstantiatePrefab(model);
             instance.name = name;
             instance.transform.position = position;
+            // Unity's FBX handedness conversion faces these exports toward +Z.
+            // Preserve the imported X rotation and turn the asset toward -Z so
+            // Blender (x,y,z) appears at Unity (x,z,y), matching the parity camera.
+            instance.transform.rotation = Quaternion.Euler(0, 180, 0) * instance.transform.rotation;
             return instance;
         }
     }

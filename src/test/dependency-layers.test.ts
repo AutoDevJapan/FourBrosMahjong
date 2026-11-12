@@ -160,6 +160,10 @@ const FIXTURE: readonly [path: string, source: string][] = [
   [".godd/state/runtime.json", '{"value":1}\n'],
   [syntheticEvidence, '{"value":1}\n'],
   ["documents/assets/ui-refresh/manifest.json", '{"value":1}\n'],
+  [
+    posix.join("documents", "assets", "contract.ts"),
+    "export type AssetContract = { id: string };\n",
+  ],
   ["documents/fixtures/railway-pre-cutover.json", '{"value":1}\n'],
   ["documents/fixtures/railway-readyz-before-iac.json", '{"value":1}\n'],
   ["documents/fixtures/unity-display-contract.json", '{"value":1}\n'],
@@ -225,6 +229,20 @@ const FIXTURE: readonly [path: string, source: string][] = [
   [
     "src/test/nativeConsumer.ts",
     'export { value } from "../../prototypes/runtime";\n',
+  ],
+  [
+    "src/components/game/characters3d/runtime.ts",
+    'import type { AssetContract } from "../../../../documents' +
+      '/assets/contract";\nexport type Contract = AssetContract;\n',
+  ],
+  [
+    "src/components/game/characters3d/offline.ts",
+    'import { readFileSync } from "node:fs";\n' +
+      "export const readSource = (path: string) => readFileSync(path);\n",
+  ],
+  [
+    "src/components/game/characters3d/valueLeak.ts",
+    'export { value } from "../../../../documents/assets/ui-refresh/manifest.json";\n',
   ],
 ];
 
@@ -444,6 +462,20 @@ describe("本番サーバーの依存境界を dependency-cruiser が検出す�
 
 describe("CSS 除外先を runtime へ import する前に境界の再検討を求める (#1191)", () => {
   const rule = "no-runtime-to-css-excluded-inputs";
+  it.each([
+    ["src/test/nativeConsumer.ts", "prototypes/runtime.ts", false],
+    [
+      "src/components/game/characters3d/runtime.ts",
+      posix.join("documents", "assets", "contract.ts"),
+      true,
+    ],
+  ])("許可case %s も実際に対象を解決している", (from, to, typeOnly) => {
+    const dependency = fixtureModules
+      .find((module) => module.source === from)
+      ?.dependencies.find((entry) => entry.resolved === to);
+    expect(dependency).toMatchObject({ couldNotResolve: false });
+    if (typeOnly) expect(dependency?.dependencyTypes).toContain("type-only");
+  });
   it("生成した evidence import は一時 repo 内の資産へ動的 literal として解決される", () => {
     const dependency = fixtureModules
       .find((module) => module.source === "src/app/evidenceLeak.ts")
@@ -467,6 +499,10 @@ describe("CSS 除外先を runtime へ import する前に境界の再検討を�
     ["src/app/testingLeak.ts", "src/domain/game/__testing__/nativeConsumer.ts"],
     ["src/app/oracleLeak.ts", "src/domain/hand/__oracle__/nativeConsumer.ts"],
     ["scripts/runtimeBridge.ts", "prototypes/runtime.ts"],
+    [
+      "src/components/game/characters3d/valueLeak.ts",
+      "documents/assets/ui-refresh/manifest.json",
+    ],
   ])(
     "%s → %s は error（静的 import・re-export・動的 literal import・中継）",
     (from, to) => {
@@ -482,6 +518,8 @@ describe("CSS 除外先を runtime へ import する前に境界の再検討を�
     "src/app/unityConsumer.ts",
     "src/app/native.test.ts",
     "src/test/nativeConsumer.ts",
+    "src/components/game/characters3d/runtime.ts",
+    "src/components/game/characters3d/offline.ts",
     "src/domain/game/__testing__/nativeConsumer.ts",
     "src/domain/hand/__oracle__/nativeConsumer.ts",
   ])("%s の正当な runtime fixture / test consumer は許可", (from) => {

@@ -9,7 +9,9 @@
  * `Request` の `mode: "navigate"` はコンストラクタで作れないため、リクエストは
  * 最小限のプレーンオブジェクトで表現する。
  */
+import { readFile } from "node:fs/promises";
 import { describe, expect, it, vi } from "vitest";
+import { CHARACTER_TEXTURES } from "@/components/game/three/characterAssets";
 import {
   buildServiceWorkerScript,
   MAX_RUNTIME_ENTRIES,
@@ -17,6 +19,20 @@ import {
   PRECACHE_ROUTES,
   resolveServiceWorkerVersion,
 } from "./serviceWorkerScript";
+
+// Next's static-image loader returns metadata; Vitest's asset loader returns a URL.
+vi.mock("@/components/game/characters3d/textures/p0-reference.jpg", () => ({
+  default: { src: "/_next/static/media/p0-reference.12345678.jpg" },
+}));
+vi.mock("@/components/game/characters3d/textures/p1-reference.jpg", () => ({
+  default: { src: "/_next/static/media/p1-reference.23456789.jpg" },
+}));
+vi.mock("@/components/game/characters3d/textures/p2-reference.jpg", () => ({
+  default: { src: "/_next/static/media/p2-reference.34567890.jpg" },
+}));
+vi.mock("@/components/game/characters3d/textures/p3-reference.jpg", () => ({
+  default: { src: "/_next/static/media/p3-reference.45678901.jpg" },
+}));
 
 const ORIGIN = "https://example.com";
 
@@ -209,9 +225,11 @@ function staticAssetResponse(pathname: string, body = "asset"): Response {
       ? "application/manifest+json"
       : pathname.endsWith(".avif")
         ? "image/avif"
-        : pathname === "/icons/icon-192" || pathname === "/icons/icon-512"
-          ? "image/png"
-          : "image/svg+xml";
+        : pathname.endsWith(".jpg")
+          ? "image/jpeg"
+          : pathname === "/icons/icon-192" || pathname === "/icons/icon-512"
+            ? "image/png"
+            : "image/svg+xml";
   return new Response(body, { headers: { "Content-Type": contentType } });
 }
 
@@ -250,7 +268,128 @@ describe("buildServiceWorkerScript", () => {
     expect(PRECACHE_ASSETS).toContain("/tiles/Back.svg");
     expect(PRECACHE_ASSETS).toContain("/manifest.webmanifest");
     expect(PRECACHE_ASSETS).toContain("/characters/p3-hechima-portrait.avif");
+    const textures = Object.values(CHARACTER_TEXTURES);
+    expect(textures).toHaveLength(4);
+    for (const texture of textures) {
+      expect(texture).toMatch(/^\/_next\/static\/media\/.+\.jpg$/);
+      expect(PRECACHE_ASSETS).not.toContain(texture);
+    }
   });
+
+  it("人物表示を有効にしていない間は候補textureをinstallで取得しない", async () => {
+    const sw = bootServiceWorker();
+    const fetchSpy = vi.fn(async (input: RequestInfo | URL) => {
+      const url = new URL(String(input), ORIGIN);
+      if (Object.values(CHARACTER_TEXTURES).includes(url.pathname))
+        throw new Error("disabled character texture must not be fetched");
+      return PRECACHE_ROUTES.includes(url.pathname)
+        ? htmlResponse("<main>offline shell</main>")
+        : staticAssetResponse(url.pathname, "asset");
+    });
+    sw.setFetchImpl(fetchSpy as typeof fetch);
+    await sw.dispatchLifecycle("install");
+    expect(fetchSpy).toHaveBeenCalled();
+    for (const texture of Object.values(CHARACTER_TEXTURES))
+      expect(
+        fetchSpy.mock.calls.some(
+          ([input]) => new URL(String(input), ORIGIN).pathname === texture,
+        ),
+      ).toBe(false);
+  });
+
+  it.each(["p0", "p1", "p2", "p3"])(
+    "%sの実texture bytesをhash付きURLで取得後、queryが変わってもofflineから同一bytesを返す",
+    async (id) => {
+      const source = `src/components/game/characters3d/textures/${id}-reference.jpg`,
+        url = CHARACTER_TEXTURES[source],
+        bytes = await readFile(new URL(`../../../${source}`, import.meta.url)),
+        sw = bootServiceWorker(),
+        online = vi.fn(
+          async () =>
+            new Response(new Uint8Array(bytes), {
+              headers: { "Content-Type": "image/jpeg" },
+            }),
+        );
+      expect(url).toMatch(/^\/_next\/static\/media\/.+\.jpg$/);
+      expect(PRECACHE_ASSETS).not.toContain(url);
+      sw.setFetchImpl(online);
+      const first = await sw.dispatchFetch(request(`${url}?dpl=first`)),
+        response: Response = await first.respondWith.mock.calls[0][0];
+      expect(new Uint8Array(await response.arrayBuffer())).toEqual(
+        new Uint8Array(bytes),
+      );
+      expect(online).toHaveBeenCalledOnce();
+      const cache = sw.cacheStorage.caches.get("fbm-runtime-v1");
+      expect([...cache!.store.keys()]).toEqual([`${ORIGIN}${url}`]);
+      const offline = vi.fn(OFFLINE);
+      sw.setFetchImpl(offline);
+      const repeated = await sw.dispatchFetch(
+          request(`${url}?dpl=second#hash`),
+        ),
+        saved: Response = await repeated.respondWith.mock.calls[0][0];
+      expect(saved.status).toBe(200);
+      expect(saved.headers.get("Content-Type")).toBe("image/jpeg");
+      expect(new Uint8Array(await saved.arrayBuffer())).toEqual(
+        new Uint8Array(bytes),
+      );
+      expect(offline).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each(["html", "wrong-image-mime", "partial", "redirect"])(
+    "人物textureの%s応答をcacheへ残さず、正常bytes取得後はofflineから回復する",
+    async (fault) => {
+      const url = Object.values(CHARACTER_TEXTURES)[0],
+        bytes = await readFile(
+          new URL(
+            "../../components/game/characters3d/textures/p0-reference.jpg",
+            import.meta.url,
+          ),
+        ),
+        invalid =
+          fault === "html"
+            ? htmlResponse("hosting fallback")
+            : fault === "redirect"
+              ? redirectedResponse(
+                  "foreign image",
+                  "image/jpeg",
+                  "https://cdn.example.net/foreign.jpg",
+                )
+              : new Response("not the complete jpeg", {
+                  status: fault === "partial" ? 206 : 200,
+                  headers: {
+                    "Content-Type":
+                      fault === "wrong-image-mime" ? "image/png" : "image/jpeg",
+                  },
+                }),
+        sw = bootServiceWorker(),
+        online = vi
+          .fn<typeof fetch>()
+          .mockResolvedValueOnce(invalid)
+          .mockResolvedValueOnce(
+            new Response(new Uint8Array(bytes), {
+              headers: { "Content-Type": "image/jpeg" },
+            }),
+          );
+      sw.setFetchImpl(online);
+      await sw.dispatchFetch(request(url));
+      expect(
+        sw.cacheStorage.caches
+          .get("fbm-runtime-v1")
+          ?.store.has(`${ORIGIN}${url}`) ?? false,
+      ).toBe(false);
+      await sw.dispatchFetch(request(url));
+      expect(online).toHaveBeenCalledTimes(2);
+      const offline = vi.fn(OFFLINE);
+      sw.setFetchImpl(offline);
+      const final = await sw.dispatchFetch(request(url)),
+        response: Response = await final.respondWith.mock.calls[0][0];
+      expect(new Uint8Array(await response.arrayBuffer())).toEqual(
+        new Uint8Array(bytes),
+      );
+      expect(offline).not.toHaveBeenCalled();
+    },
+  );
 
   it("installでプリキャッシュし、旧タブ保護のため即時activateしない(#349)", async () => {
     const sw = bootServiceWorker();

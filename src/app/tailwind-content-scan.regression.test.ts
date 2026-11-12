@@ -148,6 +148,8 @@ describe("実 Tailwind compiler が非 runtime 境界を適用する (#1191)", (
   ] as const;
   const retained = [
     ["src/components/Runtime.tsx", 9015],
+    ["src/components/game/three/canary.ts", 9019],
+    ["src/components/game/characters3d/canary.ts", 9020],
     ["documents/fixtures/unity-display-contract.json", 9016],
     // 類似名まで広く消すパターンへの退行も検出する。
     [posix.join("documents", "assets-runtime", "contract.json"), 9017],

@@ -7,6 +7,19 @@ import { LANDMARK_RULES } from "./screens";
 
 const GAME_VISUAL_STYLE = "e2e/visual-screenshot.css";
 
+async function emulateTwoDimensionalFallback(page: Page) {
+  await page.addInitScript(() => {
+    const original = HTMLCanvasElement.prototype.getContext;
+    HTMLCanvasElement.prototype.getContext = function (
+      this: HTMLCanvasElement,
+      ...args: Parameters<typeof original>
+    ) {
+      if (args[0] === "webgl2") return null;
+      return Reflect.apply(original, this, args);
+    } as typeof original;
+  });
+}
+
 async function prepareGameVisual(
   page: Page,
   options: {
@@ -16,6 +29,8 @@ async function prepareGameVisual(
     seed: number;
   },
 ): Promise<void> {
+  // Preserve the existing 2D fallback baselines; live-3d.spec verifies WebGL.
+  await emulateTwoDimensionalFallback(page);
   await page.setViewportSize(options);
   await page.addInitScript(
     (theme) => localStorage.setItem("theme", theme),
@@ -69,6 +84,9 @@ async function expectVisibleFourSlotBoard(
 }
 
 async function expectGamePageScreenshot(page: Page, name: string) {
+  await expect(
+    page.getByRole("status").filter({ hasText: "2D盤面で対局を続けられます" }),
+  ).toBeVisible();
   await page.addStyleTag({
     content: "nextjs-portal { display: none !important; }",
   });
@@ -176,15 +194,16 @@ test.describe("対局画面(/game)", () => {
       page.getByRole("heading", { level: 1, name: "対局画面" }),
     ).toBeVisible();
 
-    // 卓中央: 場風/局/本場/供託(TableInfo)。2レイアウト分 DOM にあるため可視側に限定。
+    // TableInfoのsemantic readoutを検証する。3D ready時の表示用footerは
+    // aria-hiddenなので、textの可視判定ではなくroleで読み上げ側を特定する。
     await expect(
-      page.getByText("東1局").filter({ visible: true }),
+      page.getByRole("definition").filter({ hasText: /^東1局$/ }),
     ).toBeVisible();
     await expect(
-      page.getByText("本場").filter({ visible: true }),
+      page.getByRole("term").filter({ hasText: /^本場$/ }),
     ).toBeVisible();
     await expect(
-      page.getByText("供託").filter({ visible: true }),
+      page.getByRole("term").filter({ hasText: /^供託$/ }),
     ).toBeVisible();
 
     // ドラ表示。
@@ -694,6 +713,7 @@ test.describe("対局画面(/game)", () => {
   test("リーチ宣言牌を横置きにし、同段の後続牌だけを詰めても横溢れしない(issue #782)", async ({
     page,
   }) => {
+    await emulateTwoDimensionalFallback(page);
     test.setTimeout(60_000);
     await page.setViewportSize({ width: 393, height: 850 });
     await page.goto("/game?seed=1");
@@ -817,6 +837,7 @@ test.describe("対局画面(/game)", () => {
     test(`主要スマホ幅(${width}px)で河が溜まっても横スクロールしない(#387 / スペック5 5.3.2)`, async ({
       page,
     }) => {
+      await emulateTwoDimensionalFallback(page);
       test.setTimeout(90_000);
       await page.setViewportSize({ width, height: 850 });
       await page.goto("/game?seed=0");
@@ -1068,6 +1089,7 @@ test.describe("対局画面(/game)", () => {
 
     const hand = visibleHand(page);
     const firstTile = hand.getByRole("option").first();
+    await firstTile.scrollIntoViewIfNeeded();
     const box = await firstTile.boundingBox();
     expect(box).not.toBeNull();
     const self = page
