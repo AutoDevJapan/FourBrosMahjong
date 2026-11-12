@@ -9,6 +9,7 @@
  * `Request` の `mode: "navigate"` はコンストラクタで作れないため、リクエストは
  * 最小限のプレーンオブジェクトで表現する。
  */
+import { readFile } from "node:fs/promises";
 import { describe, expect, it, vi } from "vitest";
 import { CHARACTER_TEXTURES } from "@/components/game/three/characterAssets";
 import {
@@ -295,6 +296,100 @@ describe("buildServiceWorkerScript", () => {
         ),
       ).toBe(false);
   });
+
+  it.each(["p0", "p1", "p2", "p3"])(
+    "%sの実texture bytesをhash付きURLで取得後、queryが変わってもofflineから同一bytesを返す",
+    async (id) => {
+      const source = `src/components/game/characters3d/textures/${id}-reference.jpg`,
+        url = CHARACTER_TEXTURES[source],
+        bytes = await readFile(new URL(`../../../${source}`, import.meta.url)),
+        sw = bootServiceWorker(),
+        online = vi.fn(
+          async () =>
+            new Response(new Uint8Array(bytes), {
+              headers: { "Content-Type": "image/jpeg" },
+            }),
+        );
+      expect(url).toMatch(/^\/_next\/static\/media\/.+\.jpg$/);
+      expect(PRECACHE_ASSETS).not.toContain(url);
+      sw.setFetchImpl(online);
+      const first = await sw.dispatchFetch(request(`${url}?dpl=first`)),
+        response: Response = await first.respondWith.mock.calls[0][0];
+      expect(new Uint8Array(await response.arrayBuffer())).toEqual(
+        new Uint8Array(bytes),
+      );
+      expect(online).toHaveBeenCalledOnce();
+      const cache = sw.cacheStorage.caches.get("fbm-runtime-v1");
+      expect([...cache!.store.keys()]).toEqual([`${ORIGIN}${url}`]);
+      const offline = vi.fn(OFFLINE);
+      sw.setFetchImpl(offline);
+      const repeated = await sw.dispatchFetch(
+          request(`${url}?dpl=second#hash`),
+        ),
+        saved: Response = await repeated.respondWith.mock.calls[0][0];
+      expect(saved.status).toBe(200);
+      expect(saved.headers.get("Content-Type")).toBe("image/jpeg");
+      expect(new Uint8Array(await saved.arrayBuffer())).toEqual(
+        new Uint8Array(bytes),
+      );
+      expect(offline).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each(["html", "wrong-image-mime", "partial", "redirect"])(
+    "人物textureの%s応答をcacheへ残さず、正常bytes取得後はofflineから回復する",
+    async (fault) => {
+      const url = Object.values(CHARACTER_TEXTURES)[0],
+        bytes = await readFile(
+          new URL(
+            "../../components/game/characters3d/textures/p0-reference.jpg",
+            import.meta.url,
+          ),
+        ),
+        invalid =
+          fault === "html"
+            ? htmlResponse("hosting fallback")
+            : fault === "redirect"
+              ? redirectedResponse(
+                  "foreign image",
+                  "image/jpeg",
+                  "https://cdn.example.net/foreign.jpg",
+                )
+              : new Response("not the complete jpeg", {
+                  status: fault === "partial" ? 206 : 200,
+                  headers: {
+                    "Content-Type":
+                      fault === "wrong-image-mime" ? "image/png" : "image/jpeg",
+                  },
+                }),
+        sw = bootServiceWorker(),
+        online = vi
+          .fn<typeof fetch>()
+          .mockResolvedValueOnce(invalid)
+          .mockResolvedValueOnce(
+            new Response(new Uint8Array(bytes), {
+              headers: { "Content-Type": "image/jpeg" },
+            }),
+          );
+      sw.setFetchImpl(online);
+      await sw.dispatchFetch(request(url));
+      expect(
+        sw.cacheStorage.caches
+          .get("fbm-runtime-v1")
+          ?.store.has(`${ORIGIN}${url}`) ?? false,
+      ).toBe(false);
+      await sw.dispatchFetch(request(url));
+      expect(online).toHaveBeenCalledTimes(2);
+      const offline = vi.fn(OFFLINE);
+      sw.setFetchImpl(offline);
+      const final = await sw.dispatchFetch(request(url)),
+        response: Response = await final.respondWith.mock.calls[0][0];
+      expect(new Uint8Array(await response.arrayBuffer())).toEqual(
+        new Uint8Array(bytes),
+      );
+      expect(offline).not.toHaveBeenCalled();
+    },
+  );
 
   it("installでプリキャッシュし、旧タブ保護のため即時activateしない(#349)", async () => {
     const sw = bootServiceWorker();
