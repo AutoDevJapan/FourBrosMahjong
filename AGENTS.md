@@ -1,10 +1,14 @@
 # AGENTS.md
 
+## 開発ガイド
+
+ゲームルール・実装仕様、パッケージ管理、開発コマンド、テスト、コード規約は、作業前に [開発ガイド](CLAUDE.md) の該当箇所を読む。
+
 ## 配備方針
 
 公開・稼働する環境はPrdだけとする。Preview、dev、stg、stagingの配備を作成・昇格しない。
 Vercelは既存プロジェクトのmain→Productionを維持する。localhostとCI内の隔離検査は継続する。
-詳細と実操作の達成状況は `docs/デプロイ環境運用.md` を参照する。
+配備方針の正本は [ADR-0006](documents/adr/0006-prd-only-deployment.md) とする。運用手順と実操作の記録は [デプロイ環境運用](docs/デプロイ環境運用.md) を参照する。
 
 <!-- GoDD:start -->
 ### GoDD stack snapshot
