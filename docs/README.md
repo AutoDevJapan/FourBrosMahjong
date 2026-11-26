@@ -1,6 +1,6 @@
 # ドキュメント一覧
 
-`soshina-majong`(四兄弟麻雀のゲーム化)のドキュメントナビゲーションです。
+四兄弟麻雀の遊び方・ルール・戦績は[公式Wiki](https://github.com/AutoDevJapan/FourBrosMahjong/wiki)で案内します。このページからは、実装を変更するときに確認する仕様・開発資料・運用手順を探せます。
 
 ## ゲーム仕様(SSOT)
 
@@ -33,8 +33,8 @@
 
 ## デプロイ・環境運用
 
-- [デプロイ環境運用](./デプロイ環境運用.md) — Vercel 連携・PR ごとの Preview 環境・dev/stg/prd の昇格フロー・環境変数管理方針・バックエンド(Railway)とカスタムドメインの位置づけ。
-- [ADR(アーキテクチャ決定記録)](../documents/adr/README.md) — [ADR-0001](../documents/adr/0001-deploy-architecture-and-preview-policy.md): prd 構成(Vercel フロント + Railway バックエンド)と Vercel Preview 方針。
+- [デプロイ環境運用](./デプロイ環境運用.md) — 既存のVercel・Railway本番環境への配備と、ローカル・CIでのテスト方針。
+- [ADR(アーキテクチャ決定記録)](../documents/adr/README.md) — 現行方針は[ADR-0006](../documents/adr/0006-prd-only-deployment.md)を参照。
 - [運用ガイド](../documents/guides/README.md) — [カスタムドメイン公開手順](../documents/guides/custom-domain-setup.md) ほか。
 
 ## ディレクトリの役割
